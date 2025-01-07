@@ -36,6 +36,6 @@
   "create_radar.ponder.radar_linking.text_4": "Кликните по передатчику, чтобы активировать его",
   "create_radar.ponder.tag.radar_components": "Радар",
   "create_radar.ponder.tag.radar_components.description": "Компоненты, используемые при строительстве радиолокационных станций",
-  "item.create_radar.guided_fuze": "Наводящийся заряд",
+  "item.create_radar.guided_fuze": "Наводящий взрыватель",
   "itemGroup.create_radar.radar": "Create: Radars"
 }
