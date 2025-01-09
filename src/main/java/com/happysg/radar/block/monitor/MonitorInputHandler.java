@@ -10,6 +10,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
+import org.valkyrienskies.mod.common.VSGameUtilsKt;
 
 public class MonitorInputHandler {
 
@@ -25,8 +26,14 @@ public class MonitorInputHandler {
                 Direction monitorFacing = level.getBlockState(monitor.getControllerPos())
                         .getValue(MonitorBlock.FACING);
                 int size = monitor.getSize();
-                Vec3 center = Vec3.atCenterOf(monitor.getControllerPos())
-                        .add(facing.getStepX() * (size - 1) / 2.0, (size - 1) / 2.0, facing.getStepZ() * (size - 1) / 2.0);
+                Vec3 preCenter;
+                if (VSGameUtilsKt.isBlockInShipyard(level, monitor.getControllerPos())) {
+                    preCenter = VSGameUtilsKt.toWorldCoordinates(level, monitor.getControllerPos().getCenter());
+                }
+                else {
+                    preCenter = Vec3.atCenterOf(monitor.getControllerPos());
+                }
+                Vec3 center = preCenter.add(facing.getStepX() * (size - 1) / 2.0, (size - 1) / 2.0, facing.getStepZ() * (size - 1) / 2.0);
                 Vec3 relative = hit.subtract(center);
                 relative = monitor.adjustRelativeVectorForFacing(relative, monitorFacing);
                 if (monitor.radarPos == null)
