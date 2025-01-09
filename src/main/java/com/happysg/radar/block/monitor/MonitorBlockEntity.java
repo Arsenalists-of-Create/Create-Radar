@@ -19,6 +19,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import org.valkyrienskies.mod.common.VSGameUtilsKt;
 
 import java.util.List;
 import java.util.Optional;
@@ -172,9 +173,15 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         Direction facing = level.getBlockState(getControllerPos())
                 .getValue(MonitorBlock.FACING).getClockWise();
         int size = getSize();
-        Vec3 center = Vec3.atCenterOf(getControllerPos())
-                .add(facing.getStepX() * (size - 1) / 2.0, (size - 1) / 2.0, facing.getStepZ() * (size - 1) / 2.0);
-        Vec3 relative = location.subtract(center);
+        Vec3 preCenter;
+        if (VSGameUtilsKt.isBlockInShipyard(level, getControllerPos())) {
+            preCenter = VSGameUtilsKt.toWorldCoordinates(level, getControllerPos().getCenter());
+        }
+        else {
+            preCenter = Vec3.atCenterOf(getControllerPos());
+        }
+        Vec3 center = preCenter.add(facing.getStepX() * (size - 1) / 2.0, (size - 1) / 2.0, facing.getStepZ() * (size - 1) / 2.0);
+        Vec3 relative = VSGameUtilsKt.toWorldCoordinates(level, location).subtract(center);
         relative = adjustRelativeVectorForFacing(relative, monitorFacing);
         Vec3 RadarPos = radarPos.getCenter();
         float range = getRadar().map(RadarBearingBlockEntity::getRange).orElse(0f);

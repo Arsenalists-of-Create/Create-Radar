@@ -13,8 +13,6 @@ import net.minecraftforge.event.TickEvent;
 import org.valkyrienskies.mod.common.VSGameUtilsKt;
 
 public class MonitorInputHandler {
-
-
     public static void monitorPlayerHovering(TickEvent.PlayerTickEvent event) {
         Player player = event.player;
         Level level = event.player.level();
