@@ -2,6 +2,7 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarTrack;
+import com.happysg.radar.compat.Mods;
 import com.happysg.radar.util.MonitorUtils;
 import com.simibubi.create.content.equipment.goggles.IHaveHoveringInformation;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
@@ -174,7 +175,12 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         Direction facing = level.getBlockState(getControllerPos()).getValue(MonitorBlock.FACING).getClockWise();
         int size = getSize();
         Vec3 center = MonitorUtils.calculateCenter(level, this, facing, size);
-        Vec3 relative = VSGameUtilsKt.toWorldCoordinates(level, location).subtract(center);
+        Vec3 relative;
+        if (Mods.VALKYRIENSKIES.isLoaded()) {
+            relative = VSGameUtilsKt.toWorldCoordinates(level, location).subtract(center);
+        } else {
+            relative = location.subtract(center);
+        }
         relative = adjustRelativeVectorForFacing(relative, monitorFacing);
 
         Vec3 selected = MonitorUtils.calculateSelectedPosition(relative, radarPos.getCenter(),

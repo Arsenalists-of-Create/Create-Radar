@@ -11,8 +11,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
-
 public class MonitorInputHandler {
     public static void monitorPlayerHovering(TickEvent.PlayerTickEvent event) {
         Player player = event.player;

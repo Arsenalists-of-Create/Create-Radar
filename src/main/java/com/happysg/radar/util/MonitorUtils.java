@@ -4,6 +4,7 @@ import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarTrack;
 import com.happysg.radar.block.radar.bearing.VSRadarTracks;
+import com.happysg.radar.compat.Mods;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
@@ -15,7 +16,7 @@ public class MonitorUtils {
 
     public static Vec3 calculateCenter(Level level, MonitorBlockEntity monitor, Direction facing, int size) {
         Vec3 preCenter;
-        if (VSGameUtilsKt.isBlockInShipyard(level, monitor.getControllerPos())) {
+        if (Mods.VALKYRIENSKIES.isLoaded() && VSGameUtilsKt.isBlockInShipyard(level, monitor.getControllerPos())) {
             preCenter = VSGameUtilsKt.toWorldCoordinates(level, monitor.getControllerPos().getCenter());
         } else {
             preCenter = Vec3.atCenterOf(monitor.getControllerPos());
