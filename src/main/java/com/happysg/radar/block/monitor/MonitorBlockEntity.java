@@ -2,6 +2,8 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarTrack;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.util.MonitorUtils;
 import com.simibubi.create.content.equipment.goggles.IHaveHoveringInformation;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
@@ -19,6 +21,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import org.valkyrienskies.mod.common.VSGameUtilsKt;
 
 import java.util.List;
 import java.util.Optional;
@@ -165,38 +168,29 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     private void setSelectedEntity(Vec3 location, Direction monitorFacing) {
-        if (level.isClientSide())
+        if (level.isClientSide() || radarPos == null) {
             return;
-        if (radarPos == null)
-            return;
-        Direction facing = level.getBlockState(getControllerPos())
-                .getValue(MonitorBlock.FACING).getClockWise();
+        }
+
+        Direction facing = level.getBlockState(getControllerPos()).getValue(MonitorBlock.FACING).getClockWise();
         int size = getSize();
-        Vec3 center = Vec3.atCenterOf(getControllerPos())
-                .add(facing.getStepX() * (size - 1) / 2.0, (size - 1) / 2.0, facing.getStepZ() * (size - 1) / 2.0);
-        Vec3 relative = location.subtract(center);
+        Vec3 center = MonitorUtils.calculateCenter(level, this, facing, size);
+        Vec3 relative;
+        if (Mods.VALKYRIENSKIES.isLoaded()) {
+            relative = VSGameUtilsKt.toWorldCoordinates(level, location).subtract(center);
+        } else {
+            relative = location.subtract(center);
+        }
         relative = adjustRelativeVectorForFacing(relative, monitorFacing);
-        Vec3 RadarPos = radarPos.getCenter();
-        float range = getRadar().map(RadarBearingBlockEntity::getRange).orElse(0f);
-        float sizeadj = size == 1 ? 0.5f : ((size - 1) / 2f);
-        if (size == 2)
-            sizeadj = 0.75f;
-        Vec3 selected = RadarPos.add(relative.scale(range / (sizeadj)));
+
+        Vec3 selected = MonitorUtils.calculateSelectedPosition(relative, radarPos.getCenter(),
+                getRadar().map(RadarBearingBlockEntity::getRange).orElse(0f), size);
 
         getRadar().ifPresent(radar -> {
-            double bestDistance = 0.1f * range;
-            for (RadarTrack track : radar.getEntityPositions()) {
-                Vec3 entityPos = track.position();
-                entityPos = entityPos.multiply(1, 0, 1);
-                Vec3 selectedNew = selected.multiply(1, 0, 1);
-                double newDistance = entityPos.distanceTo(selectedNew);
-                if (newDistance < bestDistance) {
-                    bestDistance = newDistance;
-                    selectedEntity = track.entityId();
-                }
-            }
-
+            selectedEntity = MonitorUtils.findClosestEntity(selected, radar.getRange(),
+                    radar.getEntityPositions(), radar.getVS2Positions()).orElse(null);
         });
+
         notifyUpdate();
     }
 
