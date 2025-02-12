@@ -3,6 +3,7 @@
   "block.create_radar.auto_yaw_controller": "Контроллер горизонтального прицеливания пушки",
   "block.create_radar.creative_radar_plate": "Творческий рефлектор антенны радара",
   "block.create_radar.monitor": "Монитор",
+  "block.create_radar.plane_radar": "Авиационный радар",
   "block.create_radar.radar_bearing": "Вращатель антенны радара",
   "block.create_radar.radar_dish_block": "Сетчатый рефлектор антенны радара",
   "block.create_radar.radar_link": "Передатчик радиолокационной информации",
