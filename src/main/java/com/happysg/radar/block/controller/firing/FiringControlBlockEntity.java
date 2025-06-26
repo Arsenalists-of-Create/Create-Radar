@@ -88,6 +88,9 @@ public class FiringControlBlockEntity {
 
     private boolean hasCorrectYawPitch() {
         BlockPos yawControllerPos = cannonMount.getBlockPos().below();
+        if (! (level.getBlockEntity(yawControllerPos) instanceof AutoYawControllerBlockEntity) ) {
+            yawControllerPos = cannonMount.getBlockPos().above();
+        }
         if (level.getBlockEntity(yawControllerPos) instanceof AutoYawControllerBlockEntity yawController && pitchController != null) {
             return yawController.atTargetYaw() && pitchController.atTargetPitch();
         }

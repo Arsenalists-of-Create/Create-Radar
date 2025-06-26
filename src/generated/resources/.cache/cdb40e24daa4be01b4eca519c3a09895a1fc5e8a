@@ -1,6 +1,6 @@
-// 1.20.1	2025-03-05T09:51:18.7077146	Registrate Provider for create_radar [Recipes, Advancements, Loot Tables, Tags (blocks), Tags (items), Tags (fluids), Tags (entity_types), Blockstates, Item models, Lang (en_us/en_ud)]
+// 1.20.1	2025-04-26T12:29:57.7296032	Registrate Provider for create_radar [Recipes, Advancements, Loot Tables, Tags (blocks), Tags (items), Tags (fluids), Tags (entity_types), Blockstates, Item models, Lang (en_us/en_ud)]
 204a35578d423a97e017194a77b9e37e955478f7 assets/create_radar/blockstates/auto_pitch_controller.json
-1379e78ca45372404579f52e6d9f7f6e5dd61b7a assets/create_radar/blockstates/auto_yaw_controller.json
+0fccde8d5fa99b75146a0480d07fc5117ef3454c assets/create_radar/blockstates/auto_yaw_controller.json
 b7267535a7b026db84482242816af286e6dc31db assets/create_radar/blockstates/creative_radar_plate.json
 ea27f3bc6593e7596ec3ace0b9be43f910ef81a2 assets/create_radar/blockstates/data_link.json
 fc1a2bb14967c6f3bab9659d6c655b161ddb758a assets/create_radar/blockstates/id_block.json

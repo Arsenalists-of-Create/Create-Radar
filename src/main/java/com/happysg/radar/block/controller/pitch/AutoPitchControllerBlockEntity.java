@@ -34,12 +34,20 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         super(typeIn, pos, state);
     }
 
+    public CannonMountBlockEntity getCannonMount() {
+        BlockPos pos = getBlockPos().relative(getBlockState().getValue(AutoPitchControllerBlock.HORIZONTAL_FACING));
+        if (level != null && level.getBlockEntity(pos) instanceof CannonMountBlockEntity mount) {
+            return mount;
+        }
+        return null;
+    }
+
     @Override
     public void initialize() {
         super.initialize();
         if (Mods.CREATEBIGCANNONS.isLoaded()) {
-            BlockPos cannonMountPos = getBlockPos().relative(getBlockState().getValue(AutoPitchControllerBlock.HORIZONTAL_FACING));
-            if (level != null && level.getBlockEntity(cannonMountPos) instanceof CannonMountBlockEntity mount) {
+            CannonMountBlockEntity mount = getCannonMount();
+            if (mount != null) {
                 firingControl = new FiringControlBlockEntity(this, mount);
             }
         }
@@ -62,11 +70,9 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
             return;
 
 
-        BlockPos cannonMountPos = getBlockPos().relative(getBlockState().getValue(AutoPitchControllerBlock.HORIZONTAL_FACING));
-        if (!(level.getBlockEntity(cannonMountPos) instanceof CannonMountBlockEntity mount))
+        CannonMountBlockEntity mount = getCannonMount();
+        if (mount == null)
             return;
-
-
 
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null)
@@ -98,8 +104,8 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
     }
 
     public boolean atTargetPitch() {
-        BlockPos turretPos = getBlockPos().relative(getBlockState().getValue(AutoPitchControllerBlock.HORIZONTAL_FACING));
-        if (level == null || !(level.getBlockEntity(turretPos) instanceof CannonMountBlockEntity mount))
+        CannonMountBlockEntity mount = getCannonMount();
+        if (mount == null)
             return false;
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null)
@@ -144,18 +150,17 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         }
         isRunning = true;
 
-
-        if (level.getBlockEntity(getBlockPos().relative(getBlockState().getValue(AutoPitchControllerBlock.HORIZONTAL_FACING))) instanceof CannonMountBlockEntity mount) {
-            if(PhysicsHandler.isBlockInShipyard(level, this.getBlockPos())) {
+        CannonMountBlockEntity mount = getCannonMount();
+        if (mount != null) {
+            if (PhysicsHandler.isBlockInShipyard(level, this.getBlockPos())) {
                 List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, (ServerLevel) level);
-                if(angles == null) return;
-                if(angles.isEmpty()) return;
-                if(angles.get(0).isEmpty()) return;
+                if (angles == null) return;
+                if (angles.isEmpty()) return;
+                if (angles.get(0).isEmpty()) return;
                 this.targetAngle = angles.get(0).get(0);
-                if(firingControl == null) return;
+                if (firingControl == null) return;
                 this.firingControl.cannonMount.setYaw(angles.get(0).get(1).floatValue());
-            }
-            else{
+            } else {
                 List<Double> angles = CannonTargeting.calculatePitch(mount, targetPos, (ServerLevel) level);
                 if (angles == null || angles.isEmpty()) { //TODO unreachable target stop targeting if auto targeting?
                     isRunning = false;
@@ -183,8 +188,10 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
             return;
         firingControl.setTarget(targetPos, targetingConfig);
     }
+
     public void setSafeZones(List<AABB> safeZones) {
         if (firingControl == null)
             return;
-        firingControl.setSafeZones(safeZones);    }
+        firingControl.setSafeZones(safeZones);
+    }
 }

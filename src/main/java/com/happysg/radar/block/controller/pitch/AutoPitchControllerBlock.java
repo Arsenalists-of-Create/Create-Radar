@@ -2,13 +2,16 @@ package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
+import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.foundation.block.IBE;
+import com.simibubi.create.foundation.utility.Iterate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 
 public class AutoPitchControllerBlock extends HorizontalKineticBlock implements IBE<AutoPitchControllerBlockEntity> {
 
@@ -26,11 +29,32 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
         return face == state.getValue(HORIZONTAL_FACING).getOpposite();
     }
 
+    public Direction getPreferredHorizontalFacing(BlockPlaceContext context) {
+        Direction prefferedSide = null;
+        for (Direction side : Iterate.horizontalDirections) {
+            BlockPos blockPos = context.getClickedPos().relative(side);
+            BlockState blockState = context.getLevel().getBlockState(blockPos);
+            if (blockState.getBlock() instanceof IRotate r && context.getLevel().getBlockEntity(blockPos) instanceof CannonMountBlockEntity) {
+                if (r.hasShaftTowards(context.getLevel(), context.getClickedPos()
+                        .relative(side), blockState, side.getOpposite()))
+                    if (prefferedSide != null && prefferedSide.getAxis() != side.getAxis()) {
+                        prefferedSide = null;
+                        break;
+                    } else {
+                        prefferedSide = side;
+                    }
+            }
+        }
+        return prefferedSide;
+    }
+
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
-        boolean crouching = context.getPlayer() != null && context.getPlayer().isCrouching();
-        return this.defaultBlockState()
-                .setValue(HORIZONTAL_FACING, crouching ? context.getHorizontalDirection().getOpposite() : context.getHorizontalDirection());
+        Direction preferred = getPreferredHorizontalFacing(context);
+        if ((context.getPlayer() != null && context.getPlayer()
+                .isShiftKeyDown()) || preferred == null)
+            return super.getStateForPlacement(context);
+        return this.defaultBlockState().setValue(HORIZONTAL_FACING, preferred);
     }
 
     @Override

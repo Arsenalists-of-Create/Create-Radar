@@ -27,7 +27,6 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
         super.tick();
         if (Mods.CREATEBIGCANNONS.isLoaded())
             tryRotateCannon();
-
     }
 
     private void tryRotateCannon() {
@@ -35,7 +34,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
             return;
         if (!isRunning)
             return;
-        if (!(level.getBlockEntity(getBlockPos().above()) instanceof CannonMountBlockEntity mount))
+        CannonMountBlockEntity mount = getCannonMount();
+        if (mount == null)
             return;
 
         PitchOrientedContraptionEntity contraption = mount.getContraption();
@@ -120,7 +120,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
         }
 
         isRunning = true;
-        Vec3 cannonCenter = getBlockPos().above(3).getCenter();
+        Vec3 cannonCenter = getBlockPos().relative(getBlockState().getValue(AutoYawControllerBlock.FACING), 3).getCenter();
         double dx = cannonCenter.x - targetPos.x;
         double dz = cannonCenter.z - targetPos.z;
 
@@ -132,9 +132,17 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
         notifyUpdate();
     }
 
+    public CannonMountBlockEntity getCannonMount() {
+        BlockPos pos = getBlockPos().relative(getBlockState().getValue(AutoYawControllerBlock.FACING));
+        if (level != null && level.getBlockEntity(pos) instanceof CannonMountBlockEntity mount) {
+            return mount;
+        }
+        return null;
+    }
+
     public boolean atTargetYaw() {
-        BlockPos turretPos = getBlockPos().above();
-        if (level == null || !(level.getBlockEntity(turretPos) instanceof CannonMountBlockEntity mount))
+        CannonMountBlockEntity mount = getCannonMount();
+        if (mount == null)
             return false;
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null)
