@@ -1,7 +1,8 @@
 package com.happysg.radar.block.monitor;
 
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
-import com.simibubi.create.api.behaviour.display.DisplaySource;
+
+import com.simibubi.create.content.redstone.displayLink.source.DisplaySource;
 import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
 import net.minecraft.network.chat.MutableComponent;
 

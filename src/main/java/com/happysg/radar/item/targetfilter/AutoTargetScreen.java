@@ -3,17 +3,18 @@ package com.happysg.radar.item.targetfilter;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.datalink.screens.TargetingConfig;
 import com.happysg.radar.registry.ModGuiTextures;
+import com.jozufozu.flywheel.util.transform.TransformStack;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.simibubi.create.foundation.gui.AbstractSimiScreen;
 import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
 import com.simibubi.create.foundation.gui.widget.Indicator;
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.createmod.catnip.gui.AbstractSimiScreen;
+
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
-public class AutoTargetScreen extends AbstractSimiScreen  {
+public class AutoTargetScreen extends AbstractSimiScreen {
 
     boolean player;
     boolean contraption;
@@ -73,7 +74,7 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
         ms.popPose();
 
         ms.pushPose();
-        TransformStack.of(ms)
+        TransformStack.cast(ms)
                 .pushPose()
                 .translate(x + background.width + 4, y + background.height + 4, 100)
                 .scale(40)

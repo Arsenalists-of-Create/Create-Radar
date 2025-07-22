@@ -12,7 +12,7 @@ import com.happysg.radar.block.network.WeaponNetworkLinkBehaviour;
 import com.happysg.radar.block.radar.behavior.RadarScannerLinkBehavior;
 //import com.simibubi.create.foundation.utility.RegisteredObjects; //Deprecated
 import net.minecraft.core.registries.BuiltInRegistries;
-import com.simibubi.create.api.registry.SimpleRegistry;
+
 import com.tterrag.registrate.util.nullness.NonNullConsumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -31,8 +31,8 @@ import java.util.Map;
 public class AllDataBehaviors {
     public static final Map<ResourceLocation, DataLinkBehavior> GATHERER_BEHAVIOURS = new HashMap<>();
 
-    public static final SimpleRegistry<ResourceLocation, DataPeripheral> PERIPHERAL_REGISTRY = SimpleRegistry.create(); // CreateRadar.asResource("data_peripheral")
-    public static final SimpleRegistry<ResourceLocation, DataController> CONTROLLER_REGISTRY = SimpleRegistry.create(); // CreateRadar.asResource("data_controller")
+    public static final Map<ResourceLocation, DataPeripheral> PERIPHERAL_REGISTRY = new HashMap<>(); // CreateRadar.asResource("data_peripheral")
+    public static final Map<ResourceLocation, DataController> CONTROLLER_REGISTRY = new HashMap<>();// CreateRadar.asResource("data_controller")
 
     private static final Map<Block, DataPeripheral> SOURCES_BY_BLOCK = new HashMap<>();
     private static final Map<BlockEntityType<?>, DataPeripheral> SOURCES_BY_BLOCK_ENTITY = new HashMap<>();
@@ -60,10 +60,10 @@ public class AllDataBehaviors {
         behaviour.id = id;
         GATHERER_BEHAVIOURS.put(id, behaviour);
         if (behaviour instanceof DataPeripheral dp) {
-            PERIPHERAL_REGISTRY.register(id, dp);
+            PERIPHERAL_REGISTRY.put(id, dp);
         }
         if (behaviour instanceof DataController dc) {
-            CONTROLLER_REGISTRY.register(id, dc);
+            CONTROLLER_REGISTRY.put(id, dc);
         }
         return behaviour;
     }

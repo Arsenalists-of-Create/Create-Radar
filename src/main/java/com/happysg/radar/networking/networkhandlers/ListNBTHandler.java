@@ -3,7 +3,6 @@ package com.happysg.radar.networking.networkhandlers;
 import net.minecraft.nbt.*;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import org.valkyrienskies.core.impl.shadow.S;
 
 import java.util.ArrayList;
 import java.util.List;

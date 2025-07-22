@@ -1,6 +1,7 @@
 package com.happysg.radar.config.client;
 
-import net.createmod.catnip.config.ConfigBase;
+
+import com.simibubi.create.foundation.config.ConfigBase;
 
 public class RadarClientConfig extends ConfigBase {
 

@@ -1,7 +1,7 @@
 plugins {
     id 'idea'
     id 'maven-publish'
-    id 'net.minecraftforge.gradle' version '[6.0.16,6.2)'
+    id 'net.minecraftforge.gradle' version '[6.0.16,6.2)' // ForgeGradle 6+
     id 'org.parchmentmc.librarian.forgegradle' version '1.+'
     id 'org.spongepowered.mixin' version '0.7.+'
     id 'com.gradleup.shadow' version '8.3.5'
@@ -18,36 +18,32 @@ base {
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
+
 minecraft {
     mappings channel: mapping_channel, version: mapping_version
-
-    // This property allows configuring Gradle's ProcessResources task(s) to run on IDE output locations before launching the game.
-    // It is REQUIRED to be set to true for this template to function.
-    // See https://docs.gradle.org/current/dsl/org.gradle.language.jvm.tasks.ProcessResources.html
     copyIdeResources = true
 
     runs {
-        // applies to all the run configs below
         configureEach {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
             mods {
                 "${mod_id}" {
                     source sourceSets.main
                 }
             }
-            property 'mixin.env.remapRefMap', 'true'
-            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
         }
 
         client {
-            // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             property 'forge.enabledGameTestNamespaces', mod_id
         }
 
         server {
             property 'forge.enabledGameTestNamespaces', mod_id
         }
+
         gameTestServer {
             property 'forge.enabledGameTestNamespaces', mod_id
         }
@@ -59,69 +55,67 @@ minecraft {
     }
 }
 
-sourceSets.main.resources { srcDir 'src/generated/resources' }
-
+sourceSets.main.resources.srcDir 'src/generated/resources'
 
 repositories {
     gradlePluginPortal()
     mavenCentral()
     mavenLocal()
-    maven { url 'https://plugins.gradle.org/' }
-    maven { url 'https://maven.parchmentmc.org' }
-    maven { url 'https://maven.quiltmc.org/repository/release' }
-    maven { url 'https://maven.blamejared.com/' }
 
-    maven {
-        url = "https://api.modrinth.com/maven"
-    }
+    maven { url 'https://maven.minecraftforge.net/' }
+    maven { url 'https://maven.parchmentmc.org' }
+    maven { url 'https://maven.blamejared.com' }
+    maven { url 'https://maven.quiltmc.org/repository/release' }
     maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
 
-    maven { url = "https://maven.createmod.net" } // Create, Ponder, Flywheel
-    maven { url = "https://maven.tterrag.com" } // Registrate
-    maven { url = "https://raw.githubusercontent.com/Fuzss/modresources/main/maven/" } // ForgeConfigAPIPort
+    // Create & dependencies
+    maven { url = "https://maven.createmod.net" }
+    maven { url = "https://maven.tterrag.com" }
+    maven {
+        url = "https://raw.githubusercontent.com/Fuzss/modresources/main/maven/"
+    }
 
+    // Modrinth
     maven {
-        url 'https://api.modrinth.com/maven'
-        content { includeGroup 'maven.modrinth' }
-    }
-    maven {
-        url 'https://www.cursemaven.com'
-        content { includeGroup "curse.maven" }
-    }
-    maven { // Ritchie's Projectile Library && CBC
-        url = "https://maven.realrobotix.me/master/"
+        url = 'https://api.modrinth.com/maven'
         content {
-            includeGroup("com.rbasamoyai")
+            includeGroup 'maven.modrinth'
         }
     }
+
+    // CurseForge
+    maven {
+        url = 'https://www.cursemaven.com'
+        content {
+            includeGroup "curse.maven"
+        }
+    }
+
+    // Valkyrien Skies
+    maven { url = 'https://maven.valkyrienskies.org' }
+
+    // Kotlin for Forge
     maven {
         name = 'Kotlin for Forge'
         url = 'https://thedarkcolour.github.io/KotlinForForge/'
     }
 
     maven {
-        name = "Valkyrien Skies Internal"
-        url = 'https://maven.valkyrienskies.org'
-    }
-
-    maven { url 'https://modmaven.dev/' }
-
-
-    maven {
-        url "https://cursemaven.com"
+        name = "Trackworks/RealRobotix"
+        url = "https://maven.realrobotix.me/master/"
         content {
-            includeGroup "curse.maven"
+            includeGroup("com.rbasamoyai")
         }
     }
-
     maven {
-        // location of maven for CC: Tweaked
-        name = "squiddev"
-        url = "https://squiddev.cc/maven/"
+        name "ModMaven"
+        url "https://modmaven.dev"
     }
 
-    flatDir {
-        dirs 'lib'
+    // CC: Tweaked
+    maven {
+        name = "squiddev"
+        url = "https://squiddev.cc/maven/"
     }
 
 }
@@ -129,62 +123,46 @@ repositories {
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    //Create
-    implementation(fg.deobf("com.simibubi.create:create-${minecraft_version}:${create_version}") { transitive = false })
-    implementation(fg.deobf("net.createmod.ponder:Ponder-Forge-${minecraft_version}:${ponder_version}"))
-    compileOnly(fg.deobf("dev.engine-room.flywheel:flywheel-forge-api-${minecraft_version}:${flywheel_version}"))
-    runtimeOnly(fg.deobf("dev.engine-room.flywheel:flywheel-forge-${minecraft_version}:${flywheel_version}"))
-    implementation(fg.deobf("com.tterrag.registrate:Registrate:${registrate_version}"))
-    compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:0.4.1"))
-    implementation("io.github.llamalad7:mixinextras-forge:0.4.1")
+    implementation "org.apache.commons:commons-math3:3.6.1"
+    runtimeOnly "org.apache.commons:commons-math3:3.6.1"
 
-    //CBC
-    implementation fg.deobf("maven.modrinth:create-big-cannons:${cbc_version}") { transitive = false }
-    implementation fg.deobf("maven.modrinth:rpl:${rpl_version}") { transitive = false }
+    implementation fg.deobf("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") { transitive = false }
+    implementation fg.deobf("com.jozufozu.flywheel:flywheel-forge-${minecraft_version}:${flywheel_version}")
+    implementation fg.deobf("com.tterrag.registrate:Registrate:${registrate_version}")
+    runtimeOnly fg.deobf("com.simibubi.create:create-1.20.1:${create_version}")
 
-    //CBCMW
-    //replace implementation instead of compileOnly after CBCMW is compatible with 6.0
-    compileOnly fg.deobf("maven.modrinth:cbcmodernwarfare:${cbc_mw_version}+mc.${minecraft_version}-forge")
-
-    //CBCAT
-    //replace implementation instead of compileOnly after CBCAT is compatible with 6.0
-    compileOnly fg.deobf("maven.modrinth:create-big-cannons-advanced-technologies:${cbc_at_version}-${minecraft_version}")
+    implementation fg.deobf("com.rbasamoyai:createbigcannons:${cbc_version}") { transitive = false }
+    implementation fg.deobf("com.rbasamoyai:ritchiesprojectilelib:${rpl_version}") { transitive = false }
+    runtimeOnly fg.deobf("com.rbasamoyai:createbigcannons:${cbc_version}") { transitive = false }
+    runtimeOnly(fg.deobf("com.rbasamoyai:ritchiesprojectilelib:${rpl_version}") { transitive = false })
 
 
-    //JEI
-//    compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}")
-//    compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}")
+    //compileOnly fg.deobf("maven.modrinth:cbcmodernwarfare:${cbc_mw_version}+mc.${minecraft_version}-forge")
+    implementation fg.deobf("curse.maven:cbc-modern-warfare-1078220:6262257")
+    //compileOnly fg.deobf("maven.modrinth:create-big-cannons-advanced-technologies:${cbc_at_version}-${minecraft_version}")
+    implementation fg.deobf("curse.maven:create-big-cannons-advanced-technologies-1180196:6431936")
     runtimeOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
 
-    //Clockwork
-    //replace implementation instead of compileOnly after clockwork is compatible with 6.0
     compileOnly fg.deobf("maven.modrinth:create-clockwork:${minecraft_version}-${clockwork_version}")
-    compileOnly fg.deobf("maven.modrinth:architectury-api:${architectury_api_version}+forge")
+    //compileOnly fg.deobf("maven.modrinth:architectury-api:${architectury_api_version}+forge")
 
-    //Valkyrien Skies
-    //replace implementation instead of compileOnly after vs2 is compatible with 6.0
     compileOnly("org.valkyrienskies.core:api:${vs_core_version}")
     compileOnly("org.valkyrienskies.core:impl:${vs_core_version}")
     compileOnly("org.valkyrienskies.core:api-game:${vs_core_version}")
     compileOnly("org.valkyrienskies.core:util:${vs_core_version}")
     compileOnly fg.deobf("org.valkyrienskies:valkyrienskies-120-forge:${vs2_version}")
+
     compileOnly "org.joml:joml:1.10.5"
     compileOnly "com.fasterxml.jackson.core:jackson-annotations:2.13.3"
     compileOnly "thedarkcolour:kotlinforforge:${forge_kotlin_version}"
 
-    //trackworks
-    //replace implementation instead of compileOnly after trackworks is compatible with 6.0
     compileOnly fg.deobf("maven.modrinth:trackwork:${minecraft_version}-${trackwork_version}")
 
-
-    //CC
     compileOnly("cc.tweaked:cc-tweaked-${minecraft_version}-core-api:${cc_tweaked_version}")
     compileOnly fg.deobf("cc.tweaked:cc-tweaked-${minecraft_version}-forge-api:${cc_tweaked_version}")
     runtimeOnly fg.deobf("cc.tweaked:cc-tweaked-${minecraft_version}-forge:${cc_tweaked_version}")
 
     annotationProcessor "org.spongepowered:mixin:0.8.5:processor"
-
-
 }
 
 mixin {
@@ -192,12 +170,8 @@ mixin {
     config 'create_radar.mixins.json'
 }
 
-// This block of code expands all declared replace properties in the specified resource targets.
-// A missing property will result in an error. Properties are expanded using ${} Groovy notation.
-// When "copyIdeResources" is enabled, this will also run before the game launches in IDE environments.
-// See https://docs.gradle.org/current/dsl/org.gradle.language.jvm.tasks.ProcessResources.html
 tasks.named('processResources', ProcessResources).configure {
-    var replaceProperties = [
+    def replaceProperties = [
             minecraft_version   : minecraft_version, minecraft_version_range: minecraft_version_range,
             forge_version       : forge_version, forge_version_range: forge_version_range,
             loader_version_range: loader_version_range,
@@ -205,19 +179,17 @@ tasks.named('processResources', ProcessResources).configure {
             mod_authors         : mod_authors, mod_description: mod_description, create_version_range: create_version_range
     ]
     inputs.properties replaceProperties
-
     filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
         expand replaceProperties + [project: project]
     }
 }
 
-// Example for how to get properties into the manifest for reading at runtime.
 tasks.named('jar', Jar).configure {
     manifest {
         attributes([
                 'Specification-Title'     : mod_id,
                 'Specification-Vendor'    : mod_authors,
-                'Specification-Version'   : '1', // We are version 1 of ourselves
+                'Specification-Version'   : '1',
                 'Implementation-Title'    : project.name,
                 'Implementation-Version'  : project.jar.archiveVersion,
                 'Implementation-Vendor'   : mod_authors,
@@ -225,12 +197,9 @@ tasks.named('jar', Jar).configure {
                 'MixinConfigs'            : 'create_radar.mixins.json'
         ])
     }
-
-    // This is the preferred method to reobfuscate your jar file
     finalizedBy 'reobfJar'
 }
 
-
 tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+    options.encoding = 'UTF-8'
 }

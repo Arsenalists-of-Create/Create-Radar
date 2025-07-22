@@ -18,6 +18,7 @@ mandatory = true #mandatory
 versionRange = "[47,)" #mandatory
 ordering = "NONE"
 side = "BOTH"
+
 [[dependencies.create_radar]]
 modId = "minecraft"
 mandatory = true
@@ -27,12 +28,12 @@ side = "BOTH"
 [[dependencies.create_radar]]
 modId = "create"
 mandatory = true
-versionRange = "[6.0.0,6.1.0)"
+versionRange = "[0.5.1.j, 6.0.0 )"
 ordering = "BEFORE"
 side = "BOTH"
 [[dependencies.create_radar]]
 modId = "createbigcannons"
 mandatory = false
-versionRange = "[5.9.0,)"
+versionRange = "[5.8.0,)"
 ordering = "BEFORE"
 side = "BOTH"

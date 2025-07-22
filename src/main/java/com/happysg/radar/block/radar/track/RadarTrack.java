@@ -2,7 +2,8 @@ package com.happysg.radar.block.radar.track;
 
 import com.happysg.radar.block.monitor.MonitorSprite;
 import com.happysg.radar.config.RadarConfig;
-import net.createmod.catnip.theme.Color;
+
+import com.simibubi.create.foundation.utility.Color;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;

@@ -1,79 +1,21 @@
 {
-  "credit": "Made with Blockbench",
-  "parent": "minecraft:block/block",
-  "textures": {
-    "0": "create_radar:block/radar_command_guidance_side",
-    "1": "create_radar:block/radar_command_guidance_top",
-    "particle": "create_radar:block/radar_command_guidance_side"
-  },
-  "elements": [
+  "type": "minecraft:block",
+  "pools": [
     {
-      "from": [
-        3,
-        0,
-        3
-      ],
-      "to": [
-        13,
-        16,
-        13
-      ],
-      "faces": {
-        "north": {
-          "uv": [
-            3,
-            0,
-            13,
-            16
-          ],
-          "texture": "#0"
-        },
-        "east": {
-          "uv": [
-            3,
-            0,
-            13,
-            16
-          ],
-          "texture": "#0"
-        },
-        "south": {
-          "uv": [
-            3,
-            0,
-            13,
-            16
-          ],
-          "texture": "#0"
-        },
-        "west": {
-          "uv": [
-            3,
-            0,
-            13,
-            16
-          ],
-          "texture": "#0"
-        },
-        "up": {
-          "uv": [
-            3,
-            3,
-            13,
-            13
-          ],
-          "texture": "#1"
-        },
-        "down": {
-          "uv": [
-            3,
-            3,
-            13,
-            13
-          ],
-          "texture": "#1"
+      "bonus_rolls": 0.0,
+      "conditions": [
+        {
+          "condition": "minecraft:survives_explosion"
         }
-      }
+      ],
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "create_radar:fire_controller"
+        }
+      ],
+      "rolls": 1.0
     }
-  ]
+  ],
+  "random_sequence": "create_radar:blocks/fire_controller"
 }

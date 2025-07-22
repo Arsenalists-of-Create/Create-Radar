@@ -10,7 +10,8 @@ import com.simibubi.create.AllSoundEvents;
 import com.simibubi.create.content.contraptions.AssemblyException;
 import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
 import com.simibubi.create.content.contraptions.bearing.MechanicalBearingBlockEntity;
-import com.simibubi.create.api.stress.BlockStressValues;
+
+import com.simibubi.create.content.kinetics.BlockStressValues;
 import com.simibubi.create.foundation.advancement.AllAdvancements;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.simibubi.create.foundation.utility.ServerSpeedProvider;

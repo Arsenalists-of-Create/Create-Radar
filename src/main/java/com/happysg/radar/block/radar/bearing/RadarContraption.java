@@ -7,7 +7,7 @@ import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
 import com.happysg.radar.registry.ModBlocks;
 import com.happysg.radar.registry.ModContraptionTypes;
 import com.simibubi.create.content.contraptions.AssemblyException;
-import com.simibubi.create.api.contraption.ContraptionType;
+import com.simibubi.create.content.contraptions.ContraptionType;
 import com.simibubi.create.content.contraptions.bearing.BearingContraption;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock;
 import net.minecraft.core.BlockPos;
@@ -38,7 +38,7 @@ public class RadarContraption extends BearingContraption {
         return assembled;
     }
 
-
+/*
     @Override
     public void addBlock(Level level, BlockPos pos, Pair<StructureTemplate.StructureBlockInfo, BlockEntity> capture) {
         if (capture.getKey().state().getBlock() instanceof DataLinkBlock)
@@ -65,6 +65,8 @@ public class RadarContraption extends BearingContraption {
 
     }
 
+
+ */
 
     public int getDishCount() {
         return dishCount;

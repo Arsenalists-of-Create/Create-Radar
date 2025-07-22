@@ -7,8 +7,7 @@ import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.simibubi.create.AllSpecialTextures;
 import com.simibubi.create.CreateClient;
-import net.createmod.catnip.outliner.Outliner;
-import com.simibubi.create.api.equipment.goggles.IHaveHoveringInformation;
+import com.simibubi.create.content.equipment.goggles.IHaveHoveringInformation;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
@@ -308,7 +307,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     @OnlyIn(Dist.CLIENT)
     public void showSafeZone() {
         for (AABB safeZone : safeZones) {
-            Outliner.getInstance().showAABB(safeZone, safeZone)
+            CreateClient.OUTLINER.showAABB(safeZone, safeZone)
                     .colored(0x383b42)
                     .withFaceTextures(AllSpecialTextures.CHECKERED, AllSpecialTextures.HIGHLIGHT_CHECKERED)
                     .lineWidth(1 / 16f);

@@ -1,39 +1,39 @@
 package com.happysg.radar.registry;
 
 import com.happysg.radar.CreateRadar;
-import com.simibubi.create.infrastructure.ponder.AllCreatePonderTags;
-import com.tterrag.registrate.util.entry.RegistryEntry;
+import com.simibubi.create.foundation.ponder.PonderRegistry;
+import com.simibubi.create.foundation.ponder.PonderTag;
 
-import net.createmod.ponder.api.registration.PonderTagRegistrationHelper;
-import net.minecraft.resources.ResourceLocation;
+import static com.simibubi.create.infrastructure.ponder.AllPonderTags.*;
+
 public class ModPonderTags {
-    public static final ResourceLocation RADAR_COMPONENT = CreateRadar.asResource("radar_components");
 
+    public static final PonderTag
 
+            RADAR_COMPONENT = create("radar_components").item(ModBlocks.RADAR_PLATE_BLOCK)
+            .defaultLang("Radar Components", "Components which allow the creation of Radar Contraptions")
+            .addToIndex();
 
-    public static void register(PonderTagRegistrationHelper<ResourceLocation> helper) {
+    private static PonderTag create(String id) {
+        return new PonderTag(CreateRadar.asResource(id));
+    }
+
+    public static void register() {
         // Add items to tags here
-        PonderTagRegistrationHelper<RegistryEntry<?>> entryHelper = helper.withKeyFunction(RegistryEntry::getId);
-        helper.registerTag(RADAR_COMPONENT)
-                .addToIndex()
-                .item(ModBlocks.RADAR_PLATE_BLOCK)
-                .title("Radar Components")
-                .description("Components which allow the creation of Radar Contraptions")
-                .register();
-        entryHelper.addToTag(RADAR_COMPONENT)
+        PonderRegistry.TAGS.forTag(RADAR_COMPONENT)
                 .add(ModBlocks.RADAR_BEARING_BLOCK)
                 .add(ModBlocks.RADAR_DISH_BLOCK)
                 .add(ModBlocks.RADAR_PLATE_BLOCK)
                 .add(ModBlocks.RADAR_RECEIVER_BLOCK)
                 .add(ModBlocks.MONITOR);
 
-        entryHelper.addToTag(AllCreatePonderTags.MOVEMENT_ANCHOR)
+        PonderRegistry.TAGS.forTag(MOVEMENT_ANCHOR)
                 .add(ModBlocks.RADAR_BEARING_BLOCK);
 
-        entryHelper.addToTag(AllCreatePonderTags.DISPLAY_SOURCES)
+        PonderRegistry.TAGS.forTag(DISPLAY_SOURCES)
                 .add(ModBlocks.RADAR_BEARING_BLOCK);
 
-        entryHelper.addToTag(AllCreatePonderTags.DISPLAY_TARGETS)
+        PonderRegistry.TAGS.forTag(DISPLAY_TARGETS)
                 .add(ModBlocks.MONITOR);
     }
 

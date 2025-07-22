@@ -5,11 +5,12 @@ import com.happysg.radar.networking.networkhandlers.ListNBTHandler;
 import com.happysg.radar.networking.packets.SaveListsPacket;
 import com.happysg.radar.registry.ModGuiTextures;
 import com.happysg.radar.utils.screenelements.SimpleEditBox;
+import com.jozufozu.flywheel.util.transform.TransformStack;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.simibubi.create.foundation.gui.AbstractSimiScreen;
 import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.createmod.catnip.gui.AbstractSimiScreen;
+
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
@@ -41,7 +42,7 @@ public class ShipListScreen extends AbstractSimiScreen {
         ms.popPose();
 
         ms.pushPose();
-        TransformStack.of(ms)
+        TransformStack.cast(ms)
                 .pushPose()
                 .translate(x + background.width + 4, y + background.height + 4, 100)
                 .scale(40)

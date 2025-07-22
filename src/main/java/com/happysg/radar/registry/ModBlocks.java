@@ -13,7 +13,7 @@ import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
 import com.happysg.radar.block.radar.plane.PlaneRadarBlock;
 import com.happysg.radar.block.radar.receiver.AbstractRadarFrame;
 import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
-import com.simibubi.create.api.stress.BlockStressValues;
+
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BuilderTransformers;
 import com.simibubi.create.foundation.data.SharedProperties;

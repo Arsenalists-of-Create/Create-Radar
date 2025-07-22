@@ -5,7 +5,8 @@ import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.AllShapes;
 import com.simibubi.create.foundation.block.IBE;
 import com.simibubi.create.foundation.block.WrenchableDirectionalBlock;
-import net.createmod.catnip.gui.ScreenOpener;
+
+import com.simibubi.create.foundation.gui.ScreenOpener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;

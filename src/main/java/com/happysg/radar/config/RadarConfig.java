@@ -3,8 +3,9 @@ package com.happysg.radar.config;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.config.client.RadarClientConfig;
 import com.happysg.radar.config.server.RadarServerConfig;
-import net.createmod.catnip.config.ConfigBase;
-import net.createmod.catnip.config.ui.BaseConfigScreen;
+
+import com.simibubi.create.foundation.config.ConfigBase;
+import com.simibubi.create.foundation.config.ui.BaseConfigScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraftforge.common.ForgeConfigSpec;

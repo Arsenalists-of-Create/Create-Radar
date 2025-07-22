@@ -1,6 +1,7 @@
 package com.happysg.radar.config.server;
 
-import net.createmod.catnip.config.ConfigBase;
+import com.simibubi.create.foundation.config.ConfigBase;
+
 
 public class RadarServerConfig extends ConfigBase {
     @Override
@@ -8,7 +9,7 @@ public class RadarServerConfig extends ConfigBase {
         return "Radar Server";
     }
 
-    public final ConfigInt radarLinkRange = i(128, 1, "radarLinkRange", "Maximum possible distance in blocks between radar links in blocks");
+    public final ConfigBase.ConfigInt radarLinkRange = i(128, 1, "radarLinkRange", "Maximum possible distance in blocks between radar links in blocks");
     public final ConfigInt maxRadarRange = i(1000, 1, "maxRadarRange", "Maximum range of a Radar Contraption in blocks");
     public final ConfigInt monitorMaxSize = i(9, 1, "monitorMaxSize", "Maximum size of monitor MultiBlock");
     public final ConfigInt dishRangeIncrease = i(10, 1, "dishRangeIncrease", "Range increase per dish block in blocks");

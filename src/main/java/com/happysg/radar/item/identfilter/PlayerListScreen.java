@@ -11,13 +11,13 @@ import com.happysg.radar.utils.screenelements.DynamicIconButton;
 import com.happysg.radar.utils.screenelements.ScrollInputPage;
 import com.happysg.radar.utils.screenelements.SimpleEditBox;
 import com.happysg.radar.utils.screenelements.TooltipIcon;
+import com.jozufozu.flywheel.util.transform.TransformStack;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.simibubi.create.foundation.gui.AbstractSimiScreen;
 import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
 
-import dev.engine_room.flywheel.lib.transform.TransformStack;
 
-import net.createmod.catnip.gui.AbstractSimiScreen;
 
 
 import net.minecraft.client.gui.GuiGraphics;
@@ -75,7 +75,7 @@ public class PlayerListScreen extends AbstractSimiScreen {
         ms.popPose();
 
         ms.pushPose();
-        TransformStack.of(ms)
+        TransformStack.cast(ms)
                 .pushPose()
                 .translate(x + background.width + 4, y + background.height + 4, 100)
                 .scale(40)
