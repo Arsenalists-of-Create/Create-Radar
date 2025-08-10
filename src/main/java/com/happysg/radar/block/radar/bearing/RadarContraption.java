@@ -38,16 +38,16 @@ public class RadarContraption extends BearingContraption {
         return assembled;
     }
 
-/*
     @Override
-    public void addBlock(Level level, BlockPos pos, Pair<StructureTemplate.StructureBlockInfo, BlockEntity> capture) {
+    public void addBlock(BlockPos pos, Pair<StructureTemplate.StructureBlockInfo, BlockEntity> capture) {
+        super.addBlock(pos, capture);
         if (capture.getKey().state().getBlock() instanceof DataLinkBlock)
             return;
 
         if (capture.getKey().state().getBlock() instanceof DisplayLinkBlock)
             return;
 
-        super.addBlock(level, pos, capture);
+        super.addBlock(pos, capture);
 
         if (ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.has(capture.getKey().state()))
             creative = true;
@@ -64,9 +64,6 @@ public class RadarContraption extends BearingContraption {
         }
 
     }
-
-
- */
 
     public int getDishCount() {
         return dishCount;
