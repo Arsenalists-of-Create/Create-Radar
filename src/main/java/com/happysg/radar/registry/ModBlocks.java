@@ -14,6 +14,7 @@ import com.happysg.radar.block.radar.plane.PlaneRadarBlock;
 import com.happysg.radar.block.radar.receiver.AbstractRadarFrame;
 import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
 
+import com.simibubi.create.content.kinetics.BlockStressDefaults;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BuilderTransformers;
 import com.simibubi.create.foundation.data.SharedProperties;
@@ -65,11 +66,11 @@ public class ModBlocks {
     public static final BlockEntry<RadarBearingBlock> RADAR_BEARING_BLOCK =
             REGISTRATE.block("radar_bearing", RadarBearingBlock::new)
                     .initialProperties(SharedProperties::softMetal)
-//                    .transform(BlockStressDefaults.setImpact(4))
                     .transform(BuilderTransformers.bearing("windmill", "gearbox"))
                     .properties(BlockBehaviour.Properties::noOcclusion)
                     .blockstate((c, p) -> p.simpleBlock(c.getEntry(), AssetLookup.partialBaseModel(c, p)))
                     .transform(axeOrPickaxe())
+                    .transform(BlockStressDefaults.setImpact(4.0d))
                     .item()
                     .model(AssetLookup.customBlockItemModel("_", "item"))
                     .build()
@@ -98,9 +99,9 @@ public class ModBlocks {
     public static final BlockEntry<RadarReceiverBlock> RADAR_RECEIVER_BLOCK =
             REGISTRATE.block("radar_receiver_block", RadarReceiverBlock::new)
                     .initialProperties(SharedProperties::softMetal)
-//                    .transform(BlockStressDefaults.setImpact(0))
                     .properties(BlockBehaviour.Properties::noOcclusion)
                     .transform(axeOrPickaxe())
+                    .transform(BlockStressDefaults.setImpact(0.0d))
                     .blockstate((ctx, prov) -> prov.directionalBlock(ctx.getEntry(), prov.models()
                             .getExistingFile(ctx.getId()), 180))
                     .simpleItem()
@@ -111,10 +112,10 @@ public class ModBlocks {
             REGISTRATE.block("radar_dish_block", properties -> new AbstractRadarFrame(properties, ModShapes.RADAR_DISH))
                     .lang("Radar Dish")
                     .initialProperties(SharedProperties::softMetal)
-//                    .transform(BlockStressDefaults.setImpact(0))
                     .properties(BlockBehaviour.Properties::noOcclusion)
                     .addLayer(() -> RenderType::cutoutMipped)
                     .transform(axeOrPickaxe())
+                    .transform(BlockStressDefaults.setImpact(0.0d))
                     .blockstate((ctx, prov) -> prov.directionalBlock(ctx.getEntry(), prov.models()
                             .getExistingFile(ctx.getId()), 0))
                     .simpleItem()
@@ -125,9 +126,9 @@ public class ModBlocks {
             REGISTRATE.block("radar_plate_block", properties -> new AbstractRadarFrame(properties, ModShapes.RADAR_PLATE))
                     .lang("Radar Plate")
                     .initialProperties(SharedProperties::softMetal)
-//                    .transform(BlockStressDefaults.setImpact(0))
                     .properties(BlockBehaviour.Properties::noOcclusion)
                     .transform(axeOrPickaxe())
+                    .transform(BlockStressDefaults.setImpact(0.0d))
                     .blockstate((ctx, prov) -> prov.directionalBlock(ctx.getEntry(), prov.models()
                             .getExistingFile(ctx.getId()), 0))
                     .simpleItem()
@@ -136,9 +137,9 @@ public class ModBlocks {
     @SuppressWarnings("unused")
     public static final BlockEntry<AbstractRadarFrame> CREATIVE_RADAR_PLATE_BLOCK =
             REGISTRATE.block("creative_radar_plate", properties -> new AbstractRadarFrame(properties, ModShapes.RADAR_PLATE))
-                    .initialProperties(SharedProperties::softMetal)
-//                    .transform(BlockStressDefaults.setImpact(0))
                     .properties(BlockBehaviour.Properties::noOcclusion)
+                    .initialProperties(SharedProperties::softMetal)
+                    .transform(BlockStressDefaults.setImpact(0.0d))
                     .blockstate((ctx, prov) -> prov.directionalBlock(ctx.getEntry(), prov.models()
                             .getExistingFile(ctx.getId()), 0))
                     .simpleItem()
@@ -149,10 +150,10 @@ public class ModBlocks {
             REGISTRATE.block("auto_yaw_controller", AutoYawControllerBlock::new)
                     .initialProperties(SharedProperties::softMetal)
                     .properties(properties -> properties.isRedstoneConductor((pState, pLevel, pPos) -> false))
-//                    .transform(BlockStressDefaults.setImpact(128))
                     .transform(BuilderTransformers.bearing("windmill", "gearbox"))
                     .properties(BlockBehaviour.Properties::noOcclusion)
                     .transform(axeOrPickaxe())
+                    .transform(BlockStressDefaults.setImpact(128.0d))
                     .blockstate((c, p) -> p.horizontalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
                     .simpleItem()
                     .register();
@@ -161,9 +162,9 @@ public class ModBlocks {
             REGISTRATE.block("track_controller", TrackControllerBlock::new)
                     .initialProperties(SharedProperties::softMetal)
                     .properties(properties -> properties.isRedstoneConductor((pState, pLevel, pPos) -> false))
-//                    .transform(BlockStressDefaults.setImpact(16))
                     .properties(BlockBehaviour.Properties::noOcclusion)
                     .transform(axeOrPickaxe())
+                    .transform(BlockStressDefaults.setImpact(16.0d))
                     .blockstate((c, p) -> p.horizontalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
                     .simpleItem()
                     .register();
@@ -172,10 +173,10 @@ public class ModBlocks {
             REGISTRATE.block("auto_pitch_controller", AutoPitchControllerBlock::new)
                     .initialProperties(SharedProperties::softMetal)
                     .properties(properties -> properties.isRedstoneConductor((pState, pLevel, pPos) -> false))
-//                    .transform(BlockStressDefaults.setImpact(128))
                     .transform(BuilderTransformers.bearing("windmill", "gearbox"))
                     .properties(BlockBehaviour.Properties::noOcclusion)
                     .transform(axeOrPickaxe())
+                    .transform(BlockStressDefaults.setImpact(128.0d))
                     .blockstate((c, p) -> p.horizontalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
                     .simpleItem()
                     .register();

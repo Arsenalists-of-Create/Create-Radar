@@ -126,24 +126,8 @@ public class CreateRadar {
     }
 
     public static void init(final FMLCommonSetupEvent event) {
-        event.enqueueWork(() -> {
-            // Must be registered after registries open
-            ModContraptionTypes.register();
-/*
-            // Stress values
-            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_BEARING_BLOCK.get(), () -> 4d);
-            BlockStressValues.IMPACTS.register(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK.get(), () -> 128d);
-            BlockStressValues.IMPACTS.register(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK.get(), () -> 128d);
-            BlockStressValues.IMPACTS.register(ModBlocks.TRACK_CONTROLLER_BLOCK.get(), () -> 16d);
-
-            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_RECEIVER_BLOCK.get(), () -> 0d);
-            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_DISH_BLOCK.get(), () -> 0d);
-            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_PLATE_BLOCK.get(), () -> 0d);
-            BlockStressValues.IMPACTS.register(ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.get(), () -> 0d);
-
- */
-        });
-
+        // Must be registered after registries open
+        event.enqueueWork(ModContraptionTypes::register);
         ModMessages.register();
         ModDisplayBehaviors.register();
         AllDataBehaviors.registerDefaults();
