@@ -129,6 +129,12 @@ repositories {
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
+    minecraftLibrary 'org.apache.commons:commons-math3:3.6.1'
+    jarJar('org.apache.commons:commons-math3:3.6.1') {
+        transitive = false
+        jarJar.ranged(it, '[3.6.1,)')
+    }
+
     //Create
     implementation(fg.deobf("com.simibubi.create:create-${minecraft_version}:${create_version}") { transitive = false })
     implementation(fg.deobf("net.createmod.ponder:Ponder-Forge-${minecraft_version}:${ponder_version}"))

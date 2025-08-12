@@ -1,11 +1,11 @@
 package com.happysg.radar.compat.cbc;
-import com.happysg.radar.math3.analysis.MultivariateFunction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import com.happysg.radar.math3.optim.*;
-import com.happysg.radar.math3.optim.nonlinear.scalar.*;
-import com.happysg.radar.math3.optim.nonlinear.scalar.noderiv.*;
-import com.happysg.radar.math3.random.RandomVectorGenerator;
+import org.apache.commons.math3.analysis.MultivariateFunction;
+import org.apache.commons.math3.optim.*;
+import org.apache.commons.math3.optim.nonlinear.scalar.*;
+import org.apache.commons.math3.optim.nonlinear.scalar.noderiv.*;
+import org.apache.commons.math3.random.RandomVectorGenerator;
 import org.joml.Matrix4dc;
 import org.joml.Vector3f;
 import org.valkyrienskies.core.api.ships.Ship;
