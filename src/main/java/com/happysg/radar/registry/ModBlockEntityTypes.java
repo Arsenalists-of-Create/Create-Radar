@@ -66,6 +66,7 @@ public class ModBlockEntityTypes {
             .validBlocks(ModBlocks.TRACK_CONTROLLER_BLOCK)
             .register();
 
+
     public static void register() {
         CreateRadar.getLogger().info("Registering block entity types!");
     }

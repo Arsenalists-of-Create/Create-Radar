@@ -169,9 +169,7 @@ public class ModBlocks {
     public static final BlockEntry<AutoPitchControllerBlock> AUTO_PITCH_CONTROLLER_BLOCK =
             REGISTRATE.block("auto_pitch_controller", AutoPitchControllerBlock::new)
                     .initialProperties(SharedProperties::softMetal)
-                    .properties(properties -> properties.isRedstoneConductor((pState, pLevel, pPos) -> false))
-//                    .transform(BlockStressDefaults.setImpact(128))
-                    .transform(BuilderTransformers.bearing("windmill", "gearbox"))
+                    .properties(p -> p.isRedstoneConductor((s, l, pos) -> false))
                     .properties(BlockBehaviour.Properties::noOcclusion)
                     .transform(axeOrPickaxe())
                     .blockstate((c, p) -> p.horizontalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
@@ -180,17 +178,21 @@ public class ModBlocks {
 
 
 
+
+
     public static void register() {
         CreateRadar.getLogger().info("Registering blocks!");
-//        BlockStressValues.IMPACTS.register(RADAR_BEARING_BLOCK.get(), () -> 4d);
-//        BlockStressValues.IMPACTS.register(AUTO_YAW_CONTROLLER_BLOCK.get(), () -> 128d);
-//        BlockStressValues.IMPACTS.register(AUTO_PITCH_CONTROLLER_BLOCK.get(), () -> 128d);
-//        BlockStressValues.IMPACTS.register(TRACK_CONTROLLER_BLOCK.get(), () -> 16d);
-//
-//        // zero-impact parts
-//        BlockStressValues.IMPACTS.register(RADAR_RECEIVER_BLOCK.get(), () -> 0d);
-//        BlockStressValues.IMPACTS.register(RADAR_DISH_BLOCK.get(), () -> 0d);
-//        BlockStressValues.IMPACTS.register(RADAR_PLATE_BLOCK.get(), () -> 0d);
-//        BlockStressValues.IMPACTS.register(CREATIVE_RADAR_PLATE_BLOCK.get(), () -> 0d);
+/*        BlockStressValues.IMPACTS.register(RADAR_BEARING_BLOCK.get(), () -> 4d);
+        BlockStressValues.IMPACTS.register(AUTO_YAW_CONTROLLER_BLOCK.get(), () -> 128d);
+        BlockStressValues.IMPACTS.register(AUTO_PITCH_CONTROLLER_BLOCK.get(), () -> 128d);
+        BlockStressValues.IMPACTS.register(TRACK_CONTROLLER_BLOCK.get(), () -> 16d);
+
+        // zero-impact parts
+        BlockStressValues.IMPACTS.register(RADAR_RECEIVER_BLOCK.get(), () -> 0d);
+        BlockStressValues.IMPACTS.register(RADAR_DISH_BLOCK.get(), () -> 0d);
+        BlockStressValues.IMPACTS.register(RADAR_PLATE_BLOCK.get(), () -> 0d);
+        BlockStressValues.IMPACTS.register(CREATIVE_RADAR_PLATE_BLOCK.get(), () -> 0d);
+
+ */
     }
 }

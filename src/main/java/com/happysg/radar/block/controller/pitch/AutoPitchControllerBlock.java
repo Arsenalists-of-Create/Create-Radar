@@ -23,8 +23,10 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
 
     @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-        return face == state.getValue(HORIZONTAL_FACING).getOpposite();
+        Direction facing = state.getValue(HORIZONTAL_FACING);
+        return face == facing || face == facing.getOpposite();
     }
+
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {

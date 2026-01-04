@@ -2,7 +2,7 @@ package com.happysg.radar.block.radar.track;
 
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.Mob;
+
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
@@ -24,15 +24,11 @@ public enum TrackCategory {
     public static TrackCategory get(Entity entity) {
         if (entity instanceof Player) {
             return PLAYER;
-        } else if (entity instanceof Mob) {
-            if (entity instanceof Animal || entity instanceof Mob) {
-                return ANIMAL;
-            }
-            if (entity instanceof Enemy) {
-                return HOSTILE;
-            }
-            return MOB;
-        } else if (entity instanceof ItemEntity){
+        } else if (entity instanceof Animal) {
+            return ANIMAL;
+        } else if (entity instanceof Enemy){
+            return HOSTILE;
+        }else if (entity instanceof ItemEntity){
             return ITEM;
         } else if (entity instanceof AbstractContraptionEntity) {
             return CONTRAPTION;
