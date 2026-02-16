@@ -1,93 +1,163 @@
 package com.happysg.radar.registry;
 
-import com.happysg.radar.block.behaviours.RadarNetworkLinkBehaviour.RadarNetworkLinkBehaviour;
-import com.happysg.radar.block.behaviours.RadarNetworkLinkBehaviour.RadarNetworkLinkCondition;
-import com.happysg.radar.block.behaviours.WeaponNetworkLinkBehaviour.WeaponNetworkLinkCondition;
-import com.happysg.radar.block.behaviours.WeaponNetworkLinkBehaviour.WeaponNetworkLinkBehaviour;
+import com.happysg.radar.CreateRadar;
+//import com.happysg.radar.block.behavior.linking.PitchLinkBehavior;
+import com.happysg.radar.block.controller.track.TrackLinkBehavior;
+
+import com.happysg.radar.block.datalink.DataController;
 import com.happysg.radar.block.datalink.DataLinkBehavior;
-import com.happysg.radar.block.behaviours.NetworkWeaponNetworkLinkBehaviour.NetworkWeaponNetworkLinkCondition;
-import com.happysg.radar.block.behaviours.NetworkWeaponNetworkLinkBehaviour.NetworkWeaponNetworkLinkBehaviour;
-import com.happysg.radar.block.network.IBehaviourCondition;
-import com.mojang.logging.LogUtils;
+import com.happysg.radar.block.datalink.DataPeripheral;
+import com.happysg.radar.block.monitor.MonitorRadarBehavior;
+
+//import com.simibubi.create.foundation.utility.RegisteredObjects; //Deprecated
+import net.minecraft.core.registries.BuiltInRegistries;
+import com.simibubi.create.api.registry.SimpleRegistry;
+import com.tterrag.registrate.util.nullness.NonNullConsumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.Block;
-import org.slf4j.Logger;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockState;
 
-import java.util.*;
+import javax.annotation.Nullable;
+import java.util.HashMap;
+import java.util.Map;
 
-/**
- * Registry for DataLinkBehaviors where pairs of blocks (or block entities)
- * map to one or more behaviors, regardless of order.
- */
 public class AllDataBehaviors {
-    private static final Logger LOGGER = LogUtils.getLogger();
+    public static final Map<ResourceLocation, DataLinkBehavior> GATHERER_BEHAVIOURS = new HashMap<>();
 
-    private static final Map<IBehaviourCondition, DataLinkBehavior> BEHAVIOURS = new HashMap<>();
+    public static final SimpleRegistry<ResourceLocation, DataPeripheral> PERIPHERAL_REGISTRY = SimpleRegistry.create(); // CreateRadar.asResource("data_peripheral")
+    public static final SimpleRegistry<ResourceLocation, DataController> CONTROLLER_REGISTRY = SimpleRegistry.create(); // CreateRadar.asResource("data_controller")
+
+    private static final Map<Block, DataPeripheral> SOURCES_BY_BLOCK = new HashMap<>();
+    private static final Map<BlockEntityType<?>, DataPeripheral> SOURCES_BY_BLOCK_ENTITY = new HashMap<>();
+
+    private static final Map<Block, DataController> TARGETS_BY_BLOCK = new HashMap<>();
+    private static final Map<BlockEntityType<?>, DataController> TARGETS_BY_BLOCK_ENTITY = new HashMap<>();
 
     public static void registerDefaults() {
-        registerBehavior(new RadarNetworkLinkCondition(), new RadarNetworkLinkBehaviour());
-        registerBehavior(new NetworkWeaponNetworkLinkCondition(), new NetworkWeaponNetworkLinkBehaviour());
-        registerBehavior(new WeaponNetworkLinkCondition(), new WeaponNetworkLinkBehaviour());
+        assignBlockEntity(register(CreateRadar.asResource("monitor"), new MonitorRadarBehavior()), ModBlockEntityTypes.MONITOR.get());
+
+//        assignBlockEntity(register(CreateRadar.asResource("pitch"), new PitchLinkBehavior()), ModBlockEntityTypes.AUTO_PITCH_CONTROLLER.get());
+
+        //assignBlockEntity(register(CreateRadar.asResource("track"), new TrackLinkBehavior()), ModBlockEntityTypes.TRACK_CONTROLLER.get());
+        //assignBlockEntity(register(CreateRadar.asResource("plane_radar"), new RadarScannerLinkBehavior()), ModBlockEntityTypes.PLANE_RADAR.get());
     }
 
-    public static void registerBlockPair(Block a, Block b, DataLinkBehavior behavior) {
-        ResourceLocation idA = a.builtInRegistryHolder().key().location();
-        ResourceLocation idB = b.builtInRegistryHolder().key().location();
-        registerBehavior(new IBehaviourCondition() {
-            @Override
-            public boolean firstBlockCondition(Block block1) {
-                if (block1 == null) return false;
-                ResourceLocation location = block1.builtInRegistryHolder().key().location();
-                return location.equals(idA) || location.equals(idB);
-            }
-
-            @Override
-            public boolean secondBlockCondition(Block block2) {
-                if (block2 == null) return false;
-                ResourceLocation location = block2.builtInRegistryHolder().key().location();
-                return location.equals(idA) || location.equals(idB);
-            }
-            @Override
-            public boolean bothBlocksCondition(Block block1, Block block2) {
-                return (block1.builtInRegistryHolder().key().location() == block2.builtInRegistryHolder().key().location()) == (idA == idB);
-            }
-        }, behavior);
-    }
-
-    /** Register one or more behaviors for a block pair */
-    public static void registerBehavior(IBehaviourCondition condition, DataLinkBehavior behaviour) {
-        if(BEHAVIOURS.containsKey(condition)) {
-            LOGGER.warn("Overriding existing DataLinkBehavior for condition: {}", condition);
+    public static DataLinkBehavior register(ResourceLocation id, DataLinkBehavior behaviour) {
+        behaviour.id = id;
+        GATHERER_BEHAVIOURS.put(id, behaviour);
+        if (behaviour instanceof DataPeripheral dp) {
+            PERIPHERAL_REGISTRY.register(id, dp);
         }
-        BEHAVIOURS.put(condition, behaviour);
-    }
-    public static ArrayList<DataLinkBehavior> getBehavioursForBlockPos(BlockPos pos, Level level) {
-        return getBehavioursForBlock(level.getBlockState(pos).getBlock());
-    }
-
-    public static ArrayList<DataLinkBehavior> getBehavioursForBlock(Block block) {
-        ArrayList<DataLinkBehavior> behaviors = new ArrayList<>();
-        for (IBehaviourCondition condition : BEHAVIOURS.keySet()) {
-            if(condition.firstBlockCondition(block) || condition.secondBlockCondition(block)) {
-                behaviors.add(BEHAVIOURS.get(condition));
-            }
+        if (behaviour instanceof DataController dc) {
+            CONTROLLER_REGISTRY.register(id, dc);
         }
-        return behaviors;
-    }
-    public static ArrayList<DataLinkBehavior> getBehavioursForBlockPoses(BlockPos blockPos, BlockPos blockPos2, Level level) {
-        return getBehavioursForBlocks(level.getBlockState(blockPos).getBlock(), level.getBlockState(blockPos2).getBlock());
+        return behaviour;
     }
 
-    public static ArrayList<DataLinkBehavior> getBehavioursForBlocks(Block block, Block block2) {
-        ArrayList<DataLinkBehavior> behaviors = new ArrayList<>();
-        for (IBehaviourCondition condition : BEHAVIOURS.keySet()) {
-            if(condition.isValid(block, block2)) {
-                behaviors.add(BEHAVIOURS.get(condition));
-            }
+    public static void assignBlock(DataLinkBehavior behaviour, Block block) {
+        if (behaviour instanceof DataPeripheral source) {
+            SOURCES_BY_BLOCK.put(block, source);
         }
-        return behaviors;
+        if (behaviour instanceof DataController target) {
+            TARGETS_BY_BLOCK.put(block, target);
+        }
     }
 
+    public static void assignBlockEntity(DataLinkBehavior behaviour, BlockEntityType<?> beType) {
+        if (behaviour instanceof DataPeripheral source) {
+            SOURCES_BY_BLOCK_ENTITY.put(beType, source);
+        }
+        if (behaviour instanceof DataController target) {
+            TARGETS_BY_BLOCK_ENTITY.put(beType, target);
+        }
+    }
+
+    public static <B extends Block> NonNullConsumer<? super B> assignDataBehaviour(DataLinkBehavior behaviour, String... suffix) {
+        return b -> {
+            ResourceLocation registryName = BuiltInRegistries.BLOCK.getKey(b);
+            String idSuffix = behaviour instanceof DataPeripheral ? "_source" : "_target";
+            if (suffix.length > 0)
+                idSuffix += "_" + suffix[0];
+            assignBlock(register(ResourceLocation.fromNamespaceAndPath(registryName.getNamespace(), registryName.getPath() + idSuffix), behaviour), b);
+        };
+    }
+
+    public static <B extends BlockEntityType<?>> NonNullConsumer<? super B> assignDataBehaviourBE(DataLinkBehavior behaviour, String... suffix) {
+        return b -> {
+            ResourceLocation registryName = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(b); // Unsure if works
+            String idSuffix = behaviour instanceof DataPeripheral ? "_source" : "_target";
+            if (suffix.length > 0)
+                idSuffix += "_" + suffix[0];
+            assignBlockEntity(register(ResourceLocation.fromNamespaceAndPath(registryName.getNamespace(), registryName.getPath() + idSuffix), behaviour), b);
+        };
+    }
+
+    @Nullable
+    public static DataPeripheral getSource(ResourceLocation id) {
+        DataLinkBehavior available = GATHERER_BEHAVIOURS.get(id);
+        return (available instanceof DataPeripheral source) ? source : null;
+    }
+
+    @Nullable
+    public static DataController getTarget(ResourceLocation id) {
+        DataLinkBehavior available = GATHERER_BEHAVIOURS.get(id);
+        return (available instanceof DataController target) ? target : null;
+    }
+
+    public static DataPeripheral sourcesOf(Block block) {
+        return SOURCES_BY_BLOCK.get(block);
+    }
+
+    public static DataPeripheral sourcesOf(BlockState state) {
+        return sourcesOf(state.getBlock());
+    }
+
+    public static DataPeripheral sourcesOf(BlockEntityType<?> type) {
+        return SOURCES_BY_BLOCK_ENTITY.get(type);
+    }
+
+    public static DataPeripheral sourcesOf(BlockEntity entity) {
+        return sourcesOf(entity.getType());
+    }
+
+    @Nullable
+    public static DataController targetOf(Block block) {
+        return TARGETS_BY_BLOCK.get(block);
+    }
+
+    @Nullable
+    public static DataController targetOf(BlockState state) {
+        return targetOf(state.getBlock());
+    }
+
+    @Nullable
+    public static DataController targetOf(BlockEntityType<?> type) {
+        return TARGETS_BY_BLOCK_ENTITY.get(type);
+    }
+
+    @Nullable
+    public static DataController targetOf(BlockEntity entity) {
+        return targetOf(entity.getType());
+    }
+
+    public static DataPeripheral sourcesOf(LevelAccessor level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        BlockEntity entity = level.getBlockEntity(pos);
+        DataPeripheral fromBlock = sourcesOf(state);
+        DataPeripheral fromEntity = (entity != null) ? sourcesOf(entity) : null;
+        return (fromEntity != null) ? fromEntity : fromBlock;
+    }
+
+    @Nullable
+    public static DataController targetOf(LevelAccessor level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        BlockEntity entity = level.getBlockEntity(pos);
+        DataController fromBlock = targetOf(state);
+        DataController fromEntity = (entity != null) ? targetOf(entity) : null;
+        return (fromEntity != null) ? fromEntity : fromBlock;
+    }
 }

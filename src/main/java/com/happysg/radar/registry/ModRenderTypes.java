@@ -19,9 +19,9 @@ public class ModRenderTypes extends RenderType {
     }
 
     private static final BiFunction<ResourceLocation, Boolean, RenderType> POLYGON_OFFSET = Util.memoize((texture, affectsOutline) -> {
-        RenderType.CompositeState state = RenderType.CompositeState.builder()
+        CompositeState state = CompositeState.builder()
                 .setShaderState(RENDERTYPE_ENTITY_TRANSLUCENT_SHADER)
-                .setTextureState(new RenderStateShard.TextureStateShard(texture, false, false) {
+                .setTextureState(new TextureStateShard(texture, false, false) {
                     @Override
                     public void setupRenderState() {
                         super.setupRenderState();

@@ -7,8 +7,8 @@ import net.createmod.catnip.gui.element.ScreenElement;
 import net.createmod.catnip.theme.Color;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 public enum ModGuiTextures implements ScreenElement {
 
@@ -34,6 +34,7 @@ public enum ModGuiTextures implements ScreenElement {
     LOS_BUTTON("targeting_filter",123,44,16,16),
     AUTO_TARGET("targeting_filter",171,43,16,16),
     CHECK("targeting_filter",192,84,16,16),
+    ARTILLERY("targeting_filter",143,44,16,16),
     DETECTION_FILTER("detection_filter",256,96),
     CONTRAPTION_BUTTON("detection_filter",89,39,16,16),
     MISSILE_BUTTON("detection_filter", 173,39,16,16),
@@ -48,7 +49,9 @@ public enum ModGuiTextures implements ScreenElement {
     ID_ADD("identification_filter_0", 183, 125,25,20),
     ID_CARD("identification_filter_0", 0,125,183,22),
     CARD_ADD("identification_filter_0", 183, 125,25,20),
-    SHIP_LIST("identification_filter_1",191,83)
+    SHIP_LIST("identification_filter_1",191,83),
+    BINOCULAR_OVERLAY("binoculars_scope",0,127,512,256),
+    MONITOR_BACKGROUND("monitor_gui",0,0,48,48)
     ;
 
     public static final int FONT_COLOR = 0x575F7A;
@@ -71,7 +74,7 @@ public enum ModGuiTextures implements ScreenElement {
     }
 
     ModGuiTextures(String namespace, String location, int startX, int startY, int width, int height, int textureWidth, int textureHeight) {
-        this.location = new ResourceLocation(namespace, "textures/gui/" + location + ".png");
+        this.location = ResourceLocation.fromNamespaceAndPath(namespace, "textures/gui/" + location + ".png");
         this.width = width;
         this.height = height;
         this.startX = startX;
