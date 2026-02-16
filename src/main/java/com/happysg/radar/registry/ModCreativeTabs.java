@@ -13,7 +13,6 @@ import net.minecraft.world.item.ItemStack;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
-import net.minecraft.world.item.CreativeModeTab.TabVisibility;
 
 import java.util.function.Supplier;
 
@@ -22,8 +21,8 @@ import static com.happysg.radar.CreateRadar.REGISTRATE;
 public class ModCreativeTabs {
     public static DeferredRegister<CreativeModeTab> CREATIVE_TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB, CreateRadar.MODID);
 
-    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> RADAR_CREATIVE_TAB =
-            addTab("radar", "Create: Radars", ModBlocks.MONITOR::asStack);
+    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> RADAR_CREATIVE_TAB = addTab("radar", "Create: Radars",
+            ModBlocks.MONITOR::asStack);
 
 
     public static DeferredHolder<CreativeModeTab, CreativeModeTab> addTab(String id, String name, Supplier<ItemStack> icon) {
@@ -32,7 +31,7 @@ public class ModCreativeTabs {
 
         CreativeModeTab.Builder tabBuilder = CreativeModeTab.builder()
                 .icon(icon)
-                .displayItems(ModCreativeTabs::displayItems) // ← RIGHT HERE
+                .displayItems(ModCreativeTabs::displayItems)
                 .title(Component.translatable(itemGroupId))
                 .withTabsBefore(getCreateTabOrFallback());
 
@@ -57,33 +56,33 @@ public class ModCreativeTabs {
     }
 
     private static void displayItems(CreativeModeTab.ItemDisplayParameters p, CreativeModeTab.Output out) {
-        out.accept(ModBlocks.MONITOR.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModItems.SAFE_ZONE_DESIGNATOR.get(), TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.MONITOR.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModItems.SAFE_ZONE_DESIGNATOR.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
 
-        out.accept(ModBlocks.RADAR_LINK.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModBlocks.RADAR_BEARING_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModBlocks.RADAR_RECEIVER_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModBlocks.RADAR_PLATE_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModBlocks.RADAR_DISH_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.RADAR_LINK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.RADAR_BEARING_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.RADAR_RECEIVER_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.RADAR_PLATE_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.RADAR_DISH_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
 
-        out.accept(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModBlocks.NETWORK_FILTERER_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModBlocks.FIRE_CONTROLLER_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.NETWORK_FILTERER_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModBlocks.FIRE_CONTROLLER_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
 
-        out.accept(ModItems.IDENT_FILTER_ITEM.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModItems.RADAR_FILTER_ITEM.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModItems.TARGET_FILTER_ITEM.get(), TabVisibility.PARENT_TAB_ONLY);
-        out.accept(ModItems.BINOCULARS.get(), TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModItems.IDENT_FILTER_ITEM.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModItems.RADAR_FILTER_ITEM.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModItems.TARGET_FILTER_ITEM.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+        out.accept(ModItems.BINOCULARS.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
 
         if (Mods.CBCMODERNWARFARE.isLoaded()) {
-            out.accept(CBCMWCompatRegister.RADAR_GUIDANCE_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
+            out.accept(CBCMWCompatRegister.RADAR_GUIDANCE_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
         }
 
         if (Mods.VALKYRIENSKIES.isLoaded()) {
-            out.accept(ModBlocks.ID_BLOCK.get(), TabVisibility.PARENT_TAB_ONLY);
-            out.accept(ModBlocks.STATIONARY_RADAR.get(), TabVisibility.PARENT_TAB_ONLY);
+            out.accept(ModBlocks.ID_BLOCK.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
+            out.accept(ModBlocks.STATIONARY_RADAR.get(), CreativeModeTab.TabVisibility.PARENT_TAB_ONLY);
         }
     }
 

@@ -31,7 +31,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.FMLPaths;
-import net.neoforged.neoforge.internal.versions.neoforge.NeoForgeVersion;
+import net.neoforged.fml.loading.FMLLoader;
 
 import javax.annotation.Nullable;
 import java.awt.*;
@@ -570,7 +570,7 @@ public class  ModCommands {
         private static void addVersions(MinecraftServer server, List<String> out) {
             // i wrote this so i can verify minecraft/forge are exactly what i expect
             out.add("Minecraft: " + server.getServerVersion());
-            out.add("Forge: " + NeoForgeVersion.getVersion());
+            out.add("Forge: " + FMLLoader.versionInfo().neoForgeVersion());
             out.add("");
         }
 

@@ -8,14 +8,13 @@ import com.tterrag.registrate.util.entry.RegistryEntry;
 import net.createmod.ponder.api.registration.PonderPlugin;
 import net.createmod.ponder.api.registration.PonderSceneRegistrationHelper;
 import net.minecraft.resources.ResourceLocation;
-import net.neoforged.neoforge.registries.DeferredHolder;
 
 
 public class ModPonderIndex implements PonderPlugin {
     public static void register(PonderSceneRegistrationHelper<ResourceLocation> helper) {
 
         CreateRadar.getLogger().info("Registering Ponder!");
-        PonderSceneRegistrationHelper<ItemProviderEntry<?, ?>> HELPER = helper.withKeyFunction(DeferredHolder::getId);
+        PonderSceneRegistrationHelper<ItemProviderEntry<?, ?>> HELPER = helper.withKeyFunction(RegistryEntry::getId);
         HELPER.forComponents(ModBlocks.RADAR_BEARING_BLOCK)
                 .addStoryBoard("radar_contraption", PonderScenes::radarContraption, ModPonderTags.RADAR_COMPONENT)
                 .addStoryBoard("radar_network", PonderScenes::networkSetup, ModPonderTags.RADAR_COMPONENT);

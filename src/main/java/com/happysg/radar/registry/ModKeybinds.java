@@ -6,11 +6,13 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
-import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.bus.api.SubscribeEvent;
 import org.lwjgl.glfw.GLFW;
 
-@EventBusSubscriber(modid = CreateRadar.MODID, value = Dist.CLIENT)
+
+
+@EventBusSubscriber(value = Dist.CLIENT, modid = CreateRadar.MODID)
 public class ModKeybinds {
 
     public static final String CATEGORY = String.valueOf(Component.translatable(CreateRadar.MODID + ".key.categories.create_radar "));
