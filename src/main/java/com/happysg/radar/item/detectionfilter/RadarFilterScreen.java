@@ -1,11 +1,8 @@
 package com.happysg.radar.item.detectionfilter;
 
 import com.happysg.radar.CreateRadar;
-import com.happysg.radar.item.identfilter.IdentificationFilterScreen;
-import com.happysg.radar.block.monitor.MonitorFilter;
-import com.happysg.radar.networking.NetworkHandler;
 import com.happysg.radar.networking.networkhandlers.BoolNBThelper;
-import com.happysg.radar.networking.packets.BoolListPacket;
+import com.happysg.radar.networking.packets.BoolListPayload;
 import com.happysg.radar.registry.ModGuiTextures;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.foundation.gui.AllIcons;
@@ -19,8 +16,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
-
-import java.util.List;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 public class RadarFilterScreen extends AbstractSimiScreen {
 
@@ -169,17 +165,15 @@ public class RadarFilterScreen extends AbstractSimiScreen {
         confirmButton.withCallback(this::onClose);
         addRenderableWidget(confirmButton);
     }
-    // call this when constructing the screen or in init()
+
     private void loadFlagsFromHeldItem() {
-        // client-side: read the item the player currently holds (main hand assumed here)
-        ItemStack stack = net.minecraft.client.Minecraft.getInstance().player.getItemInHand(InteractionHand.MAIN_HAND);
+        ItemStack stack = Minecraft.getInstance().player.getItemInHand(InteractionHand.MAIN_HAND);
         if (!stack.isEmpty()) {
             boolean[] arr = BoolNBThelper.loadBooleansFromBytes(stack, KEY, COUNT);
-            // assign into your fields in the same order you save them
             if (arr.length >= COUNT) {
                 player = arr[0];
-                contraption = arr[1];
-                vs2 = arr[2];
+                vs2 = arr[1];
+                contraption = arr[2];
                 mob = arr[3];
                 animal = arr[4];
                 projectile = arr[5];
@@ -195,20 +189,19 @@ public class RadarFilterScreen extends AbstractSimiScreen {
         sendFlagsToServerAndSave();
     }
 
-    // Package current flags into boolean[] and send packet
     private void sendFlagsToServerAndSave() {
         boolean[] flags = new boolean[COUNT];
-        ItemStack stack = net.minecraft.client.Minecraft.getInstance().player.getItemInHand(InteractionHand.MAIN_HAND);
+        ItemStack stack = Minecraft.getInstance().player.getItemInHand(InteractionHand.MAIN_HAND);
         flags[0] = player;
-        flags[1] = contraption;
-        flags[2] = vs2;
+        flags[1] = vs2;
+        flags[2] = contraption;
         flags[3] = mob;
         flags[4] = animal;
         flags[5] = projectile;
         flags[6] = item;
         BoolNBThelper.saveBooleansAsBytes(stack,flags, KEY);
-        // send to server
-        NetworkHandler.CHANNEL.sendToServer(new BoolListPacket(true, flags, KEY));
+
+        PacketDistributor.sendToServer(new BoolListPayload(true, flags, KEY));
 
     }
 

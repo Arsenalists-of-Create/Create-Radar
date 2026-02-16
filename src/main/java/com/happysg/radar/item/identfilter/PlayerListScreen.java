@@ -1,34 +1,24 @@
 package com.happysg.radar.item.identfilter;
 
-import com.happysg.radar.networking.NetworkHandler;
 import com.happysg.radar.networking.networkhandlers.ListNBTHandler;
-
-import com.happysg.radar.networking.packets.SaveListsPacket;
+import com.happysg.radar.networking.packets.SaveListsPayload;
 import com.happysg.radar.registry.ModGuiTextures;
 import com.happysg.radar.utils.screenelements.DynamicIconButton;
-
-
 import com.happysg.radar.utils.screenelements.ScrollInputPage;
 import com.happysg.radar.utils.screenelements.SimpleEditBox;
 import com.happysg.radar.utils.screenelements.TooltipIcon;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
-
 import dev.engine_room.flywheel.lib.transform.TransformStack;
-
 import net.createmod.catnip.gui.AbstractSimiScreen;
-
-
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
-import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.neoforged.neoforge.network.PacketDistributor;
 import org.jetbrains.annotations.NotNull;
 import org.lwjgl.glfw.GLFW;
-
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,7 +30,6 @@ public class PlayerListScreen extends AbstractSimiScreen {
 
 
     protected ModGuiTextures background;
-    protected DynamicIconButton friendfoe;
     protected DynamicIconButton remove;
     protected DynamicIconButton playeradd;
     protected DynamicIconButton add;
@@ -48,9 +37,7 @@ public class PlayerListScreen extends AbstractSimiScreen {
     protected IconButton confirmButton;
     protected ScrollInputPage scrollbar;
     protected List<String> entries = new ArrayList<>();
-    protected List<Boolean> friendorfoe =new ArrayList<>();
     private final List<DynamicIconButton> deleteButtons = new ArrayList<>();
-    private final List<TooltipIcon> factionIndicators = new ArrayList<>();
     private static final int MAX_VISIBLE = 3;
     private int startIndex = 0;
     private boolean isAddingNewSlot = false;
@@ -60,7 +47,7 @@ public class PlayerListScreen extends AbstractSimiScreen {
     }
 
 
-    protected void renderWindow(@NotNull GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
+    protected void renderWindow(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         int x = guiLeft;
         int y = guiTop;
 
@@ -95,12 +82,10 @@ public class PlayerListScreen extends AbstractSimiScreen {
 
         ListNBTHandler.LoadedLists loaded = ListNBTHandler.loadFromHeldItem(minecraft.player);
         this.entries      = loaded.entries;
-        this.friendorfoe  = loaded.friendOrFoe;
 
         confirmButton = new IconButton(guiLeft + 192, guiTop + 101, AllIcons.I_CONFIRM);
         confirmButton.withCallback(this::onClose);
         addRenderableWidget(confirmButton);
-        minecraft.player.getMainHandItem().setTag(null);
 
         scrollbar = new ScrollInputPage(guiLeft+209,guiTop+16,guiTop+16,guiTop+93-20,ModGuiTextures.SCROLL);
         scrollbar.withCallback(this::handleScroll);
@@ -114,17 +99,17 @@ public class PlayerListScreen extends AbstractSimiScreen {
         //System.out.println("Visible entries: " + entries.subList(startIndex, Math.min(entries.size(), startIndex + MAX_VISIBLE)));
 
 
-            int scrollThreshold = MAX_VISIBLE - 1; // Scroll when more than 2
-            int entryCount = entries.size();
+        int scrollThreshold = MAX_VISIBLE - 1; // Scroll when more than 2
+        int entryCount = entries.size();
 
-            if (entryCount <= scrollThreshold) {
-                startIndex = 0;
-            } else {
-                int maxStartIndex = entryCount - scrollThreshold;
-                startIndex = Math.round(percent * maxStartIndex);
-            }
+        if (entryCount <= scrollThreshold) {
+            startIndex = 0;
+        } else {
+            int maxStartIndex = entryCount - scrollThreshold;
+            startIndex = Math.round(percent * maxStartIndex);
+        }
 
-            rebuildList();
+        rebuildList();
 
     }
 
@@ -136,29 +121,13 @@ public class PlayerListScreen extends AbstractSimiScreen {
         }
 
         deleteButtons.forEach(this::removeWidget);
-        factionIndicators.forEach(this::removeWidget);
         deleteButtons.clear();
-        factionIndicators.clear();
+
 
         int endIndex = Math.min(entries.size(), startIndex + MAX_VISIBLE);
         for (int idx = startIndex; idx < endIndex; idx++) {
             int displayPos = idx - startIndex;            // 0,1,2
             int y = guiTop + 17 + displayPos * 23;
-
-            TooltipIcon factionIndicator = new TooltipIcon(
-                    guiLeft + 172, y + 4,
-                    friendorfoe.get(idx) ? ModGuiTextures.ID_SMILE : ModGuiTextures.ID_FROWN,
-                    Component.translatable(MODID +
-                            (friendorfoe.get(idx) ? ".faction.friendly" : ".faction.enemy"))
-            );
-            if(friendorfoe.get(idx) == true){
-                factionIndicator.setTooltip(Tooltip.create(Component.translatable(MODID + ".faction.friendly")));
-            }else{
-                factionIndicator.setTooltip(Tooltip.create(Component.translatable(MODID + ".faction.friendly")));
-
-            }
-            addRenderableWidget(factionIndicator);
-            factionIndicators.add(factionIndicator);
 
             // delete button
             DynamicIconButton del = new DynamicIconButton(
@@ -169,9 +138,7 @@ public class PlayerListScreen extends AbstractSimiScreen {
             );
             int finalIdx = idx;
             del.withCallback((mx, my) -> {
-                // capture the actual entry index
                 removeEntry(finalIdx);
-                // optionally adjust startIndex if you’re at the end
             });
             addRenderableWidget(del);
             deleteButtons.add(del);
@@ -216,33 +183,55 @@ public class PlayerListScreen extends AbstractSimiScreen {
 
         addRenderableWidget(playerentry);
 
-        friendfoe = new DynamicIconButton(guiLeft + 159, y + 4, ModGuiTextures.ID_SMILE, ModGuiTextures.ID_FROWN,
-                Component.translatable(MODID + ".filter_isfriend"),
-                Component.translatable(MODID + ".filter_isfoe"),
-                11, 11);
-        addRenderableWidget(friendfoe);
+
     }
 
 
     private void addItem() {
+        if (!isAddingNewSlot)
+            return;
+
+        if (playerentry == null || playeradd == null) {
+            cleanupAddWidgets();
+            return;
+        }
+
         String input = playerentry.getValue();
-        boolean faction = friendfoe.getState();
-        removeWidget(playerentry);
-        removeWidget(playeradd);
-        removeWidget(friendfoe);
-        friendorfoe.add(faction);
+        if (input == null) input = "";
+        input = input.trim();
+
+        if (input.isEmpty()) {
+            cleanupAddWidgets();
+            rebuildList();
+            return;
+        }
+
+
+        cleanupAddWidgets();
+
         entries.add(input);
+        rebuildList();
+    }
+
+    private void cleanupAddWidgets() {
+        if (playerentry != null) {
+            removeWidget(playerentry);
+            playerentry = null;
+        }
+        if (playeradd != null) {
+            removeWidget(playeradd);
+            playeradd = null;
+        }
+
         isAddingNewSlot = false;
         currentAddSlotY = -1;
-        rebuildList();
     }
 
 
     protected void drawList(GuiGraphics graphics) {
         int available = Math.max(0, entries.size() - startIndex);
         int drawCount = Math.min(available, MAX_VISIBLE);
-
-        // 1) Draw existing entries
+        
         for (int i = 0; i < drawCount; i++) {
             int idx = startIndex + i;
             int y   = guiTop + 17 + i * 23;
@@ -252,12 +241,10 @@ public class PlayerListScreen extends AbstractSimiScreen {
             graphics.drawString(font, label, guiLeft + 42, y + 6, 0, false);
         }
 
-        // 2) If there’s room for one more slot...
         if (drawCount < MAX_VISIBLE && !isAddingNewSlot) {
             addPlusButton(drawCount);
         }
 
-        // 3) If we ARE adding, draw the add‑card at its chosen Y
         if (isAddingNewSlot && currentAddSlotY >= 0) {
             ModGuiTextures.ID_CARD.render(graphics, guiLeft + 4, currentAddSlotY);
         }
@@ -265,7 +252,7 @@ public class PlayerListScreen extends AbstractSimiScreen {
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (keyCode == GLFW.GLFW_KEY_LEFT) {
-            scrollUp(); // Call your method when LEFT arrow is pressed
+            scrollUp();
             return true;
         }
 
@@ -280,32 +267,31 @@ public class PlayerListScreen extends AbstractSimiScreen {
     }
 
     private void scrollDown() {
-        // clamp so we never scroll past the last entry
         startIndex = Math.min(Math.max(0, entries.size() - MAX_VISIBLE), startIndex + 1);
         rebuildList();
     }
 
-
     protected void removeEntry(int entry){
         DynamicIconButton removeMe =  deleteButtons.remove(entry);
         removeWidget(removeMe);
-        TooltipIcon removeicon = factionIndicators.remove(entry);
-        removeWidget(removeicon);
+
         entries.remove(entry);
-        friendorfoe.remove(entry);
         rebuildList();
 
     }
+
     @Override
     public void removed() {
         super.removed();
-        addItem();
-        if (minecraft.player != null && minecraft.level.isClientSide) {
-            NetworkHandler.CHANNEL.sendToServer(
-                    new SaveListsPacket(this.entries, this.friendorfoe)
+        
+        if (isAddingNewSlot) {
+            addItem();
+        }
+
+        if (minecraft.player != null && minecraft.level != null && minecraft.level.isClientSide) {
+            PacketDistributor.sendToServer(
+                    new SaveListsPayload(this.entries, null, false)
             );
         }
     }
-
-
 }

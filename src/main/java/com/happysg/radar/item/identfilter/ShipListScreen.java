@@ -1,8 +1,8 @@
 package com.happysg.radar.item.identfilter;
 
-import com.happysg.radar.networking.NetworkHandler;
 import com.happysg.radar.networking.networkhandlers.ListNBTHandler;
-import com.happysg.radar.networking.packets.SaveListsPacket;
+import net.neoforged.neoforge.network.PacketDistributor;
+import com.happysg.radar.networking.packets.SaveListsPayload;
 import com.happysg.radar.registry.ModGuiTextures;
 import com.happysg.radar.utils.screenelements.SimpleEditBox;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -89,7 +89,7 @@ public class ShipListScreen extends AbstractSimiScreen {
         ListNBTHandler.saveStringToHeldItem(minecraft.player, ID);
 
         // 2) Tell the server so it can persist it and sync back properly
-        NetworkHandler.CHANNEL.sendToServer(new SaveListsPacket(ID));
+        PacketDistributor.sendToServer(new SaveListsPayload(java.util.Collections.emptyList(), ID, true));
     }
 
 }

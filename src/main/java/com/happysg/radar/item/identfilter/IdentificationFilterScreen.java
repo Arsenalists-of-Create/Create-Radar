@@ -1,19 +1,15 @@
 package com.happysg.radar.item.identfilter;
-import com.happysg.radar.CreateRadar;
 
 import com.happysg.radar.registry.ModGuiTextures;
-
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
 import dev.engine_room.flywheel.lib.transform.TransformStack;
-import io.netty.buffer.Unpooled;
 import net.createmod.catnip.gui.AbstractSimiScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import org.checkerframework.checker.signature.qual.Identifier;
 import org.jetbrains.annotations.NotNull;
 
 import static com.happysg.radar.CreateRadar.MODID;

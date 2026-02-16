@@ -1,10 +1,8 @@
 package com.happysg.radar.item.targetfilter;
 
 import com.happysg.radar.CreateRadar;
-import com.happysg.radar.block.datalink.screens.TargetingConfig;
-import com.happysg.radar.networking.NetworkHandler;
 import com.happysg.radar.networking.networkhandlers.BoolNBThelper;
-import com.happysg.radar.networking.packets.BoolListPacket;
+import com.happysg.radar.networking.packets.BoolListPayload;
 import com.happysg.radar.registry.ModGuiTextures;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.foundation.gui.AllIcons;
@@ -17,10 +15,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 public class AutoTargetScreen extends AbstractSimiScreen  {
     private static final String KEY = "TargetBools";
-    private static final int COUNT = 6; // set to number of booleans you use
+    private static final int COUNT = 7;
 
     boolean player =true;
     boolean contraption=true;
@@ -30,7 +29,7 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
     boolean autoTarget= true;
     boolean artilleryMode = true;
     boolean lineofSight = true;
-  //  boolean[] bools = new boolean[]{player,contraption,mob,animal,projectile,autoTarget,lineofSight};
+    //  boolean[] bools = new boolean[]{player,contraption,mob,animal,projectile,autoTarget,lineofSight};
 
     protected IconButton playerButton;
     protected Indicator playerIndicator;
@@ -173,11 +172,9 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
     }
     // call this when constructing the screen or in init()
     private void loadFlagsFromHeldItem() {
-        // client-side: read the item the player currently holds (main hand assumed here)
         ItemStack stack = net.minecraft.client.Minecraft.getInstance().player.getItemInHand(InteractionHand.MAIN_HAND);
         if (!stack.isEmpty()) {
             boolean[] arr = BoolNBThelper.loadBooleansFromBytes(stack, KEY, COUNT);
-            // assign into your fields in the same order you save them
             if (arr.length >= COUNT) {
                 player = arr[0];
                 contraption = arr[1];
@@ -185,8 +182,8 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
                 animal = arr[3];
                 projectile = arr[4];
                 lineofSight = arr[5];
+                autoTarget  = arr[6];
             }
-
         }
     }
 
@@ -196,7 +193,6 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
         sendFlagsToServerAndSave();
     }
 
-    // Package current flags into boolean[] and send packet
     private void sendFlagsToServerAndSave() {
         boolean[] flags = new boolean[COUNT];
         ItemStack stack = net.minecraft.client.Minecraft.getInstance().player.getItemInHand(InteractionHand.MAIN_HAND);
@@ -206,9 +202,9 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
         flags[3] = animal;
         flags[4] = projectile;
         flags[5] = lineofSight;
+        flags[6] = autoTarget;
         BoolNBThelper.saveBooleansAsBytes(stack,flags, KEY);
-        // send to server
-        NetworkHandler.CHANNEL.sendToServer(new BoolListPacket(true, flags, KEY));
+        PacketDistributor.sendToServer(new BoolListPayload(true, flags, KEY));
 
     }
 
