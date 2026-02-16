@@ -1,10 +1,12 @@
 package com.happysg.radar.block.radar.bearing;
 
+import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.content.contraptions.bearing.BearingBlock;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
@@ -16,6 +18,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
+import org.jetbrains.annotations.NotNull;
 
 public class RadarBearingBlock extends BearingBlock implements IBE<RadarBearingBlockEntity> {
 
@@ -56,21 +59,34 @@ public class RadarBearingBlock extends BearingBlock implements IBE<RadarBearingB
     }
 
     @Override
-    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
-        if (!player.getMainHandItem().isEmpty())
+    public  InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
+                                                     @NotNull Player player, BlockHitResult hit) {
+
+        if (!player.isShiftKeyDown())
             return InteractionResult.PASS;
 
         if (!level.isClientSide) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof RadarBearingBlockEntity radar) {
-                if (radar.isRunning()) {
-                    radar.disassemble();
-                } else {
-                    radar.assemble();
-                }
+                if (radar.isRunning()) radar.disassemble();
+                else radar.assemble();
             }
         }
-        return InteractionResult.SUCCESS;
+
+        return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
+    @Override
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (state.is(newState.getBlock())) {
+            super.onRemove(state, level, pos, newState, isMoving);
+            return;
+        }
+
+        if (!level.isClientSide && level instanceof ServerLevel sl) {
+            NetworkData.get(sl).onEndpointRemoved(sl, pos);
+        }
+
+        super.onRemove(state, level, pos, newState, isMoving);
+    }
 }

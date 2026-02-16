@@ -1,8 +1,9 @@
 package com.happysg.radar.block.guidance;
 
-import com.happysg.radar.block.datalink.screens.TargetingConfig;
+import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -72,8 +73,8 @@ public class RadarGuidanceBlockEntity extends GuidanceBlockEntity {
     }
 
     @Override
-    public void load(CompoundTag pTag) {
-        super.load(pTag);
+    public void loadAdditional(CompoundTag pTag, HolderLookup.Provider provider) {
+        super.loadAdditional(pTag, provider);
         if (pTag.contains("monitorPos")) {
             monitorPos = BlockPos.of(pTag.getLong("monitorPos"));
         }
@@ -84,8 +85,8 @@ public class RadarGuidanceBlockEntity extends GuidanceBlockEntity {
     }
 
     @Override
-    protected void saveAdditional(CompoundTag pTag) {
-        super.saveAdditional(pTag);
+    protected void saveAdditional(CompoundTag pTag, HolderLookup.Provider provider) {
+        super.saveAdditional(pTag, provider);
         if (monitorPos != null) {
             pTag.putLong("monitorPos", monitorPos.asLong());
         }

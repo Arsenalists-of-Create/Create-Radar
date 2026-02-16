@@ -1,104 +1,154 @@
 package com.happysg.radar.block.controller.firing;
 
-import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
-import com.happysg.radar.block.datalink.screens.TargetingConfig;
-import com.happysg.radar.block.network.WeaponNetwork;
-import com.happysg.radar.block.network.WeaponNetworkRegistry;
-import com.happysg.radar.block.network.WeaponNetworkUnit;
-import com.happysg.radar.compat.cbc.CannonUtil;
+
+import com.happysg.radar.block.behavior.networks.NetworkContext;
+import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
-import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
-import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
 import java.util.List;
-import java.util.Optional;
 
-import static com.happysg.radar.compat.cbc.CannonTargeting.calculateProjectileYatX;
+public class FireControllerBlockEntity extends SmartBlockEntity  {
+    private BlockPos lastKnownPos = BlockPos.ZERO;
 
-public class FireControllerBlockEntity extends SmartBlockEntity implements WeaponNetworkUnit {
     private static final Logger LOGGER = LogUtils.getLogger();
+    boolean powered = false;
 
-
-
-    //private TargetingConfig targetingConfig = TargetingConfig.DEFAULT;
-    //private Vec3 target;
-    //public List<AABB> safeZones = new ArrayList<>();
-    public boolean turnedOn = false;
-    private WeaponNetwork weaponNetwork;
-
-      // server-time when we last got a target update
+    // server-time when we last got a target update
+    private long lastCommandTick = -1;
+    private static final long FAILSAFE_TICKS = 10;
 
     public FireControllerBlockEntity(BlockEntityType<?> pType, BlockPos pPos, BlockState pBlockState) {
         super(pType, pPos, pBlockState);
     }
 
-    public void onPlaced() {
-        if (!(level instanceof ServerLevel serverLevel)) return;
-
-        for (Direction direction : Direction.values()) {
-            BlockEntity neighborBE = level.getBlockEntity(worldPosition.relative(direction));
-            if (neighborBE instanceof CannonMountBlockEntity cannon) {
-                WeaponNetwork weaponNetwork = WeaponNetworkRegistry.networkContains(worldPosition);
-                WeaponNetwork cannonWeaponNetwork = WeaponNetworkRegistry.networkContains(cannon.getBlockPos());
-
-                if (weaponNetwork != null) { // Shouldn't happen normally
-                    setWeaponNetwork(weaponNetwork);
-                } else if (cannonWeaponNetwork != null && cannonWeaponNetwork.getFireController() == null) {
-                    cannonWeaponNetwork.setFireController(this);
-                    setWeaponNetwork(cannonWeaponNetwork);
-                } else if (WeaponNetworkRegistry.networkContains(cannon.getBlockPos()) == null) {
-                    WeaponNetwork newNetwork = new WeaponNetwork(level);
-                    newNetwork.setCannonMount(cannon);
-                    newNetwork.setFireController(this);
-                    setWeaponNetwork(newNetwork);
-                }
-            }
-        }
-    }
-
-    public void onRemoved() {
-        if (weaponNetwork != null && weaponNetwork.getFireController() == this) {
-            weaponNetwork.setFireController(null);
-            setWeaponNetwork(null);
-        }
-    }
     @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
 
     }
+    @Override
+    public void tick() {
+        super.tick();
+        if (level == null || level.isClientSide) return;
+        // i hard fail-safe: if nobody has told me to keep firing recently, i turn off
+        if (isPowered() && lastCommandTick >= 0 && (level.getGameTime() - lastCommandTick) > FAILSAFE_TICKS) {
+            setPowered(false);
+        }
+        if (!level.isClientSide && level.getGameTime() % 40 == 0) {
+            if (level instanceof ServerLevel serverLevel) {
+                if (lastKnownPos.equals(worldPosition))
+                    return;
 
-    public void turnOff() {
+                ResourceKey<Level> dim = serverLevel.dimension();
+                WeaponNetworkData data = WeaponNetworkData.get(serverLevel);
+                boolean updated = data.updateWeaponEndpointPosition(
+                        dim,
+                        lastKnownPos,
+                        worldPosition
+                );
+
+                // only commit the new position if the network accepted it
+                if (updated) {
+                    lastKnownPos = worldPosition;
+                    LOGGER.debug("Controller moved {} -> {}", lastKnownPos, worldPosition);
+                    setChanged();
+                }
+            }
+        }
+
+    }
+
+    public boolean isPowered() {
+        return powered;
+    }
+
+    public void setPowered(boolean powered) {
+        if (level == null || level.isClientSide)
+            return;
+
+        // i treat every call as a command input, and remember when it happened
+        lastCommandTick = level.getGameTime();
+
         BlockState state = getBlockState();
-        level.setBlockAndUpdate(this.getBlockPos(), state.setValue(BlockStateProperties.POWERED, false));
-        turnedOn = false;
+        if (!(state.getBlock() instanceof FireControllerBlock))
+            return;
+
+        if (state.getValue(FireControllerBlock.POWERED) == powered)
+            return;
+
+        this.powered = powered;
+
+        level.setBlock(worldPosition, state.setValue(FireControllerBlock.POWERED, powered), 3);
+
+        level.updateNeighborsAt(worldPosition, state.getBlock());
+        for (Direction d : Direction.values())
+            level.updateNeighborsAt(worldPosition.relative(d), state.getBlock());
+
+        level.updateNeighbourForOutputSignal(worldPosition, state.getBlock());
+
+        setChanged();
+        sendData();
     }
 
-    public void turnOn() {
-        BlockState state = getBlockState();
-        level.setBlockAndUpdate(this.getBlockPos(), state.setValue(BlockStateProperties.POWERED, true));
-        turnedOn = true;
+
+
+
+
+
+    @Override
+    protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
+        super.write(tag, registries, clientPacket);
+        tag.putBoolean("Powered", powered);
+        tag.putLong("LastKnownPos", lastKnownPos.asLong());
     }
 
-    public WeaponNetwork  getWeaponNetwork() {
-        return weaponNetwork;
+    @Override
+    protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
+        super.read(tag, registries, clientPacket);
+
+        powered = tag.getBoolean("Powered");
+        if (level != null) {
+            BlockState state = getBlockState();
+            if (state.getBlock() instanceof FireControllerBlock) {
+                powered = state.getValue(FireControllerBlock.POWERED);
+            }
+        }
+        if (tag.contains("LastKnownPos", Tag.TAG_LONG)) {
+            lastKnownPos = BlockPos.of(tag.getLong("LastKnownPos"));
+        } else {
+            lastKnownPos = worldPosition;
+        }
     }
 
-    public void setWeaponNetwork(WeaponNetwork weaponNetwork) {
-        this.weaponNetwork = weaponNetwork;
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if(level instanceof ServerLevel serverLevel) {
+            ResourceKey<Level> dim = serverLevel.dimension();
+            WeaponNetworkData data = WeaponNetworkData.get(serverLevel);
+            data.updateWeaponEndpointPosition(dim,lastKnownPos,worldPosition);
+        }
+        powered = false;
+        if (level != null && !level.isClientSide) {
+            setPowered(false);
+        }
     }
-    public BlockEntity getBlockEntity() {return this;}
+
+
+
+
 }
+

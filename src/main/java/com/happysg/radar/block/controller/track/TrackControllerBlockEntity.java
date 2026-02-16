@@ -5,6 +5,7 @@ import com.happysg.radar.compat.vs2.VS2Utils;
 import com.simibubi.create.content.kinetics.transmission.SplitShaftBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -75,15 +76,15 @@ public class TrackControllerBlockEntity extends SplitShaftBlockEntity {
     }
 
     @Override
-    protected void read(CompoundTag compound, boolean clientPacket) {
-        super.read(compound, clientPacket);
+    protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
+        super.read(compound, registries, clientPacket);
         compound.getFloat("leftSpeed");
         compound.getFloat("rightSpeed");
     }
 
     @Override
-    protected void write(CompoundTag compound, boolean clientPacket) {
-        super.write(compound, clientPacket);
+    protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
+        super.write(compound, registries, clientPacket);
         compound.putFloat("leftSpeed", leftSpeed);
         compound.putFloat("rightSpeed", rightSpeed);
     }

@@ -27,25 +27,24 @@ public class DataLinkContext {
     }
 
     public BlockEntity getSourceBlockEntity() {
-        return level.getBlockEntity(getPos1());
+        return level.getBlockEntity(getSourcePos());
     }
 
-    public BlockPos getPos1() {
+    public BlockPos getSourcePos() {
         return blockEntity.getSourcePosition();
     }
 
     @Nullable
     public MonitorBlockEntity getMonitorBlockEntity() {
-        BlockPos pos = level.getBlockEntity(getPos1()) instanceof MonitorBlockEntity ? getPos1() : getPos2();
-        return level.getBlockEntity(pos) instanceof MonitorBlockEntity monitorBlockEntity ? monitorBlockEntity.getController() : null;
+        return level.getBlockEntity(getTargetPos()) instanceof MonitorBlockEntity monitorBlockEntity ? monitorBlockEntity.getController() : null;
     }
 
-    public BlockPos getPos2() {
+    public BlockPos getTargetPos() {
         return blockEntity.getTargetPosition();
     }
 
-    //public CompoundTag sourceConfig() {
-     //   return blockEntity.getSourceConfig();
-    //}
+    public CompoundTag sourceConfig() {
+        return blockEntity.getSourceConfig();
+    }
 
 }

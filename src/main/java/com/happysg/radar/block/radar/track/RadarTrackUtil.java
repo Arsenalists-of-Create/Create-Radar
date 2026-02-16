@@ -11,12 +11,14 @@ import org.valkyrienskies.core.api.ships.Ship;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 
 public class RadarTrackUtil {
 
     public static RadarTrack getRadarTrack(Ship ship, Level level) {
-        return new RadarTrack(ship.getSlug(), getPosition(ship), getVelocity(ship), level.getGameTime(),
-                TrackCategory.VS2, "VS2:ship");
+        //return new RadarTrack(String.valueOf(ship.getId()), getPosition(ship), getVelocity(ship), level.getGameTime(),
+                //TrackCategory.VS2, "VS2:ship", ship.getShipAABB().maxY());
+        return null;
     }
 
     public static Vec3 getVelocity(Ship ship) {
@@ -24,8 +26,9 @@ public class RadarTrackUtil {
     }
 
     public static Vec3 getPosition(Ship serverShip) {
-        Vector3d vecD = serverShip.getWorldAABB().center(new Vector3d());
-        return new Vec3(vecD.x, vecD.y, vecD.z);
+        //Vector3d vecD = serverShip.getWorldAABB().center(new Vector3d());
+        //return new Vec3(vecD.x, vecD.y, vecD.z);
+        return null;
     }
 
 

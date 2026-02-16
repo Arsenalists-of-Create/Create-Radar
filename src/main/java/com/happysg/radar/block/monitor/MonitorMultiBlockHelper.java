@@ -31,7 +31,6 @@ public class MonitorMultiBlockHelper {
                     if (!candState.is(ModBlocks.MONITOR.get())) return;
                     if (candState.getValue(FACING) != originFacing) return;
 
-                    // Now it’s safe to calculate size and form the multiblock
                     if (pLevel.getBlockEntity(candidate) instanceof MonitorBlockEntity monitor) {
                         int size = getSize(pLevel, candidate);
                         if (size > 1) {
@@ -85,11 +84,13 @@ public class MonitorMultiBlockHelper {
                     continue;
                 if (pLevel.getBlockEntity(pos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
                     monitor.setControllerPos(pos, 1);
+                    monitor.onDataLinkRemoved();
                     pLevel.setBlockAndUpdate(pos, pState.setValue(SHAPE, MonitorBlock.Shape.SINGLE));
                 }
             }
         }
     }
+
 
 
     public static int getSize(Level pLevel, BlockPos pPos) {
@@ -115,7 +116,7 @@ public class MonitorMultiBlockHelper {
             for (int j = 0; j < potentialsize; j++) {
                 BlockEntity be = pLevel.getBlockEntity(pPos.above(i).relative(facing.getClockWise(), j));
                 if (!(be instanceof MonitorBlockEntity monitor && monitor.getSize() < potentialsize))
-                    return Math.min(i, j);
+                    return Math.max(1, Math.min(i, j));
 
             }
         }

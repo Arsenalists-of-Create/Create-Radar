@@ -4,15 +4,18 @@ import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.compat.cbcmw.CBCMWCompatRegister;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -36,14 +39,16 @@ public class RadarGuidanceBlockItem extends BlockItem {
     }
 
     @Override
-    public void appendHoverText(ItemStack pStack, @Nullable Level pLevel, List<Component> pTooltip, TooltipFlag pFlag) {
-        CompoundTag tag = BlockItem.getBlockEntityData(pStack);
+    public void appendHoverText(ItemStack pStack, @Nullable TooltipContext pContext, List<Component> pTooltip, TooltipFlag pFlag) {
+        CustomData blockData = pStack.get(DataComponents.BLOCK_ENTITY_DATA);
+        CompoundTag tag = blockData != null ? blockData.getUnsafe() : null;
+
         if (tag != null && tag.contains("monitorPos")) {
             BlockPos monitorPos = BlockPos.of(tag.getLong("monitorPos"));
-            pTooltip.add(Component.translatable(CreateRadar.MODID + ".linked_monitor", Component.translatable(CreateRadar.MODID + ".monitor_coords", monitorPos.getX(), monitorPos.getY(), monitorPos.getZ())));
+            pTooltip.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.linked_monitor", monitorPos));
         } else {
-            pTooltip.add(Component.translatable(CreateRadar.MODID + ".no_monitor"));
+            pTooltip.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.no_monitor"));
         }
-        super.appendHoverText(pStack, pLevel, pTooltip, pFlag);
+        super.appendHoverText(pStack, pContext, pTooltip, pFlag);
     }
 }

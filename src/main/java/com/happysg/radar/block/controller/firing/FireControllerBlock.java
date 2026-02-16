@@ -1,6 +1,9 @@
 package com.happysg.radar.block.controller.firing;
 
-import com.happysg.radar.block.network.WeaponNetwork;
+
+import com.happysg.radar.block.behavior.networks.WeaponNetwork;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -16,14 +19,13 @@ import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import org.jetbrains.annotations.Nullable;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 
 public class FireControllerBlock extends Block implements EntityBlock {
 
-    public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
+    public static BooleanProperty POWERED = BlockStateProperties.POWERED;
     public WeaponNetwork weaponNetwork;
 
-    public FireControllerBlock(BlockBehaviour.Properties properties) {
+    public FireControllerBlock(Properties properties) {
         super(properties);
         this.registerDefaultState(this.stateDefinition.any().setValue(POWERED, false));
     }
@@ -31,29 +33,6 @@ public class FireControllerBlock extends Block implements EntityBlock {
     @Override
     public @Nullable BlockEntity newBlockEntity(BlockPos pPos, BlockState pState) {
         return new FireControllerBlockEntity(ModBlockEntityTypes.FIRE_CONTROLLER.get(), pPos, pState);
-    }
-    @Override
-    public void onPlace(BlockState pState, Level pLevel, BlockPos pPos, BlockState pOldState, boolean pIsMoving) {
-        for(Direction direction : Direction.values()) {
-            pLevel.updateNeighborsAt(pPos.relative(direction), this);
-        }
-        BlockEntity be = pLevel.getBlockEntity(pPos);
-        if (be instanceof FireControllerBlockEntity fireController) {
-            fireController.onPlaced();
-        }
-    }
-
-    @Override
-    public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pIsMoving) {
-        if (!pIsMoving) {
-            for(Direction direction : Direction.values()) {
-                pLevel.updateNeighborsAt(pPos.relative(direction), this);
-            }
-        }
-        BlockEntity be = pLevel.getBlockEntity(pPos);
-        if (be instanceof FireControllerBlockEntity fireController) {
-            fireController.onRemoved();
-        }
     }
     @Override
     public int getSignal(BlockState pBlockState, BlockGetter pBlockAccess, BlockPos pPos, Direction pSide) {
@@ -72,6 +51,42 @@ public class FireControllerBlock extends Block implements EntityBlock {
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
         builder.add(POWERED);
     }
+    @Override
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (level instanceof ServerLevel sl && state.getBlock() != newState.getBlock() ) {
+            breakAttachedDataLinks(level, pos);
+            WeaponNetworkData data = WeaponNetworkData.get(sl);
+            var view = data.getWeaponGroupViewFromEndpoint(sl.dimension(),pos);
+            if(view != null){
+                data.removeController(level.dimension(), pos);
+
+            }
+        }
+        super.onRemove(state, level, pos, newState, isMoving);
+
+    }
+    private static void breakAttachedDataLinks(Level level, BlockPos controllerPos) {
+        for (Direction dir : Direction.values()) {
+            BlockPos linkPos = controllerPos.relative(dir);
+            BlockState linkState = level.getBlockState(linkPos);
+
+            if (!(linkState.getBlock() instanceof DataLinkBlock))
+                continue;
+
+            if (linkState.hasProperty(DataLinkBlock.LINK_STYLE)
+                    && linkState.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.CONTROLLER)
+                continue;
+
+            if (linkState.hasProperty(DataLinkBlock.FACING)) {
+                Direction facing = linkState.getValue(DataLinkBlock.FACING);
+                if (!linkPos.relative(facing.getOpposite()).equals(controllerPos))
+                    continue;
+            }
+
+            level.destroyBlock(linkPos, true);
+        }
+    }
+
 
 
 }

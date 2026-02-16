@@ -1,7 +1,9 @@
+
 package com.happysg.radar.block.guidance;
 
 import com.happysg.radar.compat.cbcmw.CBCMWCompatRegister;
 import com.happysg.radar.config.RadarConfig;
+
 import com.simibubi.create.content.contraptions.OrientedContraptionEntity;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;

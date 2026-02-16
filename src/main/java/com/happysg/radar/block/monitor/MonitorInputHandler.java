@@ -3,6 +3,8 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -10,17 +12,17 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.event.TickEvent;
+import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 
 public class MonitorInputHandler {
 
     static Vec3 adjustRelativeVectorForFacing(Vec3 relative, Direction monitorFacing) {
         return switch (monitorFacing) {
-            case NORTH -> new Vec3(relative.x(), 0, relative.y());
-            case SOUTH -> new Vec3(relative.x(), 0, -relative.y());
+            case NORTH -> new Vec3( relative.x(), 0,  relative.y());
+            case SOUTH -> new Vec3(relative.x(), 0,  -relative.y());
             case WEST -> new Vec3(relative.y(), 0, relative.z());
             case EAST -> new Vec3(-relative.y(), 0, relative.z());
-            default -> relative;
+            default    -> relative;
         };
     }
 
@@ -59,35 +61,48 @@ public class MonitorInputHandler {
         return bestTrack;
     }
 
-    public static void monitorPlayerHovering(TickEvent.PlayerTickEvent event) {
-        Player player = event.player;
-        Level level = event.player.level();
-        if (level.isClientSide())
+    public static void monitorPlayerHovering(PlayerTickEvent.Post event) {
+        Player player = event.getEntity();
+        Level level = player.level();
+
+        if (!level.isClientSide())
             return;
+        if (player != Minecraft.getInstance().player)
+            return;
+
         Vec3 hit = player.pick(5, 0.0F, false).getLocation();
         if (player.pick(5, 0.0F, false) instanceof BlockHitResult result) {
             if (level.getBlockEntity(result.getBlockPos()) instanceof MonitorBlockEntity be && level.getBlockEntity(be.getControllerPos()) instanceof MonitorBlockEntity monitor) {
                 hit = PhysicsHandler.getShipVec(hit, be);
                 RadarTrack track = findTrack(level, hit, monitor);
-                if (track != null) {
-                    monitor.hoveredEntity = track.id();
-                } else
-                    monitor.hoveredEntity = null;
-                monitor.notifyUpdate();
+                String oldHovered = monitor.hoveredEntity;
+                String newHovered = (track != null) ? track.id() : null;
+
+                if ((oldHovered == null && newHovered != null) ||
+                        (oldHovered != null && !oldHovered.equals(newHovered))) {
+
+                    monitor.hoveredEntity = newHovered;
+                    monitor.notifyUpdate();
+                }
+
             }
         }
 
     }
 
     public static InteractionResult onUse(MonitorBlockEntity be, Player pPlayer, InteractionHand pHand, BlockHitResult pHit, Direction facing) {
+        if (!be.getController().isLinked())
+            return InteractionResult.FAIL;
+
+
         if (pPlayer.isShiftKeyDown()) {
-            be.selectedEntity = null;
+            be.setSelectedTargetServer(null);
             be.notifyUpdate();
         } else {
             RadarTrack track = findTrack(be.getLevel(), pHit.getLocation(), be.getController());
             if (track != null) {
                 be.selectedEntity = track.id();
-                be.timeOfLastSelect = System.currentTimeMillis();
+                be.setSelectedTargetServer(track);
                 be.notifyUpdate();
             }
         }
