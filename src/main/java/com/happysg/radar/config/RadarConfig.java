@@ -5,7 +5,6 @@ import com.happysg.radar.config.client.RadarClientConfig;
 import com.happysg.radar.config.server.RadarServerConfig;
 import net.createmod.catnip.config.ConfigBase;
 import net.createmod.catnip.config.ui.BaseConfigScreen;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.neoforge.common.ModConfigSpec;
@@ -27,6 +26,8 @@ public class RadarConfig {
     public static RadarClientConfig client() {
         return client;
     }
+    public static boolean DEBUG_BEAMS = false;
+
 
 
     public static RadarServerConfig server() {
@@ -50,31 +51,29 @@ public class RadarConfig {
         return config;
     }
 
-    public static void register(ModContainer context) {
+    public static void register(ModContainer container) {
         client = register(RadarClientConfig::new, ModConfig.Type.CLIENT);
         server = register(RadarServerConfig::new, ModConfig.Type.SERVER);
 
         for (Map.Entry<ModConfig.Type, ConfigBase> pair : CONFIGS.entrySet())
-            context.registerConfig(pair.getKey(), pair.getValue().specification);
-    }
+            container.registerConfig(pair.getKey(), pair.getValue().specification);
+        }
 
     @SubscribeEvent
     public static void onLoad(ModConfigEvent.Loading event) {
         for (ConfigBase config : CONFIGS.values())
-            if (config.specification == event.getConfig()
-                    .getSpec())
+            if (config.specification == event.getConfig().getSpec())
                 config.onLoad();
     }
 
     @SubscribeEvent
     public static void onReload(ModConfigEvent.Reloading event) {
         for (ConfigBase config : CONFIGS.values())
-            if (config.specification == event.getConfig()
-                    .getSpec())
+            if (config.specification == event.getConfig().getSpec())
                 config.onReload();
     }
 
-    public static BaseConfigScreen createConfigScreen(Minecraft mc, Screen parent) {
+    public static BaseConfigScreen createConfigScreen(ModContainer mc, Screen parent) {
         BaseConfigScreen.setDefaultActionFor(CreateRadar.MODID, (base) -> base
                 .withSpecs(RadarConfig.client().specification,
                         null,
