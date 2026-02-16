@@ -1,5 +1,6 @@
 package com.happysg.radar.compat.cbc;
 
+import com.happysg.radar.compat.Mods;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
@@ -15,6 +16,7 @@ import java.util.List;
 
 public class VS2CannonTargeting {
     public static List<List<Double>> calculatePitchAndYawVS2(CannonMountBlockEntity mount, Vec3 targetPos, ServerLevel level) {
+        if(!Mods.VALKYRIENSKIES.isLoaded()) return null;
         if (mount == null || targetPos == null) {
             return null;
         }
@@ -25,7 +27,12 @@ public class VS2CannonTargeting {
         }
         float chargePower = CannonUtil.getInitialVelocity(cannonContraption, level);
 
-        Vec3 mountPos = mount.getBlockPos().getCenter();
+        Vec3 mountPos;
+        if(CannonUtil.isUp(mount)) {
+            mountPos = mount.getBlockPos().above(3).getCenter();
+        }else {
+            mountPos = mount.getBlockPos().below(3).getCenter();
+        }
         int barrelLength = CannonUtil.getBarrelLength(cannonContraption);
         Direction initialDirection = cannonContraption.initialOrientation();
 
@@ -35,15 +42,14 @@ public class VS2CannonTargeting {
         return calculatePitchAndYawVS2(level, chargePower, targetPos, mountPos, barrelLength, initialDirection, drag, gravity);
     }
 
-
     public static List<List<Double>> calculatePitchAndYawVS2(Level level, double speed, Vec3 targetPos, Vec3 mountPos, int barrelLength, Direction initialDirection, double drag, double gravity) {
-        LoadedShip ship = VSGameUtilsKt.getShipObjectManagingPos(level, mountPos.x, mountPos.y, mountPos.z);
-        if (ship == null) {
-            System.out.println("null");
-            return null;
-        }
+        //LoadedShip ship = VSGameUtilsKt.getShipObjectManagingPos(level,mountPos.x,mountPos.y,mountPos.z);
+//        if (ship == null) {
+//            System.out.println("null");
+//            return null;
+//        }
         Vector3d eulerAngles = new Vector3d();
-        ship.getTransform().getShipToWorldRotation().getEulerAnglesYXZ(eulerAngles);
+        //ship.getTransform().getShipToWorldRotation().getEulerAnglesYXZ(eulerAngles);
         double x = eulerAngles.x;
         double z = eulerAngles.z;
         double initialZeta = -eulerAngles.y; // Yaw
@@ -64,7 +70,8 @@ public class VS2CannonTargeting {
             initialTheta = -z;
         }
 
-        VS2TargetingSolver targetingSolver = new VS2TargetingSolver(level, speed, drag, gravity, barrelLength, mountPos, targetPos, initialTheta, initialZeta, initialPsi, ship);
-        return targetingSolver.solveThetaZeta();
+        //VS2TargetingSolver targetingSolver = new VS2TargetingSolver(level, speed, drag, gravity, barrelLength, mountPos, targetPos, initialTheta, initialZeta, initialPsi, ship);
+        //return targetingSolver.solveThetaZeta();
+        return null;
     }
 }
