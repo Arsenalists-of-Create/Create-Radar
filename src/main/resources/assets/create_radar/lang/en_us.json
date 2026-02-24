@@ -112,7 +112,7 @@
   "create_radar.ponder.weapon_setup.text_5": "Connect to radar Network using Data links",
   "create_radar.ponder.weapon_setup.text_6": "Red Data Links indicate a Weapon Network, Blue Data Links indicate a Radar Network",
   "create_radar.ponder.network_setup.header": "Using the Network Controller",
-  "create_radar.ponder.network_setup.text_1": "The Network Controller controller is the core piece of the radar network",
+  "create_radar.ponder.network_setup.text_1": "The Network Controller is the core piece of the radar network",
   "create_radar.ponder.network_setup.text_2": "Filter items can be used along side the Network Controller to limit what it can see and do",
   "create_radar.ponder.network_setup.text_3": "Use Data Links to connect to a monitor",
   "create_radar.ponder.network_setup.text_4": "The same can be done for Radars",
