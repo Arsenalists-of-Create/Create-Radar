@@ -137,7 +137,8 @@ public class CreateRadar {
     }
 
     public static void clientInit(final FMLClientSetupEvent event) {
-        PonderIndex.addPlugin(new RadarPonderPlugin());
+        ModPonderIndex.register();
+        ModPonderTags.register();
         MinecraftForge.EVENT_BUS.addListener(MonitorInputHandler::monitorPlayerHovering);
     }
 

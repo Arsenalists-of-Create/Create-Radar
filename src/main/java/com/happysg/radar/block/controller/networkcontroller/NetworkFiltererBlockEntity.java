@@ -9,6 +9,7 @@ import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
+import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
@@ -35,6 +36,8 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
@@ -402,9 +405,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         if (!(level instanceof ServerLevel sl)) return;
 
         endpointCacheUntilTick = -1;
-
-        this.safeZones.clear();
-        if (safeZones != null) this.safeZones.addAll(safeZones);
 
         selectedWasAuto = false;
 
@@ -900,4 +900,41 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         }
         return h;
     }
+
+    public boolean isInSafeZone(Vec3 pos) {
+        return AutoTargetingHelper.isInSafeZone(pos, safeZones);
+    }
+
+    public void addSafeZone(BlockPos startPos, BlockPos endPos) {
+        double minX = Math.min(startPos.getX(), endPos.getX());
+        double minY = Math.min(startPos.getY(), endPos.getY());
+        double minZ = Math.min(startPos.getZ(), endPos.getZ());
+        double maxX = Math.max(startPos.getX(), endPos.getX()) + 1;
+        double maxY = Math.max(startPos.getY(), endPos.getY()) + 1;
+        double maxZ = Math.max(startPos.getZ(), endPos.getZ()) + 1;
+
+        safeZones.add(new AABB(minX, minY, minZ, maxX, maxY, maxZ));
+    }
+
+    public void showSafeZone() {
+        if (this.level == null || !this.level.isClientSide) return;
+        Client.showSafeZone(this);
+    }
+
+    @OnlyIn(Dist.CLIENT)
+    private static final class Client {
+        static void showSafeZone(NetworkFiltererBlockEntity be) {
+            for (AABB safeZone : be.safeZones) {
+                net.createmod.catnip.outliner.Outliner.getInstance().showAABB(safeZone, safeZone)
+                        .colored(0x383b42)
+                        .withFaceTextures(com.simibubi.create.AllSpecialTextures.CHECKERED, com.simibubi.create.AllSpecialTextures.HIGHLIGHT_CHECKERED)
+                        .lineWidth(1 / 16f);
+            }
+        }
+    }
+
+    public boolean tryRemoveAABB(BlockPos pos) {
+        return safeZones.removeIf(safeZone -> safeZone.contains(Vec3.atCenterOf(pos)));
+    }
+
 }

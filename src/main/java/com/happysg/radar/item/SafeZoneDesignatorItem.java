@@ -1,7 +1,7 @@
 package com.happysg.radar.item;
 
 import com.happysg.radar.CreateRadar;
-import com.happysg.radar.block.monitor.MonitorBlockEntity;
+import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -32,8 +32,8 @@ public class SafeZoneDesignatorItem extends Item {
             CompoundTag data = pStack.getOrCreateTag();
             if (data.contains("monitorPos")) {
                 BlockPos monitorPos = NbtUtils.readBlockPos(data.getCompound("monitorPos"));
-                if (pLevel.getBlockEntity(monitorPos) instanceof MonitorBlockEntity monitorBlockEntity && pLevel.isClientSide) {
-                    monitorBlockEntity.showSafeZone();
+                if (pLevel.getBlockEntity(monitorPos) instanceof NetworkFiltererBlockEntity nbe && pLevel.isClientSide) {
+                    nbe.showSafeZone();
                 }
             }
         }
@@ -51,8 +51,8 @@ public class SafeZoneDesignatorItem extends Item {
             return InteractionResult.FAIL;
         }
         boolean isCrouching = player.isCrouching();
-        if (level.getBlockEntity(pos) instanceof MonitorBlockEntity monitorBlockEntity) {
-            data.put("monitorPos", NbtUtils.writeBlockPos(monitorBlockEntity.getControllerPos()));
+        if (level.getBlockEntity(pos) instanceof NetworkFiltererBlockEntity networkFiltererBlockEntity) {
+            data.put("monitorPos", NbtUtils.writeBlockPos(networkFiltererBlockEntity.getBlockPos()));
             displayMessage(player, CreateRadar.MODID + ".item.safe_zone_designator.set", ChatFormatting.GREEN);
             return InteractionResult.SUCCESS;
         }
@@ -64,8 +64,8 @@ public class SafeZoneDesignatorItem extends Item {
         BlockPos monitorPos = NbtUtils.readBlockPos(data.getCompound("monitorPos"));
 
         if (!data.contains("startPos")) {
-            if (level.getBlockEntity(monitorPos) instanceof MonitorBlockEntity monitorBlockEntity) {
-                if (monitorBlockEntity.getController().tryRemoveAABB(pos)) {
+            if (level.getBlockEntity(monitorPos) instanceof NetworkFiltererBlockEntity networkFiltererBlockEntity) {
+                if (networkFiltererBlockEntity.tryRemoveAABB(pos)) {
                     displayMessage(player, CreateRadar.MODID + ".item.safe_zone_designator.remove", ChatFormatting.RED);
                     return InteractionResult.SUCCESS;
                 }
@@ -81,8 +81,8 @@ public class SafeZoneDesignatorItem extends Item {
 
             BlockPos startPos = NbtUtils.readBlockPos(data.getCompound("startPos"));
 
-            if (level.getBlockEntity(monitorPos) instanceof MonitorBlockEntity monitorBlockEntity) {
-                monitorBlockEntity.addSafeZone(startPos, pos);
+            if (level.getBlockEntity(monitorPos) instanceof NetworkFiltererBlockEntity networkFiltererBlockEntity) {
+                networkFiltererBlockEntity.addSafeZone(startPos, pos);
                 displayMessage(player, CreateRadar.MODID + ".item.safe_zone_designator.end", ChatFormatting.GREEN);
                 data.remove("startPos");
             } else {

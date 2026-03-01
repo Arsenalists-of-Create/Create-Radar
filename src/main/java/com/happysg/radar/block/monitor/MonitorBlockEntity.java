@@ -443,47 +443,6 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         return targetPos.get();
     }
 
-    // Safe zones
-
-
-    public boolean isInSafeZone(Vec3 pos) {
-        return AutoTargetingHelper.isInSafeZone(pos, safeZones);
-    }
-
-    public void addSafeZone(BlockPos startPos, BlockPos endPos) {
-        double minX = Math.min(startPos.getX(), endPos.getX());
-        double minY = Math.min(startPos.getY(), endPos.getY());
-        double minZ = Math.min(startPos.getZ(), endPos.getZ());
-        double maxX = Math.max(startPos.getX(), endPos.getX()) + 1;
-        double maxY = Math.max(startPos.getY(), endPos.getY()) + 1;
-        double maxZ = Math.max(startPos.getZ(), endPos.getZ()) + 1;
-
-        getController().safeZones.add(new AABB(minX, minY, minZ, maxX, maxY, maxZ));
-    }
-
-    public void showSafeZone() {
-        net.minecraftforge.fml.DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> Client.showSafeZone(this));
-    }
-
-    @OnlyIn(Dist.CLIENT)
-    private static final class Client {
-        static void showSafeZone(MonitorBlockEntity be) {
-            for (AABB safeZone : be.safeZones) {
-                net.createmod.catnip.outliner.Outliner.getInstance().showAABB(safeZone, safeZone)
-                        .colored(0x383b42)
-                        .withFaceTextures(com.simibubi.create.AllSpecialTextures.CHECKERED, com.simibubi.create.AllSpecialTextures.HIGHLIGHT_CHECKERED)
-                        .lineWidth(1 / 16f);
-            }
-        }
-    }
-
-    public boolean tryRemoveAABB(BlockPos pos) {
-        return safeZones.removeIf(safeZone -> safeZone.contains(Vec3.atCenterOf(pos)));
-    }
-
-    // -------------------------------------------------
-    // NBT sync
-
     @Override
     protected void read(CompoundTag tag, boolean clientPacket) {
         super.read(tag, clientPacket);

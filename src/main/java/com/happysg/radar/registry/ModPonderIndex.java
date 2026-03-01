@@ -36,6 +36,7 @@ public class ModPonderIndex implements PonderPlugin {
 //        HELPER.addStoryBoard(ModBlocks.RWR_BLOCK,"rwr_ponder",PonderScenes::controllerLinking,ModPonderTags.RADAR_COMPONENT);
 
     }
+    static final PonderRegistrationHelper HELPER = new PonderRegistrationHelper(CreateRadar.MODID);
 
     @Override
     public String getModId() {
