@@ -2,7 +2,7 @@ package com.happysg.radar.compat.vs2;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import org.valkyrienskies.mod.common.assembly.VSAssemblyEvents;
+
 
 import java.util.Map;
 import java.util.WeakHashMap;

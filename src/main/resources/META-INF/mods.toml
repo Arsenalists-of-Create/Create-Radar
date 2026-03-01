@@ -27,24 +27,12 @@ side = "BOTH"
 [[dependencies.create_radar]]
 modId = "create"
 mandatory = true
-versionRange = "[6.0.8,6.1.0)"
+versionRange = "[0.5.1.j, 6.0.0 )"
 ordering = "BEFORE"
 side = "BOTH"
 [[dependencies.create_radar]]
 modId = "createbigcannons"
-mandatory = false
-versionRange = "[5.10.1,)"
+mandatory = true
+versionRange = "[5.8.0,)"
 ordering = "BEFORE"
 side = "BOTH"
-[[dependencies.create_radar]]
-modId = "valkyrienskies"
-mandatory = false
-versionRange = "[2.4.7,)"
-ordering = "BEFORE"
-side = "BOTH"
-[[dependencies.create_radar]]
-modId="shupapium"
-mandatory=false
-versionRange="[1.0,2.0)"
-ordering="BEFORE"
-side="BOTH"

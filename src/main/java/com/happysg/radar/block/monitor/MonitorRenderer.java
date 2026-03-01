@@ -9,8 +9,8 @@ import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModRenderTypes;
+import com.jozufozu.flywheel.util.Color;
 import com.mojang.logging.LogUtils;
-import net.createmod.catnip.theme.Color;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
@@ -356,7 +356,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             shipToWorld.set(transform.getShipToWorldRotation());
         } catch (Throwable ignored) {
             // if mappings differ, fall back to the inverse of worldToShip
-            shipToWorld.set(transform.getRotation()).invert();
+            shipToWorld.set(transform.getShipToWorldRotation()).invert();
         }
 
         // i ask: "where does the ship's local +Z (forward) point in the world?"
@@ -372,7 +372,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         var transform = ship.getTransform();
 
         Quaterniond worldToShip = new Quaterniond();
-        worldToShip.set(transform.getRotation());
+        worldToShip.set(transform.getShipToWorldRotation());
 
         Vector3d v = new Vector3d(worldVec.x, worldVec.y, worldVec.z);
         worldToShip.transform(v);

@@ -9,10 +9,11 @@ import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
 
+import com.jozufozu.flywheel.util.Color;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.logging.LogUtils;
 import com.mojang.math.Axis;
-import net.createmod.catnip.theme.Color;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -356,7 +357,7 @@ public class MonitorScreen extends Screen {
         try {
             shipToWorld.set(transform.getShipToWorldRotation());
         } catch (Throwable ignored) {
-            shipToWorld.set(transform.getRotation()).invert();
+            shipToWorld.set(transform.getShipToWorldRotation()).invert();
         }
 
         org.joml.Vector3d fwd = new org.joml.Vector3d(0, 0, 1);

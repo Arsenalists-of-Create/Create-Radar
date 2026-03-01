@@ -108,7 +108,7 @@ public class MonitorInputHandler {
         try {
             shipToWorld.set(transform.getShipToWorldRotation());
         } catch (Throwable ignored) {
-            shipToWorld.set(transform.getRotation()).invert();
+            shipToWorld.set(transform.getShipToWorldRotation()).invert();
         }
 
         Vector3d fwd = new Vector3d(0, 0, 1);

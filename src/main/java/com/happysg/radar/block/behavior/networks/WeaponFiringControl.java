@@ -16,7 +16,8 @@ import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import com.happysg.radar.compat.vs2.VS2Utils;
 import com.happysg.radar.config.RadarConfig;
 import com.mojang.logging.LogUtils;
-import net.createmod.catnip.math.VecHelper;
+
+import com.simibubi.create.foundation.utility.VecHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.server.level.ServerLevel;

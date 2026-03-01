@@ -139,8 +139,6 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
 
         if (cachedMount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
             rotateCBC(cachedMount.cbc);
-        } else if (cachedMount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
-            rotatePhysBearing(cachedMount.phys);
         }
     }
 
@@ -297,23 +295,6 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
 
         if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
             setTargetCBC(mount.cbc, targetPos);
-            return;
-        }
-
-        if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
-
-            Ship ship = getShipIfPresent();
-            Vec3 desired = (ship != null) ? toShipSpace(ship, targetPos) : targetPos;
-
-            desiredTarget = desired;
-            if (smoothedTarget == null)
-                smoothedTarget = desired;
-
-            isRunning = true;
-            lastCommandedDeg = Double.NaN;
-
-            notifyUpdate();
-            setChanged();
         }
     }
 
@@ -328,10 +309,8 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
 
         // i increase tolerance slightly if we're not lag-compensating
         double cbcTol = CBC_TOLERANCE;
-        double physTol = PHYS_TOLERANCE_DEG;
         if (!lag) {
             cbcTol += 0.15;
-            physTol += 0.15;
         }
 
         if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
@@ -347,17 +326,6 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
             currentPitch = currentPitch * -invert;
 
             return Math.abs(currentPitch - targetAngle) < cbcTol;
-        }
-
-        if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
-            Double actualRad = mount.phys.getActualAngle();
-            if (actualRad == null)
-                return false;
-
-            double currentDeg = wrap360(Math.toDegrees(actualRad));
-            double desiredDeg = wrap360(targetAngle);
-
-            return Math.abs(shortestDelta(currentDeg, desiredDeg)) < Math.max(physTol, DEADBAND_DEG);
         }
 
         return false;
@@ -408,10 +376,6 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
 
     // i clamp based on what i'm actually attached to
     private double clampToLimits(double deg) {
-        Mount m = resolveMount();
-        if (m != null && m.kind == MountKind.PHYS) {
-            return clampToLimitsPhys(deg);
-        }
         return clampToLimitsCBC(deg);
     }
 
@@ -565,86 +529,7 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
     }
 
 
-    // PhysBearing behavior (aligned to yaw: follow-angle + unwrap)
-    private void rotatePhysBearing(PhysBearingBlockEntity mount) {
-        // Ensure follow-angle mode
-        ScrollOptionBehaviour<ContraptionController.LockedMode> mode = mount.getMovementMode();
-        if (mode != null && mode.getValue() != ContraptionController.LockedMode.FOLLOW_ANGLE.ordinal()) {
-            mode.setValue(ContraptionController.LockedMode.FOLLOW_ANGLE.ordinal());
-        }
 
-        double rpmAbs = Math.abs(getSpeed());
-        if (rpmAbs <= 0.0)
-            return;
-
-        if (!isRunning)
-            return;
-
-        // If we have a desired target, keep smoothing towards it and update targetAngle (degrees)
-        updateSmoothedTargetAndAngle(rpmAbs, mount);
-
-        Double actualRad = mount.getActualAngle();
-        if (actualRad == null)
-            return;
-
-        double currentDeg = wrap360(Math.toDegrees(actualRad));
-        double desiredDeg = wrap360(targetAngle);
-
-        // "snap at max rpm"
-        if (rpmAbs >= 256.0) {
-            lastCommandedDeg = desiredDeg;
-            mount.setAngle((float) desiredDeg);
-            mount.notifyUpdate();
-            return;
-        }
-
-        // latch the last-commanded value
-        if (Double.isNaN(lastCommandedDeg)) {
-            lastCommandedDeg = currentDeg;
-        }
-
-        // unwrap target near last command to avoid long spins
-        double desiredContinuous = unwrapNear(lastCommandedDeg, desiredDeg);
-
-        // deadband: stop running when close enough
-        if (Math.abs(shortestDelta(currentDeg, desiredDeg)) <= Math.max(PHYS_TOLERANCE_DEG, DEADBAND_DEG)) {
-            mount.setAngle((float) desiredDeg);
-            mount.notifyUpdate();
-            isRunning = false;
-            lastCommandedDeg = desiredContinuous;
-            return;
-        }
-
-        lastCommandedDeg = desiredContinuous;
-        mount.setAngle((float) wrap360(desiredContinuous));
-        mount.notifyUpdate();
-    }
-
-    private void updateSmoothedTargetAndAngle(double rpmAbs, PhysBearingBlockEntity mount) {
-        if (desiredTarget == null) return;
-
-        Direction facing = getBlockState().getValue(AutoPitchControllerBlock.HORIZONTAL_FACING);
-
-        Vec3 pivot = mount.getBlockPos().getCenter();
-
-        if (smoothedTarget == null) {
-            smoothedTarget = desiredTarget;
-        } else {
-            Vec3 delta = desiredTarget.subtract(smoothedTarget);
-            double dist = delta.length();
-
-            if (dist > SNAP_DISTANCE) {
-                smoothedTarget = desiredTarget;
-            } else if (dist > 1e-6) {
-                double radius = diskRadius(pivot, smoothedTarget, facing);
-                double step = stepTowardTarget(radius, dist, rpmAbs);
-                smoothedTarget = smoothedTarget.add(delta.scale(step / dist));
-            }
-        }
-        double newAngle = rollAroundFacingDeg(pivot, smoothedTarget, facing);
-        if (Math.abs(shortestDelta(targetAngle, newAngle)) < DEADBAND_DEG) return;
-        targetAngle = clampToLimitsPhys(approachWrapped(targetAngle, newAngle));
-    }
     private enum MountKind { CBC, PHYS }
 
     private static class Mount {
@@ -679,9 +564,6 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
             if (Mods.CREATEBIGCANNONS.isLoaded() && be instanceof CannonMountBlockEntity cbc) {
                 newMount = new Mount(cbc);
                 newKind = MountKind.CBC;
-            } else if (Mods.VS_CLOCKWORK.isLoaded() && be instanceof PhysBearingBlockEntity phys) {
-                newMount = new Mount(phys);
-                newKind = MountKind.PHYS;
             }
         }
 
@@ -729,17 +611,11 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         return isFacingCannonMount(level, worldPosition, getBlockState()); // your existing helper
     }
     public void setMinAngleDeg(double v) {
-        Mount m = resolveMount();
-
-        if (m != null && m.kind == MountKind.PHYS) {
-            minAngleDeg = wrap360(v);
-        } else {
-            minAngleDeg = v;
-            if (minAngleDeg > maxAngleDeg) {
-                double tmp = minAngleDeg;
-                minAngleDeg = maxAngleDeg;
-                maxAngleDeg = tmp;
-            }
+        minAngleDeg = v;
+        if (minAngleDeg > maxAngleDeg) {
+            double tmp = minAngleDeg;
+            minAngleDeg = maxAngleDeg;
+            maxAngleDeg = tmp;
         }
 
         targetAngle = clampToLimits(targetAngle);
@@ -748,17 +624,11 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
     }
 
     public void setMaxAngleDeg(double v) {
-        Mount m = resolveMount();
-
-        if (m != null && m.kind == MountKind.PHYS) {
-            maxAngleDeg = wrap360(v);
-        } else {
-            maxAngleDeg = v;
-            if (minAngleDeg > maxAngleDeg) {
-                double tmp = minAngleDeg;
-                minAngleDeg = maxAngleDeg;
-                maxAngleDeg = tmp;
-            }
+        maxAngleDeg = v;
+        if (minAngleDeg > maxAngleDeg) {
+            double tmp = minAngleDeg;
+            minAngleDeg = maxAngleDeg;
+            maxAngleDeg = tmp;
         }
 
         targetAngle = clampToLimits(targetAngle);

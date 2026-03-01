@@ -3,7 +3,8 @@ package com.happysg.radar.block.monitor;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
-import com.simibubi.create.api.behaviour.display.DisplaySource;
+
+import com.simibubi.create.content.redstone.displayLink.source.DisplaySource;
 import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.chat.Component;

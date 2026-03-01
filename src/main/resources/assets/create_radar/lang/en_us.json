@@ -3,6 +3,7 @@
   "block.create_radar.auto_pitch_controller": "Auto Pitch Controller",
   "block.create_radar.auto_yaw_controller": "Auto Yaw Controller",
   "block.create_radar.creative_radar_plate": "Creative Radar Plate",
+  "block.create_radar.radar_guidance_block": "Radar Command Guidance",
   "block.create_radar.data_link": "Data Link",
   "block.create_radar.fire_controller": "Fire Controller",
   "block.create_radar.fire_controller.tooltip.summary": "Emits a _Redstone Signal_ when the linked _Cannon Mount_ aligned",

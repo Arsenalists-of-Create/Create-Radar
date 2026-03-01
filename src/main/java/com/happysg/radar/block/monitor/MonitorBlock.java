@@ -5,7 +5,7 @@ import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.foundation.block.IBE;
-import net.createmod.catnip.lang.Lang;
+import com.simibubi.create.foundation.utility.Lang;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;

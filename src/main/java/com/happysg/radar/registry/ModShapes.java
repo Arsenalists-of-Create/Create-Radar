@@ -2,7 +2,7 @@ package com.happysg.radar.registry;
 
 
 import com.simibubi.create.AllShapes;
-import net.createmod.catnip.math.VoxelShaper;
+import com.simibubi.create.foundation.utility.VoxelShaper;
 import net.minecraft.world.level.block.Block;
 
 public class ModShapes {

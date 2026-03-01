@@ -13,7 +13,8 @@ import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
 import com.mojang.logging.LogUtils;
-import com.simibubi.create.api.equipment.goggles.IHaveHoveringInformation;
+
+import com.simibubi.create.content.equipment.goggles.IHaveHoveringInformation;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;

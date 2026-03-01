@@ -123,7 +123,9 @@ repositories {
         name = "squiddev"
         url = "https://squiddev.cc/maven/"
     }
-
+    flatDir {
+        dirs 'lib'
+    }
 }
 
 dependencies {
@@ -146,7 +148,8 @@ dependencies {
     runtimeOnly fg.deobf("com.rbasamoyai:createbigcannons:${cbc_version}") { transitive = false }
     runtimeOnly(fg.deobf("com.rbasamoyai:ritchiesprojectilelib:${rpl_version}") { transitive = false })
 
-
+    compileOnly fg.deobf(files("lib/createenergycannons-0.1+mc1.20.1.jar"))
+    compileOnly fg.deobf("curse.maven:cbc-warium-projectiles-1227170:7646592")
     //compileOnly fg.deobf("maven.modrinth:cbcmodernwarfare:${cbc_mw_version}+mc.${minecraft_version}-forge")
     implementation fg.deobf("curse.maven:cbc-modern-warfare-1078220:6262257")
     //compileOnly fg.deobf("maven.modrinth:create-big-cannons-advanced-technologies:${cbc_at_version}-${minecraft_version}")
@@ -158,9 +161,9 @@ dependencies {
 
     compileOnly("org.valkyrienskies.core:api:${vs_core_version}")
     compileOnly("org.valkyrienskies.core:impl:${vs_core_version}")
-    compileOnly("org.valkyrienskies.core:api-game:${vs_core_version}")
     compileOnly("org.valkyrienskies.core:util:${vs_core_version}")
     compileOnly fg.deobf("org.valkyrienskies:valkyrienskies-120-forge:${vs2_version}")
+
 
     compileOnly "org.joml:joml:1.10.5"
     compileOnly "com.fasterxml.jackson.core:jackson-annotations:2.13.3"

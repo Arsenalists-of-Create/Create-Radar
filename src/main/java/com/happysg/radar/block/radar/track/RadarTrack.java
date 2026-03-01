@@ -4,7 +4,8 @@ import com.happysg.radar.block.monitor.MonitorSprite;
 import com.happysg.radar.compat.cbc.CannonLead;
 import com.happysg.radar.compat.cbc.VelocityTracker;
 import com.happysg.radar.config.RadarConfig;
-import net.createmod.catnip.theme.Color;
+
+import com.jozufozu.flywheel.util.Color;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;

@@ -1,38 +1,38 @@
 package com.happysg.radar.registry;
 
 import com.happysg.radar.CreateRadar;
-import com.simibubi.create.infrastructure.ponder.AllCreatePonderTags;
+import com.simibubi.create.foundation.ponder.PonderRegistry;
+
+import com.simibubi.create.foundation.ponder.PonderTag;
 import com.tterrag.registrate.util.entry.RegistryEntry;
 
-import net.createmod.ponder.api.registration.PonderTagRegistrationHelper;
+
 import net.minecraft.resources.ResourceLocation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class ModPonderTags {
-    public static final ResourceLocation RADAR_COMPONENT = CreateRadar.asResource("radar_components");
-    public static final ResourceLocation WEAPON_NETWORK = CreateRadar.asResource("weapon_network");
-    public static final ResourceLocation RADAR_NETWORK = CreateRadar.asResource("radar_network");
-    private static final Logger log = LoggerFactory.getLogger(ModPonderTags.class);
+    public static final PonderTag RADAR_COMPONENT = create("radar_components").item(ModBlocks.RADAR_PLATE_BLOCK)
+            .defaultLang("Radar Components", "Components which allow the creation of Radar Contraptions")
+            .addToIndex();
+    public static final PonderTag WEAPON_NETWORK = create("weapon_network").item(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK).addToIndex();
+    public static final PonderTag RADAR_NETWORK = create("radar_network").item(ModBlocks.NETWORK_FILTERER_BLOCK).addToIndex();
 
 
-    public static void register(PonderTagRegistrationHelper<ResourceLocation> helper) {
+    private static PonderTag create(String id) {
+        return new PonderTag(CreateRadar.asResource(id));
+    }
+    public static void register() {
         // Add items to tags here
-        PonderTagRegistrationHelper<RegistryEntry<?>> entryHelper = helper.withKeyFunction(RegistryEntry::getId);
-        helper.registerTag(WEAPON_NETWORK)
-                .addToIndex()
-                .item(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK)
-                .title("Weapon Networks")
-                .description("How to use the Weapon Networks")
-                .register();
-        entryHelper.addToTag(WEAPON_NETWORK)
+
+
+        PonderRegistry.TAGS.forTag(WEAPON_NETWORK)
                 .add(ModBlocks.RADAR_LINK)
                 .add(ModBlocks.FIRE_CONTROLLER_BLOCK)
                 .add(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK)
                 .add(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK)
                 .add(ModBlocks.NETWORK_FILTERER_BLOCK);
 
-        helper.registerTag(RADAR_NETWORK);
 
 
     }

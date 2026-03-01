@@ -14,10 +14,12 @@ import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.monitor.MonitorRenderer;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.plane.StationaryRadarBlockEntity;
+import com.simibubi.create.content.contraptions.bearing.BearingInstance;
 import com.simibubi.create.content.contraptions.bearing.BearingRenderer;
-import com.simibubi.create.content.contraptions.bearing.BearingVisual;
+
+import com.simibubi.create.content.kinetics.base.ShaftInstance;
 import com.simibubi.create.content.kinetics.base.ShaftRenderer;
-import com.simibubi.create.content.kinetics.base.ShaftVisual;
+
 import com.tterrag.registrate.util.entry.BlockEntityEntry;
 import kotlin.reflect.jvm.internal.impl.descriptors.Visibilities;
 
@@ -33,7 +35,7 @@ public class ModBlockEntityTypes {
 
      public static final BlockEntityEntry<RadarBearingBlockEntity> RADAR_BEARING = REGISTRATE
             .blockEntity("radar_bearing", RadarBearingBlockEntity::new)
-            .visual(() -> BearingVisual::new, true)
+            .instance(() -> BearingInstance::new, true)
             .validBlocks(ModBlocks.RADAR_BEARING_BLOCK)
             .renderer(() -> BearingRenderer::new)
             .register();
@@ -51,14 +53,14 @@ public class ModBlockEntityTypes {
 
     public static final BlockEntityEntry<AutoYawControllerBlockEntity> AUTO_YAW_CONTROLLER = REGISTRATE
             .blockEntity("auto_yaw_controller", AutoYawControllerBlockEntity::new)
-            .visual(() -> ShaftVisual::new, true)
+            .instance(() -> ShaftInstance::new, true)
             .validBlocks(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK)
             .renderer(() -> ShaftRenderer::new)
             .register();
 
     public static final BlockEntityEntry<AutoPitchControllerBlockEntity> AUTO_PITCH_CONTROLLER = REGISTRATE
             .blockEntity("auto_pitch_controller", AutoPitchControllerBlockEntity::new)
-            .visual(() -> ShaftVisual::new, true)
+            .instance(() -> ShaftInstance::new, true)
             .validBlocks(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK)
             .register();
 

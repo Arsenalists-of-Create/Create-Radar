@@ -2,19 +2,20 @@ package com.happysg.radar.registry;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.ponder.PonderScenes;
+import com.simibubi.create.foundation.ponder.PonderRegistrationHelper;
 import com.tterrag.registrate.util.entry.ItemProviderEntry;
 import com.tterrag.registrate.util.entry.RegistryEntry;
 
-import net.createmod.ponder.api.registration.PonderPlugin;
-import net.createmod.ponder.api.registration.PonderSceneRegistrationHelper;
+
 import net.minecraft.resources.ResourceLocation;
 
 
-public class ModPonderIndex implements PonderPlugin {
-    public static void register(PonderSceneRegistrationHelper<ResourceLocation> helper) {
+public class ModPonderIndex  {
+    static final PonderRegistrationHelper HELPER = new PonderRegistrationHelper(CreateRadar.MODID);
+    public static void register() {
 
         CreateRadar.getLogger().info("Registering Ponder!");
-        PonderSceneRegistrationHelper<ItemProviderEntry<?>> HELPER = helper.withKeyFunction(RegistryEntry::getId);
+
         HELPER.forComponents(ModBlocks.RADAR_BEARING_BLOCK)
                 .addStoryBoard("radar_contraption", PonderScenes::radarContraption, ModPonderTags.RADAR_COMPONENT)
                 .addStoryBoard("radar_network", PonderScenes::networkSetup, ModPonderTags.RADAR_COMPONENT);
@@ -36,10 +37,6 @@ public class ModPonderIndex implements PonderPlugin {
 //        HELPER.addStoryBoard(ModBlocks.RWR_BLOCK,"rwr_ponder",PonderScenes::controllerLinking,ModPonderTags.RADAR_COMPONENT);
 
     }
-    static final PonderRegistrationHelper HELPER = new PonderRegistrationHelper(CreateRadar.MODID);
 
-    @Override
-    public String getModId() {
-        return CreateRadar.MODID;
-    }
+
 }

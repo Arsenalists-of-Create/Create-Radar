@@ -3,9 +3,8 @@ package com.happysg.radar;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorInputHandler;
-import com.happysg.radar.compat.cbcwpf.CBCWPFCompatRegister;
 import com.happysg.radar.compat.computercraft.CCCompatRegister;
-import com.happysg.radar.ponder.RadarPonderPlugin;
+
 import com.happysg.radar.registry.ModCommands;
 
 import com.happysg.radar.compat.Mods;
@@ -18,15 +17,15 @@ import com.happysg.radar.networking.NetworkHandler;
 import com.happysg.radar.registry.*;
 
 import com.mojang.logging.LogUtils;
+import com.simibubi.create.content.kinetics.BlockStressValues;
 import com.simibubi.create.foundation.data.CreateRegistrate;
-import com.simibubi.create.api.stress.BlockStressValues;
+
 
 import com.simibubi.create.foundation.item.ItemDescription;
 import com.simibubi.create.foundation.item.KineticStats;
 import com.simibubi.create.foundation.item.TooltipHelper;
 import com.simibubi.create.foundation.item.TooltipModifier;
-import net.createmod.catnip.lang.FontHelper;
-import net.createmod.ponder.foundation.PonderIndex;
+
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -62,7 +61,7 @@ public class CreateRadar {
 
     public static final CreateRegistrate REGISTRATE = CreateRegistrate.create(MODID)
             .setTooltipModifierFactory(item ->
-            new ItemDescription.Modifier(item, FontHelper.Palette.STANDARD_CREATE)
+            new ItemDescription.Modifier(item, TooltipHelper.Palette.STANDARD_CREATE)
                     .andThen(TooltipModifier.mapNull(KineticStats.create(item))));
     @SubscribeEvent
     public void onRegisterCommands(RegisterCommandsEvent event) {
@@ -107,8 +106,7 @@ public class CreateRadar {
             CBCMWCompatRegister.registerCBCMW();
         if (Mods.COMPUTERCRAFT.isLoaded())
             CCCompatRegister.registerPeripherals();
-        if (Mods.SHUPAPIUM.isLoaded())
-            CBCWPFCompatRegister.registerCBCWPF();
+
     }
     @SubscribeEvent
     public static void commonSetup(FMLCommonSetupEvent event) {
@@ -160,15 +158,15 @@ public class CreateRadar {
             // Must be registered after registries open
             ModContraptionTypes.register();
             // Stress values
-            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_BEARING_BLOCK.get(), () -> 4d);
-            BlockStressValues.IMPACTS.register(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK.get(), () -> 128d);
-            BlockStressValues.IMPACTS.register(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK.get(), () -> 128d);
-          //  BlockStressValues.IMPACTS.register(ModBlocks.TRACK_CONTROLLER_BLOCK.get(), () -> 16d);
-
-            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_RECEIVER_BLOCK.get(), () -> 0d);
-            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_DISH_BLOCK.get(), () -> 0d);
-            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_PLATE_BLOCK.get(), () -> 0d);
-            BlockStressValues.IMPACTS.register(ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.get(), () -> 0d);
+//            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_BEARING_BLOCK.get(), () -> 4d);
+//            BlockStressValues.IMPACTS.register(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK.get(), () -> 128d);
+//            BlockStressValues.IMPACTS.register(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK.get(), () -> 128d);
+//          //  BlockStressValues.IMPACTS.register(ModBlocks.TRACK_CONTROLLER_BLOCK.get(), () -> 16d);
+//
+//            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_RECEIVER_BLOCK.get(), () -> 0d);
+//            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_DISH_BLOCK.get(), () -> 0d);
+//            BlockStressValues.IMPACTS.register(ModBlocks.RADAR_PLATE_BLOCK.get(), () -> 0d);
+//            BlockStressValues.IMPACTS.register(ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.get(), () -> 0d);
         });
 
         ModMessages.register();
@@ -176,7 +174,7 @@ public class CreateRadar {
         AllDataBehaviors.registerDefaults();
     }
     static {
-        REGISTRATE.setTooltipModifierFactory((item) -> (new ItemDescription.Modifier(item, FontHelper.Palette.STANDARD_CREATE)));
+        REGISTRATE.setTooltipModifierFactory((item) -> (new ItemDescription.Modifier(item, TooltipHelper.Palette.STANDARD_CREATE)));
     }
 
 }

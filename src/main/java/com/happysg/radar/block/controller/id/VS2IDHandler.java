@@ -1,7 +1,8 @@
 package com.happysg.radar.block.controller.id;
 
 import com.happysg.radar.compat.vs2.VS2Utils;
-import net.createmod.catnip.gui.ScreenOpener;
+
+import com.simibubi.create.foundation.gui.ScreenOpener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;

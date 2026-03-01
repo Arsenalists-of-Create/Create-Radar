@@ -17,6 +17,7 @@ import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.track.TrackCategory;
+import com.simibubi.create.CreateClient;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import com.mojang.logging.LogUtils;
@@ -925,7 +926,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     private static final class Client {
         static void showSafeZone(NetworkFiltererBlockEntity be) {
             for (AABB safeZone : be.safeZones) {
-                net.createmod.catnip.outliner.Outliner.getInstance().showAABB(safeZone, safeZone)
+            CreateClient.OUTLINER.showAABB(safeZone, safeZone)
                         .colored(0x383b42)
                         .withFaceTextures(com.simibubi.create.AllSpecialTextures.CHECKERED, com.simibubi.create.AllSpecialTextures.HIGHLIGHT_CHECKERED)
                         .lineWidth(1 / 16f);

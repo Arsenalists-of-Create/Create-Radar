@@ -5,7 +5,7 @@ import com.happysg.radar.networking.ModMessages;
 import com.happysg.radar.networking.packets.IDRecordRequestPacket;
 import com.happysg.radar.networking.packets.IDRecordPacket;
 import com.happysg.radar.registry.ModGuiTextures;
-import net.createmod.catnip.gui.AbstractSimiScreen;
+import com.simibubi.create.foundation.gui.AbstractSimiScreen;
 import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
 import net.minecraft.client.gui.GuiGraphics;

@@ -84,13 +84,6 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity{
             }
             return;
         }
-        if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
-            if(level.getGameTime() %20 == 5) {
-                maybeUpdateYawZeroFromCannonInitialOrientation();
-            }
-            currentmount = MountKind.PHYS;
-            rotatePhysBearing(mount.phys);
-        }
         if (!level.isClientSide && level.getGameTime() % 40 == 0) {
             if (level instanceof ServerLevel serverLevel) {
                 if (lastKnownPos.equals(worldPosition))
@@ -167,10 +160,6 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity{
         double angle = computeYawToTargetDeg(cannonCenter, targetPos);
         double newAngle = wrap360(angle) + 180.0;
 
-        if (currentmount == MountKind.PHYS && hasYawZeroOffset) {
-            newAngle = wrap360(newAngle - yawZeroOffsetDeg);
-        }
-
         this.targetAngle = clampYawToLimits(newAngle);
         notifyUpdate();
         setChanged();
@@ -203,17 +192,6 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity{
                     : wrap360(contraption.yaw);
 
             return Math.abs(shortestDelta(current, desired)) < effectiveTolerance;
-        }
-
-        if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
-            Double actualRad = mount.phys.getActualAngle();
-            if (actualRad == null) return false;
-
-            double currentDeg = wrap360(Math.toDegrees(actualRad));
-            double desiredDeg = wrap360(360.0 - targetAngle);
-
-            return Math.abs(shortestDelta(currentDeg, desiredDeg))
-                    < Math.max(effectiveTolerance, DEADBAND_DEG);
         }
 
         return false;
@@ -266,119 +244,7 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity{
         hasLastCbcYawWritten = true;
         mount.notifyUpdate();
     }
-    private void rotatePhysBearing(PhysBearingBlockEntity mount) {
-        ScrollOptionBehaviour<ContraptionController.LockedMode> mode = mount.getMovementMode();
-        if (mode != null && mode.getValue() != ContraptionController.LockedMode.FOLLOW_ANGLE.ordinal()) {
-            mode.setValue(ContraptionController.LockedMode.FOLLOW_ANGLE.ordinal());
-        }
 
-        if (!isRunning) return;
-
-        double rpm = Math.abs(getSpeed());
-        if (rpm <= 0.0) return;
-
-        Double actualRad = mount.getActualAngle();
-        if (actualRad == null) return;
-
-        // i convert physbearing degrees -> controller degrees (your mapping)
-        double currentPhysDeg = wrap360(Math.toDegrees(actualRad));
-        double currentCtlDeg = wrap360(360.0 - currentPhysDeg);
-
-        // i keep desired in controller-space and clamp to my limits
-        double desiredCtlDeg = clampYawToLimits(targetAngle);
-
-        // i treat min==max as FULL RANGE (same behavior as your clampYawToLimits)
-        double min = wrap360(minAngleDeg);
-        double max = wrap360(maxAngleDeg);
-        double allowedLen = wrap360(max - min); // (max-min+360)%360
-
-        boolean fullRange = allowedLen < 1e-6;
-
-        // deadband in controller-space
-        double diffCtl = shortestDelta(currentCtlDeg, desiredCtlDeg);
-        double distCtl = Math.abs(diffCtl);
-        if (distCtl <= Math.max(TOLERANCE_DEG, DEADBAND_DEG)) {
-            double desiredPhysDeg = wrap360(360.0 - desiredCtlDeg);
-            mount.setAngle((float) desiredPhysDeg);
-            mount.notifyUpdate();
-            return;
-        }
-
-        // max degrees i can move this tick
-        double stepDeg = getStep(SNAP_DISTANCE, distCtl);
-
-        double nextCtlDeg;
-
-        if (fullRange) {
-            double move = Math.min(stepDeg, distCtl);
-            nextCtlDeg = wrap360(currentCtlDeg + Math.signum(diffCtl) * move);
-        } else {
-            double currentParam = angleToAllowedParamOrNearest(currentCtlDeg, min, allowedLen);
-            double desiredParam = angleToAllowedParamOrNearest(desiredCtlDeg, min, allowedLen);
-
-            double deltaParam = desiredParam - currentParam;
-            double move = Math.signum(deltaParam) * Math.min(Math.abs(deltaParam), stepDeg);
-
-            double nextParam = currentParam + move;
-            nextCtlDeg = allowedParamToAngle(nextParam, min, allowedLen);
-        }
-
-        // optional: very fast snap
-        if (rpm >= 256.0) {
-            nextCtlDeg = desiredCtlDeg;
-        }
-
-        // i convert back controller degrees -> physbearing degrees
-        double nextPhysDeg = wrap360(360.0 - nextCtlDeg);
-        mount.setAngle((float) nextPhysDeg);
-        mount.notifyUpdate();
-    }
-    private void maybeUpdateYawZeroFromCannonInitialOrientation() {
-        if (level == null) return;
-        BlockPos cannonPos =WeaponNetworkData.get((ServerLevel) level).getMountForController(level.dimension(),worldPosition);
-        if(cannonPos == null)return;
-        CannonMountBlockEntity cannonMount;
-        if(level.getBlockEntity(cannonPos) instanceof CannonMountBlockEntity mount) cannonMount =mount;
-        else return;
-
-        PitchOrientedContraptionEntity ce = cannonMount.getContraption();
-        if (ce == null) return;
-
-        if (!(ce.getContraption() instanceof AbstractMountedCannonContraption cannonContraption))
-            return;
-
-        Direction initial = cannonContraption.initialOrientation();
-        if (initial == null || !initial.getAxis().isHorizontal())
-            return;
-
-        double newOffset = controllerYawForCardinalDirection(initial);
-
-        if (!hasYawZeroOffset) {
-            yawZeroOffsetDeg = wrap360(newOffset);
-            lastYawZeroOffsetDeg = yawZeroOffsetDeg;
-            hasYawZeroOffset = true;
-            setChanged();
-            return;
-        }
-
-        double oldOffset = lastYawZeroOffsetDeg;
-        double delta = shortestDelta(oldOffset, newOffset); // signed shortest path
-
-        if (Math.abs(delta) < 1e-6) return;
-
-        yawZeroOffsetDeg = wrap360(newOffset);
-        lastYawZeroOffsetDeg = yawZeroOffsetDeg;
-
-        targetAngle = wrap360(targetAngle - delta);
-        minAngleDeg = wrap360(minAngleDeg - delta);
-        maxAngleDeg = wrap360(maxAngleDeg - delta);
-
-        normalizeLimits();
-        targetAngle = clampYawToLimits(targetAngle);
-
-        notifyUpdate();
-        setChanged();
-    }
     private double minAngleDeg = 0.0;
     private double maxAngleDeg = 360.0;
 
@@ -400,58 +266,14 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity{
         notifyUpdate();
         setChanged();
     }
-    private static double controllerYawForCardinalDirection(Direction d) {
-        return switch (d) {
-            case SOUTH -> 0.0;
-            case WEST  -> 90.0;
-            case NORTH -> 180.0;
-            case EAST  -> 270.0;
-            default    -> 0.0;
-        };
-    }
 
-    private static double angleToAllowedParamOrNearest(double angleDeg, double minDeg, double allowedLen) {
-        double a = wrap360(angleDeg);
-        double min = wrap360(minDeg);
 
-        double d = wrap360(a - min); // [0..360)
-
-        if (d <= allowedLen) return d;
-
-        double distToMaxAlongCircle = d - allowedLen;
-        double distToMinAlongCircle = 360.0 - d;
-
-        return (distToMaxAlongCircle <= distToMinAlongCircle) ? allowedLen : 0.0;
-    }
-
-    // i convert a param back into an angle on the allowed arc
-    private static double allowedParamToAngle(double param, double minDeg, double allowedLen) {
-        double min = wrap360(minDeg);
-        double p = Math.max(0.0, Math.min(allowedLen, param));
-        return wrap360(min + p);
-    }
     private void normalizeLimits() {
         minAngleDeg = wrap360(minAngleDeg);
         maxAngleDeg = wrap360(maxAngleDeg);
     }
 
 
-
-    private double getStep(double range, double dist) {
-        double rpm = Math.abs(getSpeed());
-        double r = Math.min(256.0, Math.max(0.0, rpm));
-        double gamma = 1.6;
-        double x = r / 256.0;
-        double effectiveRpm = 1.0 + (r - 1.0) * Math.pow(x, gamma);
-
-        double degPerTick = effectiveRpm * 0.3;
-        double radPerTick = degPerTick * (Math.PI / 180.0);
-
-        double maxStep = range * radPerTick;
-        maxStep = Math.max(MIN_MOVE_PER_TICK, Math.min(MAX_MOVE_PER_TICK, maxStep));
-
-        return Math.min(dist, maxStep);
-    }
 
     // ===== VS2 ship-space yaw helper =====
     private double computeYawToTargetDeg(Vec3 cannonCenterWorld, Vec3 targetWorld) {
@@ -579,9 +401,6 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity{
         if (Mods.CREATEBIGCANNONS.isLoaded() && adjacent instanceof CannonMountBlockEntity cbc) {
             newMount = new Mount(cbc);
             newKind = MountKind.CBC;
-        } else if (Mods.VS_CLOCKWORK.isLoaded() && adjacent instanceof PhysBearingBlockEntity phys) {
-            newMount = new Mount(phys);
-            newKind = MountKind.PHYS;
         }
 
         // i update cached values

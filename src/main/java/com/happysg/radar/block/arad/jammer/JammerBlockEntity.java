@@ -8,7 +8,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.List;
 
-public class JammerBlockEntity  extends SmartBlockEntity {
+public class JammerBlockEntity extends SmartBlockEntity {
 
     public int range = 128;
     public boolean enabled = true;

@@ -16,7 +16,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.item.ItemStack;
-import com.happysg.radar.compat.cbcwpf.CBCWPFCompat;
+
 
 import org.slf4j.Logger;
 
@@ -73,8 +73,7 @@ public class CannonUtil {
                 || isRotaryCannon(cannon)
                 || isMediumCannon(cannon)
                 || isTwinAutocannon(cannon)
-                || isHeavyAutocannon(cannon)
-                || CBCWPFCompat.isShupapiumAutocannon(cannon);
+                || isHeavyAutocannon(cannon);
     }
 
     public static int getBarrelLength(AbstractMountedCannonContraption cannon) {
@@ -113,10 +112,7 @@ public class CannonUtil {
     public static BallisticPropertiesComponent getAutocannonBallistics(AbstractMountedCannonContraption cannon, Level level) {
         if (cannon == null || level == null) return AC_FALLBACK;
 
-        if (CBCWPFCompat.isShupapiumAutocannon(cannon)) {
-            BallisticPropertiesComponent bp = CBCWPFCompat.resolveAutocannonBallistics(cannon, level);
-            return bp != null ? bp : AC_FALLBACK;
-        }
+
 
         java.util.function.Function<ItemStack, BallisticPropertiesComponent> fromCBCAmmo = (stack) -> {
             if (stack == null || stack.isEmpty()) return AC_FALLBACK;
@@ -259,10 +255,6 @@ public class CannonUtil {
         );
         if (cannon == null) return 0f;
 
-        if (CBCWPFCompat.isShupapiumAutocannon(cannon)) {
-            LOGGER.debug("   • Shupapium WPF muzzle speed = {}", CBCWPFCompat.resolveShupapiumMuzzleSpeed(cannon));
-            return CBCWPFCompat.resolveShupapiumMuzzleSpeed(cannon);
-        }
 
         if (isEnergyCannon(cannon)) {
             float velocity = ((MountedEnergyCannonContraption) cannon).getMuzzleVelocity(level);
@@ -298,10 +290,7 @@ public class CannonUtil {
     public static int getAutocannonLifetimeTicks(AbstractMountedCannonContraption cannon) {
         if (cannon == null) return 100;
 
-        if (CBCWPFCompat.isShupapiumAutocannon(cannon)) {
-            int t = CBCWPFCompat.resolveLifetimeTicks(cannon);
-            return t > 0 ? t : 100;
-        }
+
 
         // Only CBC autocannon contraptions have this accessor reliably
         if (!(isAutoCannon(cannon) || isTwinAutocannon(cannon) || isHeavyAutocannon(cannon))) {
