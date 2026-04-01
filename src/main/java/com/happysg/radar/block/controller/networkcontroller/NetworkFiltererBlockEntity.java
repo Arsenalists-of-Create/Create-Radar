@@ -12,6 +12,7 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.hardcorerevival.HardcoreRevivalCompat;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.block.radar.behavior.IRadar;
@@ -173,7 +174,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
         // rebuild track cache filtered
 
-        cachedTracks = radar.getTracks().stream().filter(detectionCache::test).toList();
+        cachedTracks = radar.getTracks().stream()
+                .filter(detectionCache::test)
+                .filter(track -> !HardcoreRevivalCompat.isTrackedPlayerInReviveState(sl, track))
+                .toList();
 
         // resolve current selected track from group.selectedTargetId
         RadarTrack selected = resolveSelectedTrack(group.selectedTargetId);
@@ -182,6 +186,12 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
             applySelectedTarget(sl, data, group, null, false);
             selected = null;
+        }
+
+        if (selected != null && !isTrackStillTargetable(sl, selected)) {
+            selectedWasAuto = false;
+            applySelectedTarget(sl, data, group, null, false);
+            return;
         }
 
         // If selection id exists but track isn't present anymore, clear it and stop.
@@ -336,6 +346,23 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         return false;
     }
 
+    private boolean isTrackStillTargetable(ServerLevel sl, @Nullable RadarTrack track) {
+        if (track == null) {
+            return false;
+        }
+
+        if (track.trackCategory() != TrackCategory.PLAYER) {
+            return true;
+        }
+
+        Player player = HardcoreRevivalCompat.resolveTrackedPlayer(sl, track);
+        if (player == null) {
+            return false;
+        }
+
+        return !HardcoreRevivalCompat.isInReviveState(player);
+    }
+
 
     private void pushToEndpoints(@Nullable RadarTrack track) {
         TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
@@ -411,6 +438,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         NetworkData data = NetworkData.get(sl);
         NetworkData.Group group = data.getOrCreateGroup(sl.dimension(), worldPosition);
 
+        if (track != null && !isTrackStillTargetable(sl, track)) {
+            track = null;
+        }
 
         // sets canonical selectedTargetId + pushes to endpoints
         applySelectedTarget(sl, data, group, track, false);
@@ -584,6 +614,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
             if (!cfg.test(track.trackCategory())) continue;
             if (!isVsShipStillLoaded(sl, track)) continue;
+            if (!isTrackStillTargetable(sl, track)) continue;
 
             Vec3 pos = track.position();
             if (pos == null) continue;

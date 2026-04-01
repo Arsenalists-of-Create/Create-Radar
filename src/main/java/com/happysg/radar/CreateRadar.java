@@ -27,7 +27,6 @@ import com.simibubi.create.foundation.item.TooltipHelper;
 import com.simibubi.create.foundation.item.TooltipModifier;
 import net.createmod.catnip.lang.FontHelper;
 import net.createmod.ponder.foundation.PonderIndex;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.LevelAccessor;
@@ -153,6 +152,7 @@ public class CreateRadar {
             IDManager.load(world.getServer());
         }
     }
+
     public static void init(final FMLCommonSetupEvent event) {
 
         event.enqueueWork(() -> {

@@ -7,6 +7,7 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.hardcorerevival.HardcoreRevivalCompat;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.VS2Utils;
 import com.happysg.radar.config.RadarConfig;
@@ -17,6 +18,7 @@ import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -27,7 +29,6 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.valkyrienskies.core.api.ships.Ship;
 
-import java.lang.reflect.Method;
 import java.util.*;
 
 public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
@@ -141,6 +142,11 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
 
         for (Entity entity : scannedEntities) {
+            if (entity instanceof Player player && HardcoreRevivalCompat.isInReviveState(player)) {
+                radarTracks.remove(entity.getUUID().toString());
+                continue;
+            }
+
             if (entity.isAlive() && isInFovAndRange(entity.position())) {
                 radarTracks.compute(entity.getUUID().toString(), (id, track) -> {
                     if (track == null) return new RadarTrack(entity);
@@ -191,7 +197,21 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     private void removeDeadTracks() {
+        // Hard-prune player tracks that are no longer targetable regardless of scan cache state.
+        radarTracks.entrySet().removeIf(entry -> {
+            RadarTrack track = entry.getValue();
+            return shouldDropPlayerTrack(track);
+        });
+
         // entities
+        scannedEntities.removeIf(entity -> {
+            if (entity instanceof Player player && HardcoreRevivalCompat.isInReviveState(player)) {
+                radarTracks.remove(entity.getUUID().toString());
+                return true;
+            }
+            return false;
+        });
+
         for (Entity entity : scannedEntities) {
             if (!entity.isAlive())
                 radarTracks.remove(entity.getUUID().toString());
@@ -227,6 +247,19 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return dead;
         });
     }
+
+    private boolean shouldDropPlayerTrack(RadarTrack track) {
+        if (track == null || track.trackCategory() != TrackCategory.PLAYER) {
+            return false;
+        }
+        if (!(blockEntity.getLevel() instanceof ServerLevel sl)) {
+            return false;
+        }
+
+        Player player = HardcoreRevivalCompat.resolveTrackedPlayer(sl, track);
+        return player == null || HardcoreRevivalCompat.isInReviveState(player);
+    }
+
     private void scanForEntityTracks() {
         Level level = blockEntity.getLevel();
         if (level == null) return;
@@ -236,12 +269,14 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
         for (AABB aabb : splitAABB(getRadarAABB(), 256)) {
             if (scanAll) {
-                scannedEntities.addAll(level.getEntities(null, aabb));
+                scannedEntities.addAll(level.getEntitiesOfClass(Entity.class, aabb,
+                    entity -> !(entity instanceof Player player && HardcoreRevivalCompat.isInReviveState(player))));
                 continue;
             }
 
             if (scanPlayers)
-                scannedEntities.addAll(level.getEntitiesOfClass(Player.class, aabb));
+                scannedEntities.addAll(level.getEntitiesOfClass(Player.class, aabb,
+                    player -> !HardcoreRevivalCompat.isInReviveState(player)));
 
             if (scanProjectiles)
                 scannedEntities.addAll(level.getEntitiesOfClass(Projectile.class, aabb));

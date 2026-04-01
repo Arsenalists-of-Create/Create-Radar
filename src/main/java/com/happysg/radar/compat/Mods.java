@@ -22,6 +22,7 @@ public enum Mods {
     CBC_AT,
     CREATEBIGCANNONS,
     CREATEENERGYCANNONS,
+    HARDCOREREVIVAL,
     SHUPAPIUM,
     KABOOM;
     private final String id;

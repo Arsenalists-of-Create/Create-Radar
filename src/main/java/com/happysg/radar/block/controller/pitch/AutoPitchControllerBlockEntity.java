@@ -8,6 +8,7 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
+import com.happysg.radar.compat.hardcorerevival.HardcoreRevivalCompat;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.VS2Utils;
@@ -195,6 +196,10 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         if (level == null || level.isClientSide || binoMode) return; // binoculars have priority
 
         if (firingControl == null) getFiringControl();
+
+        if (tTrack != null && level instanceof ServerLevel sl && HardcoreRevivalCompat.isTrackedPlayerInReviveState(sl, tTrack)) {
+            tTrack = null;
+        }
 
 
         LOGGER.debug("PITCH setAndAcquireTrack track={} firingControl={}", tTrack == null ? "null" : tTrack.getId(), firingControl != null);
@@ -929,6 +934,7 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
     public boolean canEngageTrack(@Nullable RadarTrack track, boolean requireLos) {
         if (track == null) return false;
         if (!(level instanceof ServerLevel sl)) return false;
+        if (HardcoreRevivalCompat.isTrackedPlayerInReviveState(sl, track)) return false;
 
         getFiringControl();
         if (firingControl == null) return false;
