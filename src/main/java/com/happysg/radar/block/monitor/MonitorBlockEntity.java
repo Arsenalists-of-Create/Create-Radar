@@ -10,6 +10,7 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.hardcorerevival.HardcoreRevivalCompat;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
 import com.mojang.logging.LogUtils;
@@ -181,6 +182,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         MonitorBlockEntity controllerBe = getController();
         if (controllerBe == null)
             return;
+        if (track != null && HardcoreRevivalCompat.isTrackedPlayerInReviveState(sl, track)) {
+            track = null;
+            controllerBe.activetrack = null;
+            controllerBe.selectedEntity = null;
+        }
         if (track != null && track.trackCategory() == TrackCategory.VS2 && "VS2:ship".equals(track.entityType())) {
             long shipId = 0;
             try {
@@ -306,7 +312,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         IRadar radar = r.get();
         DetectionConfig det = this.filter; // already synced from network (or legacy)
-        cachedTracks = radar.getTracks().stream().filter(det::test).toList();
+        cachedTracks = radar.getTracks().stream()
+                .filter(det::test)
+                .filter(track -> !(level instanceof ServerLevel sl
+                        && HardcoreRevivalCompat.isTrackedPlayerInReviveState(sl, track)))
+                .toList();
 
         if (!level.isClientSide) {
             activetrack = resolveActiveTrack();

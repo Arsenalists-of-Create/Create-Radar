@@ -9,6 +9,7 @@ import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.*;
+import com.happysg.radar.compat.hardcorerevival.HardcoreRevivalCompat;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import com.happysg.radar.compat.vs2.VS2Utils;
@@ -548,6 +549,9 @@ public class WeaponFiringControl {
             } catch (Throwable ignored) {}
 
             if (e != null && e.isAlive()) {
+                if (HardcoreRevivalCompat.isTrackedPlayerInReviveState(sl, track)) {
+                    return false;
+                }
                 return getCachedVisiblePoint(e) != null;
             }
 
@@ -679,6 +683,10 @@ public class WeaponFiringControl {
         }
 
         if (!binoMode && activetrack != null && level instanceof ServerLevel sl) {
+            if (HardcoreRevivalCompat.isTrackedPlayerInReviveState(sl, activetrack)) {
+                resetTarget();
+                return;
+            }
 
             boolean isVsShip = Mods.VALKYRIENSKIES.isLoaded() && "VS2:ship".equals(activetrack.entityType());
 
