@@ -3,8 +3,7 @@ package com.happysg.radar.registry;
 import com.happysg.radar.CreateRadar;
 
 
-import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlock;
-import com.happysg.radar.block.controller.id.IdentificationTransponder;
+import com.happysg.radar.block.arad.jammer.shield.ShieldJammerBlock;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
 import com.happysg.radar.block.controller.firing.FireControllerBlock;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlock;
@@ -13,19 +12,22 @@ import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorBlock;
+import com.happysg.radar.block.mount.SmartMountBlock;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
-import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
+import com.happysg.radar.block.radar.radome.CannonMountRadomeBlock;
 import com.happysg.radar.block.radar.receiver.AbstractRadarFrame;
 import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
 
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
+import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlock;
+import com.happysg.radar.block.radar.sonar.panel.SonarPanel;
+import com.happysg.radar.block.siren.SirenBlock;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BuilderTransformers;
 import com.simibubi.create.foundation.data.SharedProperties;
 import com.tterrag.registrate.util.entry.BlockEntry;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.tags.BlockTags;
-import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.MapColor;
 import net.neoforged.neoforge.client.model.generators.ConfiguredModel;
 
@@ -38,6 +40,7 @@ public class ModBlocks {
             REGISTRATE.block("monitor", MonitorBlock::new)
                     .initialProperties(SharedProperties::softMetal)
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .blockstate((c, p) -> p.getVariantBuilder(c.get())
                             .forAllStates(state -> {
                                 String shape = state.getValue(MonitorBlock.SHAPE).toString().toLowerCase();
@@ -60,6 +63,7 @@ public class ModBlocks {
                     .initialProperties(SharedProperties::softMetal)
                     .properties(p -> p.mapColor(MapColor.TERRACOTTA_BROWN))
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .addLayer(() -> RenderType::translucent)
                     .transform(axeOrPickaxe())
                     .blockstate((c, p) -> p.directionalBlock(c.getEntry(), AssetLookup.partialBaseModel(c, p)))
@@ -74,6 +78,7 @@ public class ModBlocks {
 //                    .transform(BlockStressDefaults.setImpact(4))
                     .transform(BuilderTransformers.bearing("windmill", "gearbox"))
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .blockstate((c, p) -> p.simpleBlock(c.getEntry(), AssetLookup.partialBaseModel(c, p)))
                     .transform(axeOrPickaxe())
                     .item()
@@ -81,24 +86,9 @@ public class ModBlocks {
                     .build()
                     .register();
 
-    public static final BlockEntry<StationaryRadarBlock> STATIONARY_RADAR  =
-            REGISTRATE.block("plane_radar", StationaryRadarBlock::new)
-                    .initialProperties(SharedProperties::softMetal)
-                    .addLayer(() -> RenderType::cutout)
-                    .properties(p -> p.noOcclusion())
-                    .blockstate((c, p) -> p.horizontalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
-                    .transform(axeOrPickaxe())
-                    .simpleItem()
-                    .register();
 
-    public static BlockEntry<IdentificationTransponder> ID_BLOCK =
-            REGISTRATE.block("identification_transponder", IdentificationTransponder::new)
-                    .initialProperties(SharedProperties::softMetal)
-                    .properties(p -> p.noOcclusion())
-                    .transform(axeOrPickaxe())
-                    .blockstate((c, p) -> p.simpleBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
-                    .simpleItem()
-                    .register();
+
+
 
     @SuppressWarnings("unused")
     public static final BlockEntry<RadarReceiverBlock> RADAR_RECEIVER_BLOCK =
@@ -106,6 +96,7 @@ public class ModBlocks {
                     .initialProperties(SharedProperties::softMetal)
 //                    .transform(BlockStressDefaults.setImpact(0))
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .transform(axeOrPickaxe())
                     .blockstate((ctx, prov) -> prov.directionalBlock(ctx.getEntry(), prov.models()
                             .getExistingFile(ctx.getId()), 180))
@@ -117,8 +108,10 @@ public class ModBlocks {
             REGISTRATE.block("radar_dish_block", properties -> new AbstractRadarFrame(properties, ModShapes.RADAR_DISH))
                     .lang("Radar Dish")
                     .initialProperties(SharedProperties::softMetal)
+
 //                    .transform(BlockStressDefaults.setImpact(0))
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .addLayer(() -> RenderType::cutoutMipped)
                     .transform(axeOrPickaxe())
                     .blockstate((ctx, prov) -> prov.directionalBlock(ctx.getEntry(), prov.models()
@@ -133,6 +126,7 @@ public class ModBlocks {
                     .initialProperties(SharedProperties::softMetal)
 //                    .transform(BlockStressDefaults.setImpact(0))
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .transform(axeOrPickaxe())
                     .blockstate((ctx, prov) -> prov.directionalBlock(ctx.getEntry(), prov.models()
                             .getExistingFile(ctx.getId()), 0))
@@ -145,6 +139,7 @@ public class ModBlocks {
                     .initialProperties(SharedProperties::softMetal)
 //                    .transform(BlockStressDefaults.setImpact(0))
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .blockstate((ctx, prov) -> prov.directionalBlock(ctx.getEntry(), prov.models()
                             .getExistingFile(ctx.getId()), 0))
                     .transform(axeOrPickaxe())
@@ -159,6 +154,7 @@ public class ModBlocks {
 //                    .transform(BlockStressDefaults.setImpact(128))
                     .transform(BuilderTransformers.bearing("windmill", "gearbox"))
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
 
                     .transform(axeOrPickaxe())
                     .blockstate((c, p) -> p.directionalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
@@ -172,6 +168,7 @@ public class ModBlocks {
 //                    .transform(BlockStressDefaults.setImpact(128))
                     .transform(BuilderTransformers.bearing("windmill", "gearbox"))
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .transform(axeOrPickaxe())
                     .blockstate((c, p) -> p.horizontalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
                     .simpleItem()
@@ -184,13 +181,14 @@ public class ModBlocks {
                         provider.getVariantBuilder(context.get())
                                 .partialState().with(FireControllerBlock.POWERED, false)
                                 .modelForState()
-                                .modelFile(provider.models().cubeAll("off",ResourceLocation.fromNamespaceAndPath("create_radar","block/off")))
+                                .modelFile(provider.models().cubeAll("off",net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("create_radar", "block/off")))
                                 .addModel()
                                 .partialState().with(FireControllerBlock.POWERED, true)
                                 .modelForState()
-                                .modelFile(provider.models().cubeAll("on",ResourceLocation.fromNamespaceAndPath("create_radar","block/on")))
+                                .modelFile(provider.models().cubeAll("on",net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("create_radar", "block/on")))
                                 .addModel();
                     })          .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .transform(axeOrPickaxe())
                     .simpleItem()
                     .register();
@@ -198,32 +196,85 @@ public class ModBlocks {
             REGISTRATE.block("network_filterer", NetworkFiltererBlock::new)
                     .initialProperties(SharedProperties::softMetal)
                     .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .transform(axeOrPickaxe())
                     .blockstate((ctx, prov) -> prov.directionalBlock(ctx.getEntry(),
                             prov.models().getExistingFile(ctx.getId()), 0))
                     .simpleItem()
                     .register();
-    public static final BlockEntry<RadarWarningReceiverBlock> RWR_BLOCK =
-            REGISTRATE.block("radar_warning_receiver", RadarWarningReceiverBlock::new)
+    public static final BlockEntry<CannonMountRadomeBlock> RADOME =
+            REGISTRATE.block("radome",CannonMountRadomeBlock::new)
                     .initialProperties(SharedProperties::softMetal)
-                    .properties(BlockBehaviour.Properties::noOcclusion)
+                    .properties(properties -> properties.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+    public static final BlockEntry<SmartMountBlock> SMART_MOUNT =
+            REGISTRATE.block("smart_mount",SmartMountBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+    public static final BlockEntry<SirenBlock> SIREN =
+            REGISTRATE.block("siren", SirenBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(properties -> properties.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .addLayer(() -> RenderType::cutoutMipped)
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+    public static final BlockEntry<SkyRadarBlock> SKY_RADAR =
+            REGISTRATE.block("sky_radar", SkyRadarBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(properties -> properties.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+    public static final BlockEntry<SonarBearingBlock> SONAR_BEARING =
+            REGISTRATE.block("sonar_bearing", SonarBearingBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+//                    .transform(BlockStressDefaults.setImpact(4))
+                    .transform(BuilderTransformers.bearing("windmill", "gearbox"))
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .blockstate((c, p) -> p.simpleBlock(c.getEntry(), AssetLookup.partialBaseModel(c, p)))
+                    .transform(axeOrPickaxe())
+                    .item()
+                    .model(AssetLookup.customBlockItemModel("_", "item"))
+                    .build()
+                    .register();
+    public static final BlockEntry<SonarPanel> SONAR_PANEL =
+            REGISTRATE.block("sonar_panel", SonarPanel::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(properties -> properties.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+    public static final BlockEntry<ShieldJammerBlock> SHIELD_JAMMER =
+            REGISTRATE.block("shield_jammer", ShieldJammerBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(properties -> properties.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
                     .transform(axeOrPickaxe())
                     .simpleItem()
                     .register();
 
 
 
+
+
+
+
+
+
+
     public static void register() {
         CreateRadar.getLogger().info("Registering blocks!");
-//        BlockStressValues.IMPACTS.register(RADAR_BEARING_BLOCK.get(), () -> 4d);
-//        BlockStressValues.IMPACTS.register(AUTO_YAW_CONTROLLER_BLOCK.get(), () -> 128d);
-//        BlockStressValues.IMPACTS.register(AUTO_PITCH_CONTROLLER_BLOCK.get(), () -> 128d);
-//        BlockStressValues.IMPACTS.register(TRACK_CONTROLLER_BLOCK.get(), () -> 16d);
-//
-//        // zero-impact parts
-//        BlockStressValues.IMPACTS.register(RADAR_RECEIVER_BLOCK.get(), () -> 0d);
-//        BlockStressValues.IMPACTS.register(RADAR_DISH_BLOCK.get(), () -> 0d);
-//        BlockStressValues.IMPACTS.register(RADAR_PLATE_BLOCK.get(), () -> 0d);
-//        BlockStressValues.IMPACTS.register(CREATIVE_RADAR_PLATE_BLOCK.get(), () -> 0d);
     }
 }

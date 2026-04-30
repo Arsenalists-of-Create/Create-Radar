@@ -1,27 +1,25 @@
 package com.happysg.radar.block.controller.firing;
 
-
-import com.happysg.radar.block.behavior.networks.NetworkContext;
-import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import org.slf4j.Logger;
 
 import java.util.List;
 
-public class FireControllerBlockEntity extends SmartBlockEntity  {
+public class FireControllerBlockEntity extends SmartBlockEntity {
     private BlockPos lastKnownPos = BlockPos.ZERO;
 
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -29,7 +27,12 @@ public class FireControllerBlockEntity extends SmartBlockEntity  {
 
     // server-time when we last got a target update
     private long lastCommandTick = -1;
-    private static final long FAILSAFE_TICKS = 10;
+    private static final long FAILSAFE_TICKS = 3;
+
+    // i use these to run a pulse train when a repeater is on top
+    private boolean pulsing = false;
+    private long nextPulseTick = -1;
+    private long pulseOffTick = -1;
 
     public FireControllerBlockEntity(BlockEntityType<?> pType, BlockPos pPos, BlockState pBlockState) {
         super(pType, pPos, pBlockState);
@@ -37,28 +40,43 @@ public class FireControllerBlockEntity extends SmartBlockEntity  {
 
     @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-
     }
+
     @Override
     public void tick() {
         super.tick();
         if (level == null || level.isClientSide) return;
+
+        long now = level.getGameTime();
+
         // i hard fail-safe: if nobody has told me to keep firing recently, i turn off
-        if (isPowered() && lastCommandTick >= 0 && (level.getGameTime() - lastCommandTick) > FAILSAFE_TICKS) {
+        if ((isPowered() || pulsing) && lastCommandTick >= 0 && (now - lastCommandTick) > FAILSAFE_TICKS) {
             setPowered(false);
+            return;
         }
-        if (!level.isClientSide && level.getGameTime() % 40 == 0) {
+
+        // i run pulse train timing
+        if (pulsing) {
+            // i turn off after a 1-tick "on" window
+            if (pulseOffTick >= 0 && now >= pulseOffTick) {
+                pulseOffTick = -1;
+                setPoweredInternal(false);
+            }
+
+            // i start the next pulse when scheduled
+            if (nextPulseTick >= 0 && now >= nextPulseTick) {
+                startPulseNow(now);
+            }
+        }
+
+        if (!level.isClientSide && now % 40 == 0) {
             if (level instanceof ServerLevel serverLevel) {
                 if (lastKnownPos.equals(worldPosition))
                     return;
 
                 ResourceKey<Level> dim = serverLevel.dimension();
                 WeaponNetworkData data = WeaponNetworkData.get(serverLevel);
-                boolean updated = data.updateWeaponEndpointPosition(
-                        dim,
-                        lastKnownPos,
-                        worldPosition
-                );
+                boolean updated = data.updateWeaponEndpointPosition(dim, lastKnownPos, worldPosition);
 
                 // only commit the new position if the network accepted it
                 if (updated) {
@@ -68,7 +86,6 @@ public class FireControllerBlockEntity extends SmartBlockEntity  {
                 }
             }
         }
-
     }
 
     public boolean isPowered() {
@@ -81,6 +98,58 @@ public class FireControllerBlockEntity extends SmartBlockEntity  {
 
         // i treat every call as a command input, and remember when it happened
         lastCommandTick = level.getGameTime();
+
+        if (powered && hasRepeaterAbove()) {
+            // i enter pulsing mode; pulses keep coming as long as i'm being commanded (failsafe handles dropout)
+            pulsing = true;
+
+            long now = level.getGameTime();
+            if (nextPulseTick < 0 || now >= nextPulseTick) {
+                // i fire an immediate pulse when first commanded (or if we got desynced)
+                startPulseNow(now);
+            }
+
+            return;
+        }
+
+        // i stop pulsing if i'm being set normally/off
+        pulsing = false;
+        nextPulseTick = -1;
+        pulseOffTick = -1;
+
+        setPoweredInternal(powered);
+    }
+
+    private void startPulseNow(long now) {
+        // i generate a 1-tick pulse
+        setPoweredInternal(true);
+        pulseOffTick = now + 1;
+
+        int period = getRepeaterPeriodTicks();
+        nextPulseTick = now + period;
+    }
+
+    private boolean hasRepeaterAbove() {
+        if (level == null) return false;
+        return level.getBlockState(worldPosition.above()).is(Blocks.REPEATER);
+    }
+
+    private int getRepeaterPeriodTicks() {
+        if (level == null) return 2;
+
+        BlockState above = level.getBlockState(worldPosition.above());
+        if (!above.is(Blocks.REPEATER)) {
+            return 2;
+        }
+
+        // i map repeater DELAY (1..4) to game ticks (2..8)
+        int delaySteps = above.getValue(RepeaterBlock.DELAY); // 1..4
+        return Math.max(1, delaySteps) * 2;
+    }
+
+    private void setPoweredInternal(boolean powered) {
+        if (level == null || level.isClientSide)
+            return;
 
         BlockState state = getBlockState();
         if (!(state.getBlock() instanceof FireControllerBlock))
@@ -103,21 +172,20 @@ public class FireControllerBlockEntity extends SmartBlockEntity  {
         sendData();
     }
 
-
-
-
-
-
     @Override
-    protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-        super.write(tag, registries, clientPacket);
+    protected void write(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.write(tag, provider, clientPacket);
         tag.putBoolean("Powered", powered);
         tag.putLong("LastKnownPos", lastKnownPos.asLong());
+
+        tag.putBoolean("Pulsing", pulsing);
+        tag.putLong("NextPulseTick", nextPulseTick);
+        tag.putLong("PulseOffTick", pulseOffTick);
     }
 
     @Override
-    protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-        super.read(tag, registries, clientPacket);
+    protected void read(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.read(tag, provider, clientPacket);
 
         powered = tag.getBoolean("Powered");
         if (level != null) {
@@ -126,29 +194,34 @@ public class FireControllerBlockEntity extends SmartBlockEntity  {
                 powered = state.getValue(FireControllerBlock.POWERED);
             }
         }
+
         if (tag.contains("LastKnownPos", Tag.TAG_LONG)) {
             lastKnownPos = BlockPos.of(tag.getLong("LastKnownPos"));
         } else {
             lastKnownPos = worldPosition;
         }
+
+        pulsing = tag.getBoolean("Pulsing");
+        nextPulseTick = tag.contains("NextPulseTick", Tag.TAG_LONG) ? tag.getLong("NextPulseTick") : -1;
+        pulseOffTick = tag.contains("PulseOffTick", Tag.TAG_LONG) ? tag.getLong("PulseOffTick") : -1;
     }
 
     @Override
     public void onLoad() {
         super.onLoad();
-        if(level instanceof ServerLevel serverLevel) {
+        if (level instanceof ServerLevel serverLevel) {
             ResourceKey<Level> dim = serverLevel.dimension();
             WeaponNetworkData data = WeaponNetworkData.get(serverLevel);
-            data.updateWeaponEndpointPosition(dim,lastKnownPos,worldPosition);
+            data.updateWeaponEndpointPosition(dim, lastKnownPos, worldPosition);
         }
+
         powered = false;
+        pulsing = false;
+        nextPulseTick = -1;
+        pulseOffTick = -1;
+
         if (level != null && !level.isClientSide) {
-            setPowered(false);
+            setPoweredInternal(false);
         }
     }
-
-
-
-
 }
-

@@ -1,0 +1,18 @@
+{
+  "rwr.lock": {
+    "sounds": [
+      {
+        "name": "create_radar:tracked",
+        "stream": false
+      }
+    ]
+  },
+  "rwr.in_range": {
+    "sounds": [
+      {
+        "name": "create_radar:spotted",
+        "stream": false
+      }
+    ]
+  }
+}

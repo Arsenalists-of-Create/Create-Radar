@@ -1,19 +1,30 @@
 {
   "variants": {
-    "facing=east": {
+    "facing=down": {
+      "model": "create_radar:block/auto_yaw_controller"
+    },
+    "facing=up": {
       "model": "create_radar:block/auto_yaw_controller",
-      "y": 90
+      "x": 180
     },
     "facing=north": {
-      "model": "create_radar:block/auto_yaw_controller"
+      "model": "create_radar:block/auto_yaw_controller",
+      "x": 90
     },
     "facing=south": {
       "model": "create_radar:block/auto_yaw_controller",
+      "x": 90,
       "y": 180
     },
     "facing=west": {
       "model": "create_radar:block/auto_yaw_controller",
+      "x": 90,
       "y": 270
+    },
+    "facing=east": {
+      "model": "create_radar:block/auto_yaw_controller",
+      "x": 90,
+      "y": 90
     }
   }
 }

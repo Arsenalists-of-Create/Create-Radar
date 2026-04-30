@@ -20,7 +20,6 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
-import net.minecraft.util.StringUtil;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 
@@ -156,7 +155,7 @@ public class SimpleEditBox extends AbstractWidget implements Renderable {
         int i = Math.min(this.cursorPos, this.highlightPos);
         int j = Math.max(this.cursorPos, this.highlightPos);
         int k = this.maxLength - this.value.length() - (i - j);
-        String s = StringUtil.filterText(pTextToWrite);
+        String s = net.minecraft.util.StringUtil.filterText(pTextToWrite);
         int l = s.length();
         if (k < l) {
             s = s.substring(0, k);

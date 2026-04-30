@@ -1,0 +1,2 @@
+package riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.guidance.infrared_homing;
+public class EntityDamagePropertiesComponent {}

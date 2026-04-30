@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "T": {
+      "item": "create:transmitter"
+    },
+    "I": {
+      "item": "create:industrial_iron_block"
+    },
+    "F": {
+      "item": "create_radar:ident_filter_item"
+    }
+  },
+  "pattern": [
+    "T",
+    "I",
+    "F"
+  ],
+  "result": {
+    "item": "create_radar:identification_transponder"
+  },
+  "show_notification": true
+}

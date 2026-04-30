@@ -26,9 +26,9 @@ public class NetworkFiltererRenderer implements BlockEntityRenderer<NetworkFilte
     }
     // UV coordinates for the three slots (u, v) in 0..16 (texture pixels).
     private static final float[][] UVS = {
-            {5f, 11f},   // slot 0 -> UV(4,4)
-            {11f, 11f},   // slot 1 -> UV(8,8)
-            {11f, 5f}   // slot 2 -> UV(12,4)
+            {5f, 11f},   // slot 0
+            {11f, 11f},  // slot 1
+            {11f, 5f}    // slot 2
     };
 
     // small offset so the item sits slightly outside the face (avoid z-fight)
@@ -62,9 +62,7 @@ public class NetworkFiltererRenderer implements BlockEntityRenderer<NetworkFilte
         try {
             // try direct accessor: getStackInSlot(int) or public inventory
             for (int i = 0; i < 3; i++) {
-                IItemHandler inv = be.getItemHandler();
-                if (inv == null) return;
-
+                IItemHandler inv =  be.getItemHandler();
                 stacks[i] = inv.getStackInSlot(i);
             }
         } catch (NoSuchMethodError | AbstractMethodError e) {
@@ -76,14 +74,15 @@ public class NetworkFiltererRenderer implements BlockEntityRenderer<NetworkFilte
         }
 
         if (usedCapability) {
-            var level = be.getLevel();
-            if (level == null) return;
-
-            IItemHandler inv = level.getCapability(net.neoforged.neoforge.capabilities.Capabilities.ItemHandler.BLOCK, be.getBlockPos(), be.getBlockState(), be, null);
-            if (inv == null) return;
-
-            for (int i = 0; i < 3; i++) {
-                stacks[i] = inv.getStackInSlot(i);
+            IItemHandler inv = be.getItemHandler();
+            if (inv != null) {
+                
+                for (int i = 0; i < 3; i++) {
+                    stacks[i] = inv.getStackInSlot(i);
+                }
+            } else {
+                // nothing to render
+                return;
             }
         }
 
@@ -103,56 +102,45 @@ public class NetworkFiltererRenderer implements BlockEntityRenderer<NetworkFilte
             // local coords in -0.5..+0.5 from UV
             double localX = (u / 16.0d) - 0.5d;       // u: left->right maps to X+
             double localY = 0.5d - (v / 16.0d);       // v: top->bottom maps to Y-
+            final double offset = 0.5d + 0.02d; // Slightly more offset to avoid z-fight
+
+            final double yShift = 0.5d;
 
             switch (face) {
                 case NORTH -> {
-                    // outward = -Z
-                    ms.translate(localX, localY, OUT_OFFSET);
-                    // rotate so item faces outward (-Z). flip so it's upright.
+                    ms.translate(localX, localY - yShift, -offset);
                     ms.mulPose(Axis.YP.rotationDegrees(180f));
-                    ms.mulPose(Axis.XP.rotationDegrees(180f));
                 }
                 case SOUTH -> {
-                    // outward = +Z
-                    ms.translate(-localX, localY, OUT_OFFSET);
-                    ms.mulPose(Axis.XP.rotationDegrees(180f));
+                    ms.translate(-localX, localY - yShift, offset);
                 }
                 case WEST -> {
-                    // outward = -X
-                    ms.translate(OUT_OFFSET, localY, -localX);
-                    // rotate to make +Z point outward (-X originally)
+                    ms.translate(-offset, localY - yShift, -localX);
                     ms.mulPose(Axis.YP.rotationDegrees(90f));
-                    ms.mulPose(Axis.XP.rotationDegrees(180f));
                 }
                 case EAST -> {
-                    // outward = +X
-                    ms.translate(OUT_OFFSET, localY, localX);
+                    ms.translate(offset, localY - yShift, localX);
                     ms.mulPose(Axis.YP.rotationDegrees(-90f));
-                    ms.mulPose(Axis.XP.rotationDegrees(180f));
                 }
                 case UP -> {
-                    // outward = +Y (top face)
-                    ms.translate(localX, OUT_OFFSET, localY);
-                    // rotate so item faces upward (rotate -90 around X)
+                    ms.translate(localX, offset - yShift, localY);
                     ms.mulPose(Axis.XP.rotationDegrees(-90f));
+                    ms.mulPose(Axis.ZP.rotationDegrees(180f));
                 }
                 case DOWN -> {
-                    // outward = -Y (bottom face)
-                    ms.translate(localX, OUT_OFFSET, -localY);
+                    ms.translate(localX, -offset - yShift, -localY);
                     ms.mulPose(Axis.XP.rotationDegrees(90f));
                 }
             }
 
-
-            final float scale = 0.3f; // smaller = tighter to face
+            final float scale = 0.35f;
             ms.scale(scale, scale, scale);
-            itemRenderer.renderStatic(stack, ItemDisplayContext.FIXED, packedLight, packedOverlay, ms, buffers,null, 0);
-
+            itemRenderer.renderStatic(stack, ItemDisplayContext.FIXED, packedLight, packedOverlay, ms, buffers, be.getLevel(), 0);
 
             ms.popPose();
         }
+
     }
 
 
 }
-

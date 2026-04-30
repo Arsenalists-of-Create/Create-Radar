@@ -10,14 +10,13 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.PhysicsHandler;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.api.equipment.goggles.IHaveHoveringInformation;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtUtils;
@@ -32,11 +31,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.fml.loading.FMLLoader;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
-import org.valkyrienskies.core.api.ships.Ship;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -74,6 +70,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     @Override
     public void initialize() {
         super.initialize();
+        this.lastKnownPos = worldPosition;
         updateCacheServerOrClient();
     }
 
@@ -91,23 +88,18 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (level == null)
             return;
 
-//        if(activetrack != null){
-//            setSelectedTargetServer(activetrack);
-//        }
 
         if (!level.isClientSide && level instanceof ServerLevel sl) {
-            if (level.getGameTime() % 5 == 0) {
-                syncFromNetwork(sl);
-                updateCacheServerOrClient();
+            syncFromNetwork(sl);
+            updateCacheServerOrClient();
 
-                // keep controller's displayed selection consistent with network
-                MonitorBlockEntity controllerBe = getController();
-                if (controllerBe != null) {
-                    controllerBe.activetrack = controllerBe.resolveActiveTrackFromCache();
-                }
-
-                sendData();
+            // keep controller's displayed selection consistent with network
+            MonitorBlockEntity controllerBe = getController();
+            if (controllerBe != null) {
+                controllerBe.activetrack = controllerBe.resolveActiveTrackFromCache();
             }
+
+            sendData();
         }
         if (!level.isClientSide && level.getGameTime() % 40 == 0) {
             if (level instanceof ServerLevel serverLevel) {
@@ -159,9 +151,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     private void syncFromNetwork(ServerLevel sl) {
         NetworkData.Group g = getNetworkGroup(sl);
-        if (g == null) {
-            return;
-        }
+        if (g == null) return;
 
 
         BlockPos netRadar = g.radarPos;
@@ -192,14 +182,13 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             }
 
             if (track != null) {
-                Ship ship = VSGameUtilsKt.getShipObjectWorld(sl).getLoadedShips().getById(shipId);
-                if (ship == null) {
+                if (PhysicsHandler.isShipAlive(sl, track.id())) {
+                    reset = false;
+                } else {
                     track = null;
                     this.activetrack = null;
                     this.selectedEntity = null;
-                    reset = true;// i refuse to forward a dead ship selection
-                }else{
-                    reset = false;
+                    reset = true;
                 }
             }
         }
@@ -210,30 +199,12 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (g == null)
             return;
 
-        //NetworkData data = NetworkData.get(sl);
-        //data.setSelectedTargetId(g, track == null ? null : track.getId());
-
-        // // Update monitor-side state
-//        if (track == null) {
-//            controllerBe.selectedEntity = null;
-//            controllerBe.activetrack = null;
-//        } else {
-//            controllerBe.selectedEntity = track.getId();
-//            controllerBe.activetrack = track;
-//        }
 
 
 
-        // // Forward selection to the filterer BE at the group’s filterer position
         BlockPos filterpos = g.key.filtererPos();
-        LOGGER.debug("MONITOR forwarding to filterer: filterPos={}, groupKey={}", filterpos, g.key);
-
         if (level.getBlockEntity(filterpos) instanceof NetworkFiltererBlockEntity filtererBe) {
-            LOGGER.debug("MONITOR found filterer BE: calling receiveSelectedTargetFromMonitor track={}", track == null ? "null" : track.getId());
-            LOGGER.debug("Ping");
-            filtererBe.receiveSelectedTargetFromMonitor(track,safeZones);
-        } else {
-            LOGGER.debug("MONITOR could NOT find NetworkFiltererBlockEntity at {}. Found={}", filterpos, level.getBlockEntity(filterpos) == null ? "null" : level.getBlockEntity(filterpos).getClass().getName());
+            filtererBe.receiveSelectedTargetFromMonitor(track, safeZones);
         }
 
         controllerBe.setChanged();
@@ -315,7 +286,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
     }
     public boolean isLinked() {
-        return getRadarCenterPos() != null;
+        return radarPos != null;
     }
 
     @Nullable
@@ -417,10 +388,13 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         return getRadar().map(IRadar::getRange).orElse(0f);
     }
 
-    @Nullable
-    public Vec3 getRadarCenterPos() {
+    public Vec3 getRadarCenterPos(float partialTicks) {
         if (radarPos == null || level == null) return null;
-        return PhysicsHandler.getWorldVec(level, radarPos);
+        return getRadar().map(radar -> radar.getRadarCenterPos(partialTicks)).orElseGet(() -> PhysicsHandler.getWorldVec(level, radarPos));
+    }
+
+    public Vec3 getRadarCenterPos() {
+        return getRadarCenterPos(1.0f);
     }
 
 
@@ -464,9 +438,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public void showSafeZone() {
-        if (FMLLoader.getDist() == Dist.CLIENT) {
-            Client.showSafeZone(this);
-        }
+        // com.happysg.radar.compat.stub.DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> Client.showSafeZone(this));
     }
 
     @OnlyIn(Dist.CLIENT)
@@ -489,18 +461,18 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     // NBT sync
 
     @Override
-    protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-        super.read(tag, registries, clientPacket);
+    protected void read(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.read(tag, provider, clientPacket);
 
-        if (tag.contains("Controller", Tag.TAG_COMPOUND))
-            controller = NbtUtils.readBlockPos(tag, "Controller").orElse(null);
+        if (tag.contains("Controller"))
+            controller = net.minecraft.nbt.NbtUtils.readBlockPos(tag, "Controller").orElse(null);
 
         // if the packet explicitly says "no radar", i clear the cached radarPos
-        if (clientPacket && tag.contains("HasRadarPos", Tag.TAG_BYTE) && !tag.getBoolean("HasRadarPos")) {
+        if (clientPacket && tag.contains("HasRadarPos") && !tag.getBoolean("HasRadarPos")) {
             radarPos = null;
             radar = null;
-        } else if (tag.contains("radarPos", Tag.TAG_COMPOUND)) {
-            radarPos = NbtUtils.readBlockPos(tag, "radarPos").orElse(null);
+        } else if (tag.contains("radarPos")) {
+            radarPos = net.minecraft.nbt.NbtUtils.readBlockPos(tag, "radarPos").orElse(null);
         }
 
         selectedEntity = tag.contains("SelectedEntity", Tag.TAG_STRING) ? tag.getString("SelectedEntity") : null;
@@ -539,8 +511,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     @Override
-    protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-        super.write(tag, registries, clientPacket);
+    protected void write(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.write(tag, provider, clientPacket);
 
         if (controller != null)
             tag.put("Controller", NbtUtils.writeBlockPos(controller));
@@ -572,10 +544,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
 
-    public Ship getShip(){
-        if(!Mods.VALKYRIENSKIES.isLoaded())return null;
-        Ship ship = VSGameUtilsKt.getShipManagingPos(level,worldPosition);
-        return ship;
+    public Object getShip(){
+        return PhysicsHandler.getShipManagingPos(level, worldPosition);
     }
 
 
@@ -597,4 +567,20 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     public String getHoveredEntity() { return hoveredEntity; }
     public String getSelectedEntity() { return selectedEntity; }
+
+    @Override
+    public net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket getUpdatePacket() {
+        return net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    @Override
+    public CompoundTag getUpdateTag(net.minecraft.core.HolderLookup.Provider provider) {
+        CompoundTag tag = super.getUpdateTag(provider);
+        write(tag, provider, true);
+        return tag;
+    }
+
+    public float getShipYawDeg() {
+        return PhysicsHandler.getShipYawDeg(level, worldPosition);
+    }
 }

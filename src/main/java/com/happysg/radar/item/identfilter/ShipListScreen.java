@@ -1,8 +1,8 @@
 package com.happysg.radar.item.identfilter;
 
+import com.happysg.radar.networking.NetworkHandler;
 import com.happysg.radar.networking.networkhandlers.ListNBTHandler;
-import net.neoforged.neoforge.network.PacketDistributor;
-import com.happysg.radar.networking.packets.SaveListsPayload;
+import com.happysg.radar.networking.packets.SaveListsPacket;
 import com.happysg.radar.registry.ModGuiTextures;
 import com.happysg.radar.utils.screenelements.SimpleEditBox;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -58,7 +58,7 @@ public class ShipListScreen extends AbstractSimiScreen {
         int x = guiLeft;
         int y = guiTop;
 
-        // 1) instantiate your edit box
+        // Initialize search and filter entry box
         shipEntry = new SimpleEditBox(font, x + 60, y + 29, 93, 10, null);
         shipEntry.setBordered(false);
         shipEntry.setTooltip(Tooltip.create(Component.translatable(MODID + ".ship_list.enter_code")));
@@ -66,31 +66,24 @@ public class ShipListScreen extends AbstractSimiScreen {
         shipEntry.setTextColor(0);
         shipEntry.setMaxLength(8);
 
-        // 2) load the string correctly
+        // Load existing ID configuration
         String idCode = ListNBTHandler.loadStringFromHeldItem(minecraft.player);
         shipEntry.setValue(idCode);
 
-        // 3) add it so it actually renders and accepts input
         addRenderableWidget(shipEntry);
 
-        // 4) confirm button
         confirmButton = new IconButton(x + background.width - 33, y + background.height - 24, AllIcons.I_CONFIRM);
         confirmButton.withCallback(this::onClose);
         addRenderableWidget(confirmButton);
     }
 
-
-
     @Override
     public void removed() {
         String ID = shipEntry.getValue();
 
-        // 1) Update the client‐side tag immediately:
+        // Update local item data and synchronize with server
         ListNBTHandler.saveStringToHeldItem(minecraft.player, ID);
-
-        // 2) Tell the server so it can persist it and sync back properly
-        PacketDistributor.sendToServer(new SaveListsPayload(java.util.Collections.emptyList(), ID, true));
+        net.neoforged.neoforge.network.PacketDistributor.sendToServer((net.minecraft.network.protocol.common.custom.CustomPacketPayload)new SaveListsPacket(ID));
     }
 
 }
-

@@ -1,8 +1,9 @@
 package com.happysg.radar.block.controller.id;
 
 import com.happysg.radar.CreateRadar;
-import net.neoforged.neoforge.network.PacketDistributor;
-import com.happysg.radar.networking.packets.IDRecordPayload;
+import com.happysg.radar.networking.ModMessages;
+import com.happysg.radar.networking.packets.IDRecordRequestPacket;
+import com.happysg.radar.networking.packets.IDRecordPacket;
 import com.happysg.radar.registry.ModGuiTextures;
 import net.createmod.catnip.gui.AbstractSimiScreen;
 import com.simibubi.create.foundation.gui.AllIcons;
@@ -10,8 +11,6 @@ import com.simibubi.create.foundation.gui.widget.IconButton;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.player.Player;
 import org.valkyrienskies.core.api.ships.Ship;
 
 
@@ -22,15 +21,11 @@ public class IDBlockScreen extends AbstractSimiScreen {
     Ship ship;
     String id = "";
     String name = "";
+    private EditBox nameField;
+    private EditBox idField;
 
     public IDBlockScreen(Ship ship) {
         this.ship = ship;
-        IDManager.IDRecord record = IDManager.getIDRecordByShip(ship);
-        if (record != null) {
-            this.id = record.secretID();
-            this.name = record.name();// this will now be the slug
-        }
-
     }
 
     @Override
@@ -40,15 +35,16 @@ public class IDBlockScreen extends AbstractSimiScreen {
         clearWidgets();
         int x = guiLeft;
         int y = guiTop;
+        loadFromClientCache();
 
-        EditBox nameField = new EditBox(font, x + 70, y + 25, 100, 18, Component.translatable(CreateRadar.MODID + ".id_block.name_input"));
+        nameField = new EditBox(font, x + 70, y + 25, 100, 18, Component.translatable(CreateRadar.MODID + ".id_block.name_input"));
         nameField.setBordered(false);
         nameField.setValue(name);
         nameField.setMaxLength(20);
         nameField.setResponder(s -> name = s);
         addRenderableWidget(nameField);
 
-        EditBox idField = new EditBox(font, x + 85, y + 48, 100, 18, Component.translatable(CreateRadar.MODID + ".id_block.id_input"));
+        idField = new EditBox(font, x + 85, y + 48, 100, 18, Component.translatable(CreateRadar.MODID + ".id_block.id_input"));
         idField.setBordered(false);
         idField.setValue(id);
         idField.setMaxLength(10);
@@ -58,6 +54,8 @@ public class IDBlockScreen extends AbstractSimiScreen {
         IconButton confirmButton = new IconButton(x + BACKGROUND.width - 33, y + BACKGROUND.height - 23, AllIcons.I_CONFIRM);
         confirmButton.withCallback(this::onClose);
         addRenderableWidget(confirmButton);
+
+        ModMessages.sendToServer(new IDRecordRequestPacket(ship.getId()));
     }
 
     @Override
@@ -69,9 +67,32 @@ public class IDBlockScreen extends AbstractSimiScreen {
 
     @Override
     public void onClose() {
+        IDManager.addIDRecord(ship.getId(), id, name);
         super.onClose();
-        PacketDistributor.sendToServer(new IDRecordPayload(ship.getId(), ship.getSlug(), id, name));
+        ModMessages.sendToServer(new IDRecordPacket(ship.getId(), ship.getSlug(), id,name));
     }
 
+    private void loadFromClientCache() {
+        IDRecord record = IDManager.getIDRecordByShip(ship);
+        if (record == null) return;
+        this.id = record.secretID();
+        this.name = record.name();
+    }
+
+    public boolean isForShip(long shipId) {
+        return ship.getId() == shipId;
+    }
+
+    public void applyLoadedRecord(String loadedName, String loadedId) {
+        this.name = loadedName == null ? "" : loadedName;
+        this.id = loadedId == null ? "" : loadedId;
+
+        if (nameField != null) {
+            nameField.setValue(this.name);
+        }
+        if (idField != null) {
+            idField.setValue(this.id);
+        }
+    }
 
 }

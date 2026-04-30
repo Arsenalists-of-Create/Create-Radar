@@ -1,0 +1,28 @@
+{
+  "variants": {
+    "facing=down": {
+      "model": "create_radar:block/identification_transponder",
+      "x": 90
+    },
+    "facing=east": {
+      "model": "create_radar:block/identification_transponder",
+      "y": 90
+    },
+    "facing=north": {
+      "model": "create_radar:block/identification_transponder",
+      "x": 90
+    },
+    "facing=south": {
+      "model": "create_radar:block/identification_transponder",
+      "y": 180
+    },
+    "facing=up": {
+      "model": "create_radar:block/identification_transponder",
+      "x": 270
+    },
+    "facing=west": {
+      "model": "create_radar:block/identification_transponder",
+      "y": 270
+    }
+  }
+}

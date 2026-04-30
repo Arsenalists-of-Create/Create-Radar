@@ -1,8 +1,9 @@
 package com.happysg.radar.item.detectionfilter;
 
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.networking.NetworkHandler;
 import com.happysg.radar.networking.networkhandlers.BoolNBThelper;
-import com.happysg.radar.networking.packets.BoolListPayload;
+import com.happysg.radar.networking.packets.BoolListPacket;
 import com.happysg.radar.registry.ModGuiTextures;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.foundation.gui.AllIcons;
@@ -16,15 +17,14 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.network.PacketDistributor;
 
 public class RadarFilterScreen extends AbstractSimiScreen {
 
     private static final String KEY = "detectBools";
-    private static final int COUNT = 7; // set to number of booleans you use
+    private static final int COUNT = 8;
 
     boolean player;
-    boolean vs2;
+    boolean physicsContraptions;
     boolean contraption;
     boolean mob;
     boolean projectile;
@@ -33,8 +33,8 @@ public class RadarFilterScreen extends AbstractSimiScreen {
 
     protected IconButton playerButton;
     protected Indicator playerIndicator;
-    protected IconButton vs2Button;
-    protected Indicator vs2Indicator;
+    protected IconButton physicsContraptionsButton;
+    protected Indicator physicsContraptionsIndicator;
     protected IconButton contraptionButton;
     protected Indicator contraptionIndicator;
     protected IconButton mobButton;
@@ -95,16 +95,16 @@ public class RadarFilterScreen extends AbstractSimiScreen {
         addRenderableWidget(playerButton);
         addRenderableWidget(playerIndicator);
 
-        vs2Button = new IconButton(guiLeft + 60, guiTop + 38, ModGuiTextures.VS2_BUTTON);
-        vs2Button.setToolTip(Component.translatable(CreateRadar.MODID + ".radar_button.vs2"));
-        vs2Indicator = new Indicator(guiLeft + 60, guiTop + 31, Component.empty());
-        vs2Indicator.state = vs2 ? Indicator.State.GREEN : Indicator.State.RED;
-        vs2Button.withCallback((x, y) -> {
-            vs2 = !vs2;
-            vs2Indicator.state = vs2 ? Indicator.State.GREEN : Indicator.State.RED;
+        physicsContraptionsButton = new IconButton(guiLeft + 60, guiTop + 38, ModGuiTextures.ARTILLERY);
+        physicsContraptionsButton.setToolTip(Component.translatable(CreateRadar.MODID + ".radar_button.physics_contraptions"));
+        physicsContraptionsIndicator = new Indicator(guiLeft + 60, guiTop + 31, Component.empty());
+        physicsContraptionsIndicator.state = physicsContraptions ? Indicator.State.GREEN : Indicator.State.RED;
+        physicsContraptionsButton.withCallback((x, y) -> {
+            physicsContraptions = !physicsContraptions;
+            physicsContraptionsIndicator.state = physicsContraptions ? Indicator.State.GREEN : Indicator.State.RED;
         });
-        addRenderableWidget(vs2Button);
-        addRenderableWidget(vs2Indicator);
+        addRenderableWidget(physicsContraptionsButton);
+        addRenderableWidget(physicsContraptionsIndicator);
 
         contraptionButton = new IconButton(guiLeft + 88, guiTop + 38, ModGuiTextures.CONTRAPTION_BUTTON);
         contraptionButton.setToolTip(Component.translatable(CreateRadar.MODID + ".radar_button.contraption"));
@@ -172,7 +172,7 @@ public class RadarFilterScreen extends AbstractSimiScreen {
             boolean[] arr = BoolNBThelper.loadBooleansFromBytes(stack, KEY, COUNT);
             if (arr.length >= COUNT) {
                 player = arr[0];
-                vs2 = arr[1];
+                physicsContraptions = arr[1] || arr[7];
                 contraption = arr[2];
                 mob = arr[3];
                 animal = arr[4];
@@ -193,16 +193,17 @@ public class RadarFilterScreen extends AbstractSimiScreen {
         boolean[] flags = new boolean[COUNT];
         ItemStack stack = Minecraft.getInstance().player.getItemInHand(InteractionHand.MAIN_HAND);
         flags[0] = player;
-        flags[1] = vs2;
+        flags[1] = physicsContraptions;
         flags[2] = contraption;
         flags[3] = mob;
         flags[4] = animal;
         flags[5] = projectile;
         flags[6] = item;
+        flags[7] = physicsContraptions;
         BoolNBThelper.saveBooleansAsBytes(stack,flags, KEY);
 
-        PacketDistributor.sendToServer(new BoolListPayload(true, flags, KEY));
+        net.neoforged.neoforge.network.PacketDistributor.sendToServer((net.minecraft.network.protocol.common.custom.CustomPacketPayload)new BoolListPacket(true, flags, KEY));
 
     }
 
-}
+}

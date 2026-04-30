@@ -9,7 +9,6 @@ import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
 import org.slf4j.Logger;
 
 import javax.annotation.Nullable;
@@ -96,7 +95,7 @@ public final class AutoTargetingHelper {
         return bestTrack;
     }
 
-    public static boolean hasLineOfSight(ServerLevel level, Vec3 start, RadarTrack track) {
+    public static boolean hasLineOfSight(net.minecraft.server.level.ServerLevel level, Vec3 start, RadarTrack track) {
         if (level == null || start == null || track == null || track.position() == null) return false;
 
         float height = track.getEnityHeight();
@@ -111,7 +110,7 @@ public final class AutoTargetingHelper {
                     from, to,
                     ClipContext.Block.COLLIDER,
                     ClipContext.Fluid.NONE,
-                    CollisionContext.empty()
+                    net.minecraft.world.phys.shapes.CollisionContext.empty()
             );
 
             HitResult hit = level.clip(ctx);

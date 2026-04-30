@@ -19,7 +19,7 @@ import static net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING;
 //this is messy but couldn't figure out how to use Create MultiblockHelper
 //todo make better
 public class MonitorMultiBlockHelper {
-    public static void onPlace(BlockState pState, Level pLevel, BlockPos pPos, BlockState pOldState, boolean pIsMoving) {
+    public static void onPlace(BlockState pState, net.minecraft.world.level.Level pLevel, BlockPos pPos, BlockState pOldState, boolean pIsMoving) {
         if (pState.getValue(SHAPE) != MonitorBlock.Shape.SINGLE && !pIsMoving)
             return;
 
@@ -39,7 +39,7 @@ public class MonitorMultiBlockHelper {
                     }});
     }
 
-    public static void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pIsMoving) {
+    public static void onRemove(BlockState pState, net.minecraft.world.level.Level pLevel, BlockPos pPos, BlockState pNewState, boolean pIsMoving) {
         if (ModBlocks.MONITOR.has(pNewState) && !pIsMoving)
             return;
         if (pLevel.getBlockEntity(pPos) instanceof MonitorBlockEntity monitor) {
@@ -47,7 +47,7 @@ public class MonitorMultiBlockHelper {
         }
     }
 
-    static void formMulti(BlockState pState, Level pLevel, BlockPos pPos, int size) {
+    static void formMulti(BlockState pState, net.minecraft.world.level.Level pLevel, BlockPos pPos, int size) {
         MonitorBlock.Shape shape;
         for (int i = 0; i < size; i++) {
             for (int j = 0; j < size; j++) {
@@ -70,7 +70,7 @@ public class MonitorMultiBlockHelper {
         }
     }
 
-    private static void destroyMulti(BlockState pState, Level pLevel, BlockPos removedPos, BlockPos controllerPos, int size) {
+    private static void destroyMulti(BlockState pState, net.minecraft.world.level.Level pLevel, BlockPos removedPos, BlockPos controllerPos, int size) {
         if (size == 1)
             return;
         if (pLevel.getBlockEntity(removedPos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
@@ -93,7 +93,7 @@ public class MonitorMultiBlockHelper {
 
 
 
-    public static int getSize(Level pLevel, BlockPos pPos) {
+    public static int getSize(net.minecraft.world.level.Level pLevel, BlockPos pPos) {
         if (!pLevel.getBlockState(pPos).is(ModBlocks.MONITOR.get()))
             return 0;
         Direction facing = pLevel.getBlockState(pPos).getValue(FACING);
@@ -125,7 +125,7 @@ public class MonitorMultiBlockHelper {
 
     }
 
-    public static boolean isMulti(Level pLevel, BlockPos pos) {
+    public static boolean isMulti(net.minecraft.world.level.Level pLevel, BlockPos pos) {
         if (!pLevel.getBlockState(pos).is(ModBlocks.MONITOR.get()))
             return false;
         return getSize(pLevel, pos) > 1;

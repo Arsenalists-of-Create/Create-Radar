@@ -1,0 +1,30 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "E": {
+      "item": "create:electron_tube"
+    },
+    "P": {
+      "item": "create_radar:radar_plate_block"
+    },
+    "M": {
+      "item": "create:precision_mechanism"
+    },
+    "Z": {
+      "item": "create:zinc_block"
+    },
+    "R": {
+      "item": "create_radar:radar_receiver_block"
+    }
+  },
+  "pattern": [
+    "EEP",
+    "MZR",
+    "EEP"
+  ],
+  "result": {
+    "item": "create_radar:plane_radar"
+  },
+  "show_notification": true
+}

@@ -5,7 +5,6 @@ import com.happysg.radar.compat.vs2.VS2Utils;
 import com.simibubi.create.content.kinetics.transmission.SplitShaftBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -76,15 +75,15 @@ public class TrackControllerBlockEntity extends SplitShaftBlockEntity {
     }
 
     @Override
-    protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-        super.read(compound, registries, clientPacket);
+    protected void read(CompoundTag compound, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.read(compound, provider, clientPacket);
         compound.getFloat("leftSpeed");
         compound.getFloat("rightSpeed");
     }
 
     @Override
-    protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-        super.write(compound, registries, clientPacket);
+    protected void write(CompoundTag compound, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.write(compound, provider, clientPacket);
         compound.putFloat("leftSpeed", leftSpeed);
         compound.putFloat("rightSpeed", rightSpeed);
     }
@@ -96,7 +95,7 @@ public class TrackControllerBlockEntity extends SplitShaftBlockEntity {
     private double getAngleToTarget() {
         if (target == null)
             return getYaw();
-        Vec3 center = VS2Utils.getWorldVec(this);
+        Vec3 center = VS2Utils.getWorldVec((net.minecraft.world.level.block.entity.BlockEntity)this);
         Vec3 relative = center.subtract(target);
         double yaw = Math.toDegrees(Math.atan2(relative.z, relative.x)) - 90;
         yaw = (yaw + 360) % 360; // Normalize to range [0, 360)
@@ -110,7 +109,7 @@ public class TrackControllerBlockEntity extends SplitShaftBlockEntity {
     private double getAngleOffsetToWorld() {
         if (!Mods.VALKYRIENSKIES.isLoaded())
             return 0;
-        LoadedShip ship = VS2Utils.getShipManagingPos(this);
+        LoadedShip ship = VS2Utils.getShipManagingPos((net.minecraft.world.level.block.entity.BlockEntity)this);
         if (ship == null)
             return 0;
         Quaterniondc quaterniondc = ship.getTransform().getShipToWorldRotation();

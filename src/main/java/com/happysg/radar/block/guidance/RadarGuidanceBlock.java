@@ -29,32 +29,27 @@ public class RadarGuidanceBlock extends MunitionsLauncherGuidanceBlock implement
         super(properties);
     }
 
-    @Override
     public boolean isValidAddition(Map<BlockPos, StructureTemplate.StructureBlockInfo> total, StructureTemplate.StructureBlockInfo data) {
         return true;//todo add check for build config
     }
 
-    @Override
     public BlockEntityType<RadarGuidanceBlockEntity> getBlockEntityType() {
         return (BlockEntityType<RadarGuidanceBlockEntity>) CBCMWCompatRegister.RADAR_GUIDANCE_BLOCK_ENTITY.get();
     }
 
-    @Override
     public Class<RadarGuidanceBlockEntity> getBlockEntityClass() {
         return RadarGuidanceBlockEntity.class;
     }
 
 
-    @Override
-    public boolean canFire(Level level, BlockPos blockPos, BlockState blockState, @Nullable BlockEntity blockEntity, PitchOrientedContraptionEntity pitchOrientedContraptionEntity) {
+    public boolean canFire(net.minecraft.world.level.Level level, BlockPos blockPos, BlockState blockState, @Nullable BlockEntity blockEntity, PitchOrientedContraptionEntity pitchOrientedContraptionEntity) {
         if (blockEntity instanceof RadarGuidanceBlockEntity radarGuidanceBlockEntity) {
             return radarGuidanceBlockEntity.canFire(pitchOrientedContraptionEntity);
         }
         return false;
     }
 
-    @Override
-    public void tickGuidance(Level level, BlockPos blockPos, BlockState blockState, @Nullable BlockEntity blockEntity, OrientedContraptionEntity orientedContraptionEntity) {
+    public void tickGuidance(net.minecraft.world.level.Level level, BlockPos blockPos, BlockState blockState, @Nullable BlockEntity blockEntity, OrientedContraptionEntity orientedContraptionEntity) {
         if (orientedContraptionEntity instanceof MunitionsPhysicsContraptionEntity munitionsPhysicsContraptionEntity) {
             if (blockEntity instanceof RadarGuidanceBlockEntity radarGuidanceBlockEntity) {
                 radarGuidanceBlockEntity.tickMissileGuidance(munitionsPhysicsContraptionEntity);

@@ -12,6 +12,7 @@ public final class RadarContactRegistry {
     public static void markLocked(ServerLevel level, long shipId, int ttlTicks) {
         RadarContactRegistryData.get(level).markLocked(shipId, ttlTicks);
     }
+
     public static boolean isInRange(ServerLevel level, long shipId) {
         return RadarContactRegistryData.get(level).isInRange(shipId);
     }
@@ -19,6 +20,7 @@ public final class RadarContactRegistry {
     public static boolean isLocked(ServerLevel level, long shipId) {
         return RadarContactRegistryData.get(level).isLocked(shipId);
     }
+
     public static void unLock(ServerLevel level, long shipId){
         RadarContactRegistryData.get(level).unlockShip(shipId);
     }

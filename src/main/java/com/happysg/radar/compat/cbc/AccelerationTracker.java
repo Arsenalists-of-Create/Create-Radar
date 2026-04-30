@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AccelerationTracker {
 
     // blocks per tick; tweak if needed
-    private static final double VELOCITY_EPSILON = 1.0;
+    private static final double VELOCITY_EPSILON = 0.01;
 
     private static final double VELOCITY_EPSILON_SQR = VELOCITY_EPSILON * VELOCITY_EPSILON;
 
@@ -26,6 +26,9 @@ public class AccelerationTracker {
 
     private static final Map<Long, Vec3> LAST_VEL_PER_TICK_SHIP = new ConcurrentHashMap<>();
     private static final Map<Long, Vec3> LAST_ACCEL_PER_TICK2_SHIP = new ConcurrentHashMap<>();
+
+    private static final Map<String, Vec3> LAST_VEL_PER_TICK_STR = new ConcurrentHashMap<>();
+    private static final Map<String, Vec3> LAST_ACCEL_PER_TICK2_STR = new ConcurrentHashMap<>();
 
     // -------------------------
     // entity-based (UUID)
@@ -91,5 +94,39 @@ public class AccelerationTracker {
     public static void clearShip(long shipId) {
         LAST_VEL_PER_TICK_SHIP.remove(shipId);
         LAST_ACCEL_PER_TICK2_SHIP.remove(shipId);
+    }
+
+    // -------------------------
+    // string-based (ids)
+    // -------------------------
+
+    public static Vec3 getAccelerationPerTick2(String id, Vec3 velPerTickNow) {
+        if (id == null || velPerTickNow == null) return Vec3.ZERO;
+
+        // skip tiny velocities
+        if (velPerTickNow.lengthSqr() < VELOCITY_EPSILON_SQR) {
+            return Vec3.ZERO;
+        }
+
+        Vec3 lastVel = LAST_VEL_PER_TICK_STR.put(id, velPerTickNow);
+        if (lastVel == null) {
+            LAST_ACCEL_PER_TICK2_STR.put(id, Vec3.ZERO);
+            return Vec3.ZERO;
+        }
+
+        Vec3 accel = velPerTickNow.subtract(lastVel);
+        LAST_ACCEL_PER_TICK2_STR.put(id, accel);
+        return accel;
+    }
+
+    public static Vec3 getLastAccelerationPerTick2(String id) {
+        if (id == null) return Vec3.ZERO;
+        return LAST_ACCEL_PER_TICK2_STR.getOrDefault(id, Vec3.ZERO);
+    }
+
+    public static void clearStr(String id) {
+        if (id == null) return;
+        LAST_VEL_PER_TICK_STR.remove(id);
+        LAST_ACCEL_PER_TICK2_STR.remove(id);
     }
 }

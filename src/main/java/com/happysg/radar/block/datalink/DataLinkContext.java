@@ -10,15 +10,15 @@ import javax.annotation.Nullable;
 
 public class DataLinkContext {
 
-    private Level level;
+    private net.minecraft.world.level.Level level;
     private DataLinkBlockEntity blockEntity;
 
-    public DataLinkContext(Level level, DataLinkBlockEntity blockEntity) {
+    public DataLinkContext(net.minecraft.world.level.Level level, DataLinkBlockEntity blockEntity) {
         this.level = level;
         this.blockEntity = blockEntity;
     }
 
-    public Level level() {
+    public net.minecraft.world.level.Level level() {
         return level;
     }
 

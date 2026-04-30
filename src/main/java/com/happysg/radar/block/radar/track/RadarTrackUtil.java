@@ -15,20 +15,25 @@ import java.util.UUID;
 
 public class RadarTrackUtil {
 
-    public static RadarTrack getRadarTrack(Ship ship, Level level) {
-        //return new RadarTrack(String.valueOf(ship.getId()), getPosition(ship), getVelocity(ship), level.getGameTime(),
-                //TrackCategory.VS2, "VS2:ship", ship.getShipAABB().maxY());
-        return null;
+    public static RadarTrack getRadarTrack(Ship ship, net.minecraft.world.level.Level level) {
+        return new RadarTrack(String.valueOf(ship.getId()), getPosition(ship), getVelocity(ship), level.getGameTime(),
+                TrackCategory.VS2, "VS2:ship", getShipSize(ship));
     }
 
+    public static int getShipSize(Ship ship){
+        if(ship.getShipAABB()!= null){
+            return (int) ship.getShipAABB().maxY;
+        }else{
+            return 1;
+        }
+    }
     public static Vec3 getVelocity(Ship ship) {
         return new Vec3(ship.getVelocity().x(), ship.getVelocity().y(), ship.getVelocity().z());
     }
 
     public static Vec3 getPosition(Ship serverShip) {
-        //Vector3d vecD = serverShip.getWorldAABB().center(new Vector3d());
-        //return new Vec3(vecD.x, vecD.y, vecD.z);
-        return null;
+        if (serverShip.getWorldAABB() == null) return Vec3.ZERO;
+        return serverShip.getWorldAABB().getCenter();
     }
 
 

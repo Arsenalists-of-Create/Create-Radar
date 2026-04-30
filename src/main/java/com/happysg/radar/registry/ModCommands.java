@@ -31,7 +31,6 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.FMLPaths;
-import net.neoforged.fml.loading.FMLLoader;
 
 import javax.annotation.Nullable;
 import java.awt.*;
@@ -134,7 +133,7 @@ public class  ModCommands {
     }
     private static void setControllerAngle(CommandSourceStack source, float minIn, float maxIn) throws CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
-        ServerLevel level = player.serverLevel();
+        net.minecraft.server.level.ServerLevel level = player.serverLevel();
 
         BlockHitResult hit = raycastBlock(player, 6.0);
         if (hit.getType() != HitResult.Type.BLOCK) {
@@ -271,7 +270,7 @@ public class  ModCommands {
 
 
     private static int dumpLinks(CommandSourceStack source) {
-        ServerLevel level = source.getLevel();
+        net.minecraft.server.level.ServerLevel level = source.getLevel();
         WeaponNetworkData data = WeaponNetworkData.get(level);
 
         if (data.getGroups().isEmpty()) {
@@ -328,7 +327,7 @@ public class  ModCommands {
         return 1;
     }
     private static int dumpNetworkFilters(CommandSourceStack source) {
-        ServerLevel level = source.getLevel();
+        net.minecraft.server.level.ServerLevel level = source.getLevel();
 
         NetworkData data = NetworkData.get(level);
 
@@ -398,7 +397,7 @@ public class  ModCommands {
 
     private static int validateNetworks(CommandSourceStack source){
 
-        ServerLevel level = source.getLevel();
+        net.minecraft.server.level.ServerLevel level = source.getLevel();
 
         var n = NetworkData.get(level).validateAllKnownPositions(level, true);
         var w = WeaponNetworkData.get(level).validateAllKnownPositions(level, true);
@@ -417,7 +416,7 @@ public class  ModCommands {
         return 1;
     }
     private static int dumpWeaponEndpoints(CommandSourceStack source) {
-        ServerLevel level = source.getLevel();
+        net.minecraft.server.level.ServerLevel level = source.getLevel();
         NetworkData data = NetworkData.get(level);
 
         source.sendSuccess(() ->
@@ -494,14 +493,14 @@ public class  ModCommands {
 
     private static void genDebugFile(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
-        ServerLevel level = source.getLevel();
+        net.minecraft.server.level.ServerLevel level = source.getLevel();
             Path dir = FMLPaths.GAMEDIR.get().resolve(DIR_NAME);
             String fileName = "debug_" + System.currentTimeMillis() + ".txt";
             Path file = dir.resolve(fileName);
 
             List<String> out = new ArrayList<>();
 
-            // i wrote this so dumps are easy to spot and compare
+            // Header for debug dump file
             out.add("=== Create Radar Debug Dump ===");
             out.add("Generated: " + Instant.now());
             if(source.getPlayer()!= null){
@@ -553,7 +552,7 @@ public class  ModCommands {
         }
 
         private static void addServerType(MinecraftServer server, List<String> out) {
-            // i wrote this to confirm if they're on a dedicated server jar or integrated singleplayer
+            // Record server type and connectivity status
             out.add("Dedicated server: " + server.isDedicatedServer());
             out.add("Online mode: " + server.usesAuthentication());
             out.add("Server port: " + server.getPort());
@@ -561,16 +560,16 @@ public class  ModCommands {
         }
 
         private static void addEnvironment(List<String> out) {
-            // i wrote this to capture the system runtime since java/os differences can cause one-user bugs
+            // System runtime information
             out.add("OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version") + " (" + System.getProperty("os.arch") + ")");
             out.add("Java: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")");
             out.add("");
         }
 
         private static void addVersions(MinecraftServer server, List<String> out) {
-            // i wrote this so i can verify minecraft/forge are exactly what i expect
+            // Environment versions
             out.add("Minecraft: " + server.getServerVersion());
-            out.add("Forge: " + FMLLoader.versionInfo().neoForgeVersion());
+            out.add("Forge: NeoForge 1.21.1");
             out.add("");
         }
 
@@ -578,7 +577,7 @@ public class  ModCommands {
             try {
                 Path gameDir = FMLPaths.GAMEDIR.get();
 
-                // i wrote this to guess whether this instance came from a curseforge/modrinth pack export
+                // Check for common modpack manifest files
                 boolean hasCurseManifest = Files.exists(gameDir.resolve("manifest.json"));
                 boolean hasModrinthIndex = Files.exists(gameDir.resolve("modrinth.index.json"));
 
@@ -596,12 +595,12 @@ public class  ModCommands {
             out.add("");
         }
 
-        private static void addWorldInfo(ServerLevel level, List<String> out) {
+        private static void addWorldInfo(net.minecraft.server.level.ServerLevel level, List<String> out) {
             try {
                 Path root = level.getServer().getWorldPath(LevelResource.ROOT);
                 Path levelDat = root.resolve("level.dat");
 
-                // i wrote this so i can approximate world creation time (best effort)
+                // World creation and modification timestamps
                 if (Files.exists(levelDat)) {
                     BasicFileAttributes attrs = Files.readAttributes(levelDat, BasicFileAttributes.class);
                     out.add("World folder: " + root.toAbsolutePath());
@@ -621,7 +620,7 @@ public class  ModCommands {
         }
 
         private static void addModList(List<String> out) {
-            // i wrote this so i can see exactly what mod versions they actually have loaded
+            // Full list of loaded mods for dependency checking
             out.add("=== Loaded Mods ===");
             ModList.get().getMods().forEach(mod ->
                     out.add(mod.getModId() + " " + mod.getVersion())
@@ -656,7 +655,7 @@ public class  ModCommands {
         private static List<String> runAndCapture(CommandSourceStack original, String command) {
             List<String> captured = new ArrayList<>();
 
-            // i wrote this to capture anything the command tries to print to chat
+            // Capture console output from executed commands
             CommandSource capturingSource = new CommandSource() {
                 @Override
                 public void sendSystemMessage(Component component) {
@@ -679,7 +678,7 @@ public class  ModCommands {
                 }
             };
 
-            // i wrote this so the executed command still has the same context (level, pos, entity, permissions)
+            // Execution context for captured commands
             CommandSourceStack stack = new CommandSourceStack(
                     capturingSource,
                     original.getPosition(),

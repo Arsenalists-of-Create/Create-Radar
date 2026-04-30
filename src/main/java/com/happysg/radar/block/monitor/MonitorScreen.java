@@ -3,10 +3,11 @@ package com.happysg.radar.block.monitor;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.controller.id.IDManager;
+import com.happysg.radar.block.controller.id.IDRecord;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
-import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
 
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -24,30 +25,36 @@ import net.minecraft.network.chat.Component;
 
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.network.PacketDistributor;
+import org.lwjgl.opengl.GL11;
 
 import java.util.Collection;
-
 import java.util.UUID;
-
 
 /**
  * A UI screen version of the MonitorRenderer. Draws the radar in 2D and lets the player hover/click tracks.
  */
 public class MonitorScreen extends Screen {
 
-
     private static final float TRACK_POSITION_SCALE = 0.75f;
+    private static final String MONITOR_I18N_PREFIX = CreateRadar.MODID + ".monitor.";
+    private static final String NO_MONITOR_KEY = MONITOR_I18N_PREFIX + "no_monitor";
+    private static final String NOT_LINKED_CONTROLLER_KEY = MONITOR_I18N_PREFIX + "not_linked_controller";
+    private static final String OFFLINE_KEY = MONITOR_I18N_PREFIX + "offline";
+    private static final String CLICK_HINT_KEY = MONITOR_I18N_PREFIX + "click_hint";
+    private static final String TITLE_KEY = MONITOR_I18N_PREFIX + "title";
 
     private static final float ALPHA_BACKGROUND = 0.6f;
     private static final float ALPHA_GRID = 0.1f;
     private static final float ALPHA_SWEEP = 0.8f;
-    private static final int BASE_SIZE = 256;
-    private static final int UI_SCALE = 2;
-    private static final int UI_SIZE = BASE_SIZE * UI_SCALE;
-    private static final int GRID_MARGIN_PX = 21;
+    private static final int TARGET_BG = 128;
+    // Native design resolution is 128x128
+    private static final int TARGET_UI_PX = 128;
+    private static final float GRID_MARGIN_PX = 3.0f; // Adjusted for 128px scale
+
+    // UI state for dynamic scaling and positioning
+    private int uiSize;
+    private float uiScale;
 
     private final BlockPos controllerPos;
 
@@ -57,125 +64,144 @@ public class MonitorScreen extends Screen {
     private String hoveredId;
 
     public MonitorScreen(BlockPos controllerPos) {
-        super(Component.literal("Radar Monitor"));
+        super(Component.translatable(TITLE_KEY));
         this.controllerPos = controllerPos;
     }
-
-    private int uiSize = UI_SIZE;
 
     @Override
     protected void init() {
         super.init();
+        recalcUiScale();
         left = (this.width - uiSize) / 2;
-        top  = (this.height - uiSize) / 2;
+        top = (this.height - uiSize) / 2;
     }
 
+    @Override
+    public void resize(Minecraft mc, int w, int h) {
+        super.resize(mc, w, h);
+        recalcUiScale();
+        left = (this.width - uiSize) / 2;
+        top = (this.height - uiSize) / 2;
+    }
 
     @Override
     public boolean isPauseScreen() {
         return false;
     }
 
+    private void recalcUiScale() {
+        int max = Math.min(this.width, this.height) - 100;
+        uiSize = max;
+        uiScale = uiSize / (float) TARGET_UI_PX;
+    }
+
     @Override
     public void render(GuiGraphics gg, int mouseX, int mouseY, float partialTicks) {
-        renderBackground(gg, mouseX, mouseY, partialTicks);
+        super.render(gg, mouseX, mouseY, partialTicks);
         drawPanelBackground(gg);
 
         MonitorBlockEntity monitor = getController();
         if (monitor == null) {
-            gg.drawCenteredString(font, "Monitor not found", width / 2, height / 2 - 4, 0xFFFFFF);
+            gg.drawCenteredString(font, Component.translatable(NO_MONITOR_KEY), width / 2, height / 2 - 4, 0xFFFFFF);
             super.render(gg, mouseX, mouseY, partialTicks);
             return;
         }
 
         if (!monitor.isLinked() || !monitor.isController()) {
-            gg.drawCenteredString(font, "Not linked / not controller", width / 2, height / 2 - 4, 0xFFFFFF);
+            gg.drawCenteredString(font, Component.translatable(NOT_LINKED_CONTROLLER_KEY), width / 2, height / 2 - 4, 0xFFFFFF);
             super.render(gg, mouseX, mouseY, partialTicks);
             return;
         }
 
         IRadar radar = monitor.getRadar().orElse(null);
         if (radar == null || !radar.isRunning()) {
-            gg.drawCenteredString(font, "Radar offline", width / 2, height / 2 - 4, 0xFFFFFF);
+            gg.drawCenteredString(font, Component.translatable(OFFLINE_KEY), width / 2, height / 2 - 4, 0xFFFFFF);
             super.render(gg, mouseX, mouseY, partialTicks);
             return;
         }
 
         updateHoverFromMouse(monitor, radar, mouseX, mouseY);
 
+        // --- SHARP RENDERING START ---
+        gg.pose().pushPose();
+        gg.pose().translate(left, top, 0);
+        gg.pose().scale(uiScale, uiScale, 1.0f);
+
+        // Now we are in a 128x128 local space
         renderGrid(gg, monitor, monitor.radar);
         renderBG(gg, monitor, MonitorSprite.RADAR_BG_FILLER, ALPHA_BACKGROUND);
         renderBG(gg, monitor, MonitorSprite.RADAR_BG_CIRCLE, ALPHA_BACKGROUND);
         renderSweep(gg, monitor, radar, partialTicks);
         renderTracks(gg, monitor, radar);
 
-        gg.drawCenteredString(font, "Click: select   Shift+Click: clear", width / 2, top + UI_SIZE + 6, 0xA0A0A0);
+        gg.pose().popPose();
+        // --- SHARP RENDERING END ---
 
-        super.render(gg, mouseX, mouseY, partialTicks);
+        gg.drawCenteredString(font, Component.translatable(CLICK_HINT_KEY), width / 2, top + uiSize + 6, 0xA0A0A0);
     }
+
     private void drawPanelBackground(GuiGraphics gg) {
         RenderSystem.enableBlend();
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
+
+        // i draw the background using the same uiSize the rest of the screen uses
         gg.blit(
                 CreateRadar.asResource("textures/gui/monitor_gui.png"),
                 left,
                 top,
                 0, 0,
-                uiSize,
-                uiSize,
-                512, 512
+                uiSize,   // destination width
+                uiSize,   // destination height
+                uiSize,uiSize  // actual texture size in pixels
         );
-        RenderSystem.disableBlend();
 
+        RenderSystem.disableBlend();
     }
 
     private void renderGrid(GuiGraphics gg, MonitorBlockEntity monitor, IRadar radar) {
-        float range = radar.getRange();
+        float alpha = ALPHA_GRID;
+        if (alpha <= 0) return;
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
 
+        float margin = GRID_MARGIN_PX;
+        float size = 128 - margin * 2;
+        
+        float range = radar.getRange();
         float cellWorld = 50f;
         int halfCells = Mth.floor(range / cellWorld);
         halfCells = Mth.clamp(halfCells, 2, 24);
-
         int totalCells = halfCells * 2;
-
-        int gridLeft   = left + GRID_MARGIN_PX;
-        int gridTop    = top + GRID_MARGIN_PX;
-        int gridRight  = left + uiSize - GRID_MARGIN_PX;
-        int gridBottom = top + uiSize - GRID_MARGIN_PX;
-
-        int gridSizePx = gridRight - gridLeft;
-        float spacing  = gridSizePx / (float) totalCells;
-
-        Color color = new Color(RadarConfig.client().groundRadarColor.get());
-        int a = (int) (ALPHA_GRID * 255f) & 0xFF;
-        int argb = (a << 24) | (color.getRGB() & 0xFFFFFF);
+        
+        float step = size / totalCells;
 
         for (int i = 0; i <= totalCells; i++) {
-            int x = gridLeft + Math.round(i * spacing);
-            gg.fill(x, gridTop, x + 1, gridBottom, argb);
+            float offset = margin + i * step;
+            // horizontal line
+            gg.fill((int) margin, (int) offset, (int) (128 - margin), (int) (offset + 1), color.getRGB() & 0x00FFFFFF | ((int) (alpha * 255) << 24));
+            // vertical line
+            gg.fill((int) offset, (int) margin, (int) (offset + 1), (int) (128 - margin), color.getRGB() & 0x00FFFFFF | ((int) (alpha * 255) << 24));
         }
-        for (int i = 0; i <= totalCells; i++) {
-            int y = gridTop + Math.round(i * spacing);
-            gg.fill(gridLeft, y, gridRight, y + 1, argb);
-        }
-
-        int cx = gridLeft + gridSizePx / 2;
-        int cy = gridTop  + gridSizePx / 2;
-
-            gg.fill(cx, gridTop, cx + 1, gridBottom, (a << 24) | (color.getRGB() & 0xFFFFFF));
-        gg.fill(gridLeft, cy, gridRight, cy + 1, (a << 24) | (color.getRGB() & 0xFFFFFF));
+        
+        // crosshair
+        gg.fill(64, (int) margin, 65, (int) (128 - margin), color.getRGB() & 0x00FFFFFF | ((int) (alpha * 255) << 24));
+        gg.fill((int) margin, 64, (int) (128 - margin), 65, color.getRGB() & 0x00FFFFFF | ((int) (alpha * 255) << 24));
     }
-
-
 
     private void renderBG(GuiGraphics gg, MonitorBlockEntity monitor, MonitorSprite sprite, float alpha) {
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
 
         RenderSystem.enableBlend();
+        RenderSystem.setShaderTexture(0, sprite.getTexture());
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
         gg.setColor(color.getRedAsFloat(), color.getGreenAsFloat(), color.getBlueAsFloat(), alpha);
-        gg.blit(sprite.getTexture(), left, top, 0, 0, UI_SIZE, UI_SIZE, UI_SIZE, UI_SIZE);
+        // We are already scaled, so draw at 128x128 native size
+        gg.blit(sprite.getTexture(), 0, 0, 128, 128, 0, 0, 128, 128, 128, 128);
         gg.setColor(1f, 1f, 1f, 1f);
         RenderSystem.disableBlend();
     }
+
     private Vec3 rotateAroundYDeg(Vec3 v, float deg) {
         double rad = Math.toRadians(deg);
         double cos = Math.cos(rad);
@@ -191,69 +217,78 @@ public class MonitorScreen extends Screen {
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
         float a = (radar.getGlobalAngle() + 360f) % 360f;
         Direction monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
-        Direction radarFacing = radar.getradarDirection();
-        if(radarFacing ==null)return;
+        Direction radarFacing = Direction.NORTH;
+        if (radarFacing == null) return;
         float facingOffset = radarFacingOffsetDeg(monitorFacing, radarFacing);
         float screenAngle = (a + facingOffset) % 360f;
-        if(monitor.getController().getShip() == null && radar.getRadarType().equals("spinning")){
-             monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
-             radarFacing   = radar.getradarDirection();
-            if(radarFacing == null)return;
-            LogUtils.getLogger().warn("here");
-            MonitorRenderer.ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, radarFacing);
-            switch (cone){
-                case NORTH -> screenAngle = 0+radar.getGlobalAngle();
-                case DOWN -> screenAngle = 180+radar.getGlobalAngle();
-                case LEFT -> screenAngle =90+radar.getGlobalAngle();
-                case RIGHT -> screenAngle =270+radar.getGlobalAngle();
-                default -> screenAngle =30;
+
+        if (monitor.getController().getShip() == null && radar.getRadarType().equals("spinning")) {
+            monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
+            radarFacing = Direction.NORTH;
+            if (radarFacing == null) return;
+            MonitorRenderer.ConeDir2D cone = MonitorRenderer.ConeDir2D.NORTH;
+            switch (cone) {
+                case NORTH -> screenAngle = 0 + radar.getGlobalAngle();
+                case DOWN -> screenAngle = 180 + radar.getGlobalAngle();
+                case LEFT -> screenAngle = 90 + radar.getGlobalAngle();
+                case RIGHT -> screenAngle = 270 + radar.getGlobalAngle();
+                default -> screenAngle = 30;
             }
 
-        }else if (monitor.getController().getShip() != null && radar.getRadarType().equals("spinning")) { // spinning radar on a ship
+        } else if (monitor.getController().getShip() != null && radar.getRadarType().equals("spinning")) { // spinning radar on a ship
             // Calculate the current angle
-             monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
+            monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
             Vec3 facingVec = new Vec3(monitorFacing.getStepX(), monitorFacing.getStepY(), monitorFacing.getStepZ());
             Vec3 angleVec = PhysicsHandler.getWorldVecDirectionTransform(facingVec, monitor.getController());
             screenAngle = (float) Math.toDegrees(Math.atan2(angleVec.x, angleVec.z));
-
+                screenAngle = screenAngle + radar.getGlobalAngle();
             if (monitorFacing == Direction.NORTH || monitorFacing == Direction.SOUTH) {
                 screenAngle = (screenAngle + 180) % 360;
             }
 
             // Normalize to positive angles
-            screenAngle = (screenAngle + 360)+180 % 360;
+            screenAngle = (screenAngle + 360 + 180) % 360;
         }
-        if(radar.renderRelativeToMonitor() && monitor.getController().getShip() != null && !radar.getRadarType().equals("spinning")){  // plane radar on a ship
-            // Plane radar on ship - cone stays fixed, tracks rotate inside
-             monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
-             radarFacing   = radar.getradarDirection();
-            if(radarFacing == null)return;
 
-            MonitorRenderer.ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, radarFacing);
-            switch (cone){
+        if (radar.renderRelativeToMonitor() && monitor.getController().getShip() != null && !radar.getRadarType().equals("spinning")) {  // plane radar on a ship
+            // Plane radar on ship - cone stays fixed, tracks rotate inside
+            monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
+            radarFacing = radar.getradarDirection();
+            if (radarFacing == null) return;
+
+            MonitorRenderer.ConeDir2D cone = MonitorRenderer.ConeDir2D.NORTH;
+            switch (cone) {
                 case NORTH -> screenAngle = 0;
                 case DOWN -> screenAngle = 180;
                 case LEFT -> screenAngle = 90;
                 case RIGHT -> screenAngle = 270;
                 default -> screenAngle = 30;
             }
-            screenAngle = screenAngle + 90;
         }
 
+        if (radar.renderRelativeToMonitor() && monitor.getController().getShip() != null
+                && radar.getRadarType().equals("spinning")) {
+            float shipYawDeg = monitor.getController().getShipYawDeg();
+            screenAngle += -(shipYawDeg + 180f);
+        }
 
-        int cx = left + UI_SIZE / 2;
-        int cy = top + UI_SIZE / 2;
+        int cx = left + uiSize / 2;
+        int cy = top + uiSize / 2;
 
         RenderSystem.enableBlend();
         gg.setColor(color.getRedAsFloat(), color.getGreenAsFloat(), color.getBlueAsFloat(), ALPHA_SWEEP);
 
         gg.pose().pushPose();
-        gg.pose().translate(cx, cy, 0);
-        // negative because GUI rotation direction is inverted relative to typical math
+        // Since the whole screen is already translated and scaled to 128x128:
+        // center is 64, 64
+        gg.pose().translate(64, 64, 0);
         gg.pose().mulPose(Axis.ZP.rotationDegrees(-screenAngle));
-        gg.pose().translate(-cx, -cy, 0);
+        gg.pose().translate(-64, -64, 0);
 
-        gg.blit(MonitorSprite.RADAR_SWEEP.getTexture(), left, top, 0, 0, UI_SIZE, UI_SIZE, UI_SIZE, UI_SIZE);
+        RenderSystem.setShaderTexture(0, MonitorSprite.RADAR_SWEEP.getTexture());
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
+        gg.blit(MonitorSprite.RADAR_SWEEP.getTexture(), 0, 0, 128, 128, 0, 0, 128, 128, 128, 128);
 
         gg.pose().popPose();
 
@@ -261,16 +296,10 @@ public class MonitorScreen extends Screen {
         RenderSystem.disableBlend();
     }
 
-    public enum ConeDir2D { UP, RIGHT, DOWN, LEFT,NORTH }
+    public enum ConeDir2D {UP, RIGHT, DOWN, LEFT, NORTH}
 
     public MonitorRenderer.ConeDir2D getConeDirectionOnMonitor(Direction monitorFacing, Direction radarFacing) {
-        // i only handle horizontals; if something weird comes in i just treat it as up
-
-        int m = monitorFacing.get2DDataValue(); // 0..3
-        int r = radarFacing.get2DDataValue();   // 0..3
-        // i compute clockwise steps from monitor -> radar
-        int steps = (r - m) & 3; // fast mod 4
-
+        int steps = cwStepsBetween(monitorFacing, radarFacing);
         return switch (steps) {
             case 0 -> MonitorRenderer.ConeDir2D.NORTH;
             case 1 -> MonitorRenderer.ConeDir2D.RIGHT;
@@ -279,42 +308,46 @@ public class MonitorScreen extends Screen {
             default -> MonitorRenderer.ConeDir2D.UP;
         };
     }
-    public  float radarFacingOffsetDeg(Direction monitorFacing, Direction radarFacing) {
+
+    private int cwStepsBetween(Direction from, Direction to) {
+        int a = dirIndex(from);
+        int b = dirIndex(to);
+        int steps = b - a;
+        steps %= 4;
+        if (steps < 0) steps += 4;
+        return steps;
+    }
+
+    private int dirIndex(Direction d) {
+        return switch (d) {
+            case NORTH -> 0;
+            case EAST -> 1;
+            case SOUTH -> 2;
+            case WEST -> 3;
+            default -> 0;
+        };
+    }
+
+    public float radarFacingOffsetDeg(Direction monitorFacing, Direction radarFacing) {
         if (monitorFacing.getAxis().isVertical() || radarFacing.getAxis().isVertical())
             return 0f;
 
         int m = monitorFacing.get2DDataValue();
         int r = radarFacing.get2DDataValue();
-        if(m == r) return -90;
+        if (m == r) return -90;
+
         // i compute clockwise steps from monitor -> radar
         int stepsCW = (r - m) & 3;
 
         return (stepsCW * 90f + 90) % 360f;
     }
 
-
-    private  Vec3 rotateAroundY(Vec3 v, double angleRad) {
+    private Vec3 rotateAroundY(Vec3 v, double angleRad) {
         double cos = Math.cos(angleRad);
         double sin = Math.sin(angleRad);
         double x = v.x * cos - v.z * sin;
         double z = v.x * sin + v.z * cos;
         return new Vec3(x, v.y, z);
-    }
-
-    private  double getShipYawRad(org.valkyrienskies.core.api.ships.Ship ship) {
-        var transform = ship.getTransform();
-
-        org.joml.Quaterniond shipToWorld = new org.joml.Quaterniond();
-        try {
-            shipToWorld.set(transform.getShipToWorldRotation());
-        } catch (Throwable ignored) {
-            shipToWorld.set(transform.getRotation()).invert();
-        }
-
-        org.joml.Vector3d fwd = new org.joml.Vector3d(0, 0, 1);
-        shipToWorld.transform(fwd);
-
-        return Math.atan2(fwd.x, -fwd.z);
     }
 
 
@@ -324,7 +357,6 @@ public class MonitorScreen extends Screen {
             return;
 
         float range = radar.getRange();
-        int sizeBlocks = monitor.getSize();
 
         DetectionConfig filter = monitor.filter;
 
@@ -335,7 +367,10 @@ public class MonitorScreen extends Screen {
                 continue;
 
             Vec3 rel = track.position().subtract(radarPos);
-            rel = rotateAroundYDeg(rel, 0);
+            if (radar.renderRelativeToMonitor() && monitor.getController().getShip() != null) {
+                float shipYawDeg = monitor.getController().getShipYawDeg();
+                rel = rotateAroundYDeg(rel, -(shipYawDeg + 180f));
+            }
 
             float xOff = calculateTrackOffset(rel, monitor.getBlockState().getValue(MonitorBlock.FACING), range, true);
             float zOff = calculateTrackOffset(rel, monitor.getBlockState().getValue(MonitorBlock.FACING), range, false);
@@ -346,8 +381,9 @@ public class MonitorScreen extends Screen {
             xOff *= TRACK_POSITION_SCALE;
             zOff *= TRACK_POSITION_SCALE;
 
-            int px = (int) (left + (0.5f + xOff) * UI_SIZE);
-            int pz = (int) (top + (0.5f + zOff) * UI_SIZE);
+            // Coordinates are in 128x128 space
+            int px = (int) ((0.5f + xOff) * 128);
+            int pz = (int) ((0.5f + zOff) * 128);
 
             long currentTime = monitor.getLevel().getGameTime();
             float age = currentTime - track.scannedTime();
@@ -359,21 +395,33 @@ public class MonitorScreen extends Screen {
 
             Color c = filter.getColor(track);
 
-            int spriteSize = 256;
-            int sx = px - spriteSize / 2;
-            int sy = pz - spriteSize / 2;
+            // Sprite size in 128px local space
+            int iconSizeInLocal = track.trackCategory() == TrackCategory.AERONAUTICS ? 128 : 64;
+            int sx = px - iconSizeInLocal / 2;
+            int sy = pz - iconSizeInLocal / 2;
 
             RenderSystem.enableBlend();
+            RenderSystem.setShaderTexture(0, track.getSprite().getTexture());
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+            GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
+            
             gg.setColor(c.getRedAsFloat(), c.getGreenAsFloat(), c.getBlueAsFloat(), alpha);
-            gg.blit(track.getSprite().getTexture(), sx, sy, 0, 0, spriteSize, spriteSize, spriteSize, spriteSize);
+            // Icons are 256x256, but we draw them small in local space
+            gg.blit(track.getSprite().getTexture(), sx, sy, iconSizeInLocal, iconSizeInLocal, 0, 0, 256, 256, 256, 256);
 
             if (track.id().equals(hoveredId)) {
+                RenderSystem.setShaderTexture(0, MonitorSprite.TARGET_HOVERED.getTexture());
+                GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+                GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
                 gg.setColor(1f, 1f, 0f, alpha);
-                gg.blit(MonitorSprite.TARGET_HOVERED.getTexture(), sx, sy, 0, 0, spriteSize, spriteSize, spriteSize, spriteSize);
+                gg.blit(MonitorSprite.TARGET_HOVERED.getTexture(), sx, sy, iconSizeInLocal, iconSizeInLocal, 0, 0, 128, 128, 128, 128);
             }
             if (track.id().equals(monitor.selectedEntity)) {
+                RenderSystem.setShaderTexture(0, MonitorSprite.TARGET_SELECTED.getTexture());
+                GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
+                GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
                 gg.setColor(1f, 0f, 0f, alpha);
-                gg.blit(MonitorSprite.TARGET_SELECTED.getTexture(), sx, sy, 0, 0, spriteSize, spriteSize, spriteSize, spriteSize);
+                gg.blit(MonitorSprite.TARGET_SELECTED.getTexture(), sx, sy, iconSizeInLocal, iconSizeInLocal, 0, 0, 128, 128, 128, 128);
             }
 
             gg.setColor(1f, 1f, 1f, 1f);
@@ -381,16 +429,28 @@ public class MonitorScreen extends Screen {
 
             String label = getLabelForTrack(track, monitor);
             if (label != null && !label.isBlank()) {
-                renderLabel(gg, label, px, pz + 8, alpha);
+                // Adjust label position for local 128px space
+                float textScale = RadarConfig.client().monitorTextScale.getF() * 2.0f;
+                renderLabel(gg, label, px, pz + 10, alpha, textScale);
             }
         }
     }
 
-    private void renderLabel(GuiGraphics gg, String text, int x, int y, float alpha) {
+    private void renderLabel(GuiGraphics gg, String text, int x, int y, float alpha, float scale) {
         Font f = Minecraft.getInstance().font;
         int a = Mth.clamp((int) (alpha * 255f), 0, 255);
         int argb = (a << 24) | 0xFFFFFF;
-        gg.drawCenteredString(f, text, x, y, argb);
+
+        gg.pose().pushPose();
+
+        // Scale around the text position
+        gg.pose().translate(x, y, 0);
+        gg.pose().scale(scale, scale, 1f);
+
+        // Since we translated, draw at 0,0
+        gg.drawCenteredString(f, text, 0, 0, argb);
+
+        gg.pose().popPose();
     }
 
     private void updateHoverFromMouse(MonitorBlockEntity monitor, IRadar radar, int mouseX, int mouseY) {
@@ -408,14 +468,17 @@ public class MonitorScreen extends Screen {
         float range = radar.getRange();
         var facing = monitor.getBlockState().getValue(MonitorBlock.FACING);
 
-        int spriteSize = 10 * UI_SCALE;
-        float pickRadius = spriteSize * 0.75f;
+        float pickRadius = (32 * uiScale) * 0.75f;
         float bestDist2 = pickRadius * pickRadius;
 
         String bestId = null;
 
         for (RadarTrack track : monitor.cachedTracks) {
             Vec3 rel = track.position().subtract(radarPos);
+            if (radar.renderRelativeToMonitor() && monitor.getController().getShip() != null) {
+                float shipYawDeg = monitor.getController().getShipYawDeg();
+                rel = rotateAroundYDeg(rel, -(shipYawDeg + 180f));
+            }
 
             float xOff = calculateTrackOffset(rel, facing, range, true);
             float zOff = calculateTrackOffset(rel, facing, range, false);
@@ -427,7 +490,7 @@ public class MonitorScreen extends Screen {
             zOff *= TRACK_POSITION_SCALE;
 
             int px = (int) (left + (0.5f + xOff) * uiSize);
-            int py = (int) (top  + (0.5f + zOff) * uiSize);
+            int py = (int) (top + (0.5f + zOff) * uiSize);
 
             float dx = mouseX - px;
             float dy = mouseY - py;
@@ -455,27 +518,20 @@ public class MonitorScreen extends Screen {
         if (!isMouseOverRadar((int) mouseX, (int) mouseY))
             return super.mouseClicked(mouseX, mouseY, button);
 
-
-        if (hasShiftDown()) {
-            monitor.selectedEntity = null;
-            monitor.activetrack = null;
-            PacketDistributor.sendToServer(new MonitorSelectionPayload(controllerPos, null));
-            return true;
-        }
-
         if (hoveredId != null) {
             monitor.selectedEntity = hoveredId;
-            PacketDistributor.sendToServer(new MonitorSelectionPayload(controllerPos, hoveredId));
+            MonitorSelectionPacket.send(controllerPos, hoveredId);
+            return true;
+        }else{
+            monitor.selectedEntity = null;
+            monitor.activetrack = null;
+            MonitorSelectionPacket.send(controllerPos, null);
             return true;
         }
-
-        return super.mouseClicked(mouseX, mouseY, button);
     }
 
-
-
     private boolean isMouseOverRadar(int mx, int my) {
-        return mx >= left && mx < left + UI_SIZE && my >= top && my < top + UI_SIZE;
+        return mx >= left && mx < left + uiSize && my >= top && my < top + uiSize;
     }
 
     private MonitorBlockEntity getController() {
@@ -530,7 +586,7 @@ public class MonitorScreen extends Screen {
         if ("VS2:ship".equals(track.entityType())) {
             try {
                 long shipId = Long.parseLong(track.id());
-                IDManager.IDRecord rec = IDManager.getIDRecordByShipId(shipId);
+                IDRecord rec = IDManager.getIDRecordByShipId(shipId);
                 if (rec != null && rec.name() != null && !rec.name().isBlank())
                     return rec.name();
             } catch (NumberFormatException ignored) {
@@ -550,8 +606,4 @@ public class MonitorScreen extends Screen {
 
         return null;
     }
-
-
-
-
 }

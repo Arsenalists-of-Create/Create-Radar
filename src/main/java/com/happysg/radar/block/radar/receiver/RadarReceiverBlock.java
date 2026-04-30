@@ -26,4 +26,3 @@ public class RadarReceiverBlock extends WrenchableDirectionalBlock {
         return true;
     }
 }
-

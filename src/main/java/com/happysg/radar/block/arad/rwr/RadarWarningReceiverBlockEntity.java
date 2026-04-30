@@ -3,17 +3,14 @@ package com.happysg.radar.block.arad.rwr;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.compat.vs2.VS2Utils;
 import com.happysg.radar.registry.ModSounds;
-import com.mojang.logging.LogUtils;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import org.valkyrienskies.core.api.ships.Ship;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
 
@@ -31,7 +28,6 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
     public RadarWarningReceiverBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
     }
-
 
     @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
@@ -56,62 +52,36 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         if (inRangeCooldownTicks > 0) inRangeCooldownTicks--;
         if (lockBeepTicks > 0) lockBeepTicks--;
 
-        Ship ship = VSGameUtilsKt.getShipManagingPos(level, worldPosition);
-        if (ship == null) {
+        Long shipId = VS2Utils.getShipId(level, worldPosition);
+        if (shipId == null) {
             resetSoundState();
             return;
         }
 
-        long key = ship.getId();
+        boolean locked = RadarContactRegistry.isLocked(sl, shipId);
+        boolean inRange = RadarContactRegistry.isInRange(sl, shipId);
 
-        boolean locked = RadarContactRegistry.isLocked(sl, key);
-        if(locked) LogUtils.getLogger().warn("locked");
-        boolean inRange = RadarContactRegistry.isInRange(sl, key);
-
-        // locked always wins and completely ignores the in-range sound
         if (locked) {
             wasInRange = inRange;
-
             if (lockBeepTicks == 0) {
-                sl.playSound(
-                        null,               // null = all nearby players hear it
-                        VS2Utils.getWorldPos(this),
-                        ModSounds.RWR_LOCK.get(),
-                        SoundSource.BLOCKS,
-                        1.0f,
-                        1.0f
-                );
-
-
-
+                Vec3 p = VS2Utils.getWorldVec(this);
+                sl.playSound(null, p.x, p.y, p.z, ModSounds.RWR_LOCK.get(), SoundSource.BLOCKS, 1.0f, 1.0f);
                 lockBeepTicks = LOCK_BEEP_PERIOD_TICKS;
             }
-
             return;
         }
 
         lockBeepTicks = 0;
-
         if (inRange && !hasPlayed) {
             boolean firstSpotted = !wasInRange;
-
             if (firstSpotted || inRangeCooldownTicks == 0) {
-                sl.playSound(
-                        null,               // null = all nearby players hear it
-                        VS2Utils.getWorldPos(this),
-                        ModSounds.RWR_IN_RANGE.get(),
-                        SoundSource.BLOCKS,
-                        1.0f,
-                        1.0f
-                );
-
-
+                Vec3 p = VS2Utils.getWorldVec(this);
+                sl.playSound(null, p.x, p.y, p.z, ModSounds.RWR_IN_RANGE.get(), SoundSource.BLOCKS, 1.0f, 1.0f);
                 hasPlayed = true;
             }
         } else {
             inRangeCooldownTicks = 0;
         }
-
         wasInRange = inRange;
     }
 
@@ -121,11 +91,11 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         wasInRange = false;
     }
 
-    private static boolean computeOnShip(Level level, BlockPos pos) {
-        return VSGameUtilsKt.getShipManagingPos(level, pos) != null;
+    private static boolean computeOnShip(net.minecraft.world.level.Level level, BlockPos pos) {
+        return VS2Utils.isBlockInShipyard(level, pos);
     }
 
-    private static void refreshOnShip(Level level, BlockPos pos) {
+    private static void refreshOnShip(net.minecraft.world.level.Level level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
         if (!state.hasProperty(ON_SHIP)) return;
 
@@ -134,14 +104,12 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
             level.setBlock(pos, state.setValue(ON_SHIP, onShip), 3);
         }
     }
+
     @Override
     public void onLoad() {
         super.onLoad();
         if (level == null || level.isClientSide) return;
         refreshOnShip(level, worldPosition);
-
         setLazyTickRate(10);
     }
-
-
 }

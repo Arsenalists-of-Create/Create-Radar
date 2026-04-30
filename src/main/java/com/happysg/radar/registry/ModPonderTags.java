@@ -18,7 +18,7 @@ public class ModPonderTags {
 
     public static void register(PonderTagRegistrationHelper<ResourceLocation> helper) {
         // Add items to tags here
-        PonderTagRegistrationHelper<RegistryEntry<?, ?>> entryHelper = helper.withKeyFunction(RegistryEntry::getId);
+        PonderTagRegistrationHelper<RegistryEntry> entryHelper = helper.withKeyFunction(entry -> entry.getId());
         helper.registerTag(WEAPON_NETWORK)
                 .addToIndex()
                 .item(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK)

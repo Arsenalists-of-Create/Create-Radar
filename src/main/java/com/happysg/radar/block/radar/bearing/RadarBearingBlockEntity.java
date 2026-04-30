@@ -1,51 +1,26 @@
 package com.happysg.radar.block.radar.bearing;
 
-import com.happysg.radar.CreateRadar;
-import com.happysg.radar.block.arad.aradnetworks.JamRegistry;
-import com.happysg.radar.block.arad.jammer.FakeRadarTrackFactory;
-import com.happysg.radar.block.behavior.networks.NetworkData;
-import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
-import com.happysg.radar.block.radar.behavior.IRadar;
-import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
-import com.happysg.radar.block.radar.track.RadarTrack;
-import com.happysg.radar.compat.vs2.PhysicsHandler;
-import com.happysg.radar.compat.vs2.VS2Utils;
-import com.happysg.radar.config.RadarConfig;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.contraptions.AssemblyException;
-import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
-import com.simibubi.create.content.contraptions.bearing.MechanicalBearingBlockEntity;
-import com.simibubi.create.api.stress.BlockStressValues;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.utility.ServerSpeedProvider;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
+import com.happysg.radar.compat.PhysicsHandler;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.Level;
+import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
+import com.simibubi.create.content.contraptions.bearing.BearingContraption;
+import com.simibubi.create.content.contraptions.bearing.MechanicalBearingBlockEntity;
+import com.happysg.radar.block.radar.track.RadarTrack;
 import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
-
-import javax.annotation.Nullable;
-import java.security.PublicKey;
+import net.minecraft.world.phys.AABB;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
-public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar {
-    private BlockPos lastKnownPos = BlockPos.ZERO;
-    private int dishCount;
-    private boolean creative;
-    private Direction receiverFacing = Direction.NORTH;
-    private RadarScanningBlockBehavior scanningBehavior;
-    private Collection<RadarTrack> networkFilteredTracks = List.of();
-    private long lastFilterTick = -1;
+import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
+import com.happysg.radar.config.RadarConfig;
+import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 
+public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implements com.happysg.radar.block.radar.behavior.IRadar {
+    private float angle;
+    protected RadarScanningBlockBehavior scanningBehavior;
 
     public RadarBearingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -54,256 +29,165 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
         super.addBehaviours(behaviours);
-        movementMode.setValue(MovementMode.MOVE_NEVER_PLACE.ordinal());
         scanningBehavior = new RadarScanningBlockBehavior(this);
+        scanningBehavior.setRange(256.0); 
+        scanningBehavior.setTrackExpiration(100); 
+        scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
         behaviours.add(scanningBehavior);
     }
 
     @Override
-    public BlockPos getWorldPos() {
-        return getBlockPos();
-    }
+    public boolean isRunning() { return running; }
+
     @Override
-    public void tick() {
-        super.tick();
+    public float getSpeed() {
+        return (float) (super.getSpeed() * RadarConfig.server().radarSpeedMultiplier.get());
+    }
 
-        if (running) {
-            scanningBehavior.setRange(getRange());
-            scanningBehavior.setAngle(getGlobalAngle());
+    @Override
+    public Collection<RadarTrack> getTracks() {
+        if (scanningBehavior != null) {
+            return scanningBehavior.getRadarTracks();
         }
+        return Collections.emptyList();
+    }
 
-        // Server-only: recompute at scan cadence (lazyTickRate = 5)
-        if (!level.isClientSide) {
-            long gt = level.getGameTime();
-            if (gt % 5 == 0 && gt != lastFilterTick) {
-                lastFilterTick = gt;
-                recomputeNetworkFilteredTracks();
+    @Override
+    public float getRange() { 
+        return scanningBehavior != null ? (float)scanningBehavior.getRange() : 256f;
+    }
+
+    @Override
+    public BlockPos getWorldPos() { return getBlockPos(); }
+
+    @Override
+    public net.minecraft.world.phys.Vec3 getRadarCenterPos(float partialTicks) {
+        if (movedContraption != null && movedContraption.getContraption() != null) {
+            net.minecraft.world.phys.Vec3 sum = net.minecraft.world.phys.Vec3.ZERO;
+            int count = 0;
+            for (net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo info : movedContraption.getContraption().getBlocks().values()) {
+                if (info.state().getBlock() instanceof com.happysg.radar.block.radar.receiver.AbstractRadarFrame) {
+                    sum = sum.add(net.minecraft.world.phys.Vec3.atCenterOf(info.pos()));
+                    count++;
+                }
+            }
+            if (count > 0) {
+                net.minecraft.world.phys.Vec3 localCenter = sum.scale(1.0 / count);
+                return movedContraption.toGlobalVector(localCenter, partialTicks);
             }
         }
-        if (!level.isClientSide && level.getGameTime() % 40 == 0) {
-            if (level instanceof ServerLevel serverLevel) {
+        return PhysicsHandler.getWorldVec(this);
+    }
 
-                // nothing to do if we didnt move
-                if (lastKnownPos.equals(worldPosition))
-                    return;
+    @Override
+    public float getGlobalAngle() { 
+        return scanningBehavior != null ? scanningBehavior.getAngle() : angle; 
+    }
 
-                ResourceKey<Level> dim = serverLevel.dimension();
-                NetworkData data = NetworkData.get(serverLevel);
+    @Override
+    public String getRadarType() { return "bearing"; }
 
-                boolean updated = data.updateRadarPosition(
-                        dim,
-                        lastKnownPos,
-                        worldPosition
-                );
+    @Override
+    public net.minecraft.core.Direction getradarDirection() { return net.minecraft.core.Direction.UP; }
 
-                // only commit the new position if the network accepted it
-                if (updated) {
-                    lastKnownPos = worldPosition;
-                    setChanged();
+    public float getAngle() { return angle; }
+    public void setAngle(float angle) { this.angle = angle; }
+    public float getAngularSpeed() { return getSpeed() / 20f; } 
+    
+    public int getDishCount() {
+        if (movedContraption != null && movedContraption.getContraption() != null) {
+            int count = 0;
+            for (net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo info : movedContraption.getContraption().getBlocks().values()) {
+                if (info.state().getBlock() instanceof com.happysg.radar.block.radar.receiver.AbstractRadarFrame) {
+                    count++;
+                }
+            }
+            return count;
+        }
+        return 0;
+    }
+
+    public boolean isCreative() {
+        if (movedContraption != null && movedContraption.getContraption() != null) {
+             for (net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo info : movedContraption.getContraption().getBlocks().values()) {
+                if (com.happysg.radar.registry.ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.has(info.state())) {
+                    return true;
                 }
             }
         }
+        return false;
     }
 
-
-    public float getGlobalAngle() {
-        Vec3 receiverVector = new Vec3(receiverFacing.getStepX(), receiverFacing.getStepY(), receiverFacing.getStepZ());
-        float receiverAngle = (float) Math.toDegrees(Math.atan2(receiverVector.x, receiverVector.z));
-        return ((receiverAngle + angle + 360)+180) % 360;
-    }
-
-    public float getAngularSpeed() {
-        if (!RadarConfig.server().gearRadarBearingSpeed.get())
-            return super.getAngularSpeed();
-
-        float speed = convertToAngular(getSpeed());
-        if (getSpeed() == 0)
-            speed = 0;
-        if (level.isClientSide) {
-            speed *= ServerSpeedProvider.get();
-            speed += clientAngleDiff / 3f;
+    @Override
+    public void write(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.write(tag, provider, clientPacket);
+        tag.putBoolean("Running", running);
+        tag.putFloat("Angle", angle);
+        if (scanningBehavior != null) {
+            tag.putDouble("Range", scanningBehavior.getRange());
         }
-
-        return speed / (4f + getDishCount() / 10);
     }
 
     @Override
-    public void assemble() {
-        if (!(level.getBlockState(getBlockPos()).getBlock() instanceof RadarBearingBlock))
-            return;
-
-        RadarContraption contraption = createContraption();
-        if (contraption == null)
-            return;
-
-        if (isWindmill())
-            award(AllAdvancements.WINDMILL);
-        if (contraption.getSailBlocks() >= 16 * 8)
-            award(AllAdvancements.WINDMILL_MAXED);
-
-        updateGeneratedRotation();
-        updateContraptionData();
-        notifyUpdate();
-    }
-
-    @Override
-    public void disassemble() {
-        super.disassemble();
-        updateContraptionData();
-    }
-
-    @Override
-    public float calculateStressApplied() {
-        float impact = (float) BlockStressValues.getImpact(getStressConfigKey()) + getDishCount();
-        this.lastStressApplied = impact;
-        return impact;
-    }
-
-    private RadarContraption createContraption() {
-        RadarContraption contraption = new RadarContraption();
-        try {
-            if (!contraption.assemble(level, getBlockPos()))
-                return null;
-            lastException = null;
-        } catch (AssemblyException e) {
-            lastException = e;
-            sendData();
-            return null;
+    public void read(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.read(tag, provider, clientPacket);
+        running = tag.getBoolean("Running");
+        angle = tag.getFloat("Angle");
+        if (scanningBehavior != null && tag.contains("Range")) {
+            scanningBehavior.setRange(tag.getDouble("Range"));
         }
-
-        contraption.removeBlocksFromWorld(level, BlockPos.ZERO);
-        movedContraption = ControlledContraptionEntity.create(level, this, contraption);
-        BlockPos anchor = getBlockPosition().above();
-        movedContraption.setPos(anchor.getX(), anchor.getY(), anchor.getZ());
-        movedContraption.setRotationAxis(Direction.Axis.Y);
-        level.addFreshEntity(movedContraption);
-
-        AllSoundEvents.CONTRAPTION_ASSEMBLE.playOnServer(level, getBlockPos());
-
-
-        running = true;
-        angle = 0;
-        return contraption;
-    }
-
-    private void updateContraptionData() {
-        dishCount = getContraption().map(RadarContraption::getDishCount).orElse(0);
-        receiverFacing = getContraption().map(RadarContraption::getReceiverFacing).orElse(Direction.NORTH);
-        creative = getContraption().map(RadarContraption::isCreative).orElse(false);
-        scanningBehavior.setRange(getRange());
-        scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
-        scanningBehavior.setRunning(running);
-        scanningBehavior.setAngle(getGlobalAngle());
-        notifyUpdate();
     }
 
     @Override
-    public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
-        super.addToGoggleTooltip(tooltip, isPlayerSneaking);
-        tooltip.add(Component.translatable(CreateRadar.MODID + ".radar.dish_count", dishCount));
-        tooltip.add(Component.translatable(CreateRadar.MODID + ".radar.range", getRange()));
-        return true;
-    }
+    public void tick() {
+        boolean wasRunning = running;
+        super.tick();
+        if (scanningBehavior != null) {
+            angle = getInterpolatedAngle(1.0f);
+            float effectiveAngle = (float) (angle * RadarConfig.server().radarRotationMultiplier.get());
+            scanningBehavior.setRunning(running);
+            scanningBehavior.setAngle(effectiveAngle);
+            scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
 
-    @Override
-    protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-        super.read(compound, registries, clientPacket);
-        dishCount = compound.getInt("dishCount");
-        creative = compound.getBoolean("creative");
-        if (compound.contains("receiverFacing"))
-            receiverFacing = Direction.from3DDataValue(compound.getInt("receiverFacing"));
-    }
-
-    @Override
-    public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-        super.write(compound, registries, clientPacket);
-        compound.putInt("dishCount", dishCount);
-        compound.putBoolean("creative", creative);
-        if (receiverFacing != null)
-            compound.putInt("receiverFacing", receiverFacing.get3DDataValue());
-    }
-
-    public int getDishCount() {
-        return dishCount;
-    }
-
-    public Optional<RadarContraption> getContraption() {
-        return Optional.ofNullable(movedContraption)
-                .map(ControlledContraptionEntity::getContraption)
-                .filter(c -> c instanceof RadarContraption)
-                .map(c -> (RadarContraption) c);
-    }
-
-    public float getAngle() {
-        return angle;
-    }
-
-    public Direction getReceiverFacing() {
-        return receiverFacing;
-    }
-
-    public float getRange() {
-        if (creative)
-            return RadarConfig.server().maxRadarRange.get();
-        return Math.min(RadarConfig.server().radarBaseRange.get() + dishCount * RadarConfig.server().dishRangeIncrease.get(),
-                RadarConfig.server().maxRadarRange.get());
-    }
-
-    public Collection<RadarTrack> getTracks() {
-        Collection<RadarTrack> real = scanningBehavior.getRadarTracks();
-
-            if (level instanceof ServerLevel sl &&
-                    JamRegistry.isRadarSpoofed(sl, worldPosition)) {
-                return FakeRadarTrackFactory.generate(sl, worldPosition, 8);
+            // Update range based on dish count
+            if (!level.isClientSide) {
+                int dishCount = getDishCount();
+                boolean creative = isCreative();
+                int baseRange = RadarConfig.server().radarBaseRange.get();
+                int bonus = RadarConfig.server().dishRangeIncrease.get();
+                int maxRange = RadarConfig.server().maxRadarRange.get();
+                
+                double finalRange = creative ? maxRange : Math.min(maxRange, baseRange + (double) dishCount * bonus);
+                
+                if (Math.abs(scanningBehavior.getRange() - finalRange) > 0.1) {
+                    com.happysg.radar.CreateRadar.getLogger().info("RADAR at {}: dishes={} creative={} range={}", 
+                        getBlockPos(), dishCount, creative, finalRange);
+                    scanningBehavior.setRange(finalRange);
+                    setChanged();
+                    sendData();
+                }
             }
-            return real;
-    }
 
-    @Nullable
-    private NetworkData.Group getNetworkGroup() {
-        if (level == null || level.isClientSide) return null;
-        if (!(level instanceof ServerLevel sl)) return null;
+            if (wasRunning != running && level != null && !level.isClientSide) {
+                sendData();
+            }
 
-        NetworkData data = NetworkData.get(sl);
-        BlockPos filtererPos = data.getFiltererForEndpoint(sl.dimension(), worldPosition);
-        if (filtererPos == null) return null;
-
-        return data.getGroup(sl.dimension(), filtererPos);
-    }
-
-    private DetectionConfig getDetectionFilterFromNetworkOrDefault() {
-        NetworkData.Group g = getNetworkGroup();
-        if (g == null) return DetectionConfig.DEFAULT;
-        return DetectionConfig.fromTag(g.detectionTag);
-    }
-
-    private void recomputeNetworkFilteredTracks() {
-        if (level == null || level.isClientSide) return;
-
-        // Not networked? Expose raw tracks.
-        if (getNetworkGroup() == null) {
-            networkFilteredTracks = scanningBehavior.getRadarTracks();
-            return;
+            scanningBehavior.tick();
         }
-
-        DetectionConfig det = getDetectionFilterFromNetworkOrDefault();
-
-        // TODO: add IdentificationConfig filter when implemented
-        networkFilteredTracks = scanningBehavior.getRadarTracks().stream()
-                .filter(det::test)
-                .toList();
-    }
-    @Override
-    public String getRadarType(){
-        return "spinning";
-    }
-    @Override
-    public boolean renderRelativeToMonitor(){
-        return (VS2Utils.isBlockInShipyard(level,getBlockPos()));
-    }
-    @Override
-    public Direction getradarDirection() {
-        return this.receiverFacing;
     }
 
+    @Override
+    public boolean isValid() {
+        return !isRemoved();
+    }
+
+    @Override
+    public void attach(com.simibubi.create.content.contraptions.ControlledContraptionEntity entity) {
+        super.attach(entity);
+    }
+
+    @Override
+    public boolean isAttachedTo(AbstractContraptionEntity entity) {
+        return movedContraption != null && movedContraption.equals(entity);
+    }
 }

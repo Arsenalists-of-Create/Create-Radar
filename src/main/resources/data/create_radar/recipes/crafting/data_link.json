@@ -9,7 +9,7 @@
       "item": "create:brass_casing"
     },
     "C": {
-      "item": "minecraft:copper_ingot"
+      "item": "create:transmitter"
     }
   },
   "pattern": [

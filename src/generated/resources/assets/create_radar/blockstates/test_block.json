@@ -1,0 +1,9 @@
+{
+  "variants": {
+    "facing=north": { "model": "create_radar:block/auto_pitch_controller" },
+    "facing=east":  { "model": "create_radar:block/auto_pitch_controller", "y": 90 },
+    "facing=south": { "model": "create_radar:block/auto_pitch_controller", "y": 180 },
+    "facing=west":  { "model": "create_radar:block/auto_pitch_controller", "y": 270 }
+  }
+}
+

@@ -304,4 +304,3 @@ implements RealDistribution, Serializable {
         return FastMath.log(density(x));
     }
 }
-

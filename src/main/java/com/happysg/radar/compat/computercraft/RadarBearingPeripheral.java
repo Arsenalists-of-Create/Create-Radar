@@ -63,6 +63,12 @@ public class RadarBearingPeripheral implements GenericPeripheral {
 
     public static HashMap<String, Double> getMapFromVector(Vec3 vector) {
         HashMap<String, Double> vectorMap = new HashMap<>();
+        if (vector == null) {
+            vectorMap.put("x", 0.0);
+            vectorMap.put("y", 0.0);
+            vectorMap.put("z", 0.0);
+            return vectorMap;
+        }
         vectorMap.put("x", vector.x);
         vectorMap.put("y", vector.y);
         vectorMap.put("z", vector.z);

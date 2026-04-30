@@ -185,4 +185,3 @@ class SmallPrimes {
         return true; // definitely prime
     }
 }
-

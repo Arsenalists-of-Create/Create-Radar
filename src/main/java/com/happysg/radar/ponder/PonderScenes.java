@@ -92,125 +92,172 @@ public class PonderScenes {
         scene.markAsFinished();
     }
 
-    public static void radarLinking(SceneBuilder scene, SceneBuildingUtil util) {
-        scene.title("radar_linking", "Linking a Radar to a Monitor!");
-        scene.rotateCameraY(180);
-        scene.configureBasePlate(0, 0, 5);
+    public static void networkSetup(SceneBuilder scene, SceneBuildingUtil util){
+        scene.title("network_setup", "Creating A Radar Network");
+        scene.configureBasePlate(0, 0, 10);
         scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(20);
+        Selection networkcontroller = util.select().position(4,1,4);
+        scene.world().showSection(networkcontroller,Direction.DOWN);
+        scene.idle(30);
+        scene.overlay().showText(100)
+                .text("")
+                .pointAt(networkcontroller.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(120);
+        scene.overlay().showText(100)
+                .text("")
+                .pointAt(networkcontroller.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(40);
+        scene.rotateCameraY(90);
         scene.idle(40);
 
-        Selection monitor = util.select().fromTo(0, 1, 3, 0, 2, 4);
-        Vec3 monitorSide = util.vector().blockSurface(new BlockPos(0, 1, 3), Direction.EAST);
-        scene.world().showSection(monitor, Direction.DOWN);
-        scene.overlay().showText(40)
-                .pointAt(monitorSide)
-                .placeNearTarget()
-                .attachKeyFrame()
-                .text("Place Monitor");
-        scene.idle(60);
 
-        scene.world().showSection(util.select().position(2, 1, 2), Direction.DOWN);
-        BlockPos bearing = util.grid().at(2, 2, 2);
-        scene.world().showSection(util.select().position(bearing), Direction.DOWN);
-        ElementLink<WorldSectionElement> large_dishes =
-                scene.world().showIndependentSection(util.select().layers(3, 3), Direction.DOWN);
-        Vec3 bearingSide = util.vector().blockSurface(bearing, Direction.EAST);
 
+        scene.world().showSection(util.select().fromTo(0,1,6,0,3,8),Direction.DOWN);
+        Selection monlink = util.select().position(0,2,5);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkcontroller, new AABB(new BlockPos(4,1,4)), 60);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, monlink, new AABB(new BlockPos(0,2,5)).contract(0, 0, -.5), 60);
         scene.overlay().showText(40)
-                .pointAt(bearingSide)
-                .placeNearTarget()
+                .text("")
+                .pointAt(monlink.getCenter())
                 .attachKeyFrame()
-                .text("Build Radar Contraption");
-        scene.idle(60);
-        BlockPos link = util.grid().at(3, 2, 2);
-        scene.world().showSection(util.select().position(link), Direction.WEST);
-        scene.idle(15);
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, monitor, new AABB(link).contract(.5f, 0, 0), 60);
+                .placeNearTarget();
         scene.idle(5);
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, link, new AABB(new BlockPos(0, 1, 3)).expandTowards(0, 1, 1), 60);
-        scene.overlay().showText(40)
-                .text("Link using Display Links")
-                .pointAt(bearingSide)
-                .attachKeyFrame()
-                .colored(PonderPalette.OUTPUT)
-                .placeNearTarget();
+        scene.world().showSection(monlink,Direction.SOUTH);
         scene.idle(50);
-
-        scene.overlay().showText(40)
-                .text("Right click Display Link to activate")
-                .pointAt(bearingSide)
-                .attachKeyFrame()
-                .placeNearTarget();
+        scene.world().hideSection((util.select().fromTo(0,1,6,0,3,8)),Direction.UP);
+        scene.world().hideSection(monlink,Direction.UP);
 
         scene.idle(40);
-        scene.markAsFinished();
-    }
+        scene.rotateCameraY(90);
+        scene.world().showSection(util.select().fromTo(4,1,0,4,1,3),Direction.DOWN );
+        scene.world().showSection(util.select().column(3,2 ),Direction.DOWN);
+        scene.world().showSection(util.select().column(4,2),Direction.DOWN);
+        scene.world().showSection(util.select().fromTo(5,3,2,5,4,2),Direction.DOWN);
+        Selection radarlink = util.select().position(5,2,2);
+        Selection gunlink = util.select().position(8,2,5);
 
-    public static void controllerLinking(SceneBuilder scene, SceneBuildingUtil util) {
-        scene.title("controller_linking", "Linking a Controller to a Monitor!");
+        scene.world().showSection(util.select().fromTo(9,9,9,9,0, 0 ),Direction.DOWN);
+        scene.idle(30);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkcontroller, new AABB(new BlockPos(4,1,4)), 60);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, radarlink, new AABB(new BlockPos(5,2,2)).contract(.5, 0, 0), 60);
+        scene.overlay().showText(40)
+                .text("")
+                .pointAt(radarlink.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(10);
+        scene.world().showSection(radarlink,Direction.WEST);
+        scene.idle(50);
+        scene.rotateCameraY(90);
+        scene.idle(40);
+        scene.overlay().showText(40)
+                .text("")
+                .pointAt(gunlink.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkcontroller, new AABB(new BlockPos(4,1,4)), 60);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, gunlink, new AABB(new BlockPos(8,2,5)).contract(-.5, 0, 0), 60);
+        scene.idle(20);
+        scene.world().showSection(gunlink,Direction.EAST);
+
+
+
+
+
+
+    }
+    public static void weaponSimpleWeaponSetup(SceneBuilder scene, SceneBuildingUtil util){
+        scene.title("weapon_setup", "Creating A Radar Network");
         scene.configureBasePlate(0, 0, 5);
         scene.world().showSection(util.select().layer(0), Direction.DOWN);
         scene.idle(10);
         scene.world().showSection(util.select().layer(1), Direction.DOWN);
-
-        Selection monitor = util.select().fromTo(4, 1, 3, 4, 2, 4);
-        Vec3 monitorSide = util.vector().blockSurface(new BlockPos(4, 1, 3), Direction.WEST);
-        scene.world().showSection(monitor, Direction.DOWN);
         scene.idle(20);
-
         Selection yawController = util.select().position(2, 2, 2);
-        Vec3 yawControllerSide = util.vector().blockSurface(new BlockPos(2, 2, 2), Direction.EAST);
-
-        Selection cannonMount = util.select().position(2, 3, 2);
-
         scene.world().showSection(yawController, Direction.DOWN);
-        scene.idle(20);
+
+        Vec3 yawControllerSide = util.vector().blockSurface(new BlockPos(2, 2, 2), Direction.EAST);
+        Selection cannonMount = util.select().position(2, 3, 2);
+        Selection networkController = util.select().position(4,1,4);
+        BlockPos networkControllerPos = util.grid().at(4,1,4);
+        scene.idle(40);
         scene.world().showSection(cannonMount, Direction.DOWN);
+        scene.idle(5);
         scene.overlay().showText(40)
                 .text("Yaw Controller is placed under the turret mount")
                 .pointAt(yawControllerSide)
                 .attachKeyFrame()
                 .placeNearTarget();
-        scene.idle(40);
+        scene.idle(60);
+
 
         BlockPos link = util.grid().at(1, 2, 2);
         scene.world().showSection(util.select().position(link), Direction.EAST);
-        scene.idle(20);
-
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, monitor, new AABB(new BlockPos(4, 1, 3)).expandTowards(0, 1, 1), 60);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, cannonMount, new AABB(new BlockPos(2,3,2)), 60);
         scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, link, new AABB(link).contract(-.5f, 0, 0), 60);
-        scene.overlay().showText(40)
-                .text("Link using Display Links")
-                .pointAt(yawControllerSide)
+        scene.overlay().showText(60)
+                .text("Link using Data Links")
+                .pointAt(link.getCenter())
                 .attachKeyFrame()
                 .colored(PonderPalette.OUTPUT)
                 .placeNearTarget();
         scene.idle(50);
+        Selection pitchController = util.select().position(2,3,1);
+        scene.idle(60);
 
-        BlockPos pitchController = link.above();
-        Vec3 pitchControllerSide = util.vector().blockSurface(pitchController, Direction.EAST);
-        scene.world().showSection(util.select().position(pitchController), Direction.DOWN);
-        scene.idle(20);
+        scene.world().showSection(pitchController,Direction.SOUTH);
+        Vec3 pitchControllerSide = util.vector().blockSurface(new BlockPos(2,3,1), Direction.EAST);
         BlockPos link2 = util.grid().at(1, 3, 1);
         scene.world().showSection(util.select().position(link2), Direction.EAST);
-        scene.overlay().showText(40)
+        scene.overlay().showText(60)
                 .text("Repeat for pitch Controller")
                 .pointAt(pitchControllerSide)
                 .attachKeyFrame()
                 .placeNearTarget();
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, monitor, new AABB(new BlockPos(4, 1, 3)).expandTowards(0, 1, 1), 60);
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, link2, new AABB(link2).contract(0, 0, -.5), 60);
-        scene.idle(50);
+        scene.idle(60);
+        scene.rotateCameraY(90);
+        scene.idle(60);
 
-        scene.rotateCameraY(-90);
-        scene.idle(20);
-        scene.overlay().showText(40)
-                .text("Select Target on monitor for turret to aim/fire at")
-                .pointAt(monitorSide)
+
+        Selection firingcontrol =util.select().position(3,3,2);
+        Selection link3 = util.select().position(3,3,3);
+        scene.world().showSection(firingcontrol,Direction.WEST);
+        scene.overlay().showText(60)
+                .text("The fire control block emits redstone when the cannon is in the correct position")
+                .pointAt(firingcontrol.getCenter())
                 .attachKeyFrame()
+                .colored(PonderPalette.OUTPUT)
                 .placeNearTarget();
         scene.idle(50);
-        scene.markAsFinished();
-
+        scene.rotateCameraY(90);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, cannonMount, new AABB(new BlockPos(2,3,2)), 60);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, link3, new AABB(new BlockPos (3,3,3)).contract(0, 0, .5f), 60);
+        scene.idle(20);
+        scene.world().showSection(link3, Direction.SOUTH);
+        scene.idle(50);
+        scene.rotateCameraY(-90);
+        Selection link4 = util.select().position(2,4,1);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, link4, new AABB(new BlockPos(2,4,1)).contract(0, .5, 0), 60);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(networkControllerPos).contract(0, .5, 0), 60);
+        scene.idle(20);
+        scene.world().showSection(link4,Direction.DOWN);
+        scene.overlay().showText(60)
+                .text("")
+                .pointAt(networkControllerPos.getCenter())
+                .attachKeyFrame()
+                .colored(PonderPalette.OUTPUT)
+                .placeNearTarget();
+        scene.idle(70);
+        scene.overlay().showText(60)
+                .text("")
+                .pointAt(networkControllerPos.getCenter())
+                .attachKeyFrame()
+                .colored(PonderPalette.OUTPUT)
+                .placeNearTarget();
     }
 }

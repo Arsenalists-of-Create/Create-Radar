@@ -53,7 +53,7 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
     }
 
     @Override
-    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+    public void onRemove(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (level instanceof ServerLevel sl && state.getBlock() != newState.getBlock() ) {
             breakAttachedDataLinks(level, pos);
             WeaponNetworkData data = WeaponNetworkData.get(sl);
@@ -66,7 +66,7 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
         super.onRemove(state, level, pos, newState, isMoving);
 
     }
-    private static void breakAttachedDataLinks(Level level, BlockPos controllerPos) {
+    private static void breakAttachedDataLinks(net.minecraft.world.level.Level level, BlockPos controllerPos) {
         for (Direction dir : Direction.values()) {
             BlockPos linkPos = controllerPos.relative(dir);
             BlockState linkState = level.getBlockState(linkPos);
@@ -88,7 +88,7 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
         }
     }
 
-    public void neighborChanged(BlockState state, Level level, BlockPos pos, Block block, BlockPos fromPos, boolean isMoving) {
+    public void neighborChanged(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, Block block, BlockPos fromPos, boolean isMoving) {
         super.neighborChanged(state, level, pos, block, fromPos, isMoving);
 
         if (level.isClientSide) return;

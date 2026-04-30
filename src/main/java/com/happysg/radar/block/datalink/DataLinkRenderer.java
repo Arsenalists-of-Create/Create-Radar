@@ -69,7 +69,7 @@ import net.minecraft.world.level.block.state.BlockState;
         // Render the glowing cube
 //        CachedBuffers.partial(ModPartials.RADAR_GLOW, blockState)
 //                .light(LightTexture.FULL_BRIGHT)
-//                .color(color, color, color, 255)
+//                .setColor(color, color, color, 255)
 //                .disableDiffuse()
 //                .renderInto(ms, buffer.getBuffer(RenderTypes.additive()));
 

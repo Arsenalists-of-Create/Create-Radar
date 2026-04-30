@@ -10,20 +10,22 @@ import net.minecraft.nbt.CompoundTag;
 
 import java.util.List;
 
-public record DetectionConfig(boolean player, boolean vs2, boolean contraption, boolean mob, boolean projectile, boolean animal, boolean item,
+public record DetectionConfig(boolean player, boolean physicsContraptions, boolean contraption, boolean mob, boolean projectile, boolean animal, boolean item,
                             List<String> blacklistPlayers, List<String> whitelistPlayers, List<String> blacklistVS2,
                             List<String> whitelistVS) {
 
     public static final DetectionConfig DEFAULT = new DetectionConfig(true, true, true, true, true,true,true);
 
-    public DetectionConfig(boolean player, boolean vs2, boolean contraption, boolean mob, boolean projectile,boolean animal, boolean item) {
-        this(player, vs2, contraption, mob, projectile,animal, item, List.of(), List.of(), List.of(), List.of());
+    public DetectionConfig(boolean player, boolean physicsContraptions, boolean contraption, boolean mob, boolean projectile,boolean animal, boolean item) {
+        this(player, physicsContraptions, contraption, mob, projectile,animal, item, List.of(), List.of(), List.of(), List.of());
     }
 
     public CompoundTag toTag() {
         CompoundTag tag = new CompoundTag();
         tag.putBoolean("player", player);
-        tag.putBoolean("vs2", vs2);
+        tag.putBoolean("physicsContraptions", physicsContraptions);
+        tag.putBoolean("vs2", physicsContraptions);
+        tag.putBoolean("aeronautics", physicsContraptions);
         tag.putBoolean("contraption", contraption);
         tag.putBoolean("mob", mob);
         tag.putBoolean("projectile", projectile);
@@ -42,7 +44,8 @@ public record DetectionConfig(boolean player, boolean vs2, boolean contraption, 
 
     public static DetectionConfig fromTag(CompoundTag tag) {
         boolean player = tag.getBoolean("player");
-        boolean vs2 = tag.getBoolean("vs2");
+        boolean physicsContraptions = tag.contains("physicsContraptions") ? tag.getBoolean("physicsContraptions") : 
+                                     (tag.contains("vs2") ? tag.getBoolean("vs2") : (tag.contains("aeronautics") ? tag.getBoolean("aeronautics") : true));
         boolean contraption = tag.getBoolean("contraption");
         boolean mob = tag.getBoolean("mob");
         boolean projectile = tag.getBoolean("projectile");
@@ -52,7 +55,7 @@ public record DetectionConfig(boolean player, boolean vs2, boolean contraption, 
         List<String> whitelistPlayers = tag.getCompound("playerList").getAllKeys().stream().filter(key -> tag.getCompound("playerList").getBoolean(key)).toList();
         List<String> blacklistVS2 = tag.getCompound("vs2Ships").getAllKeys().stream().filter(key -> !tag.getCompound("vs2Ships").getBoolean(key)).toList();
         List<String> whitelistVS = tag.getCompound("vs2Ships").getAllKeys().stream().filter(key -> tag.getCompound("vs2Ships").getBoolean(key)).toList();
-        return new DetectionConfig(player, vs2, contraption, mob, projectile, animal, item, blacklistPlayers, whitelistPlayers, blacklistVS2, whitelistVS);
+        return new DetectionConfig(player, physicsContraptions, contraption, mob, projectile, animal, item, blacklistPlayers, whitelistPlayers, blacklistVS2, whitelistVS);
     }
 
     public boolean test(RadarTrack track) {
@@ -83,7 +86,7 @@ public record DetectionConfig(boolean player, boolean vs2, boolean contraption, 
         if (trackCategory == TrackCategory.PLAYER) {
             return player;
         } else if (Mods.VALKYRIENSKIES.isLoaded() && trackCategory == TrackCategory.VS2) {
-            return vs2;
+            return physicsContraptions;
         } else if (trackCategory == TrackCategory.CONTRAPTION) {
             return contraption;
         } else if (trackCategory == TrackCategory.MOB || trackCategory == TrackCategory.HOSTILE) {
@@ -94,7 +97,9 @@ public record DetectionConfig(boolean player, boolean vs2, boolean contraption, 
             return animal;
         }else if (trackCategory == TrackCategory.ITEM){
             return item;
+        } else if (trackCategory == TrackCategory.AERONAUTICS) {
+            return physicsContraptions;
         }
         return false;
     }
-}
+}

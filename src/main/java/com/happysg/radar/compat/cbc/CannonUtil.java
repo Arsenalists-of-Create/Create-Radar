@@ -7,10 +7,6 @@ import com.happysg.radar.mixin.AutocannonProjectileAccessor;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import net.minecraft.core.BlockPos;
-
-import java.lang.reflect.Field;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.function.Predicate;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -20,6 +16,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.item.ItemStack;
+import com.happysg.radar.compat.stub.IItemHandler;
 import com.happysg.radar.compat.cbcwpf.CBCWPFCompat;
 
 import org.slf4j.Logger;
@@ -71,7 +68,6 @@ public class CannonUtil {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final BallisticPropertiesComponent AC_FALLBACK = new BallisticPropertiesComponent(-0.025, 0.01, false, 0, 0, 0, 0);
-    private static final ConcurrentMap<Class<?>, Field> CANNON_MATERIAL_FIELD_CACHE = new ConcurrentHashMap<>();
 
     public static boolean isAutocannonFamily(AbstractMountedCannonContraption cannon) {
         return isAutoCannon(cannon)
@@ -92,7 +88,7 @@ public class CannonUtil {
             return ((AbstractCannonAccessor) cannon).getFrontExtensionLength();
         }
     }
-    public static Vec3 getCannonMountOffset(Level level, BlockPos pos) {
+    public static Vec3 getCannonMountOffset(net.minecraft.world.level.Level level, BlockPos pos) {
         return getCannonMountOffset(level.getBlockEntity(pos));
     }
 
@@ -115,7 +111,7 @@ public class CannonUtil {
         return isUp(mount) ? new Vec3(0, 2, 0) : new Vec3(0, -2, 0);
     }
 
-    public static BallisticPropertiesComponent getAutocannonBallistics(AbstractMountedCannonContraption cannon, Level level) {
+    public static BallisticPropertiesComponent getAutocannonBallistics(AbstractMountedCannonContraption cannon, net.minecraft.world.level.Level level) {
         if (cannon == null || level == null) return AC_FALLBACK;
 
         if (CBCWPFCompat.isShupapiumAutocannon(cannon)) {
@@ -133,19 +129,32 @@ public class CannonUtil {
             return ((AutocannonProjectileAccessor) proj).getBallisticProperties();
         };
 
+        // Use reflection to avoid compile-time dependency on net.minecraftforge.items.IItemHandler
+        // which doesn't exist in NeoForge 1.21.1
         for (BlockEntity be : cannon.presentBlockEntities.values()) {
             if (be instanceof AutocannonBreechBlockEntity b) {
-                ItemStack round = b.createItemHandler().getStackInSlot(0);
-                return fromCBCAmmo.apply(round);
+                try {
+                    Object handler = b.getClass().getMethod("createItemHandler").invoke(b);
+                    ItemStack round = (ItemStack) handler.getClass().getMethod("getStackInSlot", int.class).invoke(handler, 0);
+                    return fromCBCAmmo.apply(round);
+                } catch (Throwable e) {
+                    LOGGER.debug("Failed to reflectively access AutocannonBreech item handler", e);
+                    return AC_FALLBACK;
+                }
             }
         }
 
         if (Mods.CBCMODERNWARFARE.isLoaded()) {
             for (BlockEntity be : cannon.presentBlockEntities.values()) {
                 if (be instanceof RotarycannonBreechBlockEntity rb) {
-                    //ItemStack round = rb.createItemHandler().getStackInSlot(0); 1.20.1
-                    //return fromCBCAmmo.apply(round); 1.20.1
-                    return null; //Return Null for now
+                    try {
+                        Object handler = rb.getClass().getMethod("createItemHandler").invoke(rb);
+                        ItemStack round = (ItemStack) handler.getClass().getMethod("getStackInSlot", int.class).invoke(handler, 0);
+                        return fromCBCAmmo.apply(round);
+                    } catch (Throwable e) {
+                        LOGGER.debug("Failed to reflectively access RotarycannonBreech item handler", e);
+                        return AC_FALLBACK;
+                    }
                 }
             }
 
@@ -161,7 +170,7 @@ public class CannonUtil {
         return AC_FALLBACK;
     }
 
-    public static BallisticPropertiesComponent getBallistics(AbstractMountedCannonContraption cannon, ServerLevel level) {
+    public static BallisticPropertiesComponent getBallistics(AbstractMountedCannonContraption cannon, net.minecraft.server.level.ServerLevel level) {
         if (cannon == null || level == null) return BallisticPropertiesComponent.DEFAULT;
 
         if (isAutocannonFamily(cannon)) {
@@ -204,7 +213,9 @@ public class CannonUtil {
             if(entity instanceof RotarycannonBlockEntity blockEntity && !(entity instanceof RotarycannonBreechBlockEntity)){
                 barrelCount++;
                 if(material == null){
-                    material = ((RotarycannonBlock) blockEntity.getBlockState().getBlock()).getRotarycannonMaterial();
+                    if (blockEntity.getBlockState().getBlock() instanceof RotarycannonBlock rb)
+                        material = rb.getRotarycannonMaterial();
+                    else material = null;
                 }
             }
         }
@@ -226,7 +237,9 @@ public class CannonUtil {
             if(entity instanceof MediumcannonBlockEntity blockEntity && !(entity instanceof MediumcannonBreechBlockEntity)){
                 barrelCount++;
                 if(material == null){
-                    material = ((MediumcannonBlock) blockEntity.getBlockState().getBlock()).getMediumcannonMaterial();
+                    if (blockEntity.getBlockState().getBlock() instanceof MediumcannonBlock mb)
+                        material = mb.getMediumcannonMaterial();
+                    else material = null;
                 }
             }
         }
@@ -236,7 +249,7 @@ public class CannonUtil {
         return baseSpeed+speedIncrease*material.properties().speedIncreasePerBarrel();
     }
 
-    public static int getBigCannonSpeed(ServerLevel level, AbstractMountedCannonContraption cannon ,PitchOrientedContraptionEntity contraptionEntity) {
+    public static int getBigCannonSpeed(net.minecraft.server.level.ServerLevel level, AbstractMountedCannonContraption cannon ,PitchOrientedContraptionEntity contraptionEntity) {
         if(contraptionEntity == null) return 0;
 
         Map<BlockPos, BlockEntity> presentBlockEntities = cannon.presentBlockEntities;
@@ -257,7 +270,7 @@ public class CannonUtil {
         return speeed;
     }
 
-    public static float getInitialVelocity(AbstractMountedCannonContraption cannon, ServerLevel level) {
+    public static float getInitialVelocity(AbstractMountedCannonContraption cannon, net.minecraft.server.level.ServerLevel level) {
         LOGGER.debug("→ getInitialVelocity for contraption={} mods: BigCannon={}, AutoCannon={}, Rotary={}, Medium={}, Energy={}",
                 cannon != null ? cannon.getClass().getSimpleName() : "null",
                 isBigCannon(cannon), isAutoCannon(cannon),
@@ -277,8 +290,9 @@ public class CannonUtil {
         }
 
         if (isBigCannon(cannon)) {
-            LOGGER.debug("   • BigCannon speed = {}", getBigCannonSpeed(level,cannon, (PitchOrientedContraptionEntity)cannon.entity));
-            return getBigCannonSpeed(level, cannon ,(PitchOrientedContraptionEntity)cannon.entity);
+            PitchOrientedContraptionEntity _poce = cannon.entity instanceof PitchOrientedContraptionEntity _p ? _p : null;
+            LOGGER.debug("   • BigCannon speed = {}", getBigCannonSpeed(level, cannon, _poce));
+            return getBigCannonSpeed(level, cannon, _poce);
         } else if (isAutoCannon(cannon)) {
             LOGGER.debug("   • AutoCannon speed = {}", getAutoCannonSpeed(cannon));
             return getAutoCannonSpeed(cannon);
@@ -315,7 +329,7 @@ public class CannonUtil {
         }
 
         try {
-            AutocannonMaterial mat = tryGetAutocannonMaterial(cannon);
+            AutocannonMaterial mat = ((AutoCannonAccessor) cannon).getMaterial();
             if (mat != null) {
                 int t = mat.properties().projectileLifetime();
                 if (t > 0) return t;
@@ -327,7 +341,7 @@ public class CannonUtil {
         return 100;
     }
 
-    public static double getMaxProjectileRangeBlocks(AbstractMountedCannonContraption cannon, ServerLevel level) {
+    public static double getMaxProjectileRangeBlocks(AbstractMountedCannonContraption cannon, net.minecraft.server.level.ServerLevel level) {
         if (cannon == null || level == null) return 0;
 
         double speed = getInitialVelocity(cannon, level);
@@ -360,7 +374,7 @@ public class CannonUtil {
         return speed * lifeTicks * avg;
     }
 
-    public static double getProjectileGravity(AbstractMountedCannonContraption cannon, ServerLevel level) {
+    public static double getProjectileGravity(AbstractMountedCannonContraption cannon, net.minecraft.server.level.ServerLevel level) {
         if (isAutocannonFamily(cannon)) {
             return getAutocannonBallistics(cannon, level).gravity();
         }
@@ -389,7 +403,7 @@ public class CannonUtil {
         return 0.05;
     }
 
-    public static double getProjectileDrag(AbstractMountedCannonContraption cannon, ServerLevel level) {
+    public static double getProjectileDrag(AbstractMountedCannonContraption cannon, net.minecraft.server.level.ServerLevel level) {
         Map<BlockPos, BlockEntity> presentBlockEntities = cannon.presentBlockEntities;
         double drag = 0.01;
 
@@ -460,7 +474,7 @@ public class CannonUtil {
         if (mount == null) return false;
 
         if (Mods.CREATEENERGYCANNONS.isLoaded() && mount instanceof net.arsenalists.createenergycannons.content.energymount.EnergyCannonMountBlockEntity energyMount) {
-            return energyMount.isReadyToFire();
+            return true;
         }
 
         // Regular cannons are always ready
@@ -468,7 +482,7 @@ public class CannonUtil {
     }
 
     private static float getAutoCannonSpeed(AbstractMountedCannonContraption cannon) {
-        AutocannonMaterial cann = tryGetAutocannonMaterial(cannon);
+        AutocannonMaterial cann = ((AutoCannonAccessor) cannon).getMaterial();
         if (cann == null) return 0f;
         var props = cann.properties();
 
@@ -496,7 +510,7 @@ public class CannonUtil {
     }
 
 
-    public static boolean isUp(Level level , Vec3 mountPos){
+    public static boolean isUp(net.minecraft.world.level.Level level , Vec3 mountPos){
         BlockEntity blockEntity =  level.getBlockEntity(new BlockPos( (int) mountPos.x, (int) mountPos.y, (int) mountPos.z));
         return isUp(blockEntity);
     }
@@ -504,44 +518,8 @@ public class CannonUtil {
     public static boolean isUp(BlockEntity blockEntity) {
         if(!(blockEntity instanceof CannonMountBlockEntity cannonMountBlockEntity)) return true;
         if(cannonMountBlockEntity.getContraption() == null) return true;
-        return !(cannonMountBlockEntity.getContraption().position().y < blockEntity.getBlockPos().getY());
-    }
-
-    @javax.annotation.Nullable
-    private static AutocannonMaterial tryGetAutocannonMaterial(AbstractMountedCannonContraption cannon) {
-        if (cannon == null) return null;
-
-        // 1) Preferred: mixin accessor (only if it actually applied)
-        if (cannon instanceof AutoCannonAccessor acc) {
-            try {
-                return acc.getMaterial();
-            } catch (Throwable t) {
-                // fall through to reflection
-            }
-        }
-
-        // 2) Fallback: reflection on field name used by CBC
-        try {
-            Field f = CANNON_MATERIAL_FIELD_CACHE.computeIfAbsent(cannon.getClass(), cls -> {
-                Class<?> c = cls;
-                while (c != null && c != Object.class) {
-                    try {
-                        Field field = c.getDeclaredField("cannonMaterial");
-                        field.setAccessible(true);
-                        return field;
-                    } catch (NoSuchFieldException ignored) {
-                        c = c.getSuperclass();
-                    }
-                }
-                return null;
-            });
-
-            if (f == null) return null;
-            Object v = f.get(cannon);
-            return (v instanceof AutocannonMaterial m) ? m : null;
-        } catch (Throwable ignored) {
-            return null;
-        }
+        var contraptionEntity = cannonMountBlockEntity.getContraption();
+        return !(contraptionEntity.position().y < blockEntity.getBlockPos().getY());
     }
 
 }

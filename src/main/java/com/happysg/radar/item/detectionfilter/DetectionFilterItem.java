@@ -17,13 +17,13 @@ public class DetectionFilterItem extends Item {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private InteractionResultHolder<ItemStack> clientFunc(Level level, Player player, InteractionHand hand) {
+    private InteractionResultHolder<ItemStack> clientFunc(net.minecraft.world.level.Level level, Player player, InteractionHand hand) {
         Minecraft.getInstance().setScreen(new RadarFilterScreen());
         return InteractionResultHolder.success(player.getItemInHand(hand));
     }
 
     @Override
-    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
+    public InteractionResultHolder<ItemStack> use(net.minecraft.world.level.Level level, Player player, InteractionHand hand) {
         if (!level.isClientSide)
             return InteractionResultHolder.pass(player.getItemInHand(hand));
         return clientFunc(level, player, hand);

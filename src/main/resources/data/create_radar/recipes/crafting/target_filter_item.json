@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "S": {
+      "tag": "minecraft:swords"
+    },
+    "W": {
+      "tag": "minecraft:wool"
+    },
+    "B": {
+      "item": "create:brass_nugget"
+    }
+  },
+  "pattern": [
+    " S ",
+    "BWB"
+  ],
+  "result": {
+    "item": "create_radar:target_filter_item"
+  },
+  "show_notification": true
+}

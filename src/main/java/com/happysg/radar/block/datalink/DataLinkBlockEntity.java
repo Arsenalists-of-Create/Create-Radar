@@ -1,12 +1,10 @@
 package com.happysg.radar.block.datalink;
 
-import com.happysg.radar.block.datalink.screens.AbstractDataLinkScreen;
 import com.happysg.radar.registry.AllDataBehaviors;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.resources.ResourceLocation;
@@ -15,6 +13,7 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import org.joml.Matrix4dc;
 import org.joml.Vector3d;
+import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -30,7 +29,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
     public DataPeripheral activeSource;
     public DataController activeTarget;
 
-    private CompoundTag sourceConfig;
+    private CompoundTag sourceConfig = new CompoundTag();
     boolean ledState = false;
 
     private BlockPos linkedMonitorPos;
@@ -41,7 +40,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
 
     @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-
+        // Implement behaviors if needed
     }
 
     @Override
@@ -54,7 +53,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         BlockPos sourcePosition = getSourcePosition();
         BlockPos targetPosition = getTargetPosition();
 
-        if (!level.isLoaded(targetPosition) || !level.isLoaded(sourcePosition))
+        if (level == null || !level.isLoaded(targetPosition) || !level.isLoaded(sourcePosition))
             return;
 
         DataController target = AllDataBehaviors.targetOf(level, targetPosition);
@@ -82,18 +81,19 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         ledState = true;
         activeSource.transferData(new DataLinkContext(level, this), activeTarget);
         sendData();
-        //TODO implement advancement
     }
 
-    @Override
-    public void writeSafe(CompoundTag tag, HolderLookup.Provider registries) {
-        super.writeSafe(tag, registries);
+    public CompoundTag getSourceConfig() { return sourceConfig; }
+    public void setSourceConfig(CompoundTag sourceConfig) { this.sourceConfig = sourceConfig; }
+
+    public void writeSafe(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider) {
+        super.writeSafe(tag, provider);
         writeGatheredData(tag);
     }
 
     @Override
-    protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-        super.write(tag, registries, clientPacket);
+    protected void write(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.write(tag, provider, clientPacket);
         writeGatheredData(tag);
         if (clientPacket && activeTarget != null)
             tag.putString("TargetType", activeTarget.id.toString());
@@ -115,60 +115,28 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
     }
 
     @Override
-    protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-        super.read(tag, registries, clientPacket);
+    protected void read(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.read(tag, provider, clientPacket);
 
-        targetOffset = NbtUtils.readBlockPos(tag, "TargetOffsetShip").orElse(null);
+        targetOffset = net.minecraft.nbt.NbtUtils.readBlockPos(tag, "TargetOffset").orElse(net.minecraft.core.BlockPos.ZERO);
         ledState = tag.getBoolean("LedState");
 
         linkedShipId = tag.contains("LinkedShipId") ? tag.getLong("LinkedShipId") : null;
         targetOffsetShip = tag.contains("TargetOffsetShip")
-                ? NbtUtils.readBlockPos(tag, "TargetOffsetShip").orElse(null)
+                ? net.minecraft.nbt.NbtUtils.readBlockPos(tag, "TargetOffsetShip").orElse(net.minecraft.core.BlockPos.ZERO)
                 : BlockPos.ZERO;
 
         if (clientPacket && tag.contains("TargetType"))
-            activeTarget = AllDataBehaviors.getTarget(ResourceLocation.parse(tag.getString("TargetType")));
+            activeTarget = AllDataBehaviors.getTarget(net.minecraft.resources.ResourceLocation.parse(tag.getString("TargetType")));
 
         if (!tag.contains("Source"))
             return;
 
         CompoundTag data = tag.getCompound("Source");
-        activeSource = AllDataBehaviors.getSource(ResourceLocation.parse(data.getString("Id")));
+        activeSource = AllDataBehaviors.getSource(net.minecraft.resources.ResourceLocation.parse(data.getString("Id")));
         sourceConfig = new CompoundTag();
         if (activeSource != null)
             sourceConfig = data.copy();
-    }
-
-    Optional<AbstractDataLinkScreen> getScreen() {
-        return activeSource == null ? Optional.empty() : Optional.ofNullable(activeSource.getScreen(this));
-    }
-
-    public void target(BlockPos targetPosition) {
-        if (!(level instanceof ServerLevel sl)) {
-            this.targetOffset = targetPosition.subtract(worldPosition);
-            return;
-        }
-
-        var ship = org.valkyrienskies.mod.common.VSGameUtilsKt.getShipManagingPos(sl, worldPosition);
-        var targetShip = org.valkyrienskies.mod.common.VSGameUtilsKt.getShipManagingPos(sl, targetPosition);
-
-        if (ship != null && targetShip != null && ship.getId() == targetShip.getId()) {
-            linkedShipId = ship.getId();
-
-            BlockPos selfShipPos   = toShipBlockPos(ship, worldPosition);
-            BlockPos targetShipPos = toShipBlockPos(ship, targetPosition);
-
-            targetOffsetShip = targetShipPos.subtract(selfShipPos);
-
-            targetOffset = targetPosition.subtract(worldPosition);
-            setChanged();
-            return;
-        }
-
-        linkedShipId = null;
-        targetOffsetShip = BlockPos.ZERO;
-        this.targetOffset = targetPosition.subtract(worldPosition);
-        setChanged();
     }
 
     public BlockPos getSourcePosition() {
@@ -186,14 +154,6 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         return toWorldBlockPos(ship, sourceShipPos);
     }
 
-    public CompoundTag getSourceConfig() {
-        return sourceConfig;
-    }
-
-    public void setSourceConfig(CompoundTag sourceConfig) {
-        this.sourceConfig = sourceConfig;
-    }
-
     public Direction getDirection() {
         return getBlockState().getOptionalValue(DataLinkBlock.FACING)
                 .orElse(Direction.UP)
@@ -207,7 +167,6 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
 
         var ship = org.valkyrienskies.mod.common.VSGameUtilsKt.getShipManagingPos(sl, worldPosition);
         if (ship == null || ship.getId() != linkedShipId) {
-            // ship changed / disassembled; fall back
             linkedShipId = null;
             return worldPosition.offset(targetOffset);
         }
@@ -218,21 +177,19 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         return toWorldBlockPos(ship, targetShipPos);
     }
 
-    private static BlockPos toShipBlockPos(org.valkyrienskies.core.api.ships.ServerShip ship, BlockPos worldPos) {
-        Vector3d v = new Vector3d(worldPos.getX() + 0.5, worldPos.getY() + 0.5, worldPos.getZ() + 0.5);
-
-        Matrix4dc worldToShip = ship.getWorldToShip();
-        worldToShip.transformPosition(v);
-
+    private static BlockPos toShipBlockPos(org.valkyrienskies.core.api.ships.Ship ship, BlockPos worldPos) {
+        org.joml.Vector3d v = new org.joml.Vector3d(worldPos.getX() + 0.5, worldPos.getY() + 0.5, worldPos.getZ() + 0.5);
+        ship.getWorldToShip().transformPosition(v);
         return BlockPos.containing(v.x, v.y, v.z);
     }
 
-    private static BlockPos toWorldBlockPos(org.valkyrienskies.core.api.ships.ServerShip ship, BlockPos shipPos) {
-        Vector3d v = new Vector3d(shipPos.getX() + 0.5, shipPos.getY() + 0.5, shipPos.getZ() + 0.5);
-
-        Matrix4dc shipToWorld = ship.getShipToWorld();
-        shipToWorld.transformPosition(v);
-
+    private static BlockPos toWorldBlockPos(org.valkyrienskies.core.api.ships.Ship ship, BlockPos shipPos) {
+        org.joml.Vector3d v = new org.joml.Vector3d(shipPos.getX() + 0.5, shipPos.getY() + 0.5, shipPos.getZ() + 0.5);
+        ship.getShipToWorld().transformPosition(v);
         return BlockPos.containing(v.x, v.y, v.z);
+    }
+
+    public static class Track {
+        public Vec3 position() { return Vec3.ZERO; }
     }
 }

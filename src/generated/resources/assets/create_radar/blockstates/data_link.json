@@ -1,28 +1,55 @@
 {
   "variants": {
-    "facing=down": {
+    "facing=down,link_style=radar": {
       "model": "create_radar:block/data_link/block",
       "x": 180
     },
-    "facing=east": {
+    "facing=east,link_style=radar": {
       "model": "create_radar:block/data_link/block",
       "x": 90,
       "y": 90
     },
-    "facing=north": {
+    "facing=north,link_style=radar": {
       "model": "create_radar:block/data_link/block",
       "x": 90
     },
-    "facing=south": {
+    "facing=south,link_style=radar": {
       "model": "create_radar:block/data_link/block",
       "x": 90,
       "y": 180
     },
-    "facing=up": {
+    "facing=up,link_style=radar": {
       "model": "create_radar:block/data_link/block"
     },
-    "facing=west": {
+    "facing=west,link_style=radar": {
       "model": "create_radar:block/data_link/block",
+      "x": 90,
+      "y": 270
+    },
+
+    "facing=down,link_style=controller": {
+      "model": "create_radar:block/data_link/block_controller",
+      "x": 180
+    },
+    "facing=east,link_style=controller": {
+      "model": "create_radar:block/data_link/block_controller",
+      "x": 90,
+      "y": 90
+    },
+    "facing=north,link_style=controller": {
+      "model": "create_radar:block/data_link/block_controller",
+      "x": 90
+    },
+    "facing=south,link_style=controller": {
+      "model": "create_radar:block/data_link/block_controller",
+      "x": 90,
+      "y": 180
+    },
+    "facing=up,link_style=controller": {
+      "model": "create_radar:block/data_link/block_controller"
+    },
+    "facing=west,link_style=controller": {
+      "model": "create_radar:block/data_link/block_controller",
       "x": 90,
       "y": 270
     }

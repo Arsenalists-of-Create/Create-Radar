@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.networkcontroller;
 
+import com.happysg.radar.NbtHelper;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
@@ -12,14 +13,11 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.PhysicsHandler;
 import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.track.TrackCategory;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
@@ -38,10 +36,8 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-
 import net.neoforged.neoforge.items.IItemHandler;
 import net.neoforged.neoforge.items.ItemStackHandler;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.valkyrienskies.core.api.ships.Ship;
 import org.valkyrienskies.mod.common.VSGameUtilsKt;
@@ -50,7 +46,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.*;
 
-public class NetworkFiltererBlockEntity extends BlockEntity {
+public class NetworkFiltererBlockEntity extends SmartBlockEntity {
     private static final String NBT_INVENTORY = "Inventory";
     private static final String NBT_SLOT_NBT  = "SlotNbt";
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -88,11 +84,26 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     private int lastPushedCfgHash = 0;
     private long lastPushedSafeZonesHash = 0;
 
-    public static void tick(Level level, BlockPos pos, BlockState state, NetworkFiltererBlockEntity be) {
+    @Override
+    public void initialize() {
+        super.initialize();
+        this.lastKnownPos = worldPosition;
+    }
+
+    public static void tick(net.minecraft.world.level.Level level, BlockPos pos, BlockState state, NetworkFiltererBlockEntity be) {
         if (!(level instanceof ServerLevel sl)) return;
         if (level.isClientSide) return;
+        
 
         NetworkData data = NetworkData.get(sl);
+            if (!be.lastKnownPos.equals(pos)) {
+                boolean updated = data.updateFiltererPosition(sl.dimension(), be.lastKnownPos, pos);
+                if (updated) {
+                    be.lastKnownPos = pos;
+                    be.setChanged();
+                }
+            }
+
         NetworkData.Group group = data.getOrCreateGroup(sl.dimension(), pos);
 
         String selectedId = data.getSelectedTargetId(group);
@@ -105,7 +116,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             }
         }
 
-        if (sl.getGameTime() % 5 != 0) return;
         be.headlessTick(sl);
     }
 
@@ -143,10 +153,34 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         return loaded;
     }
 
+    public List<AutoPitchControllerBlockEntity> getWeaponEndpointBlockEntities() {
+        if (!(level instanceof ServerLevel sl)) return List.of();
+        NetworkData data = NetworkData.get(sl);
+        NetworkData.Group group = data.getGroup(sl.dimension(), worldPosition);
+        if (group == null) return List.of();
+        Set<BlockPos> endpoints = data.getWeaponEndpoints(group);
+        if (endpoints.isEmpty()) return List.of();
+
+        List<AutoPitchControllerBlockEntity> out = new ArrayList<>();
+        for (BlockPos p : endpoints) {
+            BlockEntity be = sl.getBlockEntity(p);
+            if (be instanceof AutoPitchControllerBlockEntity pitch) {
+                out.add(pitch);
+            } else {
+                if (sl.getGameTime() % 60 == 0) {
+                     com.happysg.radar.CreateRadar.getLogger().warn("FILTERER {}: Endpoint at {} is NOT an AutoPitchController (it is {})", worldPosition, p, be == null ? "null" : be.getClass().getSimpleName());
+                }
+            }
+        }
+        return out;
+    }
+
     private void headlessTick(ServerLevel sl) {
         NetworkData data = NetworkData.get(sl);
         NetworkData.Group group = data.getGroup(sl.dimension(), worldPosition);
-        if (group == null) return;
+        if (group == null) {
+            return;
+        }
 
         targeting = readTargetingFromSlot();
 
@@ -241,19 +275,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         int newCfgHash = cfgHash(cfg2);
         long newZonesHash = safeZonesHash(safeZones);
 
-        boolean changed =
-                !Objects.equals(lastPushedTrackId, newId) ||
-                        lastPushedCfgHash != newCfgHash ||
-                        lastPushedSafeZonesHash != newZonesHash;
-
         activeTrackCache = selected;
 
-        if (changed) {
-            lastPushedTrackId = newId;
-            lastPushedCfgHash = newCfgHash;
-            lastPushedSafeZonesHash = newZonesHash;
-            pushToEndpoints(selected);
-        }
+        pushToEndpoints(selected);
     }
 
 
@@ -343,8 +367,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
         this.activeTrackCache = track;
         List<AutoPitchControllerBlockEntity> entities = (level instanceof ServerLevel sl) ? getWeaponEndpointsCached(sl) : List.of();
-        for (AutoPitchControllerBlockEntity pitch : entities) {
+        
 
+        for (AutoPitchControllerBlockEntity pitch : entities) {
             pitch.setAndAcquireTrack(track, cfg);
             pitch.setSafeZones(safeZones);
         }
@@ -443,30 +468,23 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     }
 
 
-    public void dissolveNetwork(ServerLevel level) {
+    public void dissolveNetwork(net.minecraft.server.level.ServerLevel level) {
         NetworkData data = NetworkData.get(level);
         if (data == null) return;
 
         data.dissolveNetworkForBrokenController(level, worldPosition);
         data.setDirty();
     }
-
     private void updateSlotNbtFromInventory(int slot) {
         if (slot < 0 || slot >= inventory.getSlots()) return;
 
         ItemStack s = inventory.getStackInSlot(slot);
-        if (s == null || s.isEmpty()) {
+        if (s == null || s.isEmpty() || com.happysg.radar.NbtHelper.getTag(s).isEmpty()) {
             slotNbt[slot] = null;
-            return;
+        } else {
+            CompoundTag tag = s.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
+            slotNbt[slot] = tag == null ? null : tag.copy();
         }
-
-        CustomData custom = s.get(DataComponents.CUSTOM_DATA);
-        if (custom == null) {
-            slotNbt[slot] = null;
-            return;
-        }
-
-        slotNbt[slot] = custom.copyTag();
     }
 
 
@@ -497,26 +515,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         }
 
         endpointCache = getWeaponEndpointBlockEntities();
-        endpointCacheUntilTick = now + 20;
+        endpointCacheUntilTick = now + 0;
         return endpointCache;
     }
 
-    public List<AutoPitchControllerBlockEntity> getWeaponEndpointBlockEntities() {
-        if (!(level instanceof ServerLevel serverLevel))
-            return List.of();
-        NetworkData data = NetworkData.get(serverLevel);
-        NetworkData.Group group = data.getGroup(serverLevel.dimension(), worldPosition);
-        if (group == null)
-            return List.of();
-        Set<BlockPos> pos = data.getWeaponEndpoints(group);
-        List<AutoPitchControllerBlockEntity> entities = new ArrayList<>();
-        for(BlockPos pos1: pos){
-            if(serverLevel.getBlockEntity(pos1) instanceof AutoPitchControllerBlockEntity pitch){
-                entities.add(pitch);
-            }
-        }
-        return entities;
-    }
 
 
     private Set<String> buildIgnoreList(IdentificationConfig config) {
@@ -589,14 +591,17 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         for (RadarTrack track : tracks) {
             if (track == null) continue;
 
-            if (!cfg.test(track.trackCategory())) continue;
-            if (!isVsShipStillLoaded(sl, track)) continue;
+            boolean testOk = cfg.test(track.trackCategory());
+            boolean loaded = isVsShipStillLoaded(sl, track);
+            boolean ignoredId = AutoTargetingHelper.isIgnoredByIdentification(track, sl, ignoreList);
+            boolean inSafeZone = AutoTargetingHelper.isInSafeZone(track.position(), safeZones);
 
-            Vec3 pos = track.position();
-            if (pos == null) continue;
-
-            if (AutoTargetingHelper.isIgnoredByIdentification(track, sl, ignoreList)) continue;
-            if (AutoTargetingHelper.isInSafeZone(pos, safeZones)) continue;
+            if (!testOk || !loaded || ignoredId || inSafeZone) {
+               // if (sl.getGameTime() % 400 == 0) {
+               //    System.out.println("FILTERER: skip track " + track.getId() + " testOk=" + testOk + " loaded=" + loaded + " ignoredId=" + ignoredId + " inSafeZone=" + inSafeZone);
+               // }
+               continue;
+            }
 
             candidates.add(track);
         }
@@ -648,28 +653,21 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     }
 
     @Override
-    protected void saveAdditional(CompoundTag nbt, HolderLookup.Provider registries) {
-        super.saveAdditional(nbt, registries);
-        nbt.put(NBT_INVENTORY, inventory.serializeNBT(registries));
-        saveSlotNbt(nbt);
-        nbt.putLong("LastKnownPos", lastKnownPos.asLong());
-    }
-
-    protected void write(CompoundTag tag, boolean clientPacket) {
-        tag.putLong("LastKnownPos", lastKnownPos.asLong());
-    }
-    protected void read(CompoundTag tag, boolean clientPacket) {
-        if (tag.contains("LastKnownPos", Tag.TAG_LONG)) {
-            lastKnownPos = BlockPos.of(tag.getLong("LastKnownPos"));
-        } else {
-            lastKnownPos = worldPosition;
-        }
+    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
     }
 
     @Override
-    public void loadAdditional(CompoundTag nbt, HolderLookup.Provider provider) {
-        super.loadAdditional(nbt, provider);
+    public void write(CompoundTag nbt, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.write(nbt, provider, clientPacket);
+        nbt.put(NBT_INVENTORY, inventory.serializeNBT(provider));
+        saveSlotNbt(nbt);
+        if (radarPosCache != null) nbt.put("RadarPos", net.minecraft.nbt.NbtUtils.writeBlockPos(radarPosCache));
+        nbt.putLong("LastKnownPos", lastKnownPos.asLong());
+    }
 
+    @Override
+    public void read(CompoundTag nbt, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.read(nbt, provider, clientPacket);
         if (nbt.contains(NBT_INVENTORY, Tag.TAG_COMPOUND)) {
             inventory.deserializeNBT(provider, nbt.getCompound(NBT_INVENTORY));
         } else if (nbt.contains(LEGACY_INV, Tag.TAG_COMPOUND)) {
@@ -681,35 +679,33 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         } else {
             loadLegacySlotTags(nbt);
         }
+        
+        if (nbt.contains("RadarPos")) {
+            radarPosCache = net.minecraft.nbt.NbtUtils.readBlockPos(nbt, "RadarPos").orElse(null);
+        }
+
         for (int i = 0; i < inventory.getSlots(); i++) {
             updateSlotNbtFromInventory(i);
         }
 
-
+        if (nbt.contains("LastKnownPos", Tag.TAG_LONG)) {
+            lastKnownPos = BlockPos.of(nbt.getLong("LastKnownPos"));
+        } else {
+            lastKnownPos = worldPosition;
+        }
     }
-
-    // Sync to client
-    @Override
-    public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
-        return saveWithoutMetadata(registries);
-    }
-
-    @Nullable
-    @Override
-    public ClientboundBlockEntityDataPacket getUpdatePacket() {
-        return ClientboundBlockEntityDataPacket.create(this);
-    }
-
 
     @Override
     public void onLoad() {
         super.onLoad();
-
         for (int i = 0; i < inventory.getSlots(); i++) updateSlotNbtFromInventory(i);
 
         if (level instanceof ServerLevel sl) {
             applyFiltersToNetwork();
         }
+    }
+
+    public void invalidateCaps() {
     }
 
     public IItemHandler getItemHandler() {
@@ -750,33 +746,34 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     }
 
     private static DetectionConfig readDetectionFromItem(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return DetectionConfig.DEFAULT;
+
+        // Check for modern byte array format used by RadarFilterScreen (Detection)
+        boolean[] bools = com.happysg.radar.networking.networkhandlers.BoolNBThelper.loadBooleansFromBytes(stack, "detectBools", 8);
+        if (bools.length >= 8) {
+            // New indices: 0:player, 1:vs2, 2:contraption, 3:mob, 4:animal, 5:projectile, 6:item, 7:aeronautics
+            // Merge VS2 (1) and Aeronautics (7) into physicsContraptions
+            return new DetectionConfig(bools[0], bools[1] || bools[7], bools[2], bools[3], bools[5], bools[4], bools[6]);
+        }
+        if (bools.length >= 7) {
+            // Merge VS2 (1) and (lack of) Aeronautics into physicsContraptions
+            return new DetectionConfig(bools[0], bools[1], bools[2], bools[3], bools[5], bools[4], bools[6]);
+        }
+
         CompoundTag det = extractConfigCompound(stack, "detection");
         if (det == null) return DetectionConfig.DEFAULT;
 
-        boolean player     = det.contains("player", Tag.TAG_BYTE) ? det.getBoolean("player") : DetectionConfig.DEFAULT.player();
-        boolean vs2        = det.contains("vs2", Tag.TAG_BYTE) ? det.getBoolean("vs2") : DetectionConfig.DEFAULT.vs2();
-        boolean contraption= det.contains("contraption", Tag.TAG_BYTE) ? det.getBoolean("contraption") : DetectionConfig.DEFAULT.contraption();
-        boolean mob        = det.contains("mob", Tag.TAG_BYTE) ? det.getBoolean("mob") : DetectionConfig.DEFAULT.mob();
-        boolean projectile = det.contains("projectile", Tag.TAG_BYTE) ? det.getBoolean("projectile") : DetectionConfig.DEFAULT.projectile();
-        boolean animal     = det.contains("animal", Tag.TAG_BYTE) ? det.getBoolean("animal") : DetectionConfig.DEFAULT.animal();
-        boolean item       = det.contains("item", Tag.TAG_BYTE) ? det.getBoolean("item") : DetectionConfig.DEFAULT.item();
-
-        return new DetectionConfig(player, vs2, contraption, mob, projectile, animal, item);
+        return DetectionConfig.fromTag(det);
     }
+
     private IdentificationConfig readIdentificationFromSlot() {
         return readIdentificationFromItem(inventory.getStackInSlot(SLOT_IDENT));
     }
 
 
     private static IdentificationConfig readIdentificationFromItem(ItemStack stack) {
-        if (stack == null || stack.isEmpty())
-            return IdentificationConfig.DEFAULT;
-
-        CustomData custom = stack.get(DataComponents.CUSTOM_DATA);
-        if (custom == null)
-            return IdentificationConfig.DEFAULT;
-
-        CompoundTag root = custom.getUnsafe();
+        if (stack == null || stack.isEmpty() || !!com.happysg.radar.NbtHelper.getTag(stack).isEmpty()) return IdentificationConfig.DEFAULT;
+        CompoundTag root = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
         if (root == null) return IdentificationConfig.DEFAULT;
 
         if (root.contains("Filters", Tag.TAG_COMPOUND)) {
@@ -814,29 +811,26 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     }
 
     private static TargetingConfig readTargetingFromItem(ItemStack stack) {
-        CompoundTag inner = extractConfigCompound(stack, "targeting");
-        if (inner == null) return TargetingConfig.DEFAULT;
+        if (stack == null || stack.isEmpty()) return TargetingConfig.DEFAULT;
 
-        boolean player      = inner.contains("player", Tag.TAG_BYTE) ? inner.getBoolean("player") : TargetingConfig.DEFAULT.player();
-        boolean contraption = inner.contains("contraption", Tag.TAG_BYTE) ? inner.getBoolean("contraption") : TargetingConfig.DEFAULT.contraption();
-        boolean mob         = inner.contains("mob", Tag.TAG_BYTE) ? inner.getBoolean("mob") : TargetingConfig.DEFAULT.mob();
-        boolean animal      = inner.contains("animal", Tag.TAG_BYTE) ? inner.getBoolean("animal") : TargetingConfig.DEFAULT.animal();
-        boolean projectile  = inner.contains("projectile", Tag.TAG_BYTE) ? inner.getBoolean("projectile") : TargetingConfig.DEFAULT.projectile();
-        boolean autoTarget  = inner.contains("autoTarget", Tag.TAG_BYTE) ? inner.getBoolean("autoTarget") : TargetingConfig.DEFAULT.autoTarget();
-        boolean los         = inner.contains("lineSight", Tag.TAG_BYTE) ? inner.getBoolean("lineSight") : TargetingConfig.DEFAULT.lineOfSight();
-        return new TargetingConfig(player, contraption, mob, animal, projectile, autoTarget, true, los);
+        boolean[] bools = com.happysg.radar.networking.networkhandlers.BoolNBThelper.loadBooleansFromBytes(stack, "TargetBools", 9);
+        if (bools.length >= 8) {
+            boolean physics = bools[1] || bools[7];
+            boolean create = bools.length >= 9 ? bools[8] : bools[1]; // fallback for old VS2+Create bit
+            // Mapping: 0:Player, 1:Phys, 2:Mob, 3:Animal, 4:Proj, 5:LOS, 6:AutoT, 7:Phys, 8:Create
+            return new TargetingConfig(bools[0], physics, create, bools[2], bools[3], bools[4], bools[6], true, bools[5]);
+        }
+
+        CompoundTag root = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
+        if (root == null) return TargetingConfig.DEFAULT;
+
+        return TargetingConfig.fromTag(root);
     }
 
     @Nullable
     private static CompoundTag extractConfigCompound(ItemStack stack, String key) {
-        if (stack == null || stack.isEmpty())
-            return null;
-
-        CustomData custom = stack.get(DataComponents.CUSTOM_DATA);
-        if (custom == null)
-            return null;
-
-        CompoundTag root = custom.getUnsafe();
+        if (stack == null || stack.isEmpty() || com.happysg.radar.NbtHelper.getTag(stack).isEmpty()) return null;
+        CompoundTag root = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
         if (root == null) return null;
 
         if (root.contains("Filters", Tag.TAG_COMPOUND)) {
@@ -889,7 +883,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
                 cfg.mob(),
                 cfg.animal(),
                 cfg.projectile(),
-                cfg.contraption()
+                cfg.physicsContraptions()
         );
     }
 
@@ -904,5 +898,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             h ^= Double.doubleToLongBits(a.maxZ); h *= 1099511628211L;
         }
         return h;
+    }
+    @Override
+    public ClientboundBlockEntityDataPacket getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    @Override
+    public CompoundTag getUpdateTag(net.minecraft.core.HolderLookup.Provider provider) {
+        return saveWithoutMetadata(provider);
     }
 }

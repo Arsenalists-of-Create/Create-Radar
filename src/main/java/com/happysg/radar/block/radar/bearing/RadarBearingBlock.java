@@ -18,7 +18,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
-import org.jetbrains.annotations.NotNull;
 
 public class RadarBearingBlock extends BearingBlock implements IBE<RadarBearingBlockEntity> {
 
@@ -59,25 +58,28 @@ public class RadarBearingBlock extends BearingBlock implements IBE<RadarBearingB
     }
 
     @Override
-    public  InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
-                                                     @NotNull Player player, BlockHitResult hit) {
-
-        if (!player.isShiftKeyDown())
-            return InteractionResult.PASS;
-
+    protected InteractionResult useWithoutItem(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, Player player, BlockHitResult hit) {
         if (!level.isClientSide) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof RadarBearingBlockEntity radar) {
-                if (radar.isRunning()) radar.disassemble();
-                else radar.assemble();
+                if (radar.isRunning()) {
+                    radar.disassemble();
+                } else {
+                    radar.assemble();
+                }
+                radar.sendData();
             }
         }
-
-        return InteractionResult.sidedSuccess(level.isClientSide);
+        return InteractionResult.SUCCESS;
     }
 
     @Override
-    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+    protected net.minecraft.world.ItemInteractionResult useItemOn(net.minecraft.world.item.ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, net.minecraft.world.InteractionHand hand, net.minecraft.world.phys.BlockHitResult hit) {
+        useWithoutItem(state, level, pos, player, hit);
+        return net.minecraft.world.ItemInteractionResult.sidedSuccess(level.isClientSide);
+    }
+    @Override
+    public void onRemove(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (state.is(newState.getBlock())) {
             super.onRemove(state, level, pos, newState, isMoving);
             return;
@@ -89,4 +91,6 @@ public class RadarBearingBlock extends BearingBlock implements IBE<RadarBearingB
 
         super.onRemove(state, level, pos, newState, isMoving);
     }
+
+
 }

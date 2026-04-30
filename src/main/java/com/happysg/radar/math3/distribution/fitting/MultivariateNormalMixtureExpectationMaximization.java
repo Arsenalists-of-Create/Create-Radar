@@ -451,4 +451,3 @@ public class MultivariateNormalMixtureExpectationMaximization {
         }
     }
 }
-

@@ -1,0 +1,19 @@
+{
+  "replace": false,
+  "values": [
+    "create_radar:monitor",
+    "create_radar:data_link",
+    "create_radar:radar_bearing",
+    "create_radar:plane_radar",
+    "create_radar:identification_transponder",
+    "create_radar:radar_receiver_block",
+    "create_radar:radar_dish_block",
+    "create_radar:radar_plate_block",
+    "create_radar:creative_radar_plate",
+    "create_radar:auto_yaw_controller",
+    "create_radar:auto_pitch_controller",
+    "create_radar:fire_controller",
+    "create_radar:network_filterer",
+    "create_radar:radar_warning_receiver"
+  ]
+}

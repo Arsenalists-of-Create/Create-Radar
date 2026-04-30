@@ -61,8 +61,7 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
 
 
 
-    @Override
-    public boolean isPathfindable(BlockState state, PathComputationType type) {
+    public boolean isPathfindable(BlockState pState, BlockGetter pLevel, BlockPos pPos, PathComputationType pType) {
         return false;
     }
 
@@ -93,7 +92,7 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
     }
 
     @Override
-    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+    public void onRemove(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!level.isClientSide && level instanceof ServerLevel serverLevel) {
             if(Mods.VALKYRIENSKIES.isLoaded() && VSAssemblySuppression.isSuppressed(serverLevel)) return;
             ResourceKey<Level> dim = serverLevel.dimension();

@@ -7,11 +7,15 @@
     },
     "B": {
       "tag": "forge:plates/iron"
+    },
+    "E": {
+      "item": "create:electron_tube"
     }
   },
   "pattern": [
-    "B",
-    "A"
+    " E ",
+    "BAB",
+    " B "
   ],
   "result": {
     "item": "create_radar:radar_bearing"

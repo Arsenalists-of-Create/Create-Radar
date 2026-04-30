@@ -14,7 +14,7 @@ public class ModPonderIndex implements PonderPlugin {
     public static void register(PonderSceneRegistrationHelper<ResourceLocation> helper) {
 
         CreateRadar.getLogger().info("Registering Ponder!");
-        PonderSceneRegistrationHelper<ItemProviderEntry<?, ?>> HELPER = helper.withKeyFunction(RegistryEntry::getId);
+        PonderSceneRegistrationHelper<ItemProviderEntry> HELPER = helper.withKeyFunction(entry -> entry.getId());
         HELPER.forComponents(ModBlocks.RADAR_BEARING_BLOCK)
                 .addStoryBoard("radar_contraption", PonderScenes::radarContraption, ModPonderTags.RADAR_COMPONENT)
                 .addStoryBoard("radar_network", PonderScenes::networkSetup, ModPonderTags.RADAR_COMPONENT);

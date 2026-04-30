@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "create_radar:auto_pitch_controller"
+    }
+  ],
+  "result": {
+    "item": "create_radar:auto_yaw_controller"
+  },
+  "show_notification": true
+}

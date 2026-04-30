@@ -1,0 +1,6 @@
+{
+  "variants": {
+    "on_ship=false": { "model": "create_radar:block/radar_warning_receiver_off" },
+    "on_ship=true":  { "model": "create_radar:block/radar_warning_receiver_on" }
+  }
+}

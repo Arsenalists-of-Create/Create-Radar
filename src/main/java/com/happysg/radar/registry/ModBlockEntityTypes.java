@@ -12,14 +12,21 @@ import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.monitor.MonitorRenderer;
+import com.happysg.radar.block.mount.SmartMountBlockEntity;
+import com.happysg.radar.block.mount.SmartMountRenderer;
+import com.happysg.radar.block.mount.SmartMountVisual;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.plane.StationaryRadarBlockEntity;
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.simibubi.create.content.contraptions.bearing.BearingRenderer;
 import com.simibubi.create.content.contraptions.bearing.BearingVisual;
 import com.simibubi.create.content.kinetics.base.ShaftRenderer;
 import com.simibubi.create.content.kinetics.base.ShaftVisual;
+import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.tterrag.registrate.util.entry.BlockEntityEntry;
-import kotlin.reflect.jvm.internal.impl.descriptors.Visibilities;
+
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountVisual;
 
 import static com.happysg.radar.CreateRadar.REGISTRATE;
 
@@ -37,10 +44,7 @@ public class ModBlockEntityTypes {
             .validBlocks(ModBlocks.RADAR_BEARING_BLOCK)
             .renderer(() -> BearingRenderer::new)
             .register();
-    public static final BlockEntityEntry<StationaryRadarBlockEntity> STATIONARY_RADAR = REGISTRATE
-            .blockEntity("plane_radar", StationaryRadarBlockEntity::new)
-            .validBlocks(ModBlocks.STATIONARY_RADAR)
-            .register();
+
 
     public static final BlockEntityEntry<DataLinkBlockEntity> RADAR_LINK = REGISTRATE
             .blockEntity("data_link", DataLinkBlockEntity::new)
@@ -72,9 +76,16 @@ public class ModBlockEntityTypes {
             .validBlocks(ModBlocks.NETWORK_FILTERER_BLOCK)
             .renderer(()-> NetworkFiltererRenderer::new)
             .register();
-    public static final BlockEntityEntry<RadarWarningReceiverBlockEntity> RWR_BE = REGISTRATE
-            .blockEntity("rwr_be", RadarWarningReceiverBlockEntity::new)
-            .validBlocks(ModBlocks.RWR_BLOCK)
+    public static final BlockEntityEntry<SmartMountBlockEntity> SMART_MOUNT_BE =REGISTRATE
+            .blockEntity("smart_mount",SmartMountBlockEntity::new)
+            .visual(()-> SmartMountVisual::new,true)
+            .renderer(()->SmartMountRenderer::new)
+            .validBlocks(ModBlocks.SMART_MOUNT)
+            .register();
+    public static final BlockEntityEntry<SkyRadarBlockEntity> SKY_RADAR_BE = REGISTRATE
+            .blockEntity("sky_radar",SkyRadarBlockEntity::new)
+            .visual(()-> CannonMountVisual::new,false)
+            .validBlocks(ModBlocks.SKY_RADAR)
             .register();
 
     public static void register() {

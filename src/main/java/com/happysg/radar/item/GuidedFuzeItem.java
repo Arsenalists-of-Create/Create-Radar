@@ -6,14 +6,12 @@ import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.config.RadarConfig;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
-import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
@@ -23,7 +21,6 @@ import rbasamoyai.createbigcannons.munitions.AbstractCannonProjectile;
 import rbasamoyai.createbigcannons.munitions.fuzes.FuzeItem;
 
 import java.util.List;
-import java.util.Optional;
 
 public class GuidedFuzeItem extends FuzeItem {
 
@@ -35,10 +32,7 @@ public class GuidedFuzeItem extends FuzeItem {
     public InteractionResult useOn(UseOnContext pContext) {
         BlockPos clickedPos = pContext.getClickedPos();
         if (pContext.getLevel().getBlockEntity(clickedPos) instanceof NetworkFiltererBlockEntity blockEntity) {
-            ItemStack stack = pContext.getItemInHand();
-            CompoundTag tag = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
-
-            tag.put("monitorPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
+            pContext.getItemInHand().getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag().put("monitorPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
             return InteractionResult.SUCCESS;
         }
         return super.useOn(pContext);
@@ -48,8 +42,7 @@ public class GuidedFuzeItem extends FuzeItem {
     public boolean onProjectileTick(ItemStack stack, AbstractCannonProjectile projectile) {
         boolean detonate = super.onProjectileTick(stack, projectile);
 
-        CompoundTag tag = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
-
+        CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
         if (!tag.contains("monitorPos"))
             return detonate;
 
@@ -59,7 +52,7 @@ public class GuidedFuzeItem extends FuzeItem {
         if (vel.y > 0 && !RadarConfig.server().guidedFuzeSeekBeforeApex.get())
             return detonate;
 
-        BlockPos monitorPos = NbtUtils.readBlockPos(tag, "monitorPos").orElse(null);
+        BlockPos monitorPos = net.minecraft.nbt.NbtUtils.readBlockPos(tag, "monitorPos").orElse(net.minecraft.core.BlockPos.ZERO);
         if (!(projectile.level().getBlockEntity(monitorPos) instanceof NetworkFiltererBlockEntity monitor))
             return detonate;
 
@@ -166,23 +159,14 @@ public class GuidedFuzeItem extends FuzeItem {
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, TooltipContext context,
-                                List<Component> tooltip, TooltipFlag flag) {
-        super.appendHoverText(stack, context, tooltip, flag);
-
-        BlockPos monitorPos = Optional.ofNullable(stack.get(DataComponents.CUSTOM_DATA))
-                .flatMap(cd -> NbtUtils.readBlockPos(cd.getUnsafe(), "monitorPos"))
-                .orElse(null);
-
-        if (monitorPos != null) {
-            tooltip.add(Component.translatable(
-                    CreateRadar.MODID + ".guided_fuze.linked_monitor",
-                    monitorPos.toShortString()
-            ));
-        } else {
-            tooltip.add(Component.translatable(
-                    CreateRadar.MODID + ".guided_fuze.no_monitor"
-            ));
-        }
+    public void appendHoverText(ItemStack pStack, net.minecraft.world.item.Item.TooltipContext context, List<Component> pTooltipComponents, net.minecraft.world.item.TooltipFlag pIsAdvanced) {
+        super.appendHoverText(pStack, context, pTooltipComponents, pIsAdvanced);
+        if (pStack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag().contains("monitorPos")) {
+            BlockPos monitorPos = net.minecraft.nbt.NbtUtils.readBlockPos(pStack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag(), "monitorPos").orElse(net.minecraft.core.BlockPos.ZERO);
+            pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.linked_monitor").append(monitorPos.toShortString()));
+        } else
+            pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.no_monitor"));
     }
+
+
 }

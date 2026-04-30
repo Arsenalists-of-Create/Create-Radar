@@ -4,7 +4,7 @@ import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.PhysicsHandler;
 import com.happysg.radar.compat.vs2.VS2Utils;
 import com.happysg.radar.config.RadarConfig;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
@@ -31,7 +31,7 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     public void initialize() {
         super.initialize();
-        if (!Mods.VALKYRIENSKIES.isLoaded())
+        if (!Mods.VALKYRIENSKIES.isLoaded() && !Mods.AERONAUTICS.isLoaded() && !Mods.SIMULATED.isLoaded())
             return;
         scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
         scanningBehavior.setRunning(true);
@@ -45,11 +45,12 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     public void tick() {
         super.tick();
-        if (!Mods.VALKYRIENSKIES.isLoaded() && !VS2Utils.isBlockInShipyard(level,worldPosition)){
+        if (!PhysicsHandler.isBlockInShipyard(level, worldPosition)) {
             scanningBehavior.setRunning(false);
             return;
-        }else if(!isRunning() && VS2Utils.isBlockInShipyard(level,worldPosition))
+        } else if (!isRunning()) {
             scanningBehavior.setRunning(true);
+        }
         Direction facing = getBlockState().getValue(StationaryRadarBlock.FACING).getOpposite();
         Vec3 facingVec = new Vec3(facing.getStepX(), facing.getStepY(), facing.getStepZ());
         Vec3 shipVec = PhysicsHandler.getWorldVecDirectionTransform(facingVec, this);
@@ -88,19 +89,12 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
 
     @Override
     public float getGlobalAngle() {
-        if(!Mods.VALKYRIENSKIES.isLoaded())return 0;
-        Ship ship = VSGameUtilsKt.getShipManagingPos(level,getBlockPos());
-        if(ship == null) return 0;
-
-        // get yaw for rotating correctly for plane radar
-        org.joml.Quaterniondc shipRot = ship.getTransform().getShipToWorldRotation();
-        org.joml.Vector3d fwd = new org.joml.Vector3d(0, 0, 1);
-        shipRot.transform(fwd);
-        float rot = (float) -Math.toDegrees(Math.atan2(fwd.x, fwd.z));
+        if (level == null) return 0;
+        float rot = PhysicsHandler.getShipYawDeg(level, getBlockPos());
 
         Direction facing = this.getBlockState().getValue(StationaryRadarBlock.FACING);
         int fOffset;
-        switch (facing){
+        switch (facing) {
             case NORTH -> fOffset = 0;
             case EAST -> fOffset = 90;
             case SOUTH -> fOffset = 180;

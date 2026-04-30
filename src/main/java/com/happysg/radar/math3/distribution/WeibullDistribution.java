@@ -350,4 +350,3 @@ public class WeibullDistribution extends AbstractRealDistribution {
         return true;
     }
 }
-

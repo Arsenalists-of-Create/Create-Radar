@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "create_radar:block/sonar_panel"
+    }
+  }
+}

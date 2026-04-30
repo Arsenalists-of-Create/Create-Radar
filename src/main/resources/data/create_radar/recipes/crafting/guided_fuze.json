@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "B": { "item": "create_radar:radar_receiver_block" },
+    "R": { "item": "minecraft:redstone" },
+    "Q": { "item": "minecraft:quartz" },
+    "I": { "item": "minecraft:iron_ingot" }
+  },
+  "pattern": [
+    " B ",
+    "RQR",
+    " I "
+  ],
+  "result": {
+    "item": "create_radar:guided_fuze",
+    "count": 4
+  },
+  "show_notification": true
+}

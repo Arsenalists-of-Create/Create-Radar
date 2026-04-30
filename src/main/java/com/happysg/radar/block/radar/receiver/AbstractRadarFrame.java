@@ -12,7 +12,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
@@ -48,20 +47,20 @@ public class AbstractRadarFrame extends WrenchableDirectionalBlock {
         return shaper.get(pState.getValue(FACING));
     }
 
-    @SuppressWarnings("deprecation")
     @Override
     @ParametersAreNonnullByDefault
-    public @NotNull ItemInteractionResult useItemOn(ItemStack heldItem, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+    public @NotNull net.minecraft.world.ItemInteractionResult useItemOn(ItemStack heldItem, BlockState pState, net.minecraft.world.level.Level pLevel, BlockPos pPos, Player pPlayer, net.minecraft.world.InteractionHand pHand, BlockHitResult pHit) {
         IPlacementHelper placementHelper = PlacementHelpers.get(placementHelperId);
 
-        if (!player.isShiftKeyDown() && player.mayBuild()) {
+        if (!pPlayer.isShiftKeyDown() && pPlayer.mayBuild()) {
             if (placementHelper.matchesItem(heldItem)) {
-                placementHelper.getOffset(player, level, state, pos, hit).placeInWorld(level, (BlockItem) heldItem.getItem(), player, hand, hit);
-                return ItemInteractionResult.SUCCESS;
+                placementHelper.getOffset(pPlayer, pLevel, pState, pPos, pHit)
+                        .placeInWorld(pLevel, (BlockItem) heldItem.getItem(), pPlayer, pHand, pHit);
+                return net.minecraft.world.ItemInteractionResult.SUCCESS;
             }
         }
 
-        return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+        return net.minecraft.world.ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
     }
 
     @MethodsReturnNonnullByDefault

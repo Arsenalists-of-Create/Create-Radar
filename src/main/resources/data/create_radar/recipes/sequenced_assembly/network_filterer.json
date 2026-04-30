@@ -1,0 +1,42 @@
+{
+  "type": "create:sequenced_assembly",
+  "ingredient": {
+    "item": "create_radar:data_link"
+  },
+  "loops": 1,
+  "results": [
+    {
+      "chance": 120.0,
+      "item": "create_radar:network_filterer"
+    },
+    {
+      "item": "create_radar:data_link"
+    }
+  ],
+  "sequence": [
+    {
+      "type": "create:deploying",
+      "ingredients": [
+        {"item": "create_radar:incomplete_network_controller"},
+        {"tag": "forge:plates/gold"}
+      ],
+      "results": [{"item": "create_radar:incomplete_network_controller"}]
+    },
+    {
+      "type": "create:deploying",
+      "ingredients": [
+        {"item": "create_radar:incomplete_network_controller"},
+        {"item": "create:electron_tube"}
+      ],
+      "results": [{"item": "create_radar:incomplete_network_controller"}]
+    },
+    {
+      "type": "create:pressing",
+      "ingredients": [{"item": "create_radar:incomplete_network_controller"}],
+      "results": [{"item": "create_radar:incomplete_network_controller"}]
+    }
+  ],
+  "transitionalItem": {
+    "item": "create_radar:incomplete_network_controller"
+  }
+}

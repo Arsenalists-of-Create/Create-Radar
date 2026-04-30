@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "P": {
+      "item": "minecraft:paper"
+    },
+    "W": {
+      "tag": "minecraft:wool"
+    },
+    "B": {
+      "item": "create:brass_nugget"
+    }
+  },
+  "pattern": [
+    " P ",
+    "BWB"
+  ],
+  "result": {
+    "item": "create_radar:ident_filter_item"
+  },
+  "show_notification": true
+}

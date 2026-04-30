@@ -39,7 +39,7 @@ public class RadarTrack {
     }
 
     public RadarTrack(Entity entity) {
-        this(entity.getUUID().toString(), entity.position(), entity.getDeltaMovement(), entity.level().getGameTime(),
+        this(entity.getUUID().toString(), com.happysg.radar.compat.PhysicsHandler.getWorldVec(entity.level(), entity.position()), entity.getDeltaMovement(), entity.level().getGameTime(),
                 TrackCategory.get(entity), entity.getType().toString(), entity.getBbHeight());
     }
 
@@ -52,6 +52,7 @@ public class RadarTrack {
             case HOSTILE -> new Color(RadarConfig.client().hostileColor.get());
             case PROJECTILE -> new Color(RadarConfig.client().projectileColor.get());
             case ITEM-> new Color(RadarConfig.client().itemcolor.get());
+            case AERONAUTICS -> new Color(RadarConfig.client().VS2Color.get()); // reuse VS2 color or add new
             default -> Color.WHITE;
         };
     }
@@ -97,12 +98,12 @@ public class RadarTrack {
     }
 
     public void updateRadarTrack(Entity entity) {
-        position = entity.position();
+        position = com.happysg.radar.compat.PhysicsHandler.getWorldVec(entity.level(), entity.position());
         velocity = entity.getDeltaMovement();
         scannedTime = entity.level().getGameTime();
     }
 
-    public void updateRadarTrack(Ship ship, Level level) {
+    public void updateRadarTrack(Ship ship, net.minecraft.world.level.Level level) {
         position = RadarTrackUtil.getPosition(ship);
         velocity = RadarTrackUtil.getVelocity(ship);
         scannedTime = level.getGameTime();
@@ -148,7 +149,7 @@ public class RadarTrack {
 
 
 
-    // This is a bit of a jank quick fix, since ive migrated from a record.
+    // Compatibility methods for legacy record-style access
     public String id() {
         return getId();
     }

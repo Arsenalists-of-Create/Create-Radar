@@ -27,8 +27,8 @@
   "create_radar.filter.projectiles_only": "Только снаряды",
   "create_radar.filter.show": "Отображать",
   "create_radar.filter.vs2_only": "Только конструкции VS2",
-  "create_radar.linked_monitor": "Привязанный монитор: %s",
-  "create_radar.no_monitor": "Монитор не привязан",
+  "create_radar.guided_fuze.linked_monitor": "Привязанный монитор: %s",
+  "create_radar.guided_fuze.no_monitor": "Монитор не привязан",
   "create_radar.id_block.not_on_ship": "Регистратор не является частью корабля",
   "create_radar.id_block.not_on_vs2": "VS2 не установлен",
   "create_radar.item.safe_zone_designator.end": "Безопасная зона сформирована",
@@ -66,14 +66,11 @@
   "create_radar.radar_button.contraption": "Штуковины",
   "create_radar.radar_button.hostile": "Агрессивные мобы",
   "create_radar.radar_button.mob": "Все мобы",
+  "create_radar.radar_button.physics_contraptions": "Физ. конструкции",
   "create_radar.radar_button.player": "Игроки",
   "create_radar.radar_button.projectile": "Снаряды",
-  "create_radar.radar_button.vs2": "Конструкции VS2",
+  "create_radar.radar_button.vs2": "Физ. конструкции",
   "item.create_radar.guided_fuze": "Наводящий взрыватель",
   "item.create_radar.radar_safe_zone_designator": "Контроллер безопасных зон",
-  "itemGroup.create_radar.radar": "Create: Radars",
-  "display_link.success": "Успешно подключён к целевому монитору",
-  "display_link.too_far": "Целевой монитор слишком далеко...",
-  "display_link.set": "Выбран целевой монитор",
-  "display_link.clear": "Выбор целевого монитора отменён"
+  "itemGroup.create_radar.radar": "Create: Radars"
 }

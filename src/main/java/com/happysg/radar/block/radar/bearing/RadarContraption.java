@@ -55,12 +55,15 @@ public class RadarContraption extends BearingContraption {
 
 
         //todo replace with tag instead of block instance check
-        if (capture.getKey().state().getBlock() instanceof AbstractRadarFrame)
+        if (capture.getKey().state().getBlock() instanceof AbstractRadarFrame) {
             dishCount++;
+            com.happysg.radar.CreateRadar.getLogger().info("RADAR CONTRAPTION {}: Added dish block (total={})", pos, dishCount);
+        }
 
         if (capture.getKey().state().getBlock() instanceof RadarReceiverBlock) {
             hasReceiver = true;
             receiverFacing = capture.getKey().state().getValue(RadarReceiverBlock.FACING);
+            com.happysg.radar.CreateRadar.getLogger().info("RADAR CONTRAPTION {}: Added receiver", pos);
         }
 
     }
@@ -87,4 +90,11 @@ public class RadarContraption extends BearingContraption {
     public ContraptionType getType() {
         return ModContraptionTypes.RADAR_BEARING;
     }
+
+    public java.util.List<com.happysg.radar.block.radar.track.RadarTrack> getTracks() {
+        return java.util.Collections.emptyList();
+    }
+
+    @Override
+    public void removeBlocksFromWorld(Level level, BlockPos pos) {}
 }

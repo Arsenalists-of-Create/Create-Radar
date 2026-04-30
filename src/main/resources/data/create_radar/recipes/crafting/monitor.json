@@ -13,9 +13,9 @@
     }
   },
   "pattern": [
-    "B",
-    "A",
-    "C"
+    "BBB",
+    " A ",
+    " C "
   ],
   "result": {
     "count": 3,

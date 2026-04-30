@@ -16,4 +16,3 @@ public final class RwrTones {
     public static final int[] STYLE_2__MISSILE_BURST = { 24, 19, 24, 19, 24, 19, 24, 19, 24 };
     public static final int[] STYLE_2__MISSILE_SUSTAIN = { 23, 23, 23, 23, 23, 23 };
 }
-

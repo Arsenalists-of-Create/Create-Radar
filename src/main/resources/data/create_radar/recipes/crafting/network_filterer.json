@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "A": {
+      "item": "create:electron_tube"
+    },
+    "T": {
+      "item": "create_radar:data_link"
+    },
+    "B": {
+      "item": "minecraft:gold_ingot"
+    }
+  },
+  "pattern": [
+    " A ",
+    " T ",
+    " B "
+  ],
+  "result": {
+    "item": "create_radar:network_filterer"
+  },
+  "show_notification": true
+}

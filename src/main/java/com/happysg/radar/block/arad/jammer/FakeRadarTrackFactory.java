@@ -10,7 +10,7 @@ import java.util.List;
 
 public class FakeRadarTrackFactory {
 
-    public static List<RadarTrack> generate(ServerLevel level, BlockPos radarPos, int count) {
+    public static List<RadarTrack> generate(net.minecraft.server.level.ServerLevel level, BlockPos radarPos, int count) {
         List<RadarTrack> tracks = new ArrayList<>();
 
         for (int i = 0; i < count; i++) {

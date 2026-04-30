@@ -75,4 +75,3 @@ public class WeightedObservedPoint implements Serializable {
     }
 
 }
-

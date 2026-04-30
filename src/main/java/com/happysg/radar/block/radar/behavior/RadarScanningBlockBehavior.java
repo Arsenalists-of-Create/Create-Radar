@@ -7,7 +7,7 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.PhysicsHandler;
 import com.happysg.radar.compat.vs2.VS2Utils;
 import com.happysg.radar.config.RadarConfig;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
@@ -16,7 +16,6 @@ import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.Animal;
@@ -47,6 +46,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
     private final Set<Entity> scannedEntities = new HashSet<>();
     private final Set<Ship> scannedShips = new HashSet<>();
+    private final Set<Object> scannedSubLevels = new HashSet<>();
     private final Set<Projectile> scannedProjectiles = new HashSet<>();
     private final HashMap<String, RadarTrack> radarTracks = new HashMap<>();
 
@@ -59,23 +59,25 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         if (cfg == null) cfg = DetectionConfig.DEFAULT;
         setScanFlags(
                 cfg.player(),
-                cfg.vs2(),
+                cfg.physicsContraptions(),
                 cfg.contraption(),
                 cfg.mob(),
                 cfg.animal(),
                 cfg.projectile(),
-                cfg.item()
+                cfg.item(),
+                cfg.physicsContraptions()
         );
     }
 
 
     private boolean scanPlayers = true;
-    private boolean scanVS2 = true;
+    private boolean scanVS2 = false;
     private boolean scanContraptions = true;
     private boolean scanMobs = true;
     private boolean scanAnimals = true;
     private boolean scanProjectiles = true;
     private boolean scanItems = true;
+    private boolean scanAeronautics = true;
 
     private boolean allowCategory(TrackCategory c) {
         return switch (c) {
@@ -84,7 +86,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             case CONTRAPTION -> scanContraptions;
             case PROJECTILE -> scanProjectiles;
             case ITEM -> scanItems;
-
+            case AERONAUTICS -> scanAeronautics;
             case ANIMAL -> scanAnimals;
             case HOSTILE, MOB -> scanMobs;
 
@@ -96,8 +98,9 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         radarTracks.entrySet().removeIf(e -> !allowCategory(e.getValue().trackCategory()));
     }
 
-    public void setScanFlags(boolean players, boolean vs2, boolean contraptions, boolean mobs, boolean animals, boolean projectiles, boolean items) {
-        boolean changed = players != scanPlayers || vs2 != scanVS2 || contraptions != scanContraptions || mobs != scanMobs || animals != scanAnimals || projectiles != scanProjectiles || items != scanItems;
+    public void setScanFlags(boolean players, boolean vs2, boolean contraptions, boolean mobs, boolean animals, boolean projectiles, boolean items, boolean aeronautics) {
+        boolean changed = players != scanPlayers || vs2 != scanVS2 || contraptions != scanContraptions || mobs != scanMobs 
+                || animals != scanAnimals || projectiles != scanProjectiles || items != scanItems || aeronautics != scanAeronautics;
 
         this.scanPlayers = players;
         this.scanVS2 = vs2;
@@ -106,6 +109,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         this.scanAnimals = animals;
         this.scanProjectiles = projectiles;
         this.scanItems = items;
+        this.scanAeronautics = aeronautics;
 
         if (changed) {
             pruneDisabledTracksNow();
@@ -115,34 +119,62 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     @Override
     public void tick() {
         super.tick();
-        if (blockEntity.getLevel() == null || blockEntity.getLevel().isClientSide)
+        Level level = blockEntity.getLevel();
+        if (level == null || level.isClientSide)
             return;
-        if(blockEntity.getLevel().getGameTime() %5!=1)return;
+
         removeDeadTracks();
-        if (running)
-            updateRadarTracks();
+
+
         if (running) {
+            scanPos = PhysicsHandler.getScanningVec(blockEntity);
             scannedEntities.clear();
             scannedShips.clear();
+            scannedSubLevels.clear();
             scannedProjectiles.clear();
 
             scanForEntityTracks();
             if (Mods.VALKYRIENSKIES.isLoaded() && scanVS2)
                 scanForVSTracks();
+
+            updateRadarTracks();
+
+            // Point 3: Drop target if it leaves FOV or Range
+            // Point 1: Handle destroyed structure (it won't be in scan result but would be in FOV)
+            long now = level.getGameTime();
+            radarTracks.entrySet().removeIf(entry -> {
+                RadarTrack track = entry.getValue();
+                if (track.scannedTime() == now) return false;
+
+                // If truly out of range, drop immediately
+                if (track.position().distanceTo(scanPos) > range) return true;
+
+                // If in beam but not updated, it's gone
+                return isInFovAndRange(track.position());
+            });
         }
     }
 
 
     private void updateRadarTracks() {
-        scanPos = PhysicsHandler.getWorldPos(bearingEntity).getCenter();
-        Level level = blockEntity.getLevel();
+        net.minecraft.world.level.Level level = blockEntity.getLevel();
         boolean isServer = level instanceof net.minecraft.server.level.ServerLevel;
         net.minecraft.server.level.ServerLevel sl = isServer ? (net.minecraft.server.level.ServerLevel) level : null;
         if (level == null )return;
 
 
         for (Entity entity : scannedEntities) {
-            if (entity.isAlive() && isInFovAndRange(entity.position())) {
+            Vec3 testPos = entity.position();
+            if (entity.getBbWidth() > 1 || entity.getBbHeight() > 1) {
+               AABB bb = entity.getBoundingBox();
+               testPos = new Vec3(
+                   Math.max(bb.minX, Math.min(scanPos.x, bb.maxX)),
+                   Math.max(bb.minY, Math.min(scanPos.y, bb.maxY)),
+                   Math.max(bb.minZ, Math.min(scanPos.z, bb.maxZ))
+               );
+            }
+
+            if (entity.isAlive() && isInFovAndRange(testPos)) {
                 radarTracks.compute(entity.getUUID().toString(), (id, track) -> {
                     if (track == null) return new RadarTrack(entity);
                     track.updateRadarTrack(entity);
@@ -155,8 +187,17 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         }
 
         for (Ship ship : scannedShips) {
-            Vec3 pos = RadarTrackUtil.getPosition(ship);
-            if (isInFovAndRange(pos)) {
+            AABB bb = VS2Utils.getShipAABB(ship);
+            Vec3 testPos = bb.getCenter();
+            if (bb.getXsize() > 4 || bb.getZsize() > 4) {
+                testPos = new Vec3(
+                    Math.max(bb.minX, Math.min(scanPos.x, bb.maxX)),
+                    Math.max(bb.minY, Math.min(scanPos.y, bb.maxY)),
+                    Math.max(bb.minZ, Math.min(scanPos.z, bb.maxZ))
+                );
+            }
+
+            if (isInFovAndRange(testPos)) {
 
                 long key = ship.getId();
 
@@ -170,20 +211,32 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
                 }
             }
         }
+
     }
 
     private boolean isInFovAndRange(Vec3 target) {
-        double distance = scanPos.distanceTo(target);
+        double horizontalDistance = Math.sqrt(Math.pow(target.x() - scanPos.x(), 2) + Math.pow(target.z() - scanPos.z(), 2));
+        double verticalDistance = Math.abs(target.y() - scanPos.y());
+        double yScanRange = RadarConfig.server().radarYScanRange.get();
 
-        if (distance < 2)
+        if (horizontalDistance > range || verticalDistance > yScanRange)
+            return false;
+
+        if (horizontalDistance < 2)
             return true;
 
         double angleToEntity = Math.toDegrees(Math.atan2(target.x() - scanPos.x(), target.z() - scanPos.z()));
         angleToEntity = (angleToEntity + 360) % 360;
-        double angleDiff = Math.abs(angleToEntity - angle);
+
+        // Account for ship rotation
+        double shipYaw = PhysicsHandler.getShipYawDeg(blockEntity.getLevel(), blockEntity.getBlockPos());
+        double actualRadarAngle = (angle + 180 + shipYaw) % 360;
+        actualRadarAngle = (actualRadarAngle + 360) % 360;
+
+        double angleDiff = Math.abs(angleToEntity - actualRadarAngle);
         if (angleDiff > 180) angleDiff = 360 - angleDiff;
 
-        return angleDiff <= fov / 2.0 && distance <= range;
+        return angleDiff <= fov / 2.0;
     }
 
     private void removeDeadTracks() {
@@ -224,13 +277,14 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         });
     }
     private void scanForEntityTracks() {
-        Level level = blockEntity.getLevel();
+        net.minecraft.world.level.Level level = blockEntity.getLevel();
         if (level == null) return;
+
 
         boolean scanAll =
                 scanPlayers && scanContraptions && scanMobs && scanAnimals && scanProjectiles && scanItems;
 
-        for (AABB aabb : splitAABB(getRadarAABB(), 999)) {
+        for (AABB aabb : splitAABB(getRadarAABB(level), 256)) {
             if (scanAll) {
                 scannedEntities.addAll(level.getEntities(null, aabb));
                 continue;
@@ -245,8 +299,12 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             if (scanItems)
                 scannedEntities.addAll(level.getEntitiesOfClass(ItemEntity.class, aabb));
 
-            if (scanContraptions)
-                scannedEntities.addAll(level.getEntitiesOfClass(AbstractContraptionEntity.class, aabb));
+            if (scanContraptions) {
+                for (AbstractContraptionEntity ce : level.getEntitiesOfClass(AbstractContraptionEntity.class, aabb)) {
+                    if (bearingEntity instanceof RadarBearingBlockEntity bearing && bearing.isAttachedTo(ce)) continue;
+                    scannedEntities.add(ce);
+                }
+            }
 
             if (scanAnimals)
                 scannedEntities.addAll(level.getEntitiesOfClass(Animal.class, aabb));
@@ -259,23 +317,30 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     private void scanForVSTracks() {
-        if (blockEntity.getLevel() == null || !Mods.VALKYRIENSKIES.isLoaded()) return;
-        splitAABB(getRadarAABB(), 999).forEach(aabb ->
-                VS2Utils.getLoadedShips(blockEntity.getLevel(), aabb).forEach(scannedShips::add));
+        net.minecraft.world.level.Level level = blockEntity.getLevel();
+        if (level == null || !Mods.VALKYRIENSKIES.isLoaded()) return;
+
+
+        Level finalLevel = level;
+        splitAABB(getRadarAABB(finalLevel), 256).forEach(aabb ->
+                VS2Utils.getLoadedShips(finalLevel, aabb).forEach(scannedShips::add));
 
         scannedShips.remove(VS2Utils.getShipManagingPos(blockEntity));
     }
-    private AABB getRadarAABB() {
-        BlockPos radarPos = PhysicsHandler.getWorldPos(blockEntity);
-        double x = radarPos.getX() + 0.5;
-        double y = radarPos.getY() + 0.5;
-        double z = radarPos.getZ() + 0.5;
+
+    private AABB getRadarAABB(Level level) {
+        Vec3 center = PhysicsHandler.getScanningVec(blockEntity);
+        double x = center.x();
+        double y = center.y();
+        double z = center.z();
 
         double yScan = RadarConfig.server().radarYScanRange.get();
+        double minY = level != null ? Math.max(y - yScan, level.getMinBuildHeight()) : y - yScan;
+        double maxY = level != null ? Math.min(y + yScan, level.getMaxBuildHeight()) : y + yScan;
 
         return new AABB(
-                x - range, y - yScan, z - range,
-                x + range, y + yScan, z + range
+                x - range, minY, z - range,
+                x + range, maxY, z + range
         );
     }
 
@@ -297,20 +362,27 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     @Override
-    public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-        super.read(nbt, registries, clientPacket);
+    public void read(CompoundTag nbt, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.read(nbt, provider, clientPacket);
         if (nbt.contains("fov")) fov = nbt.getInt("fov");
         if (nbt.contains("yRange")) yRange = nbt.getInt("yRange");
         if (nbt.contains("range")) range = nbt.getDouble("range");
         if (nbt.contains("angle")) angle = nbt.getDouble("angle");
         if (nbt.contains("scanPosX")) scanPos = new Vec3(nbt.getDouble("scanPosX"), nbt.getDouble("scanPosY"), nbt.getDouble("scanPosZ"));
-        if (nbt.contains("running")) running = nbt.getBoolean("running");
         if (nbt.contains("trackExpiration")) trackExpiration = nbt.getInt("trackExpiration");
+        if (nbt.contains("scanPlayers")) scanPlayers = nbt.getBoolean("scanPlayers");
+        if (nbt.contains("scanVS2")) scanVS2 = nbt.getBoolean("scanVS2");
+        if (nbt.contains("scanContraptions")) scanContraptions = nbt.getBoolean("scanContraptions");
+        if (nbt.contains("scanMobs")) scanMobs = nbt.getBoolean("scanMobs");
+        if (nbt.contains("scanAnimals")) scanAnimals = nbt.getBoolean("scanAnimals");
+        if (nbt.contains("scanProjectiles")) scanProjectiles = nbt.getBoolean("scanProjectiles");
+        if (nbt.contains("scanItems")) scanItems = nbt.getBoolean("scanItems");
+        if (nbt.contains("scanAeronautics")) scanAeronautics = nbt.getBoolean("scanAeronautics");
     }
 
     @Override
-    public void write(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-        super.write(nbt, registries, clientPacket);
+    public void write(CompoundTag nbt, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.write(nbt, provider, clientPacket);
         nbt.putInt("fov", fov);
         nbt.putInt("yRange", yRange);
         nbt.putDouble("range", range);
@@ -320,6 +392,14 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         nbt.putDouble("scanPosZ", scanPos.z);
         nbt.putBoolean("running", running);
         nbt.putInt("trackExpiration", trackExpiration);
+        nbt.putBoolean("scanPlayers", scanPlayers);
+        nbt.putBoolean("scanVS2", scanVS2);
+        nbt.putBoolean("scanContraptions", scanContraptions);
+        nbt.putBoolean("scanMobs", scanMobs);
+        nbt.putBoolean("scanAnimals", scanAnimals);
+        nbt.putBoolean("scanProjectiles", scanProjectiles);
+        nbt.putBoolean("scanItems", scanItems);
+        nbt.putBoolean("scanAeronautics", scanAeronautics);
     }
 
     public void setFov(int fov) { this.fov = fov; }
@@ -329,6 +409,8 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     public void setScanPos(Vec3 scanPos) { this.scanPos = scanPos; }
     public void setRunning(boolean running) { this.running = running; }
     public void setTrackExpiration(int trackExpiration) { this.trackExpiration = trackExpiration; }
+
+    public double getRange() { return range; }
 
     public Collection<RadarTrack> getRadarTracks() {
         return radarTracks.values();

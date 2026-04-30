@@ -51,7 +51,7 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
     }
 
     @Override
-    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+    public void onRemove(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (level instanceof ServerLevel sl && state.getBlock() != newState.getBlock() ) {
             breakAttachedDataLinks(level, pos);
             WeaponNetworkData data = WeaponNetworkData.get(sl);
@@ -64,7 +64,7 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
         super.onRemove(state, level, pos, newState, isMoving);
 
     }
-    private static void breakAttachedDataLinks(Level level, BlockPos controllerPos) {
+    private static void breakAttachedDataLinks(net.minecraft.world.level.Level level, BlockPos controllerPos) {
         for (Direction dir : Direction.values()) {
             BlockPos linkPos = controllerPos.relative(dir);
             BlockState linkState = level.getBlockState(linkPos);
@@ -86,7 +86,7 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
         }
     }
     @Override
-    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
+    public void onPlace(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
         super.onPlace(state, level, pos, oldState, isMoving);
 
         if (level.isClientSide) return;
@@ -97,7 +97,7 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
         }
     }
     @Override
-    public void neighborChanged(@NotNull BlockState state, @NotNull Level level, @NotNull BlockPos pos, @NotNull Block block, @NotNull BlockPos fromPos, boolean isMoving) {
+    public void neighborChanged(@NotNull BlockState state, @NotNull net.minecraft.world.level.Level level, @NotNull BlockPos pos, @NotNull Block block, @NotNull BlockPos fromPos, boolean isMoving) {
         super.neighborChanged(state, level, pos, block, fromPos, isMoving);
 
         if (level.isClientSide) return;

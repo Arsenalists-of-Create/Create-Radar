@@ -1,24 +1,18 @@
 package com.happysg.radar.compat.cbc;
 
-import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.PhysicsHandler;
 import com.mojang.logging.LogUtils;
-import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
 
-import java.util.Comparator;
 import java.util.List;
 
 public class CannonLead {
-    private static final double VEL_EPS = .01;
+    private static final double VEL_EPS = 0.01;
     private static final double VEL_EPS_SQR = VEL_EPS * VEL_EPS;
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -27,7 +21,7 @@ public class CannonLead {
         public final double pitchDeg;    // pitch solution for the aimPoint
         public final double yawRad;      // yaw solution for the aimPoint
         public final int flightTicks;    // predicted time-of-flight in ticks
-        
+
         public LeadSolution(Vec3 aimPoint, double pitchDeg, double yawRad, int flightTicks) {
             this.aimPoint = aimPoint;
             this.pitchDeg = pitchDeg;
@@ -53,14 +47,12 @@ public class CannonLead {
     // -------------------------
 
     public static Vec3 predictPositionTicks(Vec3 pos0, Vec3 velPerTick, Vec3 accelPerTick2, double tTicks) {
-        // i’m using x = x0 + v*t + 0.5*a*t^2
         return pos0
                 .add(velPerTick.scale(tTicks))
                 .add(accelPerTick2.scale(0.5 * tTicks * tTicks));
     }
 
     public static Vec3 predictVelocityTicks(Vec3 vel0PerTick, Vec3 accelPerTick2, double tTicks) {
-        // i’m using v = v0 + a*t
         return vel0PerTick.add(accelPerTick2.scale(tTicks));
     }
 
@@ -69,7 +61,6 @@ public class CannonLead {
     // -------------------------
 
     public static Vec3 directionFromYawPitch(double yawRad, double pitchRad) {
-        // i’m matching the usual MC-style yaw in the XZ plane and pitch upward
         return new Vec3(
                 Math.cos(pitchRad) * Math.cos(yawRad),
                 Math.sin(pitchRad),
@@ -82,9 +73,9 @@ public class CannonLead {
     // -------------------------
 
     /**
-     * i’m simming the projectile forward until it reaches the requested horizontal distance.
-     * gravityPerTick is blocks/tick^2 (CBC ballistic gravity is typically already tick tuned)
-     * drag is applied as a per-tick damping (big cannons); set applyDrag=false for no-drag weapons
+     * Simple tick integrator using per-tick damping style drag.
+     * NOTE: CBC's ballistic "drag" is not necessarily a damping coefficient; if you're matching CBC,
+     * prefer a CBC-equivalent sim (see your simulateFlightTicksCBC).
      */
     public static SimResult simulateFlightTicks(
             Vec3 muzzlePos,
@@ -93,6 +84,7 @@ public class CannonLead {
             double muzzleSpeedPerTick,
             double gravityPerTick,
             double drag,
+            Vec3 targetPoint,
             double targetHorizontalDist,
             int maxTicks,
             boolean applyDrag
@@ -110,72 +102,18 @@ public class CannonLead {
             }
 
             if (vel.lengthSqr() <= 1.0e-4) {
-               return new SimResult(tick, pos, vel);
+                return new SimResult(tick, pos, vel);
             }
 
-            // i’m applying gravity per tick
+            // gravity per tick^2
             vel = vel.add(0.0, gravityPerTick, 0.0);
 
-            // i’m applying drag as a per-tick damping; if this is slightly off from CBC, this is the knob to swap
+            // per-tick damping style drag (only valid if drag is small, like 0..1)
             if (applyDrag && drag != 0.0) {
                 vel = vel.scale(1.0 - drag);
             }
 
-            // i’m integrating one tick forward
             pos = pos.add(vel);
-        }
-
-        return new SimResult(maxTicks, pos, vel);
-    }
-
-    public static SimResult simulateFlightTicksCBC(
-            Vec3 muzzlePos,
-            Vec3 shooterVelPerTickAtFire,
-            Vec3 dirUnit,
-            double muzzleSpeedPerTick,
-
-            double gravityPerTick,
-            double formDrag,
-            boolean quadraticDrag,
-
-            double targetHorizontalDist,
-            int maxTicks
-    ) {
-        Vec3 pos = muzzlePos;
-        Vec3 vel = shooterVelPerTickAtFire.add(dirUnit.scale(muzzleSpeedPerTick));
-
-        double targetDistSqr = targetHorizontalDist * targetHorizontalDist;
-
-        for (int tick = 0; tick <= maxTicks; tick++) {
-            double dx = pos.x - muzzlePos.x;
-            double dz = pos.z - muzzlePos.z;
-            if (dx * dx + dz * dz >= targetDistSqr) {
-                return new SimResult(tick, pos, vel);
-            }
-
-
-            if (vel.lengthSqr() <= 1.0e-4) {
-                return new SimResult(tick, pos, vel);
-            }
-
-
-            double speed = vel.length();
-
-            // accel = gravity + dragAccel
-            Vec3 accel = new Vec3(0.0, gravityPerTick, 0.0);
-
-            if (speed > 1.0e-9 && formDrag != 0.0) {
-                // CBC: dragForce = formDrag * density * |v| (*|v| if quadratic), capped to |v|
-                double dragForce = formDrag * speed;       // density assumed 1.0 (air)
-                if (quadraticDrag) dragForce *= speed;
-                dragForce = Math.min(dragForce, speed);
-
-                accel = accel.add(vel.normalize().scale(-dragForce));
-            }
-
-            // CBC integration
-            pos = pos.add(vel).add(accel.scale(0.5));
-            vel = vel.add(accel);
         }
 
         return new SimResult(maxTicks, pos, vel);
@@ -186,70 +124,73 @@ public class CannonLead {
     // -------------------------
 
     /**
-     * requires:
-     * - shooterVelPerTick / shooterAccelPerTick2 in world-space
-     * - targetVelPerTick / targetAccelPerTick2 in world-space
-     *
-     * notes:
-     * - shooter acceleration is only relevant up to fire time (fireDelayTicks)
-     * - target acceleration is relevant until impact (fireDelay + flight)
+     * Shooter & target vectors are expected in WORLD SPACE and in TICK UNITS:
+     * - velocity: blocks/tick
+     * - acceleration: blocks/tick^2
      */
     public static LeadSolution solveLeadPerTickWithAcceleration(
             CannonMountBlockEntity mount,
             AbstractMountedCannonContraption cannon,
-            ServerLevel level,
+            net.minecraft.server.level.ServerLevel level,
 
-//            Vec3 shooterVelPerTick,
-//            Vec3 shooterAccelPerTick2,
+            Vec3 shooterVelPerTick,
+            Vec3 shooterAccelPerTick2,
 
             Vec3 targetPosNow,
             Vec3 targetVelPerTick,
             Vec3 targetAccelPerTick2,
 
             int fireDelayTicks,
+            double latencyTicks,
             double maxSimDistanceBlocks
     ) {
         if (mount == null || cannon == null || level == null) return null;
         if (targetPosNow == null || targetVelPerTick == null || targetAccelPerTick2 == null) return null;
-
-        // Neoforge 1.21.1 Temp
-        Vec3 shooterVelPerTick = null;
-        Vec3 shooterAccelPerTick2 = null;
-
         if (shooterVelPerTick == null || shooterAccelPerTick2 == null) return null;
+
         boolean targetMoving = targetVelPerTick.lengthSqr() >= VEL_EPS_SQR;
         boolean shooterMoving = shooterVelPerTick.lengthSqr() >= VEL_EPS_SQR;
 
-        if (!targetMoving) {
-            return new LeadSolution(targetPosNow, 0.0, 0.0, 0);
-        }
-
+        // If shooter isn't moving, zero its motion to avoid tiny noise causing weird relative motion.
         if (!shooterMoving) {
             shooterVelPerTick = Vec3.ZERO;
             shooterAccelPerTick2 = Vec3.ZERO;
         }
 
         double muzzleSpeedPerTick = CannonUtil.getInitialVelocity(cannon, level);
-        if (muzzleSpeedPerTick <= 0.0) return null;
+        if (muzzleSpeedPerTick <= 0.0) {
+             if (level.getGameTime() % 20 == 0) com.happysg.radar.CreateRadar.getLogger().warn("WFC LEAD ERROR: muzzle velocity is 0! Cannon type={}", cannon.getClass().getSimpleName());
+             return null;
+        }
 
+        // "Origin" in world space (VS2-aware)
         Vec3 originNow = PhysicsHandler.getWorldVec(level, mount.getControllerBlockPos().above(2).getCenter());
         int barrelLength = CannonUtil.getBarrelLength(cannon);
 
         BallisticPropertiesComponent bp = CannonUtil.getBallistics(cannon, level);
-        double gravityPerTick = bp.gravity();         // (your old path was fine too)
+        double gravityPerTick = bp.gravity();
         double formDrag = bp.drag();
-        boolean quadratic = bp.isQuadraticDrag();
 
-
-        // i’m predicting shooter state at the moment the projectile spawns
+        // Predict shooter state at fire time (projectile spawn moment)
         Vec3 shooterPosAtFire = predictPositionTicks(originNow, shooterVelPerTick, shooterAccelPerTick2, fireDelayTicks);
         Vec3 shooterVelAtFire = predictVelocityTicks(shooterVelPerTick, shooterAccelPerTick2, fireDelayTicks);
 
+        // Build target relative state anchored at FIRE TIME
+        // (We keep targetPosNow "now" and subtract shooterPosAtFire, which anchors relative position at fire.)
         Vec3 targetPosRel0 = targetPosNow.subtract(shooterPosAtFire);
         Vec3 targetVelRel = targetVelPerTick.subtract(shooterVelAtFire);
         Vec3 targetAccelRel = targetAccelPerTick2.subtract(shooterAccelPerTick2);
 
-        // initial guess: straight-line ticks (horizontal only)
+        // If target isn't moving, just aim directly at it (still compute yaw/pitch)
+        if (!targetMoving) {
+            Vec3 to = targetPosNow.subtract(shooterPosAtFire);
+            double yaw = Math.atan2(to.z, to.x);
+            double horiz = Math.sqrt(to.x * to.x + to.z * to.z);
+            double pitch = Math.atan2(to.y, Math.max(1.0e-6, horiz));
+            return new LeadSolution(targetPosNow, Math.toDegrees(pitch), yaw, 0);
+        }
+
+        // Initial guess: horizontal distance / muzzle speed
         double dx0 = targetPosNow.x - shooterPosAtFire.x;
         double dz0 = targetPosNow.z - shooterPosAtFire.z;
         double horiz0 = Math.sqrt(dx0 * dx0 + dz0 * dz0);
@@ -260,31 +201,35 @@ public class CannonLead {
         double chosenYawRad = 0.0;
         int flightTicks = (int) Math.round(tGuessTicks);
 
-        // i’m iterating to converge predicted impact time and ballistic time-of-flight
         for (int iter = 0; iter < 8; iter++) {
-            double tImpactTicks = fireDelayTicks + tGuessTicks;
-
-            // i’m predicting the target at impact using constant acceleration
-            Vec3 aimRel = predictPositionTicks(targetPosRel0, targetVelRel, targetAccelRel, tImpactTicks);
+            // IMPORTANT FIX:
+            // targetPosRel0/VelRel/AccelRel are anchored at FIRE TIME,
+            // so advance ONLY by FLIGHT TIME (NOT fireDelay+flight).
+            double tFlightTicks = tGuessTicks;
+            double tLeadTicks = tFlightTicks + latencyTicks;
+            // Predict target position (relative) at impact time after firing
+            Vec3 aimRel = predictPositionTicks(targetPosRel0, targetVelRel, targetAccelRel, tLeadTicks);
             aimPoint = shooterPosAtFire.add(aimRel);
 
-            // i’m yawing from the shooter position at fire time (where the projectile will actually spawn)
             Vec3 toPred = aimPoint.subtract(shooterPosAtFire);
             chosenYawRad = Math.atan2(toPred.z, toPred.x);
 
-// cheap pitch guess: point at the intercept (no ballistic solve here)
+            // Default LOS pitch
             double horizToPred = Math.sqrt(toPred.x * toPred.x + toPred.z * toPred.z);
             double pitchRad = Math.atan2(toPred.y, Math.max(1.0e-6, horizToPred));
 
-            Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
+            // CBC pitch solution for predicted intercept point
+            List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, aimPoint, level);
+            if (pitchRoots != null && !pitchRoots.isEmpty()) {
+                pitchRad = Math.toRadians(pitchRoots.get(0));
+            }
 
-// optional: keep pitchDeg populated for debugging only
+            Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
             chosenPitchDeg = Math.toDegrees(pitchRad);
 
-            // i’m offsetting muzzle forward along the barrel direction
+            // Muzzle position offset by barrel length
             Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(barrelLength));
 
-            // i’m measuring horizontal distance from muzzle to predicted point (this is what the sim uses to stop)
             double dx = aimPoint.x - muzzlePosAtFire.x;
             double dz = aimPoint.z - muzzlePosAtFire.z;
             double horiz = Math.sqrt(dx * dx + dz * dz);
@@ -296,15 +241,14 @@ public class CannonLead {
                     muzzleSpeedPerTick,
                     gravityPerTick,
                     formDrag,
+                    aimPoint,
                     horiz,
                     computeMaxSimTicks(horiz, muzzleSpeedPerTick, maxSimDistanceBlocks),
                     true
             );
 
-
             int newFlightTicks = sim.ticks;
 
-            // i’m stopping when flight time stabilizes
             if (Math.abs(newFlightTicks - tGuessTicks) < 0.5) {
                 flightTicks = newFlightTicks;
                 tGuessTicks = newFlightTicks;
@@ -314,7 +258,130 @@ public class CannonLead {
             flightTicks = newFlightTicks;
             tGuessTicks = newFlightTicks;
         }
-        //logLeadByBlocks(targetPosNow,aimPoint,targetVelPerTick);
+
+        return new LeadSolution(aimPoint, chosenPitchDeg, chosenYawRad, flightTicks);
+    }
+
+    public static LeadSolution solveLeadPerTickConstantVelocity(
+            CannonMountBlockEntity mount,
+            AbstractMountedCannonContraption cannon,
+            net.minecraft.server.level.ServerLevel level,
+
+            Vec3 shooterVelPerTick,
+            Vec3 targetPosNow,
+            Vec3 targetVelPerTick,
+
+            int fireDelayTicks,
+            double maxSimDistanceBlocks
+    ) {
+
+
+        // Treat tiny velocities as zero to reduce noise
+        if (shooterVelPerTick.lengthSqr() < VEL_EPS_SQR) shooterVelPerTick = Vec3.ZERO;
+        boolean targetMoving = targetVelPerTick.lengthSqr() >= VEL_EPS_SQR;
+
+        double muzzleSpeedPerTick = CannonUtil.getInitialVelocity(cannon, level);
+        if (muzzleSpeedPerTick <= 0.0) {
+            LOGGER.debug("[LEAD] muzzleSpeedPerTick={} (no ammo/invalid state?) cannon={} mountPos={}",
+                    muzzleSpeedPerTick, cannon.getClass().getSimpleName(), mount.getBlockPos());
+            return null;
+        }
+
+
+        // "Origin" in world space (VS2-aware)
+        Vec3 originNow = PhysicsHandler.getWorldVec(level, mount.getControllerBlockPos().above(2).getCenter());
+        int barrelLength = CannonUtil.getBarrelLength(cannon);
+
+        BallisticPropertiesComponent bp = CannonUtil.getBallistics(cannon, level);
+        double gravityPerTick = bp.gravity();
+        double drag = bp.drag(); // NOTE: if this isn't a damping coefficient, consider using your CBC sim instead.
+
+        // Predict shooter and target at FIRE TIME under constant velocity
+        Vec3 shooterPosAtFire = originNow.add(shooterVelPerTick.scale(fireDelayTicks));
+        Vec3 shooterVelAtFire = shooterVelPerTick;
+
+        Vec3 targetPosAtFire = targetPosNow.add(targetVelPerTick.scale(fireDelayTicks));
+        Vec3 targetVelAtFire = targetVelPerTick;
+
+        // Relative state anchored at FIRE TIME
+        Vec3 relPos0 = targetPosAtFire.subtract(shooterPosAtFire);
+        Vec3 relVel = targetVelAtFire.subtract(shooterVelAtFire);
+
+        // If target isn't moving (or effectively not), just do a direct aim solve
+        if (!targetMoving) {
+            Vec3 to = targetPosAtFire.subtract(shooterPosAtFire);
+            double yaw = Math.atan2(to.z, to.x);
+            double horiz = Math.sqrt(to.x * to.x + to.z * to.z);
+            double pitch = Math.atan2(to.y, Math.max(1.0e-6, horiz));
+            return new LeadSolution(targetPosAtFire, Math.toDegrees(pitch), yaw, 0);
+        }
+
+        // Initial time guess from horizontal distance / muzzle speed
+        double horiz0 = Math.sqrt(relPos0.x * relPos0.x + relPos0.z * relPos0.z);
+        double tGuessTicks = horiz0 / Math.max(1.0e-6, muzzleSpeedPerTick);
+
+        Vec3 aimPoint = targetPosAtFire;
+        double chosenPitchDeg = 0.0;
+        double chosenYawRad = 0.0;
+        int flightTicks = (int) Math.round(tGuessTicks);
+
+        // Iterate to converge flight time against the projectile sim
+        for (int iter = 0; iter < 8; iter++) {
+            // Predict target at impact (FIRE TIME + flight)
+            Vec3 aimRel = relPos0.add(relVel.scale(tGuessTicks));
+            aimPoint = shooterPosAtFire.add(aimRel);
+
+            // Yaw in XZ plane from shooter at fire → predicted point
+            Vec3 toPred = aimPoint.subtract(shooterPosAtFire);
+            chosenYawRad = Math.atan2(toPred.z, toPred.x);
+
+            // Default LOS pitch (fallback)
+            double horizToPred = Math.sqrt(toPred.x * toPred.x + toPred.z * toPred.z);
+            double pitchRad = Math.atan2(toPred.y, Math.max(1.0e-6, horizToPred));
+
+            // CBC ballistic pitch solve for the predicted intercept point
+            List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, aimPoint, level);
+            if (pitchRoots != null && !pitchRoots.isEmpty()) {
+                pitchRad = Math.toRadians(pitchRoots.get(0));
+            }
+
+            Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
+            chosenPitchDeg = Math.toDegrees(pitchRad);
+
+            // Offset muzzle forward along barrel direction
+            Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(barrelLength));
+
+            // Horizontal distance from muzzle to predicted point (stop condition for sim)
+            double dx = aimPoint.x - muzzlePosAtFire.x;
+            double dz = aimPoint.z - muzzlePosAtFire.z;
+            double horiz = Math.sqrt(dx * dx + dz * dz);
+
+            SimResult sim = simulateFlightTicks(
+                    muzzlePosAtFire,
+                    shooterVelAtFire,
+                    dir,
+                    muzzleSpeedPerTick,
+                    gravityPerTick,
+                    drag,
+                    aimPoint,
+                    horiz,
+                    computeMaxSimTicks(horiz, muzzleSpeedPerTick, maxSimDistanceBlocks),
+                    true
+            );
+
+            int newFlightTicks = sim.ticks;
+
+            // Converged?
+            if (Math.abs(newFlightTicks - tGuessTicks) < 0.5) {
+                flightTicks = newFlightTicks;
+                tGuessTicks = newFlightTicks;
+                break;
+            }
+
+            flightTicks = newFlightTicks;
+            tGuessTicks = newFlightTicks;
+        }
+
         return new LeadSolution(aimPoint, chosenPitchDeg, chosenYawRad, flightTicks);
     }
 
@@ -322,12 +389,9 @@ public class CannonLead {
         final int HARD_MAX_TICKS = 8000;
 
         double speed = Math.max(1.0e-6, muzzleSpeedPerTick);
-
-        // cap sim distance by radar-derived max distance (relative to cannon)
         double cappedDist = Math.min(targetHorizontalDist, Math.max(0.0, maxSimDistanceBlocks));
 
         int ticksToTarget = (int) Math.ceil(cappedDist / speed);
-
         int ticks = ticksToTarget + 40;
 
         if (ticks < 60) ticks = 60;
@@ -335,7 +399,7 @@ public class CannonLead {
         return ticks;
     }
 
-
+    // Optional debug helper
     public static void logLeadByBlocks(Vec3 targetPosNow, Vec3 aimPoint, Vec3 targetVelPerTick) {
         if (targetPosNow == null || aimPoint == null) return;
 

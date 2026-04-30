@@ -4,14 +4,15 @@ import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import net.minecraft.nbt.CompoundTag;
 
-public record TargetingConfig(boolean player, boolean contraption, boolean mob, boolean animal, boolean projectile,
+public record TargetingConfig(boolean player, boolean physicsContraptions, boolean contraption, boolean mob, boolean animal, boolean projectile,
                               boolean autoTarget, boolean autoFire, boolean lineOfSight) {
 
-    public static final TargetingConfig DEFAULT = new TargetingConfig(false, false, true, true, false, false, true, false);
+    public static final TargetingConfig DEFAULT = new TargetingConfig(false, true, true, true, true, false, false, true, false);
 
     public CompoundTag toTag() {
         CompoundTag tag = new CompoundTag();
         tag.putBoolean("player", player);
+        tag.putBoolean("physicsContraptions", physicsContraptions);
         tag.putBoolean("contraption", contraption);
         tag.putBoolean("mob", mob);
         tag.putBoolean("animal", animal);
@@ -37,9 +38,15 @@ public record TargetingConfig(boolean player, boolean contraption, boolean mob, 
 
         if (targeting == null) return DEFAULT;
 
+        boolean physicsContraptions = targeting.contains("physicsContraptions") ? targeting.getBoolean("physicsContraptions") :
+                (targeting.contains("vs2") ? targeting.getBoolean("vs2") : (targeting.contains("aeronautics") ? targeting.getBoolean("aeronautics") : true));
+        
+        boolean createContraption = targeting.contains("contraption") ? targeting.getBoolean("contraption") : true;
+
         return new TargetingConfig(
                 targeting.getBoolean("player"),
-                targeting.getBoolean("contraption"),
+                physicsContraptions,
+                createContraption,
                 targeting.getBoolean("mob"),
                 targeting.getBoolean("animal"),
                 targeting.getBoolean("projectile"),
@@ -50,25 +57,14 @@ public record TargetingConfig(boolean player, boolean contraption, boolean mob, 
     }
 
     public boolean test(TrackCategory trackCategory) {
-        if(Mods.VALKYRIENSKIES.isLoaded()){
-            return switch (trackCategory) {
-                case PLAYER -> player;
-                case VS2 -> contraption;
-                case CONTRAPTION -> false;
-                case HOSTILE -> mob;
-                case ANIMAL -> animal;
-                case PROJECTILE -> projectile;
-                default -> false;
-            };
-        }else {
-            return switch (trackCategory) {
-                case PLAYER -> player;
-                case CONTRAPTION -> contraption;
-                case HOSTILE -> mob;
-                case ANIMAL -> animal;
-                case PROJECTILE -> projectile;
-                default -> false;
-            };
-        }
+        return switch (trackCategory) {
+            case PLAYER -> player;
+            case VS2, AERONAUTICS -> physicsContraptions;
+            case CONTRAPTION -> contraption;
+            case HOSTILE -> mob;
+            case ANIMAL -> animal;
+            case PROJECTILE -> projectile;
+            default -> false;
+        };
     }
-}
+}

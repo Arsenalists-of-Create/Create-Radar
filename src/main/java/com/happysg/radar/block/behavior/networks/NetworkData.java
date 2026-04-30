@@ -8,7 +8,6 @@ import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.registry.ModBlocks;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -21,7 +20,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import net.minecraft.world.level.Level;
 import org.slf4j.Logger;
@@ -91,14 +89,8 @@ public class NetworkData extends SavedData {
     private final Map<String, String> controllerToWeaponMount = new HashMap<>();
 
 
-    public static NetworkData get(ServerLevel level) {
-        return level.getDataStorage().computeIfAbsent(
-                new SavedData.Factory<>(
-                        NetworkData::new,
-                        NetworkData::load
-                ),
-                "network_data"
-        );
+    public static NetworkData get(net.minecraft.server.level.ServerLevel level) {
+        return level.getDataStorage().computeIfAbsent(new net.minecraft.world.level.saveddata.SavedData.Factory<>(NetworkData::new, NetworkData::load, net.minecraft.util.datafix.DataFixTypes.LEVEL), "CreateRadar_Networks");
     }
     public void setSelectedTargetId(Group g, @Nullable String id) {
         g.selectedTargetId = id;
@@ -111,7 +103,7 @@ public class NetworkData extends SavedData {
     }
 
     public NetworkData() {}
-    public void dissolveNetworkForBrokenController(ServerLevel level, BlockPos brokenPos) {
+    public void dissolveNetworkForBrokenController(net.minecraft.server.level.ServerLevel level, BlockPos brokenPos) {
         ResourceKey<Level> dim = level.dimension();
 
         // 1) If the broken block is the filterer/controller itself, dissolve that group
@@ -133,7 +125,7 @@ public class NetworkData extends SavedData {
             }
         }
     }
-    private void dissolveGroup(ServerLevel level, String filtererKey) {
+    private void dissolveGroup(net.minecraft.server.level.ServerLevel level, String filtererKey) {
         Group group = groupsByFilterer.remove(filtererKey);
         if (group == null) return;
 
@@ -176,7 +168,7 @@ public class NetworkData extends SavedData {
      * Soft callback for anything that cares about network disconnect.
      * Safe even if the BE doesn't implement anything.
      */
-    private void notifyNodeDisconnected(ServerLevel level, @Nullable BlockPos pos) {
+    private void notifyNodeDisconnected(net.minecraft.server.level.ServerLevel level, @Nullable BlockPos pos) {
         if (pos == null) return;
 
         BlockEntity be = level.getBlockEntity(pos);
@@ -208,11 +200,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
     // Save / Load
     // ------------------------------------------------------------
 
-    private static BlockPos readRawBlockPos(CompoundTag tag) {
-        return new BlockPos(tag.getInt("X"), tag.getInt("Y"), tag.getInt("Z"));
-    }
-
-    public static NetworkData load(CompoundTag root, HolderLookup.Provider provider) {
+    public static NetworkData load(CompoundTag root, net.minecraft.core.HolderLookup.Provider provider) {
         NetworkData data = new NetworkData();
 
         // Groups
@@ -221,7 +209,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
             CompoundTag g = groupsTag.getCompound(i);
 
             ResourceKey<Level> dim = ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(g.getString("Dim")));
-            BlockPos filtererPos = NbtUtils.readBlockPos(g, "FiltererPos").orElse(null);
+            BlockPos filtererPos = net.minecraft.nbt.NbtUtils.readBlockPos(g, "FiltererPos").orElse(net.minecraft.core.BlockPos.ZERO);
             String groupKey = key(dim, filtererPos);
 
             Group group = new Group(new FilterKey(dim, filtererPos));
@@ -235,46 +223,60 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
             if (g.contains("MonitorEndpoints", Tag.TAG_LIST)) {
                 ListTag list = g.getList("MonitorEndpoints", Tag.TAG_COMPOUND);
                 for (int mi = 0; mi < list.size(); mi++) {
-                    BlockPos p = readRawBlockPos(list.getCompound(mi));
-                    group.monitorEndpoints.add(p);
-                    data.endpointToFilterer.put(key(dim, p), groupKey);
+                    CompoundTag entry = list.getCompound(mi);
+                    NbtUtils.readBlockPos(entry, "p").ifPresent(p -> {
+                        group.monitorEndpoints.add(p);
+                        data.endpointToFilterer.put(key(dim, p), groupKey);
+                    });
                 }
             }
 // LEGACY single-monitor worlds
-            else if (g.contains("MonitorPos", Tag.TAG_COMPOUND)) {
-                BlockPos p = NbtUtils.readBlockPos(g, "MonitorPos").orElse(null);
+            if (g.contains("MonitorPos")) {
+                BlockPos p = net.minecraft.nbt.NbtUtils.readBlockPos(g, "MonitorPos").orElse(net.minecraft.core.BlockPos.ZERO);
                 group.monitorEndpoints.add(p);
                 data.endpointToFilterer.put(key(dim, p), groupKey);
             }
 
-            if (g.contains("RadarPos", Tag.TAG_COMPOUND)) {
-                group.radarPos = NbtUtils.readBlockPos(g,"RadarPos").orElse(null);
+            if (g.contains("RadarPos")) {
+                group.radarPos = net.minecraft.nbt.NbtUtils.readBlockPos(g, "RadarPos").orElse(net.minecraft.core.BlockPos.ZERO);
                 group.radarKind = RadarKind.valueOf(g.getString("RadarKind"));
                 data.endpointToFilterer.put(key(dim, group.radarPos), groupKey);
             }
 
             // weapon endpoints
-            ListTag weapons = g.getList("WeaponEndpoints", Tag.TAG_COMPOUND);
-            for (int w = 0; w < weapons.size(); w++) {
-                BlockPos ep = readRawBlockPos(weapons.getCompound(w));
-                group.weaponEndpoints.add(ep);
-                data.endpointToFilterer.put(key(dim, ep), groupKey);
+            if (g.contains("WeaponEndpoints", Tag.TAG_LIST)) {
+                ListTag weapons = g.getList("WeaponEndpoints", Tag.TAG_COMPOUND);
+                for (int w = 0; w < weapons.size(); w++) {
+                    CompoundTag entry = weapons.getCompound(w);
+                    NbtUtils.readBlockPos(entry, "p").ifPresent(ep -> {
+                        group.weaponEndpoints.add(ep);
+                        data.endpointToFilterer.put(key(dim, ep), groupKey);
+                    });
+                }
             }
 
             // used mounts
-            ListTag usedMounts = g.getList("UsedWeaponMounts", Tag.TAG_COMPOUND);
-            for (int m = 0; m < usedMounts.size(); m++) {
-                BlockPos mp = readRawBlockPos(usedMounts.getCompound(m));
-                group.usedWeaponMounts.add(mp);
-                data.weaponMountToFilterer.put(key(dim, mp), groupKey);
+            if (g.contains("UsedWeaponMounts", Tag.TAG_LIST)) {
+                ListTag usedMounts = g.getList("UsedWeaponMounts", Tag.TAG_COMPOUND);
+                for (int m = 0; m < usedMounts.size(); m++) {
+                    CompoundTag entry = usedMounts.getCompound(m);
+                    NbtUtils.readBlockPos(entry, "p").ifPresent(mp -> {
+                        group.usedWeaponMounts.add(mp);
+                        data.weaponMountToFilterer.put(key(dim, mp), groupKey);
+                    });
+                }
             }
 
             // datalinks
-            ListTag links = g.getList("DataLinks", Tag.TAG_COMPOUND);
-            for (int d = 0; d < links.size(); d++) {
-                BlockPos lp = readRawBlockPos(links.getCompound(d));
-                group.dataLinks.add(lp);
-                data.dataLinkToFilterer.put(key(dim, lp), groupKey);
+            if (g.contains("DataLinks", Tag.TAG_LIST)) {
+                ListTag links = g.getList("DataLinks", Tag.TAG_COMPOUND);
+                for (int d = 0; d < links.size(); d++) {
+                    CompoundTag entry = links.getCompound(d);
+                    NbtUtils.readBlockPos(entry, "p").ifPresent(lp -> {
+                        group.dataLinks.add(lp);
+                        data.dataLinkToFilterer.put(key(dim, lp), groupKey);
+                    });
+                }
             }
 
             data.groupsByFilterer.put(groupKey, group);
@@ -306,7 +308,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
     }
 
     @Override
-    public CompoundTag save(CompoundTag root, HolderLookup.Provider provider) {
+    public CompoundTag save(CompoundTag root, net.minecraft.core.HolderLookup.Provider provider) {
         ListTag groupsTag = new ListTag();
 
         for (Group group : groupsByFilterer.values()) {
@@ -324,7 +326,9 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
             if (!group.monitorEndpoints.isEmpty()) {
                 ListTag list = new ListTag();
                 for (BlockPos p : group.monitorEndpoints) {
-                    list.add(NbtUtils.writeBlockPos(p));
+                    CompoundTag entry = new CompoundTag();
+                    entry.put("p", NbtUtils.writeBlockPos(p));
+                    list.add(entry);
                 }
                 g.put("MonitorEndpoints", list);
             }
@@ -335,15 +339,27 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
             }
 
             ListTag weapons = new ListTag();
-            for (BlockPos ep : group.weaponEndpoints) weapons.add(NbtUtils.writeBlockPos(ep));
+            for (BlockPos ep : group.weaponEndpoints) {
+                CompoundTag entry = new CompoundTag();
+                entry.put("p", NbtUtils.writeBlockPos(ep));
+                weapons.add(entry);
+            }
             g.put("WeaponEndpoints", weapons);
 
             ListTag usedMounts = new ListTag();
-            for (BlockPos mp : group.usedWeaponMounts) usedMounts.add(NbtUtils.writeBlockPos(mp));
+            for (BlockPos mp : group.usedWeaponMounts) {
+                CompoundTag entry = new CompoundTag();
+                entry.put("p", NbtUtils.writeBlockPos(mp));
+                usedMounts.add(entry);
+            }
             g.put("UsedWeaponMounts", usedMounts);
 
             ListTag links = new ListTag();
-            for (BlockPos lp : group.dataLinks) links.add(NbtUtils.writeBlockPos(lp));
+            for (BlockPos lp : group.dataLinks) {
+                CompoundTag entry = new CompoundTag();
+                entry.put("p", NbtUtils.writeBlockPos(lp));
+                links.add(entry);
+            }
             g.put("DataLinks", links);
 
             groupsTag.add(g);
@@ -438,15 +454,17 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         String existingMountOwner = weaponMountToFilterer.get(mountK);
         if (existingMountOwner != null && !existingMountOwner.equals(myKey)) return false;
 
-        // in-group uniqueness
-        return !group.usedWeaponMounts.contains(weaponMountPos);
+        // if it's already in our group, that's fine
+        if (group.weaponEndpoints.contains(controllerPos) || group.usedWeaponMounts.contains(weaponMountPos)) return true;
+
+        return true;
     }
 
     // ------------------------------------------------------------
     // Mutations (commit)
     // ------------------------------------------------------------
 
-    public void attachMonitor(ServerLevel level, Group group, BlockPos clickedPos) {
+    public void attachMonitor(net.minecraft.server.level.ServerLevel level, Group group, BlockPos clickedPos) {
         ResourceKey<Level> dim = group.key.dim();
         String filtererKey = key(dim, group.key.filtererPos());
 
@@ -461,7 +479,6 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
         group.monitorEndpoints.add(controllerPos);
         endpointToFilterer.put(key(dim, controllerPos), filtererKey);
-
         setDirty();
     }
 
@@ -474,7 +491,6 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         group.radarKind = kind;
 
         endpointToFilterer.put(key(dim, radarPos), filtererKey);
-
         setDirty();
     }
 
@@ -483,7 +499,6 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         group.weaponEndpoints.add(controllerPos);
         group.usedWeaponMounts.add(weaponMountPos);
 
-        String dimKey = group.key.dim().location().toString();
         endpointToFilterer.put(key(group.key.dim(), controllerPos), key(group.key.dim(), group.key.filtererPos()));
         weaponMountToFilterer.put(key(group.key.dim(), weaponMountPos), key(group.key.dim(), group.key.filtererPos()));
 
@@ -545,7 +560,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
     }
 
 
-    public void removeDataLinkAndCleanup(ResourceKey<Level> dim, BlockPos dataLinkPos, @Nullable ServerLevel level) {
+    public void removeDataLinkAndCleanup(ResourceKey<Level> dim, BlockPos dataLinkPos, @Nullable net.minecraft.server.level.ServerLevel level) {
         String dlKey = key(dim, dataLinkPos);
 
         String filtererKey = dataLinkToFilterer.remove(dlKey);
@@ -642,7 +657,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
     }
 
 
-    public void onEndpointRemoved(ServerLevel level, BlockPos endpointPos) {
+    public void onEndpointRemoved(net.minecraft.server.level.ServerLevel level, BlockPos endpointPos) {
         if (endpointPos == null || level == null) return;
 
         ResourceKey<Level> dim = level.dimension();
@@ -773,7 +788,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
             int dataLinksRemoved
     ) {}
 
-    public ValidationResult validateAllKnownPositions(ServerLevel level, boolean onlyIfChunkLoaded) {
+    public ValidationResult validateAllKnownPositions(net.minecraft.server.level.ServerLevel level, boolean onlyIfChunkLoaded) {
         if (level == null) return new ValidationResult(0,0,0,0);
 
         int groupsRemoved = 0;
@@ -1239,7 +1254,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
 
 
-    private boolean hasMatchingDataLinkTargeting(ServerLevel level,
+    private boolean hasMatchingDataLinkTargeting(net.minecraft.server.level.ServerLevel level,
                                                  Group group,
                                                  BlockPos endpointPos,
                                                  boolean onlyIfChunkLoaded,
@@ -1279,7 +1294,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
     private enum Presence { PRESENT, MISSING, UNKNOWN }
 
-    private Presence checkPresence(ServerLevel level, BlockPos pos, boolean onlyIfChunkLoaded, boolean requireBlockEntity) {
+    private Presence checkPresence(net.minecraft.server.level.ServerLevel level, BlockPos pos, boolean onlyIfChunkLoaded, boolean requireBlockEntity) {
         if (pos == null) return Presence.MISSING;
 
         if (onlyIfChunkLoaded && !level.hasChunkAt(pos)) {
@@ -1294,7 +1309,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         return level.getBlockEntity(pos) != null ? Presence.PRESENT : Presence.UNKNOWN;
     }
 
-    private boolean isDefinitelyMissing(ServerLevel level, BlockPos pos, boolean onlyIfChunkLoaded, boolean requireBlockEntity) {
+    private boolean isDefinitelyMissing(net.minecraft.server.level.ServerLevel level, BlockPos pos, boolean onlyIfChunkLoaded, boolean requireBlockEntity) {
         return checkPresence(level, pos, onlyIfChunkLoaded, requireBlockEntity) == Presence.MISSING;
     }
 

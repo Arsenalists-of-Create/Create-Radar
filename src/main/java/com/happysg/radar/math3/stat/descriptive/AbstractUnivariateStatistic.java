@@ -260,4 +260,3 @@ public abstract class AbstractUnivariateStatistic
         return MathArrays.verifyValues(values, weights, begin, length, allowEmpty);
     }
 }
-

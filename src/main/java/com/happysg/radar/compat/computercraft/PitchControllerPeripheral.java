@@ -4,7 +4,6 @@ import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import dan200.computercraft.api.lua.LuaFunction;
 import dan200.computercraft.api.peripheral.GenericPeripheral;
-import net.minecraft.world.phys.Vec3;
 
 public class PitchControllerPeripheral implements GenericPeripheral {
     @Override
@@ -12,18 +11,30 @@ public class PitchControllerPeripheral implements GenericPeripheral {
         return CreateRadar.asResource("pitch_controller").toString();
     }
 
-//    @LuaFunction(mainThread = true)
-//    public void setTargetPosition(AutoPitchControllerBlockEntity entity, double x, double y, double z) {
-//        entity.setTarget(new Vec3(x, y, z)); //TODO
-//    }
-
+    /**
+     * Sets pitch angle
+     * NOTE: This does not stop WeaponFiringControl from overriding it
+     * Use stopAuto() first if you want manual control to stick
+     */
     @LuaFunction(mainThread = true)
-    public void setTargetAngle(AutoPitchControllerBlockEntity entity, float angle) {
-        entity.setTargetAngle(angle);
+    public void setAngle(AutoPitchControllerBlockEntity entity, double angle) {
+        entity.setTargetAngle((float) angle);
     }
 
     @LuaFunction(mainThread = true)
-    public double getTargetAngle(AutoPitchControllerBlockEntity entity){
+    public double getAngle(AutoPitchControllerBlockEntity entity) {
         return entity.getTargetAngle();
+    }
+
+    /**
+     * Stops auto-aim/autofire control from overriding pitch by clearing the WeaponFiringControl target
+     * This is the "manual mode" toggle without changing the BE
+     */
+    @LuaFunction(mainThread = true)
+    public void stopAuto(AutoPitchControllerBlockEntity entity) {
+        if (entity.firingControl != null) {
+            entity.firingControl.resetTarget();
+        }
+        entity.isRunning = false;
     }
 }

@@ -1,9 +1,9 @@
 package com.happysg.radar.block.arad.aradnetworks;
 
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraft.core.HolderLookup;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -16,19 +16,18 @@ public class RadarContactRegistryData extends SavedData {
 
     private final Map<Long, Entry> entries = new HashMap<>();
 
-    // ===== access =====
+    public RadarContactRegistryData() {}
 
-    public static RadarContactRegistryData get(ServerLevel level) {
+    public static RadarContactRegistryData get(net.minecraft.server.level.ServerLevel level) {
         return level.getDataStorage().computeIfAbsent(
                 new SavedData.Factory<>(
                         RadarContactRegistryData::new,
-                        RadarContactRegistryData::load
+                        RadarContactRegistryData::load,
+                        net.minecraft.util.datafix.DataFixTypes.LEVEL
                 ),
                 "create_radar_contact_registry"
         );
     }
-
-    // ===== model =====
 
     public enum RadarContactState {
         IN_RANGE,
@@ -45,33 +44,25 @@ public class RadarContactRegistryData extends SavedData {
         }
     }
 
-    // ===== core API (range/lock) =====
-
-    // i call this any tick a target is within detection range
     public void markInRange(long shipId, int ttlTicks) {
         if (ttlTicks <= 0) ttlTicks = DEFAULT_IN_RANGE_TTL;
-
         Entry e = entries.get(shipId);
         if (e == null) {
             entries.put(shipId, new Entry(ttlTicks, 0));
         } else {
             e.inRangeTtl = Math.max(e.inRangeTtl, ttlTicks);
         }
-
         setDirty();
     }
 
-    // i call this any tick a target is actively locked
     public void markLocked(long shipId, int ttlTicks) {
         if (ttlTicks <= 0) ttlTicks = DEFAULT_LOCK_TTL;
-
         Entry e = entries.get(shipId);
         if (e == null) {
             entries.put(shipId, new Entry(0, ttlTicks));
         } else {
             e.lockedTtl = Math.max(e.lockedTtl, ttlTicks);
         }
-
         setDirty();
     }
 
@@ -85,51 +76,36 @@ public class RadarContactRegistryData extends SavedData {
         return e != null && e.lockedTtl > 0;
     }
 
-    // highest state wins
     public RadarContactState getState(long shipId) {
         if (isLocked(shipId)) return RadarContactState.LOCKED;
         if (isInRange(shipId)) return RadarContactState.IN_RANGE;
         return null;
     }
 
-    /**
-     * Call once per server tick (or whatever cadence you prefer) to decay TTLs and prune dead entries.
-     */
     public void tickDecay() {
         if (entries.isEmpty()) return;
-
         boolean changed = false;
         Iterator<Map.Entry<Long, Entry>> it = entries.entrySet().iterator();
-
         while (it.hasNext()) {
             Map.Entry<Long, Entry> me = it.next();
             Entry e = me.getValue();
-
             if (e.inRangeTtl > 0) e.inRangeTtl--;
             if (e.lockedTtl > 0) e.lockedTtl--;
-
             if (e.inRangeTtl <= 0 && e.lockedTtl <= 0) {
                 it.remove();
             }
-
             changed = true;
         }
-
         if (changed) setDirty();
     }
 
-    // ===== LockRegistryData compatibility API =====
-
     public static final int DEFAULT_TTL_TICKS = DEFAULT_LOCK_TTL;
 
-    public void lockShip(long shipId, int ttlTicks) {
-        markLocked(shipId, ttlTicks);
-    }
+    public void lockShip(long shipId, int ttlTicks) { markLocked(shipId, ttlTicks); }
 
     public void unlockShip(long shipId) {
         Entry e = entries.get(shipId);
         if (e == null) return;
-
         if (e.lockedTtl != 0) {
             e.lockedTtl = 0;
             if (e.inRangeTtl <= 0) {
@@ -139,16 +115,10 @@ public class RadarContactRegistryData extends SavedData {
         }
     }
 
-    public boolean isShipLocked(long shipId) {
-        return isLocked(shipId);
-    }
-
-    // ===== persistence =====
+    public boolean isShipLocked(long shipId) { return isLocked(shipId); }
 
     public static RadarContactRegistryData load(CompoundTag tag, HolderLookup.Provider provider) {
         RadarContactRegistryData data = new RadarContactRegistryData();
-
-        // New format: "Ships" -> shipId -> { InRange, Locked }
         CompoundTag shipsTag = tag.getCompound("Ships");
         for (String key : shipsTag.getAllKeys()) {
             try {
@@ -156,17 +126,11 @@ public class RadarContactRegistryData extends SavedData {
                 CompoundTag eTag = shipsTag.getCompound(key);
                 int inRange = eTag.getInt("InRange");
                 int locked = eTag.getInt("Locked");
-
                 if (inRange > 0 || locked > 0) {
                     data.entries.put(shipId, new Entry(inRange, locked));
                 }
-            } catch (NumberFormatException ignored) {
-                // i ignore invalid keys
-            }
+            } catch (NumberFormatException ignored) {}
         }
-
-        // Legacy format support: "LockedShips" -> shipId -> ttl
-        // If it exists, merge it in (max with anything already loaded).
         if (tag.contains("LockedShips")) {
             CompoundTag lockedShips = tag.getCompound("LockedShips");
             for (String key : lockedShips.getAllKeys()) {
@@ -181,31 +145,24 @@ public class RadarContactRegistryData extends SavedData {
                             e.lockedTtl = Math.max(e.lockedTtl, ttl);
                         }
                     }
-                } catch (NumberFormatException ignored) {
-                }
+                } catch (NumberFormatException ignored) {}
             }
         }
-
         return data;
     }
 
     @Override
-    public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
+    public CompoundTag save(CompoundTag tag, net.minecraft.core.HolderLookup.Provider provider) {
         CompoundTag shipsTag = new CompoundTag();
-
         for (var e : entries.entrySet()) {
             Entry entry = e.getValue();
             if (entry.inRangeTtl <= 0 && entry.lockedTtl <= 0) continue;
-
             CompoundTag eTag = new CompoundTag();
             eTag.putInt("InRange", entry.inRangeTtl);
             eTag.putInt("Locked", entry.lockedTtl);
             shipsTag.put(Long.toString(e.getKey()), eTag);
         }
-
         tag.put("Ships", shipsTag);
-
-        // Not saving legacy "LockedShips" anymore (one registry to rule them all).
         return tag;
     }
 }

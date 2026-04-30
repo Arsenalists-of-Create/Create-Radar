@@ -1,7 +1,7 @@
 package com.happysg.radar.block.controller.firing;
 
 
-import com.happysg.radar.block.behavior.networks.WeaponNetwork;
+
 import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.registry.ModBlockEntityTypes;
@@ -23,7 +23,7 @@ import org.jetbrains.annotations.Nullable;
 public class FireControllerBlock extends Block implements EntityBlock {
 
     public static BooleanProperty POWERED = BlockStateProperties.POWERED;
-    public WeaponNetwork weaponNetwork;
+
 
     public FireControllerBlock(Properties properties) {
         super(properties);
@@ -52,7 +52,7 @@ public class FireControllerBlock extends Block implements EntityBlock {
         builder.add(POWERED);
     }
     @Override
-    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+    public void onRemove(BlockState state, net.minecraft.world.level.Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (level instanceof ServerLevel sl && state.getBlock() != newState.getBlock() ) {
             breakAttachedDataLinks(level, pos);
             WeaponNetworkData data = WeaponNetworkData.get(sl);
@@ -65,7 +65,7 @@ public class FireControllerBlock extends Block implements EntityBlock {
         super.onRemove(state, level, pos, newState, isMoving);
 
     }
-    private static void breakAttachedDataLinks(Level level, BlockPos controllerPos) {
+    private static void breakAttachedDataLinks(net.minecraft.world.level.Level level, BlockPos controllerPos) {
         for (Direction dir : Direction.values()) {
             BlockPos linkPos = controllerPos.relative(dir);
             BlockState linkState = level.getBlockState(linkPos);

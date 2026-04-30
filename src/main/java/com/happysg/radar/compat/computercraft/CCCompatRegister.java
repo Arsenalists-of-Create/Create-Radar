@@ -10,5 +10,8 @@ public class CCCompatRegister {
         ComputerCraftAPI.registerGenericSource(new MonitorPeripheral());
         ComputerCraftAPI.registerGenericSource(new YawControllerPeripheral());
         ComputerCraftAPI.registerGenericSource(new PitchControllerPeripheral());
+        ComputerCraftAPI.registerGenericSource(new FireControllerPeripheral());
+        ComputerCraftAPI.registerGenericSource(new PlaneRadarPeripheral());
+
     }
 }

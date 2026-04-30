@@ -68,6 +68,7 @@ public class SubLine {
      * @exception MathIllegalArgumentException if the points are equal
      * @deprecated as of 3.3, replaced with {@link #SubLine(Vector3D, Vector3D, double)}
      */
+    @Deprecated
     public SubLine(final Vector3D start, final Vector3D end)
         throws MathIllegalArgumentException {
         this(start, end, DEFAULT_TOLERANCE);

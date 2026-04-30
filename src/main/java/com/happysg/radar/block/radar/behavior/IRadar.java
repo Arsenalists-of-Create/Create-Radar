@@ -14,6 +14,13 @@ public interface IRadar {
     boolean isRunning();
 
     BlockPos getWorldPos();
+    default net.minecraft.world.phys.Vec3 getRadarCenterPos(float partialTicks) {
+        return net.minecraft.world.phys.Vec3.atCenterOf(getWorldPos());
+    }
+
+    default net.minecraft.world.phys.Vec3 getRadarCenterPos() {
+        return getRadarCenterPos(1.0f);
+    }
 
     float getGlobalAngle();
 

@@ -5,7 +5,6 @@ import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock
 import com.mojang.logging.LogUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.chat.Component;
@@ -14,9 +13,8 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.SpyglassItem;
 import net.minecraft.world.item.TooltipFlag;
-import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.context.UseOnContext;
-import org.jetbrains.annotations.NotNull;
+import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -37,24 +35,22 @@ public class Binoculars extends SpyglassItem {
     }
 
     @Override
-    public void appendHoverText(ItemStack pStack, @Nullable TooltipContext pContext, List<Component> pTooltipComponents, TooltipFlag pIsAdvanced) {
-        super.appendHoverText(pStack, pContext, pTooltipComponents, pIsAdvanced);
+    public void appendHoverText(ItemStack pStack, net.minecraft.world.item.Item.TooltipContext context, List<Component> pTooltipComponents, net.minecraft.world.item.TooltipFlag pIsAdvanced) {
+        super.appendHoverText(pStack, context, pTooltipComponents, pIsAdvanced);
         if (net.minecraft.client.gui.screens.Screen.hasShiftDown()) {
             pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".binoculars.base_text"));
         }
-
-        CompoundTag tag = pStack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
-        if (tag.contains("filtererPos")) {
-            BlockPos monitorPos =
-                    NbtUtils.readBlockPos(tag, "filtererPos").orElse(null);
-            pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".binoculars.controller" + monitorPos.toShortString()));
+        if (pStack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag().contains("filtererPos")) {
+            BlockPos monitorPos = net.minecraft.nbt.NbtUtils.readBlockPos(pStack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag(), "filtererPos").orElse(net.minecraft.core.BlockPos.ZERO);
+            pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".binoculars.controller").append(": " + monitorPos.toShortString()));
         } else {
             pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".binoculars.no_controller"));
         }
-    }
 
+
+    }
     @Override
-    public @NotNull InteractionResult useOn(UseOnContext pContext) {
+    public InteractionResult useOn(UseOnContext pContext) {
         BlockPos clickedPos = pContext.getClickedPos();
         Player player = pContext.getPlayer();
         if (player == null) return super.useOn(pContext);
@@ -65,12 +61,8 @@ public class Binoculars extends SpyglassItem {
                     true
             );
 
-            ItemStack stack = pContext.getItemInHand();
-            CompoundTag tag = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
-
-
-            tag.put("filterPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
-            tag.put("filtererPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
+            pContext.getItemInHand().getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag().put("filterPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
+            pContext.getItemInHand().getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag().put("filtererPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
 
             return InteractionResult.SUCCESS;
         }
@@ -78,7 +70,7 @@ public class Binoculars extends SpyglassItem {
     }
 
     public static void setLastHit(ItemStack stack, @Nullable BlockPos pos) {
-        CompoundTag tag = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
+        CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
 
         if (pos == null) {
             tag.remove(TAG_LAST_HIT);
@@ -95,11 +87,8 @@ public class Binoculars extends SpyglassItem {
 
     @Nullable
     public static BlockPos getLastHit(ItemStack stack) {
-        CustomData custom = stack.get(DataComponents.CUSTOM_DATA);
-        if (custom == null || !custom.contains(TAG_LAST_HIT)) return null;
-
-        CompoundTag tag = custom.getUnsafe();
-        if (!tag.contains(TAG_LAST_HIT)) return null;
+        CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
+        if (tag == null || !tag.contains(TAG_LAST_HIT)) return null;
 
         CompoundTag hit = tag.getCompound(TAG_LAST_HIT);
         return new BlockPos(
@@ -110,14 +99,13 @@ public class Binoculars extends SpyglassItem {
     }
 
     public static boolean hasLastHit(ItemStack stack) {
-        CustomData custom = stack.get(DataComponents.CUSTOM_DATA);
-        return custom != null && custom.contains(TAG_LAST_HIT);
+        CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
+        return tag != null && tag.contains(TAG_LAST_HIT);
     }
 
     public static void clearLastHit(ItemStack stack) {
-        CompoundTag tag = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
+        CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
         if (tag != null) tag.remove(TAG_LAST_HIT);
     }
 
 }
-

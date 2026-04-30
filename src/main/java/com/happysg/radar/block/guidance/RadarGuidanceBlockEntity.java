@@ -1,9 +1,9 @@
 package com.happysg.radar.block.guidance;
 
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
+import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -25,6 +25,8 @@ public class RadarGuidanceBlockEntity extends GuidanceBlockEntity {
         super(type, pos, blockState);
     }
 
+    public void addBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {}
+
     public boolean canFire(PitchOrientedContraptionEntity pitchOrientedContraptionEntity) {
         checkForTarget(pitchOrientedContraptionEntity.level());
         return target != null;
@@ -32,8 +34,9 @@ public class RadarGuidanceBlockEntity extends GuidanceBlockEntity {
 
     private void checkForTarget(Level server) {
         if (monitorPos == null) return;
-        if (server.getBlockEntity(monitorPos) instanceof MonitorBlockEntity monitor) {
-            target = monitor.getController().getTargetPos(TargetingConfig.DEFAULT);
+        if (server.getBlockEntity(monitorPos) instanceof NetworkFiltererBlockEntity monitor) {
+            if (monitor.activeTrackCache == null) return;
+            target = monitor.activeTrackCache.getPosition();
         }
     }
 
@@ -72,11 +75,14 @@ public class RadarGuidanceBlockEntity extends GuidanceBlockEntity {
         missile.setContraptionMotion(adjustedDirection.scale(missileSpeed));
     }
 
-    @Override
-    public void loadAdditional(CompoundTag pTag, HolderLookup.Provider provider) {
-        super.loadAdditional(pTag, provider);
-        if (pTag.contains("monitorPos")) {
-            monitorPos = BlockPos.of(pTag.getLong("monitorPos"));
+    private double calculateTurningSpeed(int blocks, double speed, BlockState state) {
+        return 0.1; // Default stub value
+    }
+
+    public void read(CompoundTag pTag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        // super.read removed
+        if (pTag.contains("filtererPos")) {
+            monitorPos = BlockPos.of(pTag.getLong("filtererPos"));
         }
         if (pTag.contains("target")) {
             int[] targetArray = pTag.getIntArray("target");
@@ -84,11 +90,10 @@ public class RadarGuidanceBlockEntity extends GuidanceBlockEntity {
         }
     }
 
-    @Override
-    protected void saveAdditional(CompoundTag pTag, HolderLookup.Provider provider) {
-        super.saveAdditional(pTag, provider);
+    public void write(CompoundTag pTag, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        // super.write removed
         if (monitorPos != null) {
-            pTag.putLong("monitorPos", monitorPos.asLong());
+            pTag.putLong("filtererPos", monitorPos.asLong());
         }
         if (target != null) {
             pTag.putIntArray("target", new int[]{(int) target.x, (int) target.y, (int) target.z});

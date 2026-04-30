@@ -1,7 +1,8 @@
 package com.happysg.radar.item.identfilter;
 
+import com.happysg.radar.networking.NetworkHandler;
 import com.happysg.radar.networking.networkhandlers.ListNBTHandler;
-import com.happysg.radar.networking.packets.SaveListsPayload;
+import com.happysg.radar.networking.packets.SaveListsPacket;
 import com.happysg.radar.registry.ModGuiTextures;
 import com.happysg.radar.utils.screenelements.DynamicIconButton;
 import com.happysg.radar.utils.screenelements.ScrollInputPage;
@@ -16,7 +17,6 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.neoforged.neoforge.network.PacketDistributor;
 import org.jetbrains.annotations.NotNull;
 import org.lwjgl.glfw.GLFW;
 
@@ -47,7 +47,7 @@ public class PlayerListScreen extends AbstractSimiScreen {
     }
 
 
-    protected void renderWindow(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
+    protected void renderWindow(@NotNull GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         int x = guiLeft;
         int y = guiTop;
 
@@ -289,8 +289,8 @@ public class PlayerListScreen extends AbstractSimiScreen {
         }
 
         if (minecraft.player != null && minecraft.level != null && minecraft.level.isClientSide) {
-            PacketDistributor.sendToServer(
-                    new SaveListsPayload(this.entries, null, false)
+            net.neoforged.neoforge.network.PacketDistributor.sendToServer((net.minecraft.network.protocol.common.custom.CustomPacketPayload)
+                    new SaveListsPacket(this.entries)
             );
         }
     }
