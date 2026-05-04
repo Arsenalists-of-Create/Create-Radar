@@ -182,7 +182,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         MonitorBlockEntity controllerBe = getController();
         if (controllerBe == null)
             return;
-        if (track != null && track.trackCategory() == TrackCategory.VS2 && "VS2:ship".equals(track.entityType())) {
+        if (track != null && track.trackCategory() == TrackCategory.SABLE && "VS2:ship".equals(track.entityType())) {
             long shipId = 0;
             try {
                 shipId = Long.parseLong(track.id());

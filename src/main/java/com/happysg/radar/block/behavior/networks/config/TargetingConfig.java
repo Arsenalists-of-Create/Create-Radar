@@ -53,7 +53,7 @@ public record TargetingConfig(boolean player, boolean contraption, boolean mob, 
         if(Mods.SABLE.isLoaded()){
             return switch (trackCategory) {
                 case PLAYER -> player;
-                case VS2 -> contraption;
+                case SABLE -> contraption;
                 case CONTRAPTION -> false;
                 case HOSTILE -> mob;
                 case ANIMAL -> animal;

@@ -1,19 +1,13 @@
 package com.happysg.radar.block.radar.track;
 
 import com.happysg.radar.block.monitor.MonitorSprite;
-import com.happysg.radar.compat.cbc.CannonLead;
-import com.happysg.radar.compat.cbc.VelocityTracker;
 import com.happysg.radar.config.RadarConfig;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.createmod.catnip.theme.Color;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import org.valkyrienskies.core.api.ships.Ship;
-
-import javax.annotation.Nullable;
-import java.util.UUID;
 
 
 public class RadarTrack {
@@ -45,7 +39,7 @@ public class RadarTrack {
 
     public Color getColor() {
         return switch (trackCategory) {
-            case VS2 -> new Color(RadarConfig.client().VS2Color.get());
+            case SABLE -> new Color(RadarConfig.client().VS2Color.get());
             case CONTRAPTION -> new Color(RadarConfig.client().contraptionColor.get());
             case PLAYER -> new Color(RadarConfig.client().playerColor.get());
             case ANIMAL -> new Color(RadarConfig.client().friendlyColor.get());
@@ -58,7 +52,7 @@ public class RadarTrack {
 
     public MonitorSprite getSprite() {
         return switch (trackCategory) {
-            case VS2, CONTRAPTION -> MonitorSprite.CONTRAPTION_HITBOX;
+            case SABLE, CONTRAPTION -> MonitorSprite.CONTRAPTION_HITBOX;
             case PLAYER -> MonitorSprite.PLAYER;
             case PROJECTILE -> MonitorSprite.PROJECTILE;
             default -> MonitorSprite.ENTITY_HITBOX;
@@ -102,7 +96,7 @@ public class RadarTrack {
         scannedTime = entity.level().getGameTime();
     }
 
-    public void updateRadarTrack(Ship ship, Level level) {
+    public void updateRadarTrack(SubLevelAccess ship, Level level) {
         position = RadarTrackUtil.getPosition(ship);
         velocity = RadarTrackUtil.getVelocity(ship);
         scannedTime = level.getGameTime();

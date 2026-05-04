@@ -8,6 +8,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.UUID;
 
 public class RadarContactRegistryData extends SavedData {
 
@@ -16,7 +17,7 @@ public class RadarContactRegistryData extends SavedData {
 
     private static final String DATA_NAME = "create_radar_contact_registry";
 
-    private final Map<Long, Entry> entries = new HashMap<>();
+    private final Map<UUID, Entry> entries = new HashMap<>();
 
     // ===== access =====
 
@@ -51,7 +52,7 @@ public class RadarContactRegistryData extends SavedData {
     // ===== core API (range/lock) =====
 
     // i call this any tick a target is within detection range
-    public void markInRange(long shipId, int ttlTicks) {
+    public void markInRange(UUID shipId, int ttlTicks) {
         if (ttlTicks <= 0) ttlTicks = DEFAULT_IN_RANGE_TTL;
 
         Entry e = entries.get(shipId);
@@ -65,7 +66,7 @@ public class RadarContactRegistryData extends SavedData {
     }
 
     // i call this any tick a target is actively locked
-    public void markLocked(long shipId, int ttlTicks) {
+    public void markLocked(UUID shipId, int ttlTicks) {
         if (ttlTicks <= 0) ttlTicks = DEFAULT_LOCK_TTL;
 
         Entry e = entries.get(shipId);
@@ -78,18 +79,18 @@ public class RadarContactRegistryData extends SavedData {
         setDirty();
     }
 
-    public boolean isInRange(long shipId) {
+    public boolean isInRange(UUID shipId) {
         Entry e = entries.get(shipId);
         return e != null && e.inRangeTtl > 0;
     }
 
-    public boolean isLocked(long shipId) {
+    public boolean isLocked(UUID shipId) {
         Entry e = entries.get(shipId);
         return e != null && e.lockedTtl > 0;
     }
 
     // highest state wins
-    public RadarContactState getState(long shipId) {
+    public RadarContactState getState(UUID shipId) {
         if (isLocked(shipId)) return RadarContactState.LOCKED;
         if (isInRange(shipId)) return RadarContactState.IN_RANGE;
         return null;
@@ -99,10 +100,10 @@ public class RadarContactRegistryData extends SavedData {
         if (entries.isEmpty()) return;
 
         boolean changed = false;
-        Iterator<Map.Entry<Long, Entry>> it = entries.entrySet().iterator();
+        Iterator<Map.Entry<UUID, Entry>> it = entries.entrySet().iterator();
 
         while (it.hasNext()) {
-            Map.Entry<Long, Entry> me = it.next();
+            Map.Entry<UUID, Entry> me = it.next();
             Entry e = me.getValue();
 
             if (e.inRangeTtl > 0) e.inRangeTtl--;
@@ -122,11 +123,11 @@ public class RadarContactRegistryData extends SavedData {
 
     public static final int DEFAULT_TTL_TICKS = DEFAULT_LOCK_TTL;
 
-    public void lockShip(long shipId, int ttlTicks) {
+    public void lockShip(UUID shipId, int ttlTicks) {
         markLocked(shipId, ttlTicks);
     }
 
-    public void unlockShip(long shipId) {
+    public void unlockShip(UUID shipId) {
         Entry e = entries.get(shipId);
         if (e == null) return;
 
@@ -139,7 +140,7 @@ public class RadarContactRegistryData extends SavedData {
         }
     }
 
-    public boolean isShipLocked(long shipId) {
+    public boolean isShipLocked(UUID shipId) {
         return isLocked(shipId);
     }
 
@@ -151,7 +152,7 @@ public class RadarContactRegistryData extends SavedData {
         CompoundTag shipsTag = tag.getCompound("Ships");
         for (String key : shipsTag.getAllKeys()) {
             try {
-                long shipId = Long.parseLong(key);
+                UUID shipId = UUID.fromString(key);
                 CompoundTag eTag = shipsTag.getCompound(key);
                 int inRange = eTag.getInt("InRange");
                 int locked = eTag.getInt("Locked");
@@ -168,7 +169,7 @@ public class RadarContactRegistryData extends SavedData {
             CompoundTag lockedShips = tag.getCompound("LockedShips");
             for (String key : lockedShips.getAllKeys()) {
                 try {
-                    long shipId = Long.parseLong(key);
+                    UUID shipId = UUID.fromString(key);
                     int ttl = lockedShips.getInt(key);
                     if (ttl > 0) {
                         Entry e = data.entries.get(shipId);
@@ -197,7 +198,7 @@ public class RadarContactRegistryData extends SavedData {
             CompoundTag eTag = new CompoundTag();
             eTag.putInt("InRange", entry.inRangeTtl);
             eTag.putInt("Locked", entry.lockedTtl);
-            shipsTag.put(Long.toString(e.getKey()), eTag);
+            shipsTag.put(e.getKey().toString(), eTag);
         }
 
         tag.put("Ships", shipsTag);

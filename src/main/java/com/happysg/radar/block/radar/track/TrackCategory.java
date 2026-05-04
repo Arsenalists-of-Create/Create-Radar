@@ -2,6 +2,7 @@ package com.happysg.radar.block.radar.track;
 
 import com.happysg.radar.compat.Mods;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
@@ -10,7 +11,6 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.item.ItemEntity;
-import org.valkyrienskies.core.api.ships.Ship;
 
 
 public enum TrackCategory {
@@ -18,7 +18,7 @@ public enum TrackCategory {
     MOB,
     HOSTILE,
     ANIMAL,
-    VS2,
+    SABLE,
     PROJECTILE,
     CONTRAPTION,
     ITEM,
@@ -34,7 +34,7 @@ public enum TrackCategory {
             if (type.is(RadarEntityTypeTags.RADAR_ITEM)) return ITEM;
 
             if (entity instanceof Player) return PLAYER;
-            if (Mods.SABLE.isLoaded() && entity instanceof Ship) return VS2;
+            if (Mods.SABLE.isLoaded() && entity instanceof SubLevelAccess) return SABLE;
             if (entity instanceof Enemy) return HOSTILE;
             if (entity instanceof Animal) return ANIMAL;
             if (entity instanceof Mob) return MOB;

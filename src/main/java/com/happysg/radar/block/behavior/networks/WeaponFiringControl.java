@@ -14,6 +14,8 @@ import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
 import com.mojang.logging.LogUtils;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.createmod.catnip.math.VecHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
@@ -28,8 +30,6 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
-import org.valkyrienskies.core.api.ships.Ship;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
@@ -623,7 +623,7 @@ public class WeaponFiringControl {
     public  Entity getEntityByUUID(ServerLevel level, UUID uuid) {
         return level.getEntity(uuid);
     }
-    public Ship getShipByUUID(ServerLevel level, String uuid){
+    public SubLevelAccess getShipByUUID(ServerLevel level, String uuid){
         return VSGameUtilsKt.getShipObjectWorld(level).getLoadedShips().getById(Long.parseLong(uuid));
     }
 

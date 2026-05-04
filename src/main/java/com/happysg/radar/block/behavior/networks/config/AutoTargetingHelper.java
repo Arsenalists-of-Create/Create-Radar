@@ -164,7 +164,7 @@ public final class AutoTargetingHelper {
         }
 
         // VS2 -> transponder / name via IDManager
-        if (track.trackCategory() == TrackCategory.VS2) {
+        if (track.trackCategory() == TrackCategory.SABLE) {
             try {
                 long shipId = Long.parseLong(track.getId());
                 var rec = com.happysg.radar.block.controller.id.IDManager.getIDRecordByShipId(shipId);
