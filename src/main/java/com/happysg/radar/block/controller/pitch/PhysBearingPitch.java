@@ -2,15 +2,14 @@ package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.compat.Mods;
 import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollOptionBehaviour;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Matrix4dc;
 import org.joml.Vector3d;
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
 import org.valkyrienskies.clockwork.platform.api.ContraptionController;
-import org.valkyrienskies.core.api.ships.Ship;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
 
 import javax.annotation.Nullable;
 
@@ -42,7 +41,7 @@ public class PhysBearingPitch {
     }
 
     public void setTarget(PhysBearingBlockEntity mount, Vec3 targetPos) {
-        Ship ship = getShipIfPresent();
+        SubLevelAccess ship = getShipIfPresent();
         Vec3 desired = ship != null ? toShipSpace(ship, targetPos) : targetPos;
 
         desiredTarget = desired;
@@ -174,7 +173,7 @@ public class PhysBearingPitch {
     }
 
     @Nullable
-    private Ship getShipIfPresent() {
+    private SubLevelAccess getShipIfPresent() {
         if (controller.getLevel() == null) {
             return null;
         }
@@ -183,14 +182,12 @@ public class PhysBearingPitch {
             return null;
         }
 
-        return VSGameUtilsKt.getShipManagingPos(controller.getLevel(), controller.getBlockPos());
+        return SableCompanion.INSTANCE.getContaining(controller.getLevel(), controller.getBlockPos());
     }
 
-    private static Vec3 toShipSpace(Ship ship, Vec3 worldPos) {
-        Matrix4dc worldToShip = ship.getTransform().getWorldToShip();
-        Vector3d v = new Vector3d(worldPos.x, worldPos.y, worldPos.z);
-        worldToShip.transformPosition(v);
-        return new Vec3(v.x, v.y, v.z);
+    private static Vec3 toShipSpace(SubLevelAccess ship, Vec3 worldPos) {
+        Vector3d v = ship.logicalPose().transformPositionInverse(new Vector3d(worldPos.x, worldPos.y, worldPos.z));
+        return new Vec3(v.x(), v.y(), v.z());
     }
 
     private static Vec3 forwardHoriz(Direction facing) {

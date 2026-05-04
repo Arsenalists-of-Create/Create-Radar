@@ -1,6 +1,7 @@
 package com.happysg.radar.block.controller.id;
 
 import com.happysg.radar.compat.vs2.SableUtils;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.createmod.catnip.gui.ScreenOpener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -16,13 +17,12 @@ import net.neoforged.api.distmarker.OnlyIn;
 
 import net.neoforged.fml.loading.FMLEnvironment;
 import org.jetbrains.annotations.NotNull;
-import org.valkyrienskies.core.api.ships.Ship;
 
 // Done to avoid loading vs2 classes when the mod is not loaded
 public class VS2IDHandler {
 
     public static @NotNull InteractionResult use(BlockState pState, Level pLevel, BlockPos pPos, @NotNull Player pPlayer, InteractionHand pHand, BlockHitResult pHit) {
-        Ship ship = SableUtils.getShipManagingPos(pLevel, pPos);
+        SubLevelAccess ship = SableUtils.getShipManagingPos(pLevel, pPos);
         if (ship == null) {
             pPlayer.displayClientMessage(Component.translatable("create_radar.id_block.not_on_ship"), true);
             return InteractionResult.PASS;
@@ -35,14 +35,14 @@ public class VS2IDHandler {
     }
 
     @OnlyIn(Dist.CLIENT)
-    private static void displayScreen(Ship ship, Player player) {
+    private static void displayScreen(SubLevelAccess ship, Player player) {
         if (!(player instanceof LocalPlayer))
             return;
         ScreenOpener.open(new IDBlockScreen(ship));
     }
 
     public static void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pMovedByPiston) {
-        Ship ship = SableUtils.getShipManagingPos(pLevel, pPos);
+        SubLevelAccess ship = SableUtils.getShipManagingPos(pLevel, pPos);
         if (ship != null) {
             // uses ship.getId() internally now
             IDManager.removeIDRecord(ship);

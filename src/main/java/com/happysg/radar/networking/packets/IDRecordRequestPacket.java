@@ -12,13 +12,15 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-public record IDRecordRequestPacket(long shipId) implements CustomPacketPayload {
+import java.util.UUID;
+
+public record IDRecordRequestPacket(String shipId) implements CustomPacketPayload {
     public static final Type<IDRecordRequestPacket> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(CreateRadar.MODID, "id_record_request")
     );
 
     public static final StreamCodec<RegistryFriendlyByteBuf, IDRecordRequestPacket> STREAM_CODEC = StreamCodec.composite(
-            ByteBufCodecs.VAR_LONG,
+            ByteBufCodecs.STRING_UTF8,
             IDRecordRequestPacket::shipId,
             IDRecordRequestPacket::new
     );
@@ -34,7 +36,7 @@ public record IDRecordRequestPacket(long shipId) implements CustomPacketPayload 
                 return;
             }
 
-            IDManager.IDRecord record = IDManager.getIDRecordByShipId(packet.shipId());
+            IDManager.IDRecord record = IDManager.getIDRecordByShipId(UUID.fromString(packet.shipId()));
 
             if (record == null) {
                 PacketDistributor.sendToPlayer(
@@ -51,7 +53,7 @@ public record IDRecordRequestPacket(long shipId) implements CustomPacketPayload 
         });
     }
 
-    public static void send(long shipId) {
-        PacketDistributor.sendToServer(new IDRecordRequestPacket(shipId));
+    public static void send(UUID shipId) {
+        PacketDistributor.sendToServer(new IDRecordRequestPacket(shipId.toString()));
     }
 }

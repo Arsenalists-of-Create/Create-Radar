@@ -15,6 +15,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 public class SableUtils {
 

@@ -14,8 +14,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-import org.valkyrienskies.core.api.ships.Ship;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 
 import java.util.Collection;
 import java.util.List;
@@ -89,14 +89,11 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     public float getGlobalAngle() {
         if(!Mods.SABLE.isLoaded())return 0;
-        Ship ship = VSGameUtilsKt.getShipManagingPos(level,getBlockPos());
+        SubLevelAccess ship = SableCompanion.INSTANCE.getContaining(level, getBlockPos());
         if(ship == null) return 0;
 
-        // get yaw for rotating correctly for plane radar
-        org.joml.Quaterniondc shipRot = ship.getTransform().getShipToWorldRotation();
-        org.joml.Vector3d fwd = new org.joml.Vector3d(0, 0, 1);
-        shipRot.transform(fwd);
-        float rot = (float) -Math.toDegrees(Math.atan2(fwd.x, fwd.z));
+        org.joml.Vector3d fwd = ship.logicalPose().transformNormal(new org.joml.Vector3d(0, 0, 1));
+        float rot = (float) -Math.toDegrees(Math.atan2(fwd.x(), fwd.z()));
 
         Direction facing = this.getBlockState().getValue(StationaryRadarBlock.FACING);
         int fOffset;

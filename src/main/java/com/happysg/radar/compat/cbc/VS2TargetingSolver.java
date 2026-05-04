@@ -12,9 +12,8 @@ import com.happysg.radar.math3.random.RandomVectorGenerator;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
-import org.joml.Matrix4dc;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import org.joml.Vector3f;
-import org.valkyrienskies.core.api.ships.Ship;
 
 import java.util.*;
 
@@ -33,14 +32,13 @@ public class VS2TargetingSolver {
     double initialZeta;
     double initialPsi;
     double l;
-    Matrix4dc shipToWorld;
-    Matrix4dc worldToShip;
+    private final SubLevelAccess ship;
 
     private static final double TOLERANCE = 1e-3;
 
 
     // Constructor to set up the known values
-    public VS2TargetingSolver(Level level, double u, double drag, double g, double barrelLength, Vec3 mountPos, Vec3 targetPos, double initialTheta, double initialZeta, double initialPsi, Ship ship ) {
+    public VS2TargetingSolver(Level level, double u, double drag, double g, double barrelLength, Vec3 mountPos, Vec3 targetPos, double initialTheta, double initialZeta, double initialPsi, SubLevelAccess ship ) {
         this.level = level;
         this.u = u;
         this.drag = drag;
@@ -48,8 +46,7 @@ public class VS2TargetingSolver {
         this.initialTheta = initialTheta;
         this.initialZeta = initialZeta;
         this.initialPsi = initialPsi;
-        this.shipToWorld = ship.getShipToWorld();
-        this.worldToShip = ship.getWorldToShip();
+        this.ship = ship;
         this.targetPos = targetPos;
         this.mountPos = mountPos; // shipyard coord
         this.l = barrelLength;
@@ -71,8 +68,8 @@ public class VS2TargetingSolver {
             pivotPoint = pivotPoint.add(offset);
             shipyardFrontOfBarrel = shipyardFrontOfBarrel.add(offset);
 
-            Vec3 frontOfBarrel = getVec3FromVector(shipToWorld.transformPosition(getVector3dFromVec3(shipyardFrontOfBarrel)));
-            pivotPoint = getVec3FromVector(shipToWorld.transformPosition(getVector3dFromVec3(pivotPoint)));
+            Vec3 frontOfBarrel = getVec3FromVector(ship.logicalPose().transformPosition(getVector3dFromVec3(shipyardFrontOfBarrel)));
+            pivotPoint = getVec3FromVector(ship.logicalPose().transformPosition(getVector3dFromVec3(pivotPoint)));
 
             Vec3 diffVec = targetPos.subtract(frontOfBarrel);
             double dZ = diffVec.z;

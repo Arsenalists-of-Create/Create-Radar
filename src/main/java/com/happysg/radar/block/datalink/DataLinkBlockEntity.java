@@ -3,6 +3,8 @@ package com.happysg.radar.block.datalink;
 import com.happysg.radar.registry.AllDataBehaviors;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
@@ -13,18 +15,17 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import org.joml.Matrix4dc;
 import org.joml.Vector3d;
 
 import javax.annotation.Nullable;
 import java.util.List;
-import java.util.Optional;
+import java.util.UUID;
 
 public class DataLinkBlockEntity extends SmartBlockEntity {
 
     protected BlockPos targetOffset = BlockPos.ZERO;
     @Nullable
-    private Long linkedShipId = null;
+    private UUID linkedShipId = null;
     private BlockPos targetOffsetShip = BlockPos.ZERO;
 
     public DataPeripheral activeSource;
@@ -100,7 +101,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         tag.put("TargetOffset", NbtUtils.writeBlockPos(targetOffset));
 
         if (linkedShipId != null)
-            tag.putLong("LinkedShipId", linkedShipId);
+            tag.putUUID("LinkedShipId", linkedShipId);
         tag.put("TargetOffsetShip", NbtUtils.writeBlockPos(targetOffsetShip));
 
         if (activeSource != null) {
@@ -117,9 +118,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         targetOffset = NbtUtils.readBlockPos(tag, "TargetOffset").orElse(BlockPos.ZERO);
         ledState = tag.getBoolean("LedState");
 
-        linkedShipId = tag.contains("LinkedShipId", Tag.TAG_LONG)
-                ? tag.getLong("LinkedShipId")
-                : null;
+        linkedShipId = tag.hasUUID("LinkedShipId") ? tag.getUUID("LinkedShipId") : null;
 
         targetOffsetShip = NbtUtils.readBlockPos(tag, "TargetOffsetShip").orElse(BlockPos.ZERO);
 
@@ -153,11 +152,11 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
             return;
         }
 
-        var ship = org.valkyrienskies.mod.common.VSGameUtilsKt.getShipManagingPos(sl, worldPosition);
-        var targetShip = org.valkyrienskies.mod.common.VSGameUtilsKt.getShipManagingPos(sl, targetPosition);
+        var ship = SableCompanion.INSTANCE.getContaining(sl, worldPosition);
+        var targetShip = SableCompanion.INSTANCE.getContaining(sl, targetPosition);
 
-        if (ship != null && targetShip != null && ship.getId() == targetShip.getId()) {
-            linkedShipId = ship.getId();
+        if (ship != null && targetShip != null && ship.getUniqueId() == targetShip.getUniqueId()) {
+            linkedShipId = ship.getUniqueId();
 
             BlockPos selfShipPos   = toShipBlockPos(ship, worldPosition);
             BlockPos targetShipPos = toShipBlockPos(ship, targetPosition);
@@ -179,8 +178,8 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         if (!(level instanceof ServerLevel sl) || linkedShipId == null)
             return worldPosition.relative(getDirection());
 
-        var ship = org.valkyrienskies.mod.common.VSGameUtilsKt.getShipManagingPos(sl, worldPosition);
-        if (ship == null || ship.getId() != linkedShipId) {
+        var ship = SableCompanion.INSTANCE.getContaining(sl, worldPosition);
+        if (ship == null || !ship.getUniqueId().equals(linkedShipId)) {
             linkedShipId = null;
             return worldPosition.relative(getDirection());
         }
@@ -209,9 +208,8 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
             return worldPosition.offset(targetOffset);
         }
 
-        var ship = org.valkyrienskies.mod.common.VSGameUtilsKt.getShipManagingPos(sl, worldPosition);
-        if (ship == null || ship.getId() != linkedShipId) {
-            // ship changed / disassembled; fall back
+        var ship = SableCompanion.INSTANCE.getContaining(sl, worldPosition);
+        if (ship == null || !ship.getUniqueId().equals(linkedShipId)) {
             linkedShipId = null;
             return worldPosition.offset(targetOffset);
         }
@@ -222,21 +220,15 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         return toWorldBlockPos(ship, targetShipPos);
     }
 
-    private static BlockPos toShipBlockPos(org.valkyrienskies.core.api.ships.ServerShip ship, BlockPos worldPos) {
-        Vector3d v = new Vector3d(worldPos.getX() + 0.5, worldPos.getY() + 0.5, worldPos.getZ() + 0.5);
-
-        Matrix4dc worldToShip = ship.getWorldToShip();
-        worldToShip.transformPosition(v);
-
-        return BlockPos.containing(v.x, v.y, v.z);
+    private static BlockPos toShipBlockPos(SubLevelAccess ship, BlockPos worldPos) {
+        Vector3d v = ship.logicalPose().transformPositionInverse(
+                new Vector3d(worldPos.getX() + 0.5, worldPos.getY() + 0.5, worldPos.getZ() + 0.5));
+        return BlockPos.containing(v.x(), v.y(), v.z());
     }
 
-    private static BlockPos toWorldBlockPos(org.valkyrienskies.core.api.ships.ServerShip ship, BlockPos shipPos) {
-        Vector3d v = new Vector3d(shipPos.getX() + 0.5, shipPos.getY() + 0.5, shipPos.getZ() + 0.5);
-
-        Matrix4dc shipToWorld = ship.getShipToWorld();
-        shipToWorld.transformPosition(v);
-
-        return BlockPos.containing(v.x, v.y, v.z);
+    private static BlockPos toWorldBlockPos(SubLevelAccess ship, BlockPos shipPos) {
+        Vector3d v = ship.logicalPose().transformPosition(
+                new Vector3d(shipPos.getX() + 0.5, shipPos.getY() + 0.5, shipPos.getZ() + 0.5));
+        return BlockPos.containing(v.x(), v.y(), v.z());
     }
 }

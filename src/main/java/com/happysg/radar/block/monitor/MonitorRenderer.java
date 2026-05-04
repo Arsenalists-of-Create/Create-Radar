@@ -10,6 +10,7 @@ import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModRenderTypes;
 import com.mojang.logging.LogUtils;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.createmod.catnip.theme.Color;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -28,10 +29,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
-import org.joml.Quaterniond;
 import org.joml.Vector3d;
 import org.slf4j.Logger;
-import org.valkyrienskies.core.api.ships.Ship;
 
 import java.util.List;
 import java.util.UUID;
@@ -257,7 +256,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         // rotate the relative vector into ship-local axes so the screen rotates with the ship
         if (radar.renderRelativeToMonitor()) {
             if(!Mods.SABLE.isLoaded())return;
-            Ship ship = monitor.getShip();
+            SubLevelAccess ship = monitor.getShip();
             if (ship != null) {
                 // i keep the cone "north-up" by counter-rotating track vectors by the ship yaw
                 double shipYawRad = getShipYawRad(ship);
@@ -346,36 +345,14 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
      * i compute ship yaw only (around world Y) relative to world NORTH (-Z).
      * result is radians, where 0 means ship forward points toward north ( -Z ).
      */
-    private  double getShipYawRad(Ship ship) {
-        var transform = ship.getTransform();
-
-        Quaterniond shipToWorld = new Quaterniond();
-        try {
-            shipToWorld.set(transform.getShipToWorldRotation());
-        } catch (Throwable ignored) {
-            // if mappings differ, fall back to the inverse of worldToShip
-            shipToWorld.set(transform.getRotation()).invert();
-        }
-
-        // i ask: "where does the ship's local +Z (forward) point in the world?"
-        Vector3d fwd = new Vector3d(0, 0, 1);
-        shipToWorld.transform(fwd);
-
-        // yaw relative to north (-Z):
-        // when fwd is (0,0,-1) => atan2(0, 1) = 0 rad  (north)
-        // when fwd is (1,0,0)  => atan2(1, 0) = +pi/2 (east)
-        return Math.atan2(fwd.x, -fwd.z);
+    private double getShipYawRad(SubLevelAccess ship) {
+        Vector3d fwd = ship.logicalPose().transformNormal(new Vector3d(0, 0, 1));
+        return Math.atan2(fwd.x(), -fwd.z());
     }
-    private  Vec3 rotateWorldVecIntoShipFrame(Ship ship, Vec3 worldVec) {
-        var transform = ship.getTransform();
 
-        Quaterniond worldToShip = new Quaterniond();
-        worldToShip.set(transform.getRotation());
-
-        Vector3d v = new Vector3d(worldVec.x, worldVec.y, worldVec.z);
-        worldToShip.transform(v);
-
-        return new Vec3(v.x, v.y, v.z);
+    private Vec3 rotateWorldVecIntoShipFrame(SubLevelAccess ship, Vec3 worldVec) {
+        Vector3d v = ship.logicalPose().transformNormalInverse(new Vector3d(worldVec.x, worldVec.y, worldVec.z));
+        return new Vec3(v.x(), v.y(), v.z());
     }
 
 
@@ -650,22 +627,13 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     private String getSlugForTrack(RadarTrack track, MonitorBlockEntity mon) {
         if (mon.getLevel() == null) return null;
 
-        if ("VS2:ship".equals(track.entityType())) {
-            long shipId;
-            try {
-                shipId = Long.parseLong(track.id());
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-
-            IDManager.IDRecord rec = IDManager.getIDRecordByShipId(shipId);
+        if ("Sable:ship".equals(track.entityType())) {
+            IDManager.IDRecord rec = IDManager.getIDRecordByShipId(UUID.fromString(track.id()));
             if (rec != null) {
                 String storedName = rec.name();
                 if (storedName != null && !storedName.isBlank())
                     return storedName;
             }
-
-
         }
 
         // Players: null-safe

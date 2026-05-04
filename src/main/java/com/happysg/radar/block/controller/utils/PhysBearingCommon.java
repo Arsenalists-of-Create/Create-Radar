@@ -2,15 +2,14 @@ package com.happysg.radar.block.controller.utils;
 
 import com.happysg.radar.compat.Mods;
 import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollOptionBehaviour;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Matrix4dc;
 import org.joml.Vector3d;
 import org.jetbrains.annotations.Nullable;
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
 import org.valkyrienskies.clockwork.platform.api.ContraptionController;
-import org.valkyrienskies.core.api.ships.Ship;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
 
 public final class PhysBearingCommon {
     private PhysBearingCommon() {}
@@ -23,17 +22,15 @@ public final class PhysBearingCommon {
     }
 
     @Nullable
-    public static Ship getShipIfPresent(Level level, net.minecraft.core.BlockPos pos) {
+    public static SubLevelAccess getShipIfPresent(Level level, net.minecraft.core.BlockPos pos) {
         if (level == null) return null;
         if (!Mods.SABLE.isLoaded()) return null;
-        return VSGameUtilsKt.getShipManagingPos(level, pos);
+        return SableCompanion.INSTANCE.getContaining(level, pos);
     }
 
-    public static Vec3 toShipSpace(Ship ship, Vec3 worldPos) {
-        Matrix4dc worldToShip = ship.getTransform().getWorldToShip();
-        Vector3d v = new Vector3d(worldPos.x, worldPos.y, worldPos.z);
-        worldToShip.transformPosition(v);
-        return new Vec3(v.x, v.y, v.z);
+    public static Vec3 toShipSpace(SubLevelAccess ship, Vec3 worldPos) {
+        Vector3d v = ship.logicalPose().transformPositionInverse(new Vector3d(worldPos.x, worldPos.y, worldPos.z));
+        return new Vec3(v.x(), v.y(), v.z());
     }
 
     public static double wrap360(double deg) {

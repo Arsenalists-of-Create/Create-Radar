@@ -1,12 +1,14 @@
 package com.happysg.radar.compat.cbc;
 
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix3d;
+import org.joml.Quaterniond;
 import org.joml.Vector3d;
-import org.valkyrienskies.core.api.ships.LoadedShip;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
@@ -55,13 +57,17 @@ public class VS2CannonTargeting {
     }
 
     public static List<List<Double>> calculatePitchAndYawVS2(Level level, double speed, Vec3 targetPos, Vec3 mountPos, int barrelLength, Direction initialDirection, double drag, double gravity) {
-        LoadedShip ship = VSGameUtilsKt.getShipObjectManagingPos(level,mountPos.x,mountPos.y,mountPos.z);
+        SubLevelAccess ship = SableCompanion.INSTANCE.getContaining(level, mountPos);
         if (ship == null) {
             System.out.println("null");
             return null;
         }
+        Vector3d right = ship.logicalPose().transformNormal(new Vector3d(1, 0, 0));
+        Vector3d up    = ship.logicalPose().transformNormal(new Vector3d(0, 1, 0));
+        Vector3d fwd   = ship.logicalPose().transformNormal(new Vector3d(0, 0, 1));
+        Matrix3d rot = new Matrix3d(right.x, right.y, right.z, up.x, up.y, up.z, fwd.x, fwd.y, fwd.z);
         Vector3d eulerAngles = new Vector3d();
-        ship.getTransform().getShipToWorldRotation().getEulerAnglesYXZ(eulerAngles);
+        new Quaterniond().setFromNormalized(rot).getEulerAnglesYXZ(eulerAngles);
         double x = eulerAngles.x;
         double z = eulerAngles.z;
         double initialZeta = -eulerAngles.y; // Yaw

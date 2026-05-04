@@ -5,6 +5,8 @@ import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
 import com.happysg.radar.compat.Mods;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
@@ -18,8 +20,6 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
-import org.valkyrienskies.core.api.ships.Ship;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
 
@@ -282,14 +282,14 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
     }
 
     public double computeYawToTargetDeg(Vec3 cannonCenterWorld, Vec3 targetWorld) {
-        Ship ship = getShipIfPresent();
+        SubLevelAccess subLevel = getSublevelIfPresent();
 
         Vec3 cannonCenter = cannonCenterWorld;
         Vec3 target = targetWorld;
 
-        if (Mods.SABLE.isLoaded() && ship != null) {
-            cannonCenter = toShipSpace(ship, cannonCenterWorld);
-            target = toShipSpace(ship, targetWorld);
+        if (Mods.SABLE.isLoaded() && subLevel != null) {
+            cannonCenter = toShipSpace(subLevel, cannonCenterWorld);
+            target = toShipSpace(subLevel, targetWorld);
         }
 
         double dx = target.x - cannonCenter.x;
@@ -299,7 +299,7 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
     }
 
     @Nullable
-    private Ship getShipIfPresent() {
+    private SubLevelAccess getSublevelIfPresent() {
         if (level == null) {
             return null;
         }
@@ -308,12 +308,12 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
             return null;
         }
 
-        return VSGameUtilsKt.getShipManagingPos(level, worldPosition);
+        return SableCompanion.INSTANCE.getContaining(level, worldPosition);
     }
 
-    private Vec3 toShipSpace(Ship ship, Vec3 worldPos) {
+    private Vec3 toShipSpace(SubLevelAccess subLevel, Vec3 worldPos) {
         Vector3d tmp = new Vector3d(worldPos.x, worldPos.y, worldPos.z);
-        ship.getTransform().getWorldToShip().transformPosition(tmp);
+        subLevel.logicalPose().transformPositionInverse(tmp);
         return new Vec3(tmp.x, tmp.y, tmp.z);
     }
 

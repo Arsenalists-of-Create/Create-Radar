@@ -124,7 +124,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
     }
 
     private static boolean computeOnShip(Level level, BlockPos pos) {
-        return VSGameUtilsKt.getShipManagingPos(level, pos) != null;
+        return SableCompanion.INSTANCE.getContaining(level, pos) != null;
     }
 
     private static void refreshOnShip(Level level, BlockPos pos) {

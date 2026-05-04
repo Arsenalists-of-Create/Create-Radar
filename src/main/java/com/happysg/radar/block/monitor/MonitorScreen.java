@@ -353,20 +353,9 @@ public class MonitorScreen extends Screen {
         return new Vec3(x, v.y, z);
     }
 
-    private double getShipYawRad(org.valkyrienskies.core.api.ships.Ship ship) {
-        var transform = ship.getTransform();
-
-        org.joml.Quaterniond shipToWorld = new org.joml.Quaterniond();
-        try {
-            shipToWorld.set(transform.getShipToWorldRotation());
-        } catch (Throwable ignored) {
-            shipToWorld.set(transform.getRotation()).invert();
-        }
-
-        org.joml.Vector3d fwd = new org.joml.Vector3d(0, 0, 1);
-        shipToWorld.transform(fwd);
-
-        return Math.atan2(fwd.x, -fwd.z);
+    private double getShipYawRad(dev.ryanhcode.sable.companion.SubLevelAccess ship) {
+        org.joml.Vector3d fwd = ship.logicalPose().transformNormal(new org.joml.Vector3d(0, 0, 1));
+        return Math.atan2(fwd.x(), -fwd.z());
     }
 
     private void renderTracks(GuiGraphics gg, MonitorBlockEntity monitor, IRadar radar) {
@@ -587,15 +576,10 @@ public class MonitorScreen extends Screen {
     private String getLabelForTrack(RadarTrack track, MonitorBlockEntity mon) {
         if (mon.getLevel() == null) return null;
 
-        if ("VS2:ship".equals(track.entityType())) {
-            try {
-                long shipId = Long.parseLong(track.id());
-                IDManager.IDRecord rec = IDManager.getIDRecordByShipId(shipId);
-                if (rec != null && rec.name() != null && !rec.name().isBlank())
-                    return rec.name();
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
+        if ("Sable:ship".equals(track.entityType())) {
+            IDManager.IDRecord rec = IDManager.getIDRecordByShipId(java.util.UUID.fromString(track.id()));
+            if (rec != null && rec.name() != null && !rec.name().isBlank())
+                return rec.name();
         }
 
         if (track.trackCategory() == TrackCategory.PLAYER) {

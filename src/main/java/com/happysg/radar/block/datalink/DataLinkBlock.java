@@ -3,7 +3,6 @@ package com.happysg.radar.block.datalink;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
 import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.vs2.VSAssemblySuppression;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.AllShapes;
@@ -91,7 +90,7 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!level.isClientSide && level instanceof ServerLevel serverLevel) {
-            if(Mods.SABLE.isLoaded() && VSAssemblySuppression.isSuppressed(serverLevel)) return;
+            if(Mods.SABLE.isLoaded()) return;
             ResourceKey<Level> dim = serverLevel.dimension();
             Direction supportFace = state.getValue(FACING);
 

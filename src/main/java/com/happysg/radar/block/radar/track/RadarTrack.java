@@ -98,7 +98,7 @@ public class RadarTrack {
 
     public void updateRadarTrack(SubLevelAccess ship, Level level) {
         position = RadarTrackUtil.getPosition(ship);
-        velocity = RadarTrackUtil.getVelocity(ship);
+        velocity = RadarTrackUtil.getVelocity(ship, level);
         scannedTime = level.getGameTime();
     }
 

@@ -14,6 +14,8 @@ import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.track.TrackCategory;
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.component.CustomData;
@@ -37,8 +39,6 @@ import net.minecraft.world.phys.Vec3;
 
 import net.neoforged.neoforge.items.ItemStackHandler;
 import org.slf4j.Logger;
-import org.valkyrienskies.core.api.ships.Ship;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -61,7 +61,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     private static final int MANUAL_CLEAR_COOLDOWN_TICKS = 20;
 
     private long vsLoadedCacheUntilTick = -1;
-    private final Map<Long, Boolean> vsLoadedCache = new HashMap<>();
+    private final Map<UUID, Boolean> vsLoadedCache = new HashMap<>();
 
     private  TargetingConfig targeting = TargetingConfig.DEFAULT;
     private List<AABB> safeZones = new ArrayList<>();
@@ -91,11 +91,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         String selectedId = data.getSelectedTargetId(group);
 
         if (Mods.SABLE.isLoaded() && selectedId != null && (sl.getGameTime() % 10 == 0)) {
-            long shipId = parseShipIdOrNeg(selectedId);
-            if (shipId != -1L) {
-                Ship ship = VSGameUtilsKt.getAllShips(level).getById(shipId);
-                if (ship != null) RadarContactRegistry.markLocked(sl, shipId, 10);
-            }
+            UUID shipId = UUID.fromString(selectedId);
+            SubLevelAccess ship = SubLevelContainer.getContainer(level).getSubLevel(shipId);
+            if (ship != null) RadarContactRegistry.markLocked(sl, shipId, 10);
         }
 
         if (sl.getGameTime() % 5 != 0) return;
@@ -107,16 +105,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         if (track == null) return true;
         if (track.trackCategory() != TrackCategory.SABLE) return true;
 
-        final long shipId;
-        try {
-            shipId = Long.parseLong(track.getId());
-        } catch (NumberFormatException ignored) {
-            return false;
-        }
-
+        UUID shipId = UUID.fromString(track.getId());
         long now = sl.getGameTime();
 
-        // refresh cache
         if (now > vsLoadedCacheUntilTick) {
             vsLoadedCache.clear();
             vsLoadedCacheUntilTick = now + 10;
@@ -125,13 +116,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         Boolean cached = vsLoadedCache.get(shipId);
         if (cached != null) return cached;
 
-        boolean loaded;
-        try {
-            loaded = VSGameUtilsKt.getShipObjectWorld(sl).getLoadedShips().getById(shipId) != null;
-        } catch (Throwable t) {
-            loaded = false;
-        }
-
+        boolean loaded = SubLevelContainer.getContainer(sl).getSubLevel(shipId) != null;
         vsLoadedCache.put(shipId, loaded);
         return loaded;
     }
@@ -282,19 +267,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         data.setSelectedTargetId(group, track == null ? null : track.getId());
 
         if (Mods.SABLE.isLoaded()) {
-            if (prev != null && track == null) {
-                long prevShipId = parseShipIdOrNeg(prev);
-                if (prevShipId != -1L) {
-                    RadarContactRegistry.unLock(sl, prevShipId);
-                }
-            }
+            if (prev != null && track == null)
+                RadarContactRegistry.unLock(sl, UUID.fromString(prev));
 
-            if (track != null && track.trackCategory() == TrackCategory.SABLE) {
-                long shipId = parseShipIdOrNeg(track.getId());
-                if (shipId != -1L) {
-                    RadarContactRegistry.markLocked(sl, shipId, 10);
-                }
-            }
+            if (track != null && track.trackCategory() == TrackCategory.SABLE)
+                RadarContactRegistry.markLocked(sl, UUID.fromString(track.getId()), 10);
         }
 
         activeTrackCache = track;
@@ -783,24 +760,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         }
 
         return null;
-    }
-
-    private static boolean isNumericId(@Nullable String s) {
-        if (s == null || s.isEmpty()) return false;
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c < '0' || c > '9') return false;
-        }
-        return true;
-    }
-
-    private static long parseShipIdOrNeg(@Nullable String s) {
-        if (!isNumericId(s)) return -1L;
-        try {
-            return Long.parseLong(s);
-        } catch (NumberFormatException e) {
-            return -1L;
-        }
     }
 
     private void dropOrReselectAuto(ServerLevel sl, NetworkData data, NetworkData.Group group) {

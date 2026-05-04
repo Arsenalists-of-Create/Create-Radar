@@ -5,26 +5,28 @@ import com.happysg.radar.CreateRadar;
 import com.happysg.radar.networking.packets.IDRecordRequestPacket;
 import com.happysg.radar.networking.packets.IDRecordPacket;
 import com.happysg.radar.registry.ModGuiTextures;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.createmod.catnip.gui.AbstractSimiScreen;
 import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
-import org.valkyrienskies.core.api.ships.Ship;
+
+import java.util.UUID;
 
 
 //only open on VsShip
 public class IDBlockScreen extends AbstractSimiScreen {
     private static final ModGuiTextures BACKGROUND = ModGuiTextures.ID_SCREEN;
 
-    Ship ship;
+    SubLevelAccess ship;
     String id = "";
     String name = "";
     private EditBox nameField;
     private EditBox idField;
 
-    public IDBlockScreen(Ship ship) {
+    public IDBlockScreen(SubLevelAccess ship) {
         this.ship = ship;
     }
 
@@ -55,7 +57,7 @@ public class IDBlockScreen extends AbstractSimiScreen {
         confirmButton.withCallback(this::onClose);
         addRenderableWidget(confirmButton);
 
-       IDRecordRequestPacket.send(ship.getId());
+       IDRecordRequestPacket.send(ship.getUniqueId());
     }
 
     @Override
@@ -67,9 +69,9 @@ public class IDBlockScreen extends AbstractSimiScreen {
 
     @Override
     public void onClose() {
-        IDManager.addIDRecord(ship.getId(), id, name);
+        IDManager.addIDRecord(ship.getUniqueId(), id, name);
         super.onClose();
-        IDRecordPacket.send(ship.getId(), ship.getSlug(), id,name);
+        IDRecordPacket.send(ship.getUniqueId(), ship.getUniqueId().toString(), id,name);
     }
 
     private void loadFromClientCache() {
@@ -79,8 +81,8 @@ public class IDBlockScreen extends AbstractSimiScreen {
         this.name = record.name();
     }
 
-    public boolean isForShip(long shipId) {
-        return ship.getId() == shipId;
+    public boolean isForShip(UUID shipId) {
+        return ship.getUniqueId() == shipId;
     }
 
     public void applyLoadedRecord(String loadedName, String loadedId) {

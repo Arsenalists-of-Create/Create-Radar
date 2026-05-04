@@ -15,6 +15,8 @@ import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
@@ -26,7 +28,6 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.valkyrienskies.core.api.ships.Ship;
 
 import java.util.*;
 
@@ -45,7 +46,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     Vec3 scanPos = Vec3.ZERO;
 
     private final Set<Entity> scannedEntities = new HashSet<>();
-    private final Set<Ship> scannedShips = new HashSet<>();
+    private final Set<SubLevelAccess> scannedShips = new HashSet<>();
     private final Set<Projectile> scannedProjectiles = new HashSet<>();
     private final HashMap<String, RadarTrack> radarTracks = new HashMap<>();
 
@@ -153,13 +154,13 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             }
         }
 
-        for (Ship ship : scannedShips) {
+        for (SubLevelAccess ship : scannedShips) {
             Vec3 pos = RadarTrackUtil.getPosition(ship);
             if (isInFovAndRange(pos)) {
 
-                long key = ship.getId();
+                UUID key = ship.getUniqueId();
 
-                radarTracks.compute(ship.getSlug(), (id, track) -> {
+                radarTracks.compute(ship.getUniqueId().toString(), (id, track) -> {
                     if (track == null) return RadarTrackUtil.getRadarTrack(ship, level);
                     track.updateRadarTrack(ship, level);
                     return track;
@@ -197,15 +198,14 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
                 radarTracks.remove(entity.getUUID().toString());
         }
 
-        // vs2 ships
+        // sable ships
         if (Mods.SABLE.isLoaded()) {
-            assert blockEntity.getLevel() != null;
-
-            var shipWorld = org.valkyrienskies.mod.common.VSGameUtilsKt.getShipObjectWorld(blockEntity.getLevel());
-            // i remove ship tracks if the ship id no longer resolves (unloaded/despawned)
+            Level level = blockEntity.getLevel();
             scannedShips.removeIf(ship -> {
-                boolean dead = shipWorld == null || shipWorld.getLoadedShips().getById(ship.getId()) == null;
-                if (dead) radarTracks.remove(String.valueOf(ship.getId()));
+                var center = ship.boundingBox().center();
+                SubLevelAccess current = SableCompanion.INSTANCE.getContaining(level, new Vec3(center.x(), center.y(), center.z()));
+                boolean dead = current == null || !ship.getUniqueId().equals(current.getUniqueId());
+                if (dead) radarTracks.remove(ship.getUniqueId().toString());
                 return dead;
             });
         }

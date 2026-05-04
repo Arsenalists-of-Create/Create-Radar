@@ -14,7 +14,9 @@ import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-public record IDRecordSyncPacket(long shipId, boolean hasRecord, String name, String secretID) implements CustomPacketPayload {
+import java.util.UUID;
+
+public record IDRecordSyncPacket(String shipId, boolean hasRecord, String name, String secretID) implements CustomPacketPayload {
 
     public IDRecordSyncPacket {
         name = name == null ? "" : name;
@@ -26,7 +28,7 @@ public record IDRecordSyncPacket(long shipId, boolean hasRecord, String name, St
     );
 
     public static final StreamCodec<RegistryFriendlyByteBuf, IDRecordSyncPacket> STREAM_CODEC = StreamCodec.composite(
-            ByteBufCodecs.VAR_LONG,
+            ByteBufCodecs.STRING_UTF8,
             IDRecordSyncPacket::shipId,
             ByteBufCodecs.BOOL,
             IDRecordSyncPacket::hasRecord,
@@ -51,21 +53,21 @@ public record IDRecordSyncPacket(long shipId, boolean hasRecord, String name, St
         ));
     }
 
-    public static void send(ServerPlayer player, long shipId, boolean hasRecord, String name, String secretID) {
+    public static void send(ServerPlayer player, String shipId, boolean hasRecord, String name, String secretID) {
         PacketDistributor.sendToPlayer(player, new IDRecordSyncPacket(shipId, hasRecord, name, secretID));
     }
 
     @OnlyIn(Dist.CLIENT)
     private static class Client {
-        private static void handle(long shipId, boolean hasRecord, String name, String secretID) {
+        private static void handle(String shipId, boolean hasRecord, String name, String secretID) {
             if (hasRecord) {
-                IDManager.addIDRecord(shipId, secretID, name);
+                IDManager.addIDRecord(UUID.fromString(shipId), secretID, name);
             } else {
-                IDManager.ID_RECORDS.remove(shipId);
+                IDManager.ID_RECORDS.remove(UUID.fromString(shipId));
             }
 
             if (Minecraft.getInstance().screen instanceof com.happysg.radar.block.controller.id.IDBlockScreen screen
-                    && screen.isForShip(shipId)) {
+                    && screen.isForShip(UUID.fromString(shipId))) {
                 screen.applyLoadedRecord(name, secretID);
             }
         }

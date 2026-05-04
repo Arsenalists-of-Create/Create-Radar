@@ -17,21 +17,21 @@ import java.util.List;
 
 public class RadarTrackUtil {
 
-    public static RadarTrack getRadarTrack(SubLevelAccess ship, Level level) {
-        return new RadarTrack(String.valueOf(ship.getUniqueId()), getPosition(ship), getVelocity(ship, level), level.getGameTime(),
-                TrackCategory.SABLE, "Sable:ship", getShipSize(ship));
+    public static RadarTrack getRadarTrack(SubLevelAccess subLevel, Level level) {
+        return new RadarTrack(String.valueOf(subLevel.getUniqueId()), getPosition(subLevel), getVelocity(subLevel, level), level.getGameTime(),
+                TrackCategory.SABLE, "Sable:subLevel", getShipSize(subLevel));
     }
 
-    public static float getShipSize(SubLevelAccess ship){
-        if(ship.boundingBox() != null){
-            return (float) ship.boundingBox().maxY();
+    public static float getShipSize(SubLevelAccess subLevel){
+        if(subLevel.boundingBox() != null){
+            return (float) subLevel.boundingBox().maxY();
         }else{
             return 1;
         }
     }
-    public static Vec3 getVelocity(SubLevelAccess ship, Level level) {
-        //Probally a horrid way to do this
-        Vector3f vec3d = new Vector3f((Vector3fc) SableCompanion.INSTANCE.getVelocity(level, ship.boundingBox().center()));
+    public static Vec3 getVelocity(SubLevelAccess subLevel, Level level) {
+        //Probally not the best to cast like this.
+        Vector3f vec3d = new Vector3f((Vector3fc) SableCompanion.INSTANCE.getVelocity(level, subLevel.boundingBox().center()));
         return new Vec3(vec3d);
     }
 

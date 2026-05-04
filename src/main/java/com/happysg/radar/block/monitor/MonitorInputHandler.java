@@ -4,6 +4,7 @@ package com.happysg.radar.block.monitor;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -12,9 +13,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
-import org.joml.Quaterniond;
 import org.joml.Vector3d;
-import org.valkyrienskies.core.api.ships.Ship;
 
 public class MonitorInputHandler {
 
@@ -34,7 +33,7 @@ public class MonitorInputHandler {
     public static RadarTrack findTrack(Level level, Vec3 hit, MonitorBlockEntity controller) {
         if (controller.getRadarCenterPos() == null)
             return null;
-        Ship ship = null;
+        SubLevelAccess ship = null;
         if(Mods.SABLE.isLoaded()){
             ship = controller.getShip();
         }
@@ -98,19 +97,9 @@ public class MonitorInputHandler {
         return new Vec3(x, v.y, z);
     }
 
-    private static double getShipYawRad(Ship ship) {
-        var transform = ship.getTransform();
-
-        Quaterniond shipToWorld = new Quaterniond();
-        try {
-            shipToWorld.set(transform.getShipToWorldRotation());
-        } catch (Throwable ignored) {
-            shipToWorld.set(transform.getRotation()).invert();
-        }
-
-        Vector3d fwd = new Vector3d(0, 0, 1);
-        shipToWorld.transform(fwd);
-        return Math.atan2(fwd.x, -fwd.z);
+    private static double getShipYawRad(SubLevelAccess ship) {
+        Vector3d fwd = ship.logicalPose().transformNormal(new Vector3d(0, 0, 1));
+        return Math.atan2(fwd.x(), -fwd.z());
     }
 
     public static void monitorPlayerHovering(PlayerTickEvent.Post event) {

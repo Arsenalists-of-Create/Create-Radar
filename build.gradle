@@ -202,6 +202,10 @@ dependencies {
         }
     }
 
+    //CEC
+    compileOnly files ("lib/createenergycannons-forge-0.2.jar")
+    compileOnly files("lib/createenergycannons-0.2+mc1.20.1.jar")
+
     jarJar(api("dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_companion_version}"))
 }
 

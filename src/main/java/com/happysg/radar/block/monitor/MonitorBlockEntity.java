@@ -12,10 +12,14 @@ import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.api.equipment.goggles.IHaveHoveringInformation;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
@@ -34,8 +38,6 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
-import org.valkyrienskies.core.api.ships.Ship;
-import org.valkyrienskies.mod.common.VSGameUtilsKt;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -182,24 +184,16 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         MonitorBlockEntity controllerBe = getController();
         if (controllerBe == null)
             return;
-        if (track != null && track.trackCategory() == TrackCategory.SABLE && "VS2:ship".equals(track.entityType())) {
-            long shipId = 0;
-            try {
-                shipId = Long.parseLong(track.id());
-            } catch (NumberFormatException ignored) {
+        if (track != null && track.trackCategory() == TrackCategory.SABLE && "Sable:ship".equals(track.entityType())) {
+            UUID shipId = UUID.fromString(track.id());
+            SubLevelAccess subLevel = SubLevelContainer.getContainer(sl).getSubLevel(shipId);
+            if (subLevel == null) {
                 track = null;
-            }
-
-            if (track != null) {
-                Ship ship = VSGameUtilsKt.getShipObjectWorld(sl).getLoadedShips().getById(shipId);
-                if (ship == null) {
-                    track = null;
-                    this.activetrack = null;
-                    this.selectedEntity = null;
-                    reset = true;// i refuse to forward a dead ship selection
-                }else{
-                    reset = false;
-                }
+                this.activetrack = null;
+                this.selectedEntity = null;
+                reset = true;
+            } else {
+                reset = false;
             }
         }
 
@@ -581,11 +575,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
 
-    public Ship getShip(){
-        if(!Mods.SABLE.isLoaded())return null;
-        Ship ship = VSGameUtilsKt.getShipManagingPos(level,worldPosition);
-        return ship;
-
+    public SubLevelAccess getShip(){
+        return SableUtils.getShipManagingPos(level, worldPosition);
     }
 
 
