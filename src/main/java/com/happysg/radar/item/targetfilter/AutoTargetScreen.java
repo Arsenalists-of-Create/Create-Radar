@@ -98,7 +98,7 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
         });
         addRenderableWidget(playerButton);
         addRenderableWidget(playerIndicator);
-        contraptionButton = new IconButton(guiLeft + 42, guiTop + 43, ModGuiTextures.VS2_BUTTON);
+        contraptionButton = new IconButton(guiLeft + 42, guiTop + 43, ModGuiTextures.SABLE_BUTTON);
         contraptionButton.setToolTip(Component.translatable(CreateRadar.MODID + ".radar_button.contraption"));
         contraptionIndicator = new Indicator(guiLeft + 42, guiTop + 36, Component.empty());
         contraptionIndicator.state = contraption ? Indicator.State.GREEN : Indicator.State.RED;

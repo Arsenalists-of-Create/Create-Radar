@@ -10,20 +10,20 @@ import net.minecraft.nbt.CompoundTag;
 
 import java.util.List;
 
-public record DetectionConfig(boolean player, boolean vs2, boolean contraption, boolean mob, boolean projectile, boolean animal, boolean item,
-                            List<String> blacklistPlayers, List<String> whitelistPlayers, List<String> blacklistVS2,
-                            List<String> whitelistVS) {
+public record DetectionConfig(boolean player, boolean sable, boolean contraption, boolean mob, boolean projectile, boolean animal, boolean item,
+                            List<String> blacklistPlayers, List<String> whitelistPlayers, List<String> blacklistSable,
+                            List<String> whitelistSable) {
 
     public static final DetectionConfig DEFAULT = new DetectionConfig(true, true, true, true, true,true,true);
 
-    public DetectionConfig(boolean player, boolean vs2, boolean contraption, boolean mob, boolean projectile,boolean animal, boolean item) {
-        this(player, vs2, contraption, mob, projectile,animal, item, List.of(), List.of(), List.of(), List.of());
+    public DetectionConfig(boolean player, boolean sable, boolean contraption, boolean mob, boolean projectile,boolean animal, boolean item) {
+        this(player, sable, contraption, mob, projectile,animal, item, List.of(), List.of(), List.of(), List.of());
     }
 
     public CompoundTag toTag() {
         CompoundTag tag = new CompoundTag();
         tag.putBoolean("player", player);
-        tag.putBoolean("vs2", vs2);
+        tag.putBoolean("sable", sable);
         tag.putBoolean("contraption", contraption);
         tag.putBoolean("mob", mob);
         tag.putBoolean("projectile", projectile);
@@ -33,16 +33,16 @@ public record DetectionConfig(boolean player, boolean vs2, boolean contraption, 
         blacklistPlayers.forEach(player -> playersListTag.putBoolean(player, false));
         whitelistPlayers.forEach(player -> playersListTag.putBoolean(player, true));
         tag.put("playerList", playersListTag);
-        CompoundTag vs2ListTag = new CompoundTag();
-        blacklistVS2.forEach(vs2 -> vs2ListTag.putBoolean(vs2, false));
-        whitelistVS.forEach(vs2 -> vs2ListTag.putBoolean(vs2, true));
-        tag.put("vs2Ships", vs2ListTag);
+        CompoundTag sableListTag = new CompoundTag();
+        blacklistSable.forEach(s -> sableListTag.putBoolean(s, false));
+        whitelistSable.forEach(s -> sableListTag.putBoolean(s, true));
+        tag.put("sableShips", sableListTag);
         return tag;
     }
 
     public static DetectionConfig fromTag(CompoundTag tag) {
         boolean player = tag.getBoolean("player");
-        boolean vs2 = tag.getBoolean("vs2");
+        boolean sable = tag.getBoolean("sable");
         boolean contraption = tag.getBoolean("contraption");
         boolean mob = tag.getBoolean("mob");
         boolean projectile = tag.getBoolean("projectile");
@@ -50,9 +50,9 @@ public record DetectionConfig(boolean player, boolean vs2, boolean contraption, 
         boolean item = tag.getBoolean("item");
         List<String> blacklistPlayers = tag.getCompound("playerList").getAllKeys().stream().filter(key -> !tag.getCompound("playerList").getBoolean(key)).toList();
         List<String> whitelistPlayers = tag.getCompound("playerList").getAllKeys().stream().filter(key -> tag.getCompound("playerList").getBoolean(key)).toList();
-        List<String> blacklistVS2 = tag.getCompound("vs2Ships").getAllKeys().stream().filter(key -> !tag.getCompound("vs2Ships").getBoolean(key)).toList();
-        List<String> whitelistVS = tag.getCompound("vs2Ships").getAllKeys().stream().filter(key -> tag.getCompound("vs2Ships").getBoolean(key)).toList();
-        return new DetectionConfig(player, vs2, contraption, mob, projectile, animal, item, blacklistPlayers, whitelistPlayers, blacklistVS2, whitelistVS);
+        List<String> blacklistSable = tag.getCompound("sableShips").getAllKeys().stream().filter(key -> !tag.getCompound("sableShips").getBoolean(key)).toList();
+        List<String> whitelistSable = tag.getCompound("sableShips").getAllKeys().stream().filter(key -> tag.getCompound("sableShips").getBoolean(key)).toList();
+        return new DetectionConfig(player, sable, contraption, mob, projectile, animal, item, blacklistPlayers, whitelistPlayers, blacklistSable, whitelistSable);
     }
 
     public boolean test(RadarTrack track) {
@@ -69,10 +69,10 @@ public record DetectionConfig(boolean player, boolean vs2, boolean contraption, 
             }
         }
         if (track.trackCategory() == TrackCategory.SABLE) {
-            if (blacklistVS2.contains(track.id())) {
+            if (blacklistSable.contains(track.id())) {
                 return new Color(RadarConfig.client().hostileColor.get());
             }
-            if (whitelistVS.contains(track.id())) {
+            if (whitelistSable.contains(track.id())) {
                 return new Color(RadarConfig.client().friendlyColor.get());
             }
         }
@@ -83,7 +83,7 @@ public record DetectionConfig(boolean player, boolean vs2, boolean contraption, 
         if (trackCategory == TrackCategory.PLAYER) {
             return player;
         } else if (Mods.SABLE.isLoaded() && trackCategory == TrackCategory.SABLE) {
-            return vs2;
+            return sable;
         } else if (trackCategory == TrackCategory.CONTRAPTION) {
             return contraption;
         } else if (trackCategory == TrackCategory.MOB || trackCategory == TrackCategory.HOSTILE) {

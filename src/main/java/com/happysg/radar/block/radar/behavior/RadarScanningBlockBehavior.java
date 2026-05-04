@@ -59,7 +59,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         if (cfg == null) cfg = DetectionConfig.DEFAULT;
         setScanFlags(
                 cfg.player(),
-                cfg.vs2(),
+                cfg.sable(),
                 cfg.contraption(),
                 cfg.mob(),
                 cfg.animal(),
@@ -70,7 +70,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
 
     private boolean scanPlayers = true;
-    private boolean scanVS2 = true;
+    private boolean scanSable = true;
     private boolean scanContraptions = true;
     private boolean scanMobs = true;
     private boolean scanAnimals = true;
@@ -80,7 +80,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     private boolean allowCategory(TrackCategory c) {
         return switch (c) {
             case PLAYER -> scanPlayers;
-            case SABLE -> scanVS2;
+            case SABLE -> scanSable;
             case CONTRAPTION -> scanContraptions;
             case PROJECTILE -> scanProjectiles;
             case ITEM -> scanItems;
@@ -96,11 +96,11 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         radarTracks.entrySet().removeIf(e -> !allowCategory(e.getValue().trackCategory()));
     }
 
-    public void setScanFlags(boolean players, boolean vs2, boolean contraptions, boolean mobs, boolean animals, boolean projectiles, boolean items) {
-        boolean changed = players != scanPlayers || vs2 != scanVS2 || contraptions != scanContraptions || mobs != scanMobs || animals != scanAnimals || projectiles != scanProjectiles || items != scanItems;
+    public void setScanFlags(boolean players, boolean sable, boolean contraptions, boolean mobs, boolean animals, boolean projectiles, boolean items) {
+        boolean changed = players != scanPlayers || sable != scanSable || contraptions != scanContraptions || mobs != scanMobs || animals != scanAnimals || projectiles != scanProjectiles || items != scanItems;
 
         this.scanPlayers = players;
-        this.scanVS2 = vs2;
+        this.scanSable = sable;
         this.scanContraptions = contraptions;
         this.scanMobs = mobs;
         this.scanAnimals = animals;
@@ -127,8 +127,8 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             scannedProjectiles.clear();
 
             scanForEntityTracks();
-            if (Mods.SABLE.isLoaded() && scanVS2)
-                scanForVSTracks();
+            if (Mods.SABLE.isLoaded() && scanSable)
+                scanForSableTracks();
         }
     }
 
@@ -262,7 +262,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         }
     }
 
-    private void scanForVSTracks() {
+    private void scanForSableTracks() {
         if (blockEntity.getLevel() == null || !Mods.SABLE.isLoaded()) return;
         splitAABB(getRadarAABB(), 256).forEach(aabb ->
                 SableUtils.getLoadedShips(blockEntity.getLevel(), aabb).forEach(scannedShips::add));

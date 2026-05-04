@@ -39,7 +39,7 @@ public class RadarTrack {
 
     public Color getColor() {
         return switch (trackCategory) {
-            case SABLE -> new Color(RadarConfig.client().VS2Color.get());
+            case SABLE -> new Color(RadarConfig.client().SableColor.get());
             case CONTRAPTION -> new Color(RadarConfig.client().contraptionColor.get());
             case PLAYER -> new Color(RadarConfig.client().playerColor.get());
             case ANIMAL -> new Color(RadarConfig.client().friendlyColor.get());

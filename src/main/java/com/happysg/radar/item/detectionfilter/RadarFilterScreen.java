@@ -33,7 +33,7 @@ public class RadarFilterScreen extends AbstractSimiScreen {
 
     protected IconButton playerButton;
     protected Indicator playerIndicator;
-    protected IconButton vs2Button;
+    protected IconButton sableButton;
     protected Indicator vs2Indicator;
     protected IconButton contraptionButton;
     protected Indicator contraptionIndicator;
@@ -95,15 +95,15 @@ public class RadarFilterScreen extends AbstractSimiScreen {
         addRenderableWidget(playerButton);
         addRenderableWidget(playerIndicator);
 
-        vs2Button = new IconButton(guiLeft + 60, guiTop + 38, ModGuiTextures.VS2_BUTTON);
-        vs2Button.setToolTip(Component.translatable(CreateRadar.MODID + ".radar_button.vs2"));
+        sableButton = new IconButton(guiLeft + 60, guiTop + 38, ModGuiTextures.SABLE_BUTTON);
+        sableButton.setToolTip(Component.translatable(CreateRadar.MODID + ".radar_button.vs2"));
         vs2Indicator = new Indicator(guiLeft + 60, guiTop + 31, Component.empty());
         vs2Indicator.state = vs2 ? Indicator.State.GREEN : Indicator.State.RED;
-        vs2Button.withCallback((x, y) -> {
+        sableButton.withCallback((x, y) -> {
             vs2 = !vs2;
             vs2Indicator.state = vs2 ? Indicator.State.GREEN : Indicator.State.RED;
         });
-        addRenderableWidget(vs2Button);
+        addRenderableWidget(sableButton);
         addRenderableWidget(vs2Indicator);
 
         contraptionButton = new IconButton(guiLeft + 88, guiTop + 38, ModGuiTextures.CONTRAPTION_BUTTON);

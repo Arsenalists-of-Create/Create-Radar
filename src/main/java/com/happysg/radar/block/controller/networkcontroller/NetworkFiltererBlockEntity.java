@@ -678,14 +678,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         if (det == null) return DetectionConfig.DEFAULT;
 
         boolean player     = det.contains("player", Tag.TAG_BYTE) ? det.getBoolean("player") : DetectionConfig.DEFAULT.player();
-        boolean vs2        = det.contains("vs2", Tag.TAG_BYTE) ? det.getBoolean("vs2") : DetectionConfig.DEFAULT.vs2();
+        boolean sable      = det.contains("sable", Tag.TAG_BYTE) ? det.getBoolean("sable") : DetectionConfig.DEFAULT.sable();
         boolean contraption= det.contains("contraption", Tag.TAG_BYTE) ? det.getBoolean("contraption") : DetectionConfig.DEFAULT.contraption();
         boolean mob        = det.contains("mob", Tag.TAG_BYTE) ? det.getBoolean("mob") : DetectionConfig.DEFAULT.mob();
         boolean projectile = det.contains("projectile", Tag.TAG_BYTE) ? det.getBoolean("projectile") : DetectionConfig.DEFAULT.projectile();
         boolean animal     = det.contains("animal", Tag.TAG_BYTE) ? det.getBoolean("animal") : DetectionConfig.DEFAULT.animal();
         boolean item       = det.contains("item", Tag.TAG_BYTE) ? det.getBoolean("item") : DetectionConfig.DEFAULT.item();
 
-        return new DetectionConfig(player, vs2, contraption, mob, projectile, animal, item);
+        return new DetectionConfig(player, sable, contraption, mob, projectile, animal, item);
     }
     private IdentificationConfig readIdentificationFromSlot() {
         return readIdentificationFromItem(inventory.getStackInSlot(SLOT_IDENT));
