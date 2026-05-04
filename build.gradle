@@ -24,7 +24,11 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 configurations {
     sqliteRuntime
 }
-
+tasks.withType(JavaExec).configureEach {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
 neoForge {
    version = project.neo_version
 
