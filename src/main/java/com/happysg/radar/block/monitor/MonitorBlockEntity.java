@@ -36,7 +36,6 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.valkyrienskies.core.api.ships.Ship;
 import org.valkyrienskies.mod.common.VSGameUtilsKt;
-import net.neoforged.api.distmarker.Dist;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -583,7 +582,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
 
     public Ship getShip(){
-        if(!Mods.VALKYRIENSKIES.isLoaded())return null;
+        if(!Mods.SABLE.isLoaded())return null;
         Ship ship = VSGameUtilsKt.getShipManagingPos(level,worldPosition);
         return ship;
 

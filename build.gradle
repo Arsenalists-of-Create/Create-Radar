@@ -24,11 +24,7 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 configurations {
     sqliteRuntime
 }
-tasks.withType(JavaExec).configureEach {
-    javaLauncher = javaToolchains.launcherFor {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
+
 neoForge {
    version = project.neo_version
 
@@ -124,6 +120,17 @@ repositories {
         url = 'https://thedarkcolour.github.io/KotlinForForge/'
     }
 
+    //Yuck 2 mavens
+    maven {
+        name = "Ritchie's Projectile Library"
+        url = "https://maven.realrobotix.me/master"
+    }
+
+    maven {
+        name = "Create Big Cannons"
+        url = "https://maven.realrobotix.me/createbigcannons"
+    }
+
     maven {
         name = "Valkyrien Skies"
         url = "https://maven.valkyrienskies.org"
@@ -135,14 +142,11 @@ repositories {
 }
 
 dependencies {
-    compileOnly files ("lib/createenergycannons-forge-0.2.jar")
     compileOnly("org.joml:joml-primitives:1.10.0")
     compileOnly("maven.modrinth:kotlin-for-forge:${forge_kotlin_version}")
-    compileOnly("org.valkyrienskies.core:api:${vs_core_version}") { transitive = false }
-    compileOnly("org.valkyrienskies.core:impl:${vs_core_version}"){ transitive = false }
-    compileOnly("org.valkyrienskies.core:util:${vs_core_version}"){ transitive = false }
-    compileOnly("org.valkyrienskies:valkyrienskies-120-forge:${vs2_version}") {transitive = false}
+
     compileOnly("curse.maven:create-clockwork-807792:7418660")
+   // compileOnly ("maven.modrinth:architectury-api:${architectury_api_version}+forge")
     compileOnly("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") { transitive = false }
     localRuntime("com.simibubi.create:create-${minecraft_version}:${create_version}") { transitive = false }
     compileOnly("net.createmod.ponder:ponder-neoforge:${ponder_version}+mc${minecraft_version}")
@@ -161,16 +165,17 @@ dependencies {
     }
     localRuntime("dev.ryanhcode.sable:sable-neoforge-${minecraft_version}:${sable_version}")
 
-//    // CBC
-//    implementation("maven.modrinth:create-big-cannons:${cbc_version}") {
-//        transitive = false
-//    }
-    implementation("maven.modrinth:rpl:${rpl_version}") {
+    // CBC
+    implementation("com.rbasamoyai:createbigcannons:${cbc_version}+mc.${minecraft_version}-build.${cbc_build_number}") {
         transitive = false
     }
-    compileOnly files("lib/createenergycannons-0.2+mc1.20.1.jar")
-    compileOnly files("lib/createbigcannons-5.11.3-mc.1.21.1.jar")
+    implementation("com.rbasamoyai:ritchiesprojectilelib:${rpl_version}+mc.${minecraft_version}-neoforge-build.${rpl_build_number}") {
+        transitive = false
+    }
     annotationProcessor "org.spongepowered:mixin:0.8.5:processor"
+
+    //Is this needed?
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
 
 
     //Simulated

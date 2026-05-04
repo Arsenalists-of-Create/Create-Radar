@@ -25,6 +25,7 @@ public class VS2CompatRegister {
     public static BlockEntityEntry<StationaryRadarBlockEntity> STATIONARY_RADAR_BE;
     public static BlockEntityEntry<RadarWarningReceiverBlockEntity> RWR_BE;
     public static void registerVS2() {
+
         STATIONARY_RADAR = REGISTRATE.block("plane_radar", StationaryRadarBlock::new)
                         .initialProperties(SharedProperties::softMetal)
                         .addLayer(() -> RenderType::cutout)

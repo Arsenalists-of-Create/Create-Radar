@@ -287,7 +287,7 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
         Vec3 cannonCenter = cannonCenterWorld;
         Vec3 target = targetWorld;
 
-        if (Mods.VALKYRIENSKIES.isLoaded() && ship != null) {
+        if (Mods.SABLE.isLoaded() && ship != null) {
             cannonCenter = toShipSpace(ship, cannonCenterWorld);
             target = toShipSpace(ship, targetWorld);
         }
@@ -304,7 +304,7 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
             return null;
         }
 
-        if (!Mods.VALKYRIENSKIES.isLoaded()) {
+        if (!Mods.SABLE.isLoaded()) {
             return null;
         }
 

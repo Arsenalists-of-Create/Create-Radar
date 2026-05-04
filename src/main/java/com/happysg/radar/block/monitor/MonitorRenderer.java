@@ -256,7 +256,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         // if we're rendering relative to the monitor, and the monitor is on a ship,
         // rotate the relative vector into ship-local axes so the screen rotates with the ship
         if (radar.renderRelativeToMonitor()) {
-            if(!Mods.VALKYRIENSKIES.isLoaded())return;
+            if(!Mods.SABLE.isLoaded())return;
             Ship ship = monitor.getShip();
             if (ship != null) {
                 // i keep the cone "north-up" by counter-rotating track vectors by the ship yaw

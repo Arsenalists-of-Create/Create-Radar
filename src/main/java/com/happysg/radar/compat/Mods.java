@@ -14,7 +14,7 @@ import java.util.function.Supplier;
  */
 public enum Mods {
     CREATE_MECHAMAYHEM,
-    VALKYRIENSKIES,
+    SABLE,
     VS_CLOCKWORK,
     COMPUTERCRAFT,
     TRACKWORK,

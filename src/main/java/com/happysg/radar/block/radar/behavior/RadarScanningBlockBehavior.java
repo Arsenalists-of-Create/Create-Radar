@@ -8,7 +8,7 @@ import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
-import com.happysg.radar.compat.vs2.VS2Utils;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
@@ -28,7 +28,6 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.valkyrienskies.core.api.ships.Ship;
 
-import java.lang.reflect.Method;
 import java.util.*;
 
 public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
@@ -127,7 +126,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             scannedProjectiles.clear();
 
             scanForEntityTracks();
-            if (Mods.VALKYRIENSKIES.isLoaded() && scanVS2)
+            if (Mods.SABLE.isLoaded() && scanVS2)
                 scanForVSTracks();
         }
     }
@@ -199,7 +198,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         }
 
         // vs2 ships
-        if (Mods.VALKYRIENSKIES.isLoaded()) {
+        if (Mods.SABLE.isLoaded()) {
             assert blockEntity.getLevel() != null;
 
             var shipWorld = org.valkyrienskies.mod.common.VSGameUtilsKt.getShipObjectWorld(blockEntity.getLevel());
@@ -264,11 +263,11 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     private void scanForVSTracks() {
-        if (blockEntity.getLevel() == null || !Mods.VALKYRIENSKIES.isLoaded()) return;
+        if (blockEntity.getLevel() == null || !Mods.SABLE.isLoaded()) return;
         splitAABB(getRadarAABB(), 256).forEach(aabb ->
-                VS2Utils.getLoadedShips(blockEntity.getLevel(), aabb).forEach(scannedShips::add));
+                SableUtils.getLoadedShips(blockEntity.getLevel(), aabb).forEach(scannedShips::add));
 
-        scannedShips.remove(VS2Utils.getShipManagingPos(blockEntity));
+        scannedShips.remove(SableUtils.getShipManagingPos(blockEntity));
     }
     private AABB getRadarAABB() {
         BlockPos radarPos = PhysicsHandler.getWorldPos(blockEntity);

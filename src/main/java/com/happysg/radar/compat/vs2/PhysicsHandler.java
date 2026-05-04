@@ -16,49 +16,48 @@ import net.minecraft.world.phys.Vec3;
 public class PhysicsHandler {
 
     public static BlockPos getWorldPos(Level level, BlockPos pos) {
-        if (!Mods.VALKYRIENSKIES.isLoaded())
+        if (!Mods.SABLE.isLoaded())
             return pos;
-        return VS2Utils.getWorldPos(level, pos);
+        return SableUtils.getWorldPos(level, pos);
     }
 
     public static Vec3 getShipVec(Vec3 vec3, BlockEntity be) {
-        if (!Mods.VALKYRIENSKIES.isLoaded())
+        if (!Mods.SABLE.isLoaded())
             return vec3;
-        return VS2Utils.getShipVec(vec3, be);
+        return SableUtils.getShipVec(vec3, be);
     }
 
     public static Vec3 getWorldVecDirectionTransform(Vec3 vec3, BlockEntity be) {
-        if (!Mods.VALKYRIENSKIES.isLoaded())
+        if (!Mods.SABLE.isLoaded())
             return vec3;
-        return VS2Utils.getWorldVecDirectionTransform(vec3, be);
+        return SableUtils.getWorldVecDirectionTransform(vec3, be);
     }
 
     public static BlockPos getWorldPos(BlockEntity blockEntity) {
         return getWorldPos(blockEntity.getLevel(), blockEntity.getBlockPos());
     }
 
-
     public static Vec3 getWorldVec(Level level, BlockPos pos) {
-        if (!Mods.VALKYRIENSKIES.isLoaded())
+        if (!Mods.SABLE.isLoaded())
             return new Vec3(pos.getX(), pos.getY(), pos.getZ());
-        return VS2Utils.getWorldVec(level, pos);
+        return SableUtils.getWorldVec(level, pos);
     }
 
     public static Vec3 getWorldVec(Level level, Vec3 vec3) {
-        if (!Mods.VALKYRIENSKIES.isLoaded())
+        if (!Mods.SABLE.isLoaded())
             return vec3;
-        return VS2Utils.getWorldVec(level, vec3);
+        return SableUtils.getWorldVec(level, vec3);
     }
 
     public static Vec3 getWorldVec(BlockEntity blockEntity) {
-        if (!Mods.VALKYRIENSKIES.isLoaded())
+        if (!Mods.SABLE.isLoaded())
             return blockEntity.getBlockPos().getCenter();
-        return VS2Utils.getWorldVec(blockEntity);
+        return SableUtils.getWorldVec(blockEntity);
     }
 
-    public static boolean isBlockInShipyard(Level level, BlockPos blockPos) {
-        if (!Mods.VALKYRIENSKIES.isLoaded())
+    public static boolean isBlockInPlotyard(Level level, BlockPos blockPos) {
+        if (!Mods.SABLE.isLoaded())
             return false;
-        return VS2Utils.isBlockInShipyard(level, blockPos);
+        return SableUtils.isBlockInShipyard(level, blockPos);
     }
 }

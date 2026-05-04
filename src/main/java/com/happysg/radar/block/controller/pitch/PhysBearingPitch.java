@@ -179,7 +179,7 @@ public class PhysBearingPitch {
             return null;
         }
 
-        if (!Mods.VALKYRIENSKIES.isLoaded()) {
+        if (!Mods.SABLE.isLoaded()) {
             return null;
         }
 

@@ -1,7 +1,6 @@
 package com.happysg.radar.block.controller.id;
 
-import com.happysg.radar.compat.vs2.VS2Utils;
-import com.simibubi.create.foundation.utility.DistExecutor;
+import com.happysg.radar.compat.vs2.SableUtils;
 import net.createmod.catnip.gui.ScreenOpener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -23,7 +22,7 @@ import org.valkyrienskies.core.api.ships.Ship;
 public class VS2IDHandler {
 
     public static @NotNull InteractionResult use(BlockState pState, Level pLevel, BlockPos pPos, @NotNull Player pPlayer, InteractionHand pHand, BlockHitResult pHit) {
-        Ship ship = VS2Utils.getShipManagingPos(pLevel, pPos);
+        Ship ship = SableUtils.getShipManagingPos(pLevel, pPos);
         if (ship == null) {
             pPlayer.displayClientMessage(Component.translatable("create_radar.id_block.not_on_ship"), true);
             return InteractionResult.PASS;
@@ -43,7 +42,7 @@ public class VS2IDHandler {
     }
 
     public static void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pMovedByPiston) {
-        Ship ship = VS2Utils.getShipManagingPos(pLevel, pPos);
+        Ship ship = SableUtils.getShipManagingPos(pLevel, pPos);
         if (ship != null) {
             // uses ship.getId() internally now
             IDManager.removeIDRecord(ship);

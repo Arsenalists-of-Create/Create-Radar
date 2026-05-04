@@ -82,7 +82,7 @@ public record DetectionConfig(boolean player, boolean vs2, boolean contraption, 
     private boolean test(TrackCategory trackCategory) {
         if (trackCategory == TrackCategory.PLAYER) {
             return player;
-        } else if (Mods.VALKYRIENSKIES.isLoaded() && trackCategory == TrackCategory.VS2) {
+        } else if (Mods.SABLE.isLoaded() && trackCategory == TrackCategory.VS2) {
             return vs2;
         } else if (trackCategory == TrackCategory.CONTRAPTION) {
             return contraption;

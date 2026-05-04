@@ -4,9 +4,6 @@ package com.happysg.radar.block.monitor;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
-import com.happysg.radar.config.RadarConfig;
-import net.minecraft.client.Minecraft;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -38,7 +35,7 @@ public class MonitorInputHandler {
         if (controller.getRadarCenterPos() == null)
             return null;
         Ship ship = null;
-        if(Mods.VALKYRIENSKIES.isLoaded()){
+        if(Mods.SABLE.isLoaded()){
             ship = controller.getShip();
         }
         if (ship != null) {

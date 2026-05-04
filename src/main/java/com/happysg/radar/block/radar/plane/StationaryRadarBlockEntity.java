@@ -5,7 +5,7 @@ import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
-import com.happysg.radar.compat.vs2.VS2Utils;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
@@ -31,7 +31,7 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     public void initialize() {
         super.initialize();
-        if (!Mods.VALKYRIENSKIES.isLoaded())
+        if (!Mods.SABLE.isLoaded())
             return;
         scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
         scanningBehavior.setRunning(true);
@@ -45,10 +45,10 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     public void tick() {
         super.tick();
-        if (!Mods.VALKYRIENSKIES.isLoaded() && !VS2Utils.isBlockInShipyard(level,worldPosition)){
+        if (!Mods.SABLE.isLoaded() && !SableUtils.isBlockInShipyard(level,worldPosition)){
             scanningBehavior.setRunning(false);
             return;
-        }else if(!isRunning() && VS2Utils.isBlockInShipyard(level,worldPosition))
+        }else if(!isRunning() && SableUtils.isBlockInShipyard(level,worldPosition))
             scanningBehavior.setRunning(true);
         Direction facing = getBlockState().getValue(StationaryRadarBlock.FACING).getOpposite();
         Vec3 facingVec = new Vec3(facing.getStepX(), facing.getStepY(), facing.getStepZ());
@@ -88,7 +88,7 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
 
     @Override
     public float getGlobalAngle() {
-        if(!Mods.VALKYRIENSKIES.isLoaded())return 0;
+        if(!Mods.SABLE.isLoaded())return 0;
         Ship ship = VSGameUtilsKt.getShipManagingPos(level,getBlockPos());
         if(ship == null) return 0;
 

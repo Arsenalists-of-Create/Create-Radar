@@ -78,7 +78,7 @@ public class ModCreativeTabs {
         if (Mods.TRACKWORK.isLoaded()) {
 
         }
-        if (Mods.VALKYRIENSKIES.isLoaded()) {
+        if (Mods.SABLE.isLoaded()) {
             pOutput.accept(VS2CompatRegister.ID_BLOCK);
             pOutput.accept(VS2CompatRegister.STATIONARY_RADAR);
             pOutput.accept(VS2CompatRegister.RWR_BLOCK);

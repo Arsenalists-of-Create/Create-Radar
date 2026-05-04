@@ -19,7 +19,7 @@ import org.valkyrienskies.core.api.ships.Ship;
 import java.util.*;
 
 import static com.happysg.radar.compat.cbc.CannonUtil.getCannonMountOffset;
-import static com.happysg.radar.compat.vs2.VS2Utils.*;
+import static com.happysg.radar.compat.vs2.SableUtils.*;
 import static java.lang.Math.*;
 
 public class VS2TargetingSolver {

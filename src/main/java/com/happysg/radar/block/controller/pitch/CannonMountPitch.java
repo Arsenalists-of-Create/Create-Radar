@@ -6,7 +6,7 @@ import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
-import com.happysg.radar.compat.vs2.VS2Utils;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.mojang.logging.LogUtils;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
@@ -93,7 +93,7 @@ public class CannonMountPitch {
         double max = controller.getMaxEngagementRangeBlocks();
         if (max > 0.0) {
             Vec3 start = controller.firingControl.getCannonRayStart();
-            if (Mods.VALKYRIENSKIES.isLoaded() && PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
+            if (Mods.SABLE.isLoaded() && PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
                 start = PhysicsHandler.getWorldVec(controller.getLevel(), start);
             }
             if (start.distanceToSqr(p) > (max * max)) {
@@ -101,8 +101,8 @@ public class CannonMountPitch {
             }
         }
 
-        if (Mods.VALKYRIENSKIES.isLoaded() && PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
-            Vec3 mountPos = VS2Utils.getWorldVec(controller.getLevel(), mount.getBlockPos().getCenter());
+        if (Mods.SABLE.isLoaded() && PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
+            Vec3 mountPos = SableUtils.getWorldVec(controller.getLevel(), mount.getBlockPos().getCenter());
             List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, p, sl);
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
                 return false;
@@ -186,7 +186,7 @@ public class CannonMountPitch {
             return;
         }
 
-        if (PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
+        if (PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
             List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
                 LOGGER.warn("ping-3{}", angles);

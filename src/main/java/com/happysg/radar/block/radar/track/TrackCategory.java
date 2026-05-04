@@ -34,7 +34,7 @@ public enum TrackCategory {
             if (type.is(RadarEntityTypeTags.RADAR_ITEM)) return ITEM;
 
             if (entity instanceof Player) return PLAYER;
-            if (Mods.VALKYRIENSKIES.isLoaded() && entity instanceof Ship) return VS2;
+            if (Mods.SABLE.isLoaded() && entity instanceof Ship) return VS2;
             if (entity instanceof Enemy) return HOSTILE;
             if (entity instanceof Animal) return ANIMAL;
             if (entity instanceof Mob) return MOB;

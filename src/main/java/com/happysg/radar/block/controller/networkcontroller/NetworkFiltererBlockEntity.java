@@ -90,7 +90,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
         String selectedId = data.getSelectedTargetId(group);
 
-        if (Mods.VALKYRIENSKIES.isLoaded() && selectedId != null && (sl.getGameTime() % 10 == 0)) {
+        if (Mods.SABLE.isLoaded() && selectedId != null && (sl.getGameTime() % 10 == 0)) {
             long shipId = parseShipIdOrNeg(selectedId);
             if (shipId != -1L) {
                 Ship ship = VSGameUtilsKt.getAllShips(level).getById(shipId);
@@ -103,7 +103,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     }
 
     private boolean isVsShipStillLoaded(ServerLevel sl, @Nullable RadarTrack track) {
-        if (!Mods.VALKYRIENSKIES.isLoaded()) return true;
+        if (!Mods.SABLE.isLoaded()) return true;
         if (track == null) return true;
         if (track.trackCategory() != TrackCategory.VS2) return true;
 
@@ -281,7 +281,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
         data.setSelectedTargetId(group, track == null ? null : track.getId());
 
-        if (Mods.VALKYRIENSKIES.isLoaded()) {
+        if (Mods.SABLE.isLoaded()) {
             if (prev != null && track == null) {
                 long prevShipId = parseShipIdOrNeg(prev);
                 if (prevShipId != -1L) {
@@ -305,7 +305,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
     private double distSqFromFilterer(Vec3 pos) {
         Vec3 filtererPos = worldPosition.getCenter();
-        if (Mods.VALKYRIENSKIES.isLoaded() && level != null && PhysicsHandler.isBlockInShipyard(level, worldPosition)) {
+        if (Mods.SABLE.isLoaded() && level != null && PhysicsHandler.isBlockInPlotyard(level, worldPosition)) {
             filtererPos = PhysicsHandler.getWorldVec(level, filtererPos);
         }
         return filtererPos.distanceToSqr(pos);

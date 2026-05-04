@@ -80,7 +80,7 @@ public class CreateRadar {
         NeoForge.EVENT_BUS.addListener(CreateRadar::clientTick);
         NeoForge.EVENT_BUS.addListener(CreateRadar::onLoadWorld);
 
-        if (Mods.VALKYRIENSKIES.isLoaded()) {
+        if (Mods.SABLE.isLoaded()) {
             VS2CompatRegister.registerVS2();
         }
     }

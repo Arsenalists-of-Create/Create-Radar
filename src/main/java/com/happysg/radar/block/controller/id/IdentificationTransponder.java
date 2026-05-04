@@ -11,7 +11,6 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.DirectionalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -25,7 +24,7 @@ public class IdentificationTransponder extends WrenchableDirectionalBlock {
 
     @Override
     protected @NotNull InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
-        if (!Mods.VALKYRIENSKIES.isLoaded()) {
+        if (!Mods.SABLE.isLoaded()) {
             player.displayClientMessage(Component.translatable("create_radar.id_block.not_on_vs2"), true);
             return super.useWithoutItem(state, level, pos, player, hit);
         }
@@ -34,7 +33,7 @@ public class IdentificationTransponder extends WrenchableDirectionalBlock {
 
     @Override
     public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pMovedByPiston) {
-        if (Mods.VALKYRIENSKIES.isLoaded()) {
+        if (Mods.SABLE.isLoaded()) {
             VS2IDHandler.onRemove(pState, pLevel, pPos, pNewState, pMovedByPiston);
         }
         super.onRemove(pState, pLevel, pPos, pNewState, pMovedByPiston);

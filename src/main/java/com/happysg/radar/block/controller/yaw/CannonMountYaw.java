@@ -26,7 +26,7 @@ public class CannonMountYaw {
             return;
         }
 
-        if (PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
+        if (PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
             List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
                 return;

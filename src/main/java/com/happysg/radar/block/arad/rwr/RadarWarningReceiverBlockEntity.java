@@ -2,7 +2,7 @@ package com.happysg.radar.block.arad.rwr;
 
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.vs2.VS2Utils;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.registry.ModSounds;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
@@ -64,7 +64,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         }
 
         long key = ship.getId();
-        if(!Mods.VALKYRIENSKIES.isLoaded()) return;
+        if(!Mods.SABLE.isLoaded()) return;
         boolean locked = RadarContactRegistry.isLocked(sl, key);
         if (locked) LogUtils.getLogger().warn("locked");
         boolean inRange = RadarContactRegistry.isInRange(sl, key);
@@ -75,7 +75,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
             if (lockBeepTicks == 0) {
                 sl.playSound(
                         null,               // null = all nearby players hear it
-                        VS2Utils.getWorldPos(this),
+                        SableUtils.getWorldPos(this),
                         ModSounds.RWR_LOCK.get(),
                         SoundSource.BLOCKS,
                         1.0f,
@@ -98,7 +98,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
             if (firstSpotted || inRangeCooldownTicks == 0) {
                 sl.playSound(
                         null,               // null = all nearby players hear it
-                        VS2Utils.getWorldPos(this),
+                        SableUtils.getWorldPos(this),
                         ModSounds.RWR_IN_RANGE.get(),
                         SoundSource.BLOCKS,
                         1.0f,

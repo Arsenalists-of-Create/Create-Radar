@@ -24,7 +24,6 @@ import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.EnumProperty;
-import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.slf4j.Logger;
@@ -92,7 +91,7 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!level.isClientSide && level instanceof ServerLevel serverLevel) {
-            if(Mods.VALKYRIENSKIES.isLoaded() && VSAssemblySuppression.isSuppressed(serverLevel)) return;
+            if(Mods.SABLE.isLoaded() && VSAssemblySuppression.isSuppressed(serverLevel)) return;
             ResourceKey<Level> dim = serverLevel.dimension();
             Direction supportFace = state.getValue(FACING);
 

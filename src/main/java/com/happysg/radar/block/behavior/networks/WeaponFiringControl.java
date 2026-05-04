@@ -11,7 +11,7 @@ import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.*;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
-import com.happysg.radar.compat.vs2.VS2Utils;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
 import com.mojang.logging.LogUtils;
 import net.createmod.catnip.math.VecHelper;
@@ -208,13 +208,13 @@ public class WeaponFiringControl {
 
         PitchOrientedContraptionEntity poce = cannonMount.getContraption();
 
-        if (Mods.VALKYRIENSKIES.isLoaded() && VS2Utils.isBlockInShipyard(level, cannonMount.getBlockPos())) {
+        if (Mods.SABLE.isLoaded() && SableUtils.isBlockInShipyard(level, cannonMount.getBlockPos())) {
             if (poce != null) {
                 // toGlobalVector gives shipyard-global coords
                 Vec3 shipyardPos = poce.toGlobalVector(VecHelper.getCenterOf(BlockPos.ZERO), 1.0f);
-                return VS2Utils.getWorldVec(level, shipyardPos);
+                return SableUtils.getWorldVec(level, shipyardPos);
             }
-            return VS2Utils.getWorldVec(level, cannonMount.getBlockPos().getCenter());
+            return SableUtils.getWorldVec(level, cannonMount.getBlockPos().getCenter());
         }
 
         if (poce == null)
@@ -681,7 +681,7 @@ public class WeaponFiringControl {
 
         if (!binoMode && activetrack != null && level instanceof ServerLevel sl) {
 
-            boolean isVsShip = Mods.VALKYRIENSKIES.isLoaded() && "VS2:ship".equals(activetrack.entityType());
+            boolean isVsShip = Mods.SABLE.isLoaded() && "VS2:ship".equals(activetrack.entityType());
 
             if (isVsShip) {
                 long id;
@@ -779,7 +779,7 @@ public class WeaponFiringControl {
         Vec3 targetVel;
         Vec3 targetAccel;
         boolean lag;
-        if(Mods.VALKYRIENSKIES.isLoaded() && VS2Utils.isBlockInShipyard(level,cannonMount.getBlockPos())){
+        if(Mods.SABLE.isLoaded() && SableUtils.isBlockInShipyard(level,cannonMount.getBlockPos())){
             Ship mountship = VSGameUtilsKt.getShipManagingPos(level,cannonMount.getBlockPos());
             if(mountship ==null){
                 shooterVel = Vec3.ZERO;
@@ -886,7 +886,7 @@ public class WeaponFiringControl {
         Double desiredPitch = null;
         Double desiredYaw = null;
 
-        if (Mods.VALKYRIENSKIES.isLoaded() && PhysicsHandler.isBlockInShipyard(level, cannonMount.getBlockPos())) {
+        if (Mods.SABLE.isLoaded() && PhysicsHandler.isBlockInPlotyard(level, cannonMount.getBlockPos())) {
             long now = level.getGameTime();
             boolean needSolve = cachedVS2Angles == null
                     || (now - cachedVS2SolveTick) >= VS2_SOLVE_INTERVAL

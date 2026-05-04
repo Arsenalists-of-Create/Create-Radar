@@ -25,7 +25,7 @@ public final class PhysBearingCommon {
     @Nullable
     public static Ship getShipIfPresent(Level level, net.minecraft.core.BlockPos pos) {
         if (level == null) return null;
-        if (!Mods.VALKYRIENSKIES.isLoaded()) return null;
+        if (!Mods.SABLE.isLoaded()) return null;
         return VSGameUtilsKt.getShipManagingPos(level, pos);
     }
 
