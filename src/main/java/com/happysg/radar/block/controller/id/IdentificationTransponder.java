@@ -24,18 +24,16 @@ public class IdentificationTransponder extends WrenchableDirectionalBlock {
 
     @Override
     public InteractionResult useWithoutItem(BlockState pState, Level pLevel, BlockPos pPos, Player pPlayer, BlockHitResult pHit) {
-        if (!Mods.VALKYRIENSKIES.isLoaded()) {
-            pPlayer.displayClientMessage(Component.translatable("create_radar.id_block.not_on_vs2"), true);
+        if (!Mods.VALKYRIENSKIES.isLoaded() && !Mods.SABLE.isLoaded()) {
+            pPlayer.displayClientMessage(Component.translatable("create_radar.id_block.not_on_ship"), true);
             return super.useWithoutItem(pState, pLevel, pPos, pPlayer, pHit);
         }
-        return InteractionResult.PASS;
+        return IdentificationHandler.use(pState, pLevel, pPos, pPlayer, InteractionHand.MAIN_HAND, pHit);
     }
 
     @Override
     public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pMovedByPiston) {
-        if (Mods.VALKYRIENSKIES.isLoaded()) {
-            VS2IDHandler.onRemove(pState, pLevel, pPos, pNewState, pMovedByPiston);
-        }
+        IdentificationHandler.onRemove(pState, pLevel, pPos, pNewState, pMovedByPiston);
         super.onRemove(pState, pLevel, pPos, pNewState, pMovedByPiston);
     }
 

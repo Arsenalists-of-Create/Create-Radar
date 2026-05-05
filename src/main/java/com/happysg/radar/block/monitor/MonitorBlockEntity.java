@@ -45,6 +45,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     /** Client must rely on this field (synced). Server also keeps it as cache. */
     protected @Nullable BlockPos radarPos;
+    protected @Nullable net.minecraft.resources.ResourceLocation radarDim;
 
     protected @Nullable IRadar radar;
     protected String hoveredEntity;
@@ -61,7 +62,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     /** Keep as field because renderer uses it (coloring). */
     protected DetectionConfig filter = DetectionConfig.DEFAULT;
     private BlockPos lastKnownPos = BlockPos.ZERO;
-    public final List<AABB> safeZones = new ArrayList<>();
+    public final List<com.happysg.radar.block.behavior.networks.config.SafeZone> safeZones = new ArrayList<>();
 
     public MonitorBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -92,7 +93,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (!level.isClientSide && level instanceof ServerLevel sl) {
             syncFromNetwork(sl);
             updateCacheServerOrClient();
-
+            
             // keep controller's displayed selection consistent with network
             MonitorBlockEntity controllerBe = getController();
             if (controllerBe != null) {
@@ -136,8 +137,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         this.controller = null;
 
 
-        //LOGGER.debug("Reset " + controller +" " +radar + radarPos);
-        // force client + server refresh
+
         setChanged();
         if (level != null) {
             level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
@@ -157,6 +157,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         BlockPos netRadar = g.radarPos;
         if (!Objects.equals(netRadar, radarPos)) {
             radarPos = netRadar;
+            radar = null;
+        }
+
+        if (!Objects.equals(g.radarDim, radarDim)) {
+            radarDim = g.radarDim;
             radar = null;
         }
 
@@ -193,7 +198,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             }
         }
 
-        LOGGER.debug("MONITOR setSelectedTargetServer: track={}, controllerPos={}", track == null ? "null" : track.getId(), controllerBe.getBlockPos());
+
 
         NetworkData.Group g = controllerBe.getNetworkGroup(sl);
         if (g == null)
@@ -264,6 +269,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 cachedTracks = List.of();
                 activetrack = null;
                 selectedEntity = null;
+                radarDim = null;
             }
             return;
         }
@@ -274,12 +280,21 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             cachedTracks = List.of();
             activetrack = null;
             selectedEntity = null;
+            cachedRadarRunning = false;
+            cachedRadarCenter = null;
             return;
         }
 
         IRadar radar = r.get();
         DetectionConfig det = this.filter; // already synced from network (or legacy)
         cachedTracks = radar.getTracks().stream().filter(det::test).toList();
+        
+        cachedRadarRange = radar.getRange();
+        cachedRadarAngle = radar.getGlobalAngle();
+        cachedRadarSpeed = radar.getSpeed();
+        cachedRadarRunning = radar.isRunning();
+        cachedRadarRenderRelative = radar.renderRelativeToMonitor();
+        cachedRadarCenter = radar.getRadarCenterPos(1.0f);
 
         if (!level.isClientSide) {
             activetrack = resolveActiveTrack();
@@ -298,6 +313,17 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 return t;
         }
         return null;
+    }
+
+    public float cachedRadarRange = 0f;
+    public float cachedRadarAngle = 0f;
+    public float cachedRadarSpeed = 0f;
+    public boolean cachedRadarRunning = false;
+    public boolean cachedRadarRenderRelative = true;
+    public Vec3 cachedRadarCenter = null;
+
+    public float getStabilizedAngle(float partialTicks) {
+        return cachedRadarAngle;
     }
 
     public Optional<IRadar> getRadar() {
@@ -332,6 +358,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         radar = null;
         if (level.getBlockEntity(radarPos) instanceof IRadar r) {
             radar = r;
+        } else {
+            // Radar may be inside a Sable sub-level (ship) while monitor is in the parent world
+            radar = com.happysg.radar.compat.PhysicsHandler.getRadarInSubLevel(radarDim, radarPos);
         }
         return Optional.ofNullable(radar);
     }
@@ -413,7 +442,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         if (targetPos.get() == null)
             selectedEntity = null;
-        else if (AutoTargetingHelper.isInSafeZone(targetPos.get(), safeZones))
+        else if (isInSafeZone(targetPos.get()))
             return null;
 
         return targetPos.get();
@@ -423,7 +452,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
 
     public boolean isInSafeZone(Vec3 pos) {
-        return AutoTargetingHelper.isInSafeZone(pos, safeZones);
+        if (level == null) return false;
+        for (com.happysg.radar.block.behavior.networks.config.SafeZone zone : safeZones) {
+            if (zone.contains(pos, level)) return true;
+        }
+        return false;
     }
 
     public void addSafeZone(BlockPos startPos, BlockPos endPos) {
@@ -434,18 +467,31 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         double maxY = Math.max(startPos.getY(), endPos.getY()) + 1;
         double maxZ = Math.max(startPos.getZ(), endPos.getZ()) + 1;
 
-        getController().safeZones.add(new AABB(minX, minY, minZ, maxX, maxY, maxZ));
+        UUID subLevelId = null;
+        if (Mods.SABLE.isLoaded()) {
+            var subLevel = com.happysg.radar.compat.aeronautics.SableUtils.getSubLevelManagingPos(level, startPos);
+            if (subLevel != null) {
+                subLevelId = subLevel.getUniqueId();
+            }
+        }
+
+        getController().safeZones.add(new com.happysg.radar.block.behavior.networks.config.SafeZone(new AABB(minX, minY, minZ, maxX, maxY, maxZ), subLevelId));
     }
 
     public void showSafeZone() {
-        // com.happysg.radar.compat.stub.DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> () -> Client.showSafeZone(this));
+        com.happysg.radar.compat.stub.DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> Client.showSafeZone(this));
     }
 
     @OnlyIn(Dist.CLIENT)
     private static final class Client {
         static void showSafeZone(MonitorBlockEntity be) {
-            for (AABB safeZone : be.safeZones) {
-                net.createmod.catnip.outliner.Outliner.getInstance().showAABB(safeZone, safeZone)
+            for (com.happysg.radar.block.behavior.networks.config.SafeZone safeZone : be.safeZones) {
+                AABB aabb = safeZone.aabb();
+                if (safeZone.subLevelId() != null && be.level != null) {
+                     aabb = com.happysg.radar.compat.aeronautics.SableUtils.getWorldAABB(be.level, aabb, safeZone.subLevelId());
+                }
+
+                net.createmod.catnip.outliner.Outliner.getInstance().showAABB(aabb, aabb)
                         .colored(0x383b42)
                         .withFaceTextures(com.simibubi.create.AllSpecialTextures.CHECKERED, com.simibubi.create.AllSpecialTextures.HIGHLIGHT_CHECKERED)
                         .lineWidth(1 / 16f);
@@ -454,7 +500,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public boolean tryRemoveAABB(BlockPos pos) {
-        return safeZones.removeIf(safeZone -> safeZone.contains(Vec3.atCenterOf(pos)));
+        return safeZones.removeIf(safeZone -> safeZone.aabb().contains(Vec3.atCenterOf(pos)));
     }
 
     // -------------------------------------------------
@@ -473,6 +519,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             radar = null;
         } else if (tag.contains("radarPos")) {
             radarPos = net.minecraft.nbt.NbtUtils.readBlockPos(tag, "radarPos").orElse(null);
+            if (tag.contains("radarDim")) radarDim = net.minecraft.resources.ResourceLocation.parse(tag.getString("radarDim"));
         }
 
         selectedEntity = tag.contains("SelectedEntity", Tag.TAG_STRING) ? tag.getString("SelectedEntity") : null;
@@ -485,8 +532,19 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         radius = tag.contains("Size", Tag.TAG_INT) ? tag.getInt("Size") : 1;
 
-        if (clientPacket && tag.contains("tracks", Tag.TAG_COMPOUND))
+        if (clientPacket && tag.contains("tracks", Tag.TAG_COMPOUND)) {
             cachedTracks = RadarTrackUtil.deserializeListNBT(tag.getCompound("tracks"));
+            cachedRadarRange = tag.getFloat("cachedRadarRange");
+            cachedRadarAngle = tag.getFloat("cachedRadarAngle");
+            cachedRadarSpeed = tag.getFloat("cachedRadarSpeed");
+            cachedRadarRunning = tag.getBoolean("cachedRadarRunning");
+            cachedRadarRenderRelative = tag.getBoolean("cachedRadarRenderRelative");
+            if (tag.contains("cachedRadarCenterX")) {
+                cachedRadarCenter = new Vec3(tag.getDouble("cachedRadarCenterX"), tag.getDouble("cachedRadarCenterY"), tag.getDouble("cachedRadarCenterZ"));
+            } else {
+                cachedRadarCenter = null;
+            }
+        }
 
         readSafeZones(tag);
     }
@@ -497,16 +555,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         ListTag safeZonesTag = tag.getList("SafeZones", Tag.TAG_COMPOUND);
 
         for (int i = 0; i < safeZonesTag.size(); i++) {
-            CompoundTag safeZoneTag = safeZonesTag.getCompound(i);
-            AABB safeZone = new AABB(
-                    safeZoneTag.getDouble("minX"),
-                    safeZoneTag.getDouble("minY"),
-                    safeZoneTag.getDouble("minZ"),
-                    safeZoneTag.getDouble("maxX"),
-                    safeZoneTag.getDouble("maxY"),
-                    safeZoneTag.getDouble("maxZ")
-            );
-            safeZones.add(safeZone);
+            safeZones.add(com.happysg.radar.block.behavior.networks.config.SafeZone.fromTag(safeZonesTag.getCompound(i)));
         }
     }
 
@@ -525,16 +574,30 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (clientPacket) {
             tag.putBoolean("HasRadarPos", radarPos != null);
 
-            if (radarPos != null)
+            if (radarPos != null) {
                 tag.put("radarPos", NbtUtils.writeBlockPos(radarPos));
+                if (radarDim != null) tag.putString("radarDim", radarDim.toString());
+            }
 
             tag.put("Filter", filter.toTag());
             tag.put("tracks", RadarTrackUtil.serializeNBTList(cachedTracks));
+            tag.putFloat("cachedRadarRange", cachedRadarRange);
+            tag.putFloat("cachedRadarAngle", cachedRadarAngle);
+            tag.putFloat("cachedRadarSpeed", cachedRadarSpeed);
+            tag.putBoolean("cachedRadarRunning", cachedRadarRunning);
+            tag.putBoolean("cachedRadarRenderRelative", cachedRadarRenderRelative);
+            if (cachedRadarCenter != null) {
+                tag.putDouble("cachedRadarCenterX", cachedRadarCenter.x);
+                tag.putDouble("cachedRadarCenterY", cachedRadarCenter.y);
+                tag.putDouble("cachedRadarCenterZ", cachedRadarCenter.z);
+            }
         } else {
             if (level instanceof ServerLevel slevel) {
                 if (getNetworkGroup(slevel) == null) {
-                    if (radarPos != null)
+                    if (radarPos != null) {
                         tag.put("radarPos", NbtUtils.writeBlockPos(radarPos));
+                        if (radarDim != null) tag.putString("radarDim", radarDim.toString());
+                    }
                     tag.put("Filter", filter.toTag());
                 }
             }
@@ -552,15 +615,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     private @NotNull ListTag saveSafeZones() {
         ListTag safeZonesTag = new ListTag();
-        for (AABB safeZone : safeZones) {
-            CompoundTag safeZoneTag = new CompoundTag();
-            safeZoneTag.putDouble("minX", safeZone.minX);
-            safeZoneTag.putDouble("minY", safeZone.minY);
-            safeZoneTag.putDouble("minZ", safeZone.minZ);
-            safeZoneTag.putDouble("maxX", safeZone.maxX);
-            safeZoneTag.putDouble("maxY", safeZone.maxY);
-            safeZoneTag.putDouble("maxZ", safeZone.maxZ);
-            safeZonesTag.add(safeZoneTag);
+        for (com.happysg.radar.block.behavior.networks.config.SafeZone safeZone : safeZones) {
+            safeZonesTag.add(safeZone.toTag());
         }
         return safeZonesTag;
     }
@@ -581,6 +637,6 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public float getShipYawDeg() {
-        return PhysicsHandler.getShipYawDeg(level, worldPosition);
+        return PhysicsHandler.getShipYawDeg(this);
     }
 }

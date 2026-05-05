@@ -77,10 +77,7 @@ public final class CBCWPFCompat {
             int life = resolveLifetimeTicks(cannon);
             float muzzle = resolveShupapiumMuzzleSpeed(cannon);
 
-            LOGGER.info(
-                    "[CBCWPF] Shupapium ammo present: item={} count={} muzzleSpeed={} lifetimeTicks={}",
-                    round.getItem(), round.getCount(), muzzle, life
-            );
+
 
             loggedLoaded.put(cannon, true);
         } catch (Throwable ignored) {}

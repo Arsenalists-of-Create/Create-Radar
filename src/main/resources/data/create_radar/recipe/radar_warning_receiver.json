@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "R": {
+      "item": "minecraft:redstone"
+    },
+    "I": {
+      "item": "minecraft:iron_block"
+    },
+    "E": {
+      "item": "create:electron_tube"
+    }
+  },
+  "pattern": [
+    "E",
+    "I",
+    "R"
+  ],
+  "result": { "id": "create_radar:radar_warning_receiver"
+  },
+  "show_notification": true
+}
+
+

@@ -1,0 +1,22 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "N": {
+      "item": "minecraft:note_block"
+    },
+    "I": {
+      "item": "minecraft:iron_block"
+    }
+  },
+  "pattern": [
+    "III",
+    "INI",
+    "III"
+  ],
+  "result": { "id": "create_radar:siren"
+  },
+  "show_notification": true
+}
+
+

@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "A": {
+      "item": "create:mechanical_bearing"
+    },
+    "B": {
+      "tag": "c:plates/iron"
+    },
+    "E": {
+      "item": "create:electron_tube"
+    }
+  },
+  "pattern": [
+    " E ",
+    "BAB",
+    " B "
+  ],
+  "result": { "id": "create_radar:radar_bearing"
+  },
+  "show_notification": true
+}
+
+

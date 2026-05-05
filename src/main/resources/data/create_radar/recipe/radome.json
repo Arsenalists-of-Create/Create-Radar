@@ -1,0 +1,22 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "W": {
+      "item": "minecraft:white_wool"
+    },
+    "I": {
+      "item": "minecraft:iron_block"
+    }
+  },
+  "pattern": [
+    "WWW",
+    "WIW",
+    "WWW"
+  ],
+  "result": { "id": "create_radar:radome"
+  },
+  "show_notification": true
+}
+
+

@@ -16,16 +16,24 @@ public class RaycastPacket extends SimplePacketBase {
     public static final StreamCodec<FriendlyByteBuf, RaycastPacket> STREAM_CODEC = createCodec(RaycastPacket::new);
 
     private final BlockPos pos;
+    private final java.util.UUID subLevelId;
 
-    public RaycastPacket(BlockPos pos) {
+    public RaycastPacket(BlockPos pos, java.util.UUID subLevelId) {
         this.pos = pos;
+        this.subLevelId = subLevelId;
     }
 
     public RaycastPacket(FriendlyByteBuf buffer) {
         if (buffer.readBoolean()) {
             this.pos = buffer.readBlockPos();
+            if (buffer.readBoolean()) {
+                this.subLevelId = buffer.readUUID();
+            } else {
+                this.subLevelId = null;
+            }
         } else {
             this.pos = null;
+            this.subLevelId = null;
         }
     }
 
@@ -34,6 +42,10 @@ public class RaycastPacket extends SimplePacketBase {
         buffer.writeBoolean(pos != null);
         if (pos != null) {
             buffer.writeBlockPos(pos);
+            buffer.writeBoolean(subLevelId != null);
+            if (subLevelId != null) {
+                buffer.writeUUID(subLevelId);
+            }
         }
     }
 
@@ -42,7 +54,7 @@ public class RaycastPacket extends SimplePacketBase {
         context.enqueueWork(() -> {
             ItemStack stack = context.player().getMainHandItem();
             if (stack.getItem() instanceof Binoculars) {
-                Binoculars.setLastHit(stack, pos);
+                Binoculars.setLastHit(stack, pos, subLevelId);
             }
         });
     }

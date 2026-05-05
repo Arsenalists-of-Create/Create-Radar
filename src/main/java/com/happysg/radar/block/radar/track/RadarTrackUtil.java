@@ -17,7 +17,7 @@ public class RadarTrackUtil {
 
     public static RadarTrack getRadarTrack(Ship ship, net.minecraft.world.level.Level level) {
         return new RadarTrack(String.valueOf(ship.getId()), getPosition(ship), getVelocity(ship), level.getGameTime(),
-                TrackCategory.VS2, "VS2:ship", getShipSize(ship));
+                TrackCategory.VS2, "VS2:ship", getShipSize(ship), ship.getSlug());
     }
 
     public static int getShipSize(Ship ship){

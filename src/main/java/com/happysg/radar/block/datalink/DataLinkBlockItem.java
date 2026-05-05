@@ -383,7 +383,7 @@ public class DataLinkBlockItem extends BlockItem {
                 }
 
                 case RADAR_BEARING -> {
-                    filterData.attachRadar(fGroup, clickedPos, NetworkData.RadarKind.BEARING);
+                    filterData.attachRadar(fGroup, clickedPos, serverLevel.dimension().location(), NetworkData.RadarKind.BEARING);
 
                     BlockEntity fbe = serverLevel.getBlockEntity(filtererPos);
                     if (fbe instanceof com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity nfb) {
@@ -392,7 +392,7 @@ public class DataLinkBlockItem extends BlockItem {
                 }
 
                 case RADAR_STATIONARY -> {
-                    filterData.attachRadar(fGroup, clickedPos, NetworkData.RadarKind.STATIONARY);
+                    filterData.attachRadar(fGroup, clickedPos, serverLevel.dimension().location(), NetworkData.RadarKind.STATIONARY);
 
                     BlockEntity fbe = serverLevel.getBlockEntity(filtererPos);
                     if (fbe instanceof com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity nfb) {

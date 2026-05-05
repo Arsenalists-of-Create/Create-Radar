@@ -240,9 +240,9 @@ public class  ModCommands {
     }
 
     private static int listShipIds(CommandSourceStack source) {
-        if (IDManager.ID_RECORDS.isEmpty()) {
+        if (IDManager.getRecords().isEmpty()) {
             source.sendSuccess(
-                    () -> Component.literal("No VS2 ship ID records found.")
+                    () -> Component.literal("No ship ID records found.")
                             .withStyle(ChatFormatting.GRAY),
                     false
             );
@@ -250,22 +250,22 @@ public class  ModCommands {
         }
 
         source.sendSuccess(
-                () -> Component.literal("VS2 Ship IFF Records:")
+                () -> Component.literal("Ship IFF Records:")
                         .withStyle(ChatFormatting.GOLD),
                 false
         );
 
-        IDManager.ID_RECORDS.forEach((slug, record) -> {
+        IDManager.getRecords().forEach((record) -> {
             Component line = Component.literal("• ")
                     .withStyle(ChatFormatting.DARK_GRAY)
-                    .append(Component.literal(String.valueOf(slug)).withStyle(ChatFormatting.AQUA))
+                    .append(Component.literal(String.valueOf(record.idInt())).withStyle(ChatFormatting.AQUA))
                     .append(Component.literal(" | name="))
                     .append(Component.literal(record.name()).withStyle(ChatFormatting.GREEN))
                     .append(Component.literal(" | secret="))
                     .append(Component.literal(record.secretID()).withStyle(ChatFormatting.RED));
             source.sendSuccess(() -> line, false);
         });
-        return IDManager.ID_RECORDS.size();
+        return IDManager.getRecords().size();
     }
 
 

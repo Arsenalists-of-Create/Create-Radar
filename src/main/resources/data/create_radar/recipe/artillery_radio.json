@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "R": {
+      "item": "minecraft:redstone"
+    },
+    "I": {
+      "item": "minecraft:iron_ingot"
+    },
+    "E": {
+      "item": "create:electron_tube"
+    }
+  },
+  "pattern": [
+    " R ",
+    "IEI",
+    " I "
+  ],
+  "result": { "id": "create_radar:artillery_radio"
+  },
+  "show_notification": true
+}
+
+

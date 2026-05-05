@@ -108,7 +108,9 @@ public class SimpleEditBox extends AbstractWidget implements Renderable {
 
     protected MutableComponent createNarrationMessage() {
         Component component = this.getMessage();
-        return Component.translatable("gui.narrate.editBox", component, this.value);
+        String val = this.value == null ? "" : this.value;
+        if (component == null) return Component.literal(val);
+        return Component.translatable("gui.narrate.editBox", component, val);
     }
 
     /**

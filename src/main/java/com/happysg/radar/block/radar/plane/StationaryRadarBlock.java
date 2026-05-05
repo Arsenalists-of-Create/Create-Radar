@@ -1,6 +1,5 @@
 package com.happysg.radar.block.radar.plane;
 
-import com.happysg.radar.compat.vs2.VS2CompatRegister;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.Direction;
@@ -45,6 +44,6 @@ public class StationaryRadarBlock extends HorizontalDirectionalBlock implements 
 
     @Override
     public BlockEntityType<? extends StationaryRadarBlockEntity> getBlockEntityType() {
-        return VS2CompatRegister.STATIONARY_RADAR_BE.get();
+        return ModBlockEntityTypes.STATIONARY_RADAR_BE.get();
     }
 }

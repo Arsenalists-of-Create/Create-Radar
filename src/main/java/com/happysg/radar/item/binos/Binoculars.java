@@ -61,28 +61,38 @@ public class Binoculars extends SpyglassItem {
                     true
             );
 
-            pContext.getItemInHand().getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag().put("filterPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
-            pContext.getItemInHand().getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag().put("filtererPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
+            ItemStack stack = pContext.getItemInHand();
+            stack.update(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY, customData -> customData.update(tag -> {
+                tag.put("filterPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
+                tag.put("filtererPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
+            }));
 
             return InteractionResult.SUCCESS;
         }
         return super.useOn(pContext);
     }
 
+    public static void setLastHit(ItemStack stack, @Nullable BlockPos pos, @Nullable java.util.UUID subLevelId) {
+        stack.update(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY, customData -> customData.update(tag -> {
+            if (pos == null) {
+                tag.remove(TAG_LAST_HIT);
+                return;
+            }
+
+            CompoundTag hit = new CompoundTag();
+            hit.putInt("x", pos.getX());
+            hit.putInt("y", pos.getY());
+            hit.putInt("z", pos.getZ());
+            if (subLevelId != null) {
+                hit.putUUID("subLevelId", subLevelId);
+            }
+
+            tag.put(TAG_LAST_HIT, hit);
+        }));
+    }
+
     public static void setLastHit(ItemStack stack, @Nullable BlockPos pos) {
-        CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
-
-        if (pos == null) {
-            tag.remove(TAG_LAST_HIT);
-            return;
-        }
-
-        CompoundTag hit = new CompoundTag();
-        hit.putInt("x", pos.getX());
-        hit.putInt("y", pos.getY());
-        hit.putInt("z", pos.getZ());
-
-        tag.put(TAG_LAST_HIT, hit);
+        setLastHit(stack, pos, null);
     }
 
     @Nullable
@@ -98,14 +108,27 @@ public class Binoculars extends SpyglassItem {
         );
     }
 
+    @Nullable
+    public static java.util.UUID getLastHitSubLevelId(ItemStack stack) {
+        CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
+        if (tag == null || !tag.contains(TAG_LAST_HIT)) return null;
+
+        CompoundTag hit = tag.getCompound(TAG_LAST_HIT);
+        if (hit.hasUUID("subLevelId")) {
+            return hit.getUUID("subLevelId");
+        }
+        return null;
+    }
+
     public static boolean hasLastHit(ItemStack stack) {
         CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
         return tag != null && tag.contains(TAG_LAST_HIT);
     }
 
     public static void clearLastHit(ItemStack stack) {
-        CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
-        if (tag != null) tag.remove(TAG_LAST_HIT);
+        stack.update(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY, customData -> customData.update(tag -> {
+            tag.remove(TAG_LAST_HIT);
+        }));
     }
 
 }

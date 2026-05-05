@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "B": {
+      "item": "create_radar:radar_bearing"
+    },
+    "E": {
+      "item": "create:electron_tube"
+    }
+  },
+  "pattern": [
+    " E ",
+    " B "
+  ],
+  "result": { "id": "create_radar:sky_radar"
+  },
+  "show_notification": true
+}
+
+

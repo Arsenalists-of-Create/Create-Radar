@@ -11,21 +11,22 @@ import com.simibubi.create.foundation.gui.widget.IconButton;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
-import org.valkyrienskies.core.api.ships.Ship;
 
 
 //only open on VsShip
 public class IDBlockScreen extends AbstractSimiScreen {
     private static final ModGuiTextures BACKGROUND = ModGuiTextures.ID_SCREEN;
 
-    Ship ship;
+    long targetId;
+    String targetSlug;
     String id = "";
     String name = "";
     private EditBox nameField;
     private EditBox idField;
 
-    public IDBlockScreen(Ship ship) {
-        this.ship = ship;
+    public IDBlockScreen(long targetId, String targetSlug) {
+        this.targetId = targetId;
+        this.targetSlug = targetSlug;
     }
 
     @Override
@@ -55,7 +56,7 @@ public class IDBlockScreen extends AbstractSimiScreen {
         confirmButton.withCallback(this::onClose);
         addRenderableWidget(confirmButton);
 
-        ModMessages.sendToServer(new IDRecordRequestPacket(ship.getId()));
+        ModMessages.sendToServer(new IDRecordRequestPacket(targetId));
     }
 
     @Override
@@ -67,20 +68,20 @@ public class IDBlockScreen extends AbstractSimiScreen {
 
     @Override
     public void onClose() {
-        IDManager.addIDRecord(ship.getId(), id, name);
+        IDManager.addIDRecord(targetId, id, name);
         super.onClose();
-        ModMessages.sendToServer(new IDRecordPacket(ship.getId(), ship.getSlug(), id,name));
+        ModMessages.sendToServer(new IDRecordPacket(targetId, targetSlug, id, name));
     }
 
     private void loadFromClientCache() {
-        IDRecord record = IDManager.getIDRecordByShip(ship);
+        IDRecord record = IDManager.getIDRecordByShipId(targetId);
         if (record == null) return;
         this.id = record.secretID();
         this.name = record.name();
     }
 
-    public boolean isForShip(long shipId) {
-        return ship.getId() == shipId;
+    public boolean isForTarget(long targetId) {
+        return this.targetId == targetId;
     }
 
     public void applyLoadedRecord(String loadedName, String loadedId) {
@@ -94,5 +95,4 @@ public class IDBlockScreen extends AbstractSimiScreen {
             idField.setValue(this.id);
         }
     }
-
-}
+}

@@ -22,8 +22,6 @@ public record IdentificationConfig(List<String> entries, String label) {
             names.add(StringTag.valueOf(s == null ? "" : s));
         }
 
-        // i keep writing a flags list (all zeros) so older readers dont choke,
-        // but gameplay should ignore it completely
         ListTag flags = new ListTag();
         for (int i = 0; i < entries.size(); i++) {
             flags.add(ByteTag.valueOf((byte) 0));
@@ -49,7 +47,6 @@ public record IdentificationConfig(List<String> entries, String label) {
         return new IdentificationConfig(outNames, t.getString("label"));
     }
 
-    // i keep these so old call sites compile without you refactoring everything at once
     public List<String> usernames() {
         return entries();
     }

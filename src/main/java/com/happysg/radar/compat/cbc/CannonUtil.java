@@ -138,7 +138,7 @@ public class CannonUtil {
                     ItemStack round = (ItemStack) handler.getClass().getMethod("getStackInSlot", int.class).invoke(handler, 0);
                     return fromCBCAmmo.apply(round);
                 } catch (Throwable e) {
-                    LOGGER.debug("Failed to reflectively access AutocannonBreech item handler", e);
+
                     return AC_FALLBACK;
                 }
             }
@@ -152,7 +152,7 @@ public class CannonUtil {
                         ItemStack round = (ItemStack) handler.getClass().getMethod("getStackInSlot", int.class).invoke(handler, 0);
                         return fromCBCAmmo.apply(round);
                     } catch (Throwable e) {
-                        LOGGER.debug("Failed to reflectively access RotarycannonBreech item handler", e);
+
                         return AC_FALLBACK;
                     }
                 }
@@ -205,7 +205,7 @@ public class CannonUtil {
         if(!Mods.CBCMODERNWARFARE.isLoaded()) return 0f;
         if(contraptionEntity == null) return 0f;
         Map<BlockPos, BlockEntity> presentBlockEntities = contraptionEntity.presentBlockEntities;
-        LOGGER.debug(" → presentBlockEntities count = {}", presentBlockEntities.size());
+
         if(presentBlockEntities.isEmpty()) return 0f;
         int barrelCount = 0;
         RotarycannonMaterial material = null;
@@ -271,47 +271,43 @@ public class CannonUtil {
     }
 
     public static float getInitialVelocity(AbstractMountedCannonContraption cannon, net.minecraft.server.level.ServerLevel level) {
-        LOGGER.debug("→ getInitialVelocity for contraption={} mods: BigCannon={}, AutoCannon={}, Rotary={}, Medium={}, Energy={}",
-                cannon != null ? cannon.getClass().getSimpleName() : "null",
-                isBigCannon(cannon), isAutoCannon(cannon),
-                isRotaryCannon(cannon), isMediumCannon(cannon), isEnergyCannon(cannon)
-        );
+
         if (cannon == null) return 0f;
 
         if (CBCWPFCompat.isShupapiumAutocannon(cannon)) {
-            LOGGER.debug("   • Shupapium WPF muzzle speed = {}", CBCWPFCompat.resolveShupapiumMuzzleSpeed(cannon));
+
             return CBCWPFCompat.resolveShupapiumMuzzleSpeed(cannon);
         }
 
         if (isEnergyCannon(cannon)) {
             float velocity = ((MountedEnergyCannonContraption) cannon).getMuzzleVelocity(level);
-            LOGGER.debug("   • EnergyCannon speed = {}", velocity);
+
             return velocity;
         }
 
         if (isBigCannon(cannon)) {
             PitchOrientedContraptionEntity _poce = cannon.entity instanceof PitchOrientedContraptionEntity _p ? _p : null;
-            LOGGER.debug("   • BigCannon speed = {}", getBigCannonSpeed(level, cannon, _poce));
+
             return getBigCannonSpeed(level, cannon, _poce);
         } else if (isAutoCannon(cannon)) {
-            LOGGER.debug("   • AutoCannon speed = {}", getAutoCannonSpeed(cannon));
+
             return getAutoCannonSpeed(cannon);
         }
         else if(isRotaryCannon(cannon)){
-            LOGGER.debug("   • RotaryCannon speed = {}", getRotarySpeed(cannon));
+
             return getRotarySpeed(cannon);
         }
         else if(isMediumCannon(cannon)){
-            LOGGER.debug("   • MediumCannon speed = {}", getMediumCannonSpeed(cannon));
+
             return getMediumCannonSpeed(cannon);
         } else if(isTwinAutocannon(cannon)){
-            LOGGER.debug("   • TwinACannon speed = {}", getAutoCannonSpeed(cannon));
+
             return getAutoCannonSpeed(cannon);
         } else if(isHeavyAutocannon(cannon)){
-            LOGGER.debug("   • HeavyACannon speed = {}", getAutoCannonSpeed(cannon));
+
             return getAutoCannonSpeed(cannon);
         }
-        LOGGER.debug("   • No known cannon type → returning 0");
+
         return 0;
     }
 
@@ -335,7 +331,7 @@ public class CannonUtil {
                 if (t > 0) return t;
             }
         } catch (Throwable ignored) {
-            LOGGER.debug("Mixin maybe didnt apply?");
+
         }
 
         return 100;

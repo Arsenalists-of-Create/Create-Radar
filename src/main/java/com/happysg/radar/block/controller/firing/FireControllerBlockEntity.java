@@ -81,7 +81,7 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
                 // only commit the new position if the network accepted it
                 if (updated) {
                     lastKnownPos = worldPosition;
-                    LOGGER.debug("Controller moved {} -> {}", lastKnownPos, worldPosition);
+
                     setChanged();
                 }
             }

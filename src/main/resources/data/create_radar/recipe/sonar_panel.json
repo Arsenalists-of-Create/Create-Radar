@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "S": {
+      "item": "minecraft:prismarine_shard"
+    },
+    "I": {
+      "item": "minecraft:iron_block"
+    }
+  },
+  "pattern": [
+    "S",
+    "I"
+  ],
+  "result": { "id": "create_radar:sonar_panel"
+  },
+  "show_notification": true
+}
+
+

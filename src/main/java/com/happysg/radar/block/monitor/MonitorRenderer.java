@@ -7,6 +7,7 @@ import com.happysg.radar.config.RadarConfig;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
+import net.createmod.catnip.animation.AnimationTickHolder;
 import net.createmod.catnip.theme.Color;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
@@ -30,8 +31,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         if (!be.isController()) return;
         if (!be.isLinked()) return;
 
-        IRadar radar = be.getRadar().orElse(null);
-        if (radar == null || !radar.isRunning()) return;
+        if (!be.cachedRadarRunning) return;
 
         Direction facing = be.getBlockState().getValue(MonitorBlock.FACING);
         int size = be.getSize();
@@ -41,11 +41,15 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         // Center at block position
         ms.translate(0.5, 0.5, 0.5);
         
-        // Align with block facing
-        ms.mulPose(Axis.YP.rotationDegrees(facing.toYRot()));
+        // Correcting base rotation for the face
+        float yRot = facing.toYRot();
+        if (facing.getAxis() == Direction.Axis.X) {
+            yRot += 180;
+        }
+        ms.mulPose(Axis.YP.rotationDegrees(yRot));
         
-        // Offset from block surface to prevent z-fighting
-        ms.translate(0, 0, 0.45);
+        // Offset from block surface
+        ms.translate(0, 0, 0.465f);
         
         // Adjust for multiblock dimensions
         float offset = (size - 1) / 2.0f;
@@ -56,9 +60,9 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
 
         // Normalize coordinate space to [0, 1] relative to the multiblock display
         renderBackground(ms, bufferSource, light, overlay);
-        renderGrid(ms, bufferSource, radar, light, overlay);
-        renderSweep(ms, be, radar, partialTicks, bufferSource, light, overlay);
-        renderTracks(ms, be, radar, bufferSource, light, overlay, totalSize, partialTicks);
+        renderGrid(ms, bufferSource, be, light, overlay);
+        renderSweep(ms, be, partialTicks, bufferSource, light, overlay);
+        renderTracks(ms, be, bufferSource, light, overlay, totalSize, partialTicks);
 
         ms.popPose();
     }
@@ -78,7 +82,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         drawTexturedQuad(vc, mat, -0.5f, -0.5f, 0.5f, 0.5f, r, g, b, a, light, overlay, 0.001f);
     }
 
-    private void renderGrid(PoseStack ms, MultiBufferSource buffer, IRadar radar, int light, int overlay) {
+    private void renderGrid(PoseStack ms, MultiBufferSource buffer, MonitorBlockEntity be, int light, int overlay) {
         VertexConsumer vc = buffer.getBuffer(RenderType.lines());
         Matrix4f mat = ms.last().pose();
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
@@ -87,7 +91,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         int b = color.getBlue();
         int a = 10;
 
-        float range = radar.getRange();
+        float range = be.cachedRadarRange;
         int halfCells = Math.max(2, Math.min(24, (int)(range / 50f)));
         int totalCells = halfCells * 2;
         float spacing = 1.0f / totalCells;
@@ -101,12 +105,22 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         }
     }
 
-    private void renderSweep(PoseStack ms, MonitorBlockEntity be, IRadar radar, float partialTicks, MultiBufferSource buffer, int light, int overlay) {
-        float angle = (radar.getGlobalAngle() + 360f) % 360f;
-        
+    private void renderSweep(PoseStack ms, MonitorBlockEntity be, float partialTicks, MultiBufferSource buffer, int light, int overlay) {
+        float angle = (be.cachedRadarAngle + 180f) % 360f;
+
+        Direction facing = be.getBlockState().getValue(MonitorBlock.FACING);
+        float screenAngle = angle;
+        // Adjusted West offset by another 180 degrees (reverting the previous -180 adjustment)
+        if (facing == Direction.NORTH) screenAngle += 180;
+        else if (facing == Direction.EAST) screenAngle += 0; 
+        else if (facing == Direction.WEST) screenAngle += 0; // Rotated by 180 compared to previous -180
+
         ms.pushPose();
-        ms.mulPose(Axis.ZP.rotationDegrees(-angle));
         
+        // Rotation sign logic
+        float rotationSign = (facing == Direction.NORTH) ? -1.0f : 1.0f;
+        ms.mulPose(Axis.ZP.rotationDegrees(rotationSign * screenAngle));
+
         Matrix4f mat = ms.last().pose();
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
         int r = color.getRed();
@@ -120,12 +134,12 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         ms.popPose();
     }
 
-    private void renderTracks(PoseStack ms, MonitorBlockEntity be, IRadar radar, MultiBufferSource buffer, int light, int overlay, float totalSize, float partialTicks) {
+    private void renderTracks(PoseStack ms, MonitorBlockEntity be, MultiBufferSource buffer, int light, int overlay, float totalSize, float partialTicks) {
         Collection<RadarTrack> tracks = be.getTracks();
         if (tracks.isEmpty()) return;
 
-        float range = radar.getRange();
-        Vec3 radarPos = be.getRadarCenterPos(partialTicks);
+        float range = be.cachedRadarRange;
+        Vec3 radarPos = be.cachedRadarCenter;
         if (radarPos == null) return;
 
         long currentTime = be.getLevel().getGameTime();
@@ -135,7 +149,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
             Vec3 rel = track.position().subtract(radarPos);
 
             // Ship rotation support
-            if (radar.renderRelativeToMonitor() && be.getShip() != null) {
+            if (be.cachedRadarRenderRelative && be.getShip() != null) {
                 float shipYawDeg = be.getShipYawDeg();
                 rel = rotateAroundYDeg(rel, -(shipYawDeg + 180f));
             }
@@ -143,11 +157,6 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
             // Map world-space coordinates to screen-space offsets
             float xOff = calculateTrackOffset(rel, facing, range, true);
             float zOff = calculateTrackOffset(rel, facing, range, false);
-
-            // Use 1:1 world coordinate mapping for maximum precision
-            float trackPositionScale = 1.0f;
-            xOff = xOff * trackPositionScale;
-            zOff = zOff * trackPositionScale;
 
             // Invert vertical offset to match screen-space Y (Up)
             float screenX = xOff;
@@ -161,10 +170,8 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
             if (fade <= 0.05f) continue;
 
             ms.pushPose();
-            // screenX and screenY represent normalized display coordinates [-0.5, 0.5]
             ms.translate(screenX, screenY, 0.003f);
             
-            // Apply track scaling based on category and total display size
             float trackScale = (track.trackCategory() == TrackCategory.AERONAUTICS) ? 1.2f : 0.6f;
             trackScale /= totalSize;
             ms.scale(trackScale, trackScale, 1);
@@ -202,7 +209,6 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         double cos = Math.cos(rad);
         double sin = Math.sin(rad);
 
-        // match MonitorScreen rotateAroundYDeg implementation
         double x = v.x * cos - v.z * sin;
         double z = v.x * sin + v.z * cos;
         return new Vec3(x, v.y, z);

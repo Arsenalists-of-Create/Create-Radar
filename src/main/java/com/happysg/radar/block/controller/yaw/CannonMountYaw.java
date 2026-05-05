@@ -27,7 +27,13 @@ public class CannonMountYaw {
         }
 
         if (PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
-            List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
+            List<List<Double>> angles = null;
+            if (com.happysg.radar.compat.Mods.VALKYRIENSKIES.isLoaded() && com.happysg.radar.compat.vs2.VS2Utils.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
+                angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
+            } else if (com.happysg.radar.compat.Mods.SABLE.isLoaded() || com.happysg.radar.compat.Mods.AERONAUTICS.isLoaded() || com.happysg.radar.compat.Mods.SIMULATED.isLoaded()) {
+                angles = com.happysg.radar.compat.cbc.SableCannonTargeting.calculatePitchAndYawSable(mount, targetPos, serverLevel);
+            }
+
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
                 return;
             }
@@ -59,6 +65,9 @@ public class CannonMountYaw {
         }
 
         double effectiveTolerance = AutoYawControllerBlockEntity.getToleranceDeg();
+        if (PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
+            effectiveTolerance += 1.0;
+        }
         if (!lag) {
             effectiveTolerance += 0.15;
         }
@@ -99,7 +108,7 @@ public class CannonMountYaw {
 
 
 
-        double stepDeg = rpm / 24.0;
+        double stepDeg = rpm / 8.0; // Increased from /24.0 for better tracking
         double move = Math.signum(yawDiff) * Math.min(Math.abs(yawDiff), stepDeg);
         double nextYaw = AutoYawControllerBlockEntity.wrap360(currentYaw + move);
 

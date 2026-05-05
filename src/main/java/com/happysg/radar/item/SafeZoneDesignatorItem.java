@@ -108,7 +108,7 @@ public class SafeZoneDesignatorItem extends Item {
         CompoundTag data = pStack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
         if (data.contains("monitorPos")) {
             BlockPos monitorPos = NbtUtils.readBlockPos(data, "monitorPos").orElse(BlockPos.ZERO);
-            pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.linked_monitor", monitorPos));
+            pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.linked_monitor", monitorPos.getX() + ", " + monitorPos.getY() + ", " + monitorPos.getZ()));
         } else {
             pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.no_monitor"));
         }

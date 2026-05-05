@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "R": {
+      "item": "create_radar:radar_filter_item"
+    },
+    "E": {
+      "item": "create:electron_tube"
+    }
+  },
+  "pattern": [
+    "E",
+    "R"
+  ],
+  "result": { "id": "create_radar:arad_guidance"
+  },
+  "show_notification": true
+}
+
+

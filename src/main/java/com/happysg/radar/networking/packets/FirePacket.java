@@ -22,18 +22,45 @@ public class FirePacket extends SimplePacketBase {
     public static final StreamCodec<FriendlyByteBuf, FirePacket> STREAM_CODEC = createCodec(FirePacket::new);
 
     private final boolean enable;
+    private final BlockPos pos;
+    private final java.util.UUID subLevelId;
+
+    public FirePacket(boolean enable, BlockPos pos, java.util.UUID subLevelId) {
+        this.enable = enable;
+        this.pos = pos;
+        this.subLevelId = subLevelId;
+    }
 
     public FirePacket(boolean enable) {
-        this.enable = enable;
+        this(enable, null, null);
     }
 
     public FirePacket(FriendlyByteBuf buffer) {
         this.enable = buffer.readBoolean();
+        if (buffer.readBoolean()) {
+            this.pos = buffer.readBlockPos();
+            if (buffer.readBoolean()) {
+                this.subLevelId = buffer.readUUID();
+            } else {
+                this.subLevelId = null;
+            }
+        } else {
+            this.pos = null;
+            this.subLevelId = null;
+        }
     }
 
     @Override
     public void write(FriendlyByteBuf buffer) {
         buffer.writeBoolean(enable);
+        buffer.writeBoolean(pos != null);
+        if (pos != null) {
+            buffer.writeBlockPos(pos);
+            buffer.writeBoolean(subLevelId != null);
+            if (subLevelId != null) {
+                buffer.writeUUID(subLevelId);
+            }
+        }
     }
 
     @Override
@@ -52,11 +79,10 @@ public class FirePacket extends SimplePacketBase {
             if (!(serverLevel.getBlockEntity(filtererPos) instanceof NetworkFiltererBlockEntity filtererBe)) return;
 
             if (enable) {
-                BlockPos hit = Binoculars.getLastHit(binos);
-                if (hit == null) return;
-                filtererBe.onBinocularsTriggered(player, binos, false);
+                if (pos == null) return;
+                filtererBe.onBinocularsTriggered(player, binos, pos, subLevelId, false);
             } else {
-                filtererBe.onBinocularsTriggered(player, binos, true);
+                filtererBe.onBinocularsTriggered(player, binos, pos, subLevelId, true);
             }
             filtererBe.setChanged();
         });

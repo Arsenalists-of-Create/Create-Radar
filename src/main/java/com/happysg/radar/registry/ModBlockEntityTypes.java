@@ -88,6 +88,16 @@ public class ModBlockEntityTypes {
             .validBlocks(ModBlocks.SKY_RADAR)
             .register();
 
+    public static final BlockEntityEntry<RadarWarningReceiverBlockEntity> RWR_BE = REGISTRATE
+            .blockEntity("rwr_be", RadarWarningReceiverBlockEntity::new)
+            .validBlocks(ModBlocks.RADAR_WARNING_RECEIVER)
+            .register();
+
+    public static final BlockEntityEntry<StationaryRadarBlockEntity> STATIONARY_RADAR_BE = REGISTRATE
+            .blockEntity("stationary_radar", StationaryRadarBlockEntity::new)
+            .validBlocks(ModBlocks.PLANE_RADAR)
+            .register();
+
     public static void register() {
         CreateRadar.getLogger().info("Registering block entity types!");
     }

@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "M": {
+      "item": "createbigcannons:cannon_mount"
+    },
+    "E": {
+      "item": "create:electron_tube"
+    }
+  },
+  "pattern": [
+    " E ",
+    " M "
+  ],
+  "result": { "id": "create_radar:smart_mount"
+  },
+  "show_notification": true
+}
+
+

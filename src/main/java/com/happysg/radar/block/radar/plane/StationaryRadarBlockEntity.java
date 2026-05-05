@@ -31,7 +31,12 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     public void initialize() {
         super.initialize();
-        if (!Mods.VALKYRIENSKIES.isLoaded() && !Mods.AERONAUTICS.isLoaded() && !Mods.SIMULATED.isLoaded())
+        if (Mods.SABLE.isLoaded() || Mods.AERONAUTICS.isLoaded() || Mods.SIMULATED.isLoaded()) {
+            if (PhysicsHandler.isBlockInShipyard(this)) {
+                com.happysg.radar.block.radar.behavior.SableRadarRegistry.register(level.dimension().location(), worldPosition, this);
+            }
+        }
+        if (!Mods.VALKYRIENSKIES.isLoaded() && !Mods.AERONAUTICS.isLoaded() && !Mods.SIMULATED.isLoaded() && !Mods.SABLE.isLoaded())
             return;
         scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
         scanningBehavior.setRunning(true);
@@ -39,23 +44,33 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
 
     @Override
     public BlockPos getWorldPos() {
-        return getBlockPos();
+        return PhysicsHandler.getWorldPos(this);
     }
 
     @Override
     public void tick() {
         super.tick();
-        if (!PhysicsHandler.isBlockInShipyard(level, worldPosition)) {
+        if (!PhysicsHandler.isBlockInShipyard(this)) {
             scanningBehavior.setRunning(false);
             return;
         } else if (!isRunning()) {
             scanningBehavior.setRunning(true);
+        }
+        // Keep registry up-to-date while on a ship
+        if (Mods.SABLE.isLoaded() || Mods.AERONAUTICS.isLoaded() || Mods.SIMULATED.isLoaded()) {
+            com.happysg.radar.block.radar.behavior.SableRadarRegistry.register(level.dimension().location(), worldPosition, this);
         }
         Direction facing = getBlockState().getValue(StationaryRadarBlock.FACING).getOpposite();
         Vec3 facingVec = new Vec3(facing.getStepX(), facing.getStepY(), facing.getStepZ());
         Vec3 shipVec = PhysicsHandler.getWorldVecDirectionTransform(facingVec, this);
         double angle = Math.toDegrees(Math.atan2(shipVec.x, shipVec.z));
         scanningBehavior.setAngle((angle + 360) % 360);
+    }
+
+    @Override
+    public void destroy() {
+        super.destroy();
+        com.happysg.radar.block.radar.behavior.SableRadarRegistry.unregister(level.dimension().location(), worldPosition);
     }
 
 
@@ -116,5 +131,10 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     public Direction getradarDirection() {
         return getBlockState().getValue(StationaryRadarBlock.FACING);
+    }
+
+    @Override
+    public float getSpeed() {
+        return 0;
     }
 }

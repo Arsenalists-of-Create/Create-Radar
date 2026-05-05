@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "R": {
+      "item": "create_radar:radar_receiver_block"
+    },
+    "I": {
+      "item": "minecraft:iron_block"
+    }
+  },
+  "pattern": [
+    "R",
+    "I"
+  ],
+  "result": { "id": "create_radar:plane_radar"
+  },
+  "show_notification": true
+}
+
+

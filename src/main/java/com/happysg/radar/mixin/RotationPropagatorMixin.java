@@ -1,6 +1,7 @@
 package com.happysg.radar.mixin;
 
 import com.simibubi.create.content.kinetics.RotationPropagator;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.state.BlockState;
@@ -15,7 +16,7 @@ import java.util.List;
 @Mixin(value = RotationPropagator.class, priority = 500)
 public abstract class RotationPropagatorMixin {
     @Inject(method = "getPotentialNeighbourLocations", at = @At("RETURN"), cancellable = true, remap = false)
-    private static void create_radar$makePotentialListMutable(com.simibubi.create.content.kinetics.base.KineticBlockEntity be, CallbackInfoReturnable<List<BlockPos>> cir) {
+    private static void create_radar$makePotentialListMutable(KineticBlockEntity be, CallbackInfoReturnable<List<BlockPos>> cir) {
         List<BlockPos> list = cir.getReturnValue();
         if (list == null) return;
         try {

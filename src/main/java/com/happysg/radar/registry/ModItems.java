@@ -27,6 +27,9 @@ public class ModItems {
     public static final ItemEntry<RadarGogglesItem> RADAR_GOGGLES = REGISTRATE.item("radar_goggles", RadarGogglesItem::new)
             .register();
 
+    public static final ItemEntry<net.minecraft.world.item.Item> INCOMPLETE_NETWORK_FILTERER = REGISTRATE.item("incomplete_network_controller", net.minecraft.world.item.Item::new)
+            .register();
+
 
 
     public static final ItemEntry<Binoculars> BINOCULARS =

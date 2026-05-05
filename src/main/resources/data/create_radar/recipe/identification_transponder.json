@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "T": {
+      "item": "create:electron_tube"
+    },
+    "I": {
+      "item": "minecraft:iron_block"
+    }
+  },
+  "pattern": [
+    "T",
+    "I"
+  ],
+  "result": { "id": "create_radar:identification_transponder"
+  },
+  "show_notification": true
+}
+
+

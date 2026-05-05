@@ -26,7 +26,15 @@ public class RadarContraption extends BearingContraption {
     private Direction receiverFacing;
 
     public RadarContraption() {
-        facing = Direction.UP;
+        this(Direction.UP);
+    }
+
+    public RadarContraption(Direction facing) {
+        this.facing = facing;
+    }
+
+    public void setFacing(Direction facing) {
+        this.facing = facing;
     }
 
     @Override
@@ -41,6 +49,11 @@ public class RadarContraption extends BearingContraption {
 
     @Override
     public void addBlock(Level level, BlockPos pos, Pair<StructureTemplate.StructureBlockInfo, BlockEntity> capture) {
+        net.minecraft.world.level.block.Block block = capture.getKey().state().getBlock();
+        if (!(block instanceof AbstractRadarFrame || block instanceof RadarReceiverBlock)) {
+            return;
+        }
+
         if (capture.getKey().state().getBlock() instanceof DataLinkBlock)
             return;
 
@@ -52,9 +65,6 @@ public class RadarContraption extends BearingContraption {
         if (ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.has(capture.getKey().state()))
             creative = true;
 
-
-
-        //todo replace with tag instead of block instance check
         if (capture.getKey().state().getBlock() instanceof AbstractRadarFrame) {
             dishCount++;
             com.happysg.radar.CreateRadar.getLogger().info("RADAR CONTRAPTION {}: Added dish block (total={})", pos, dishCount);
@@ -65,7 +75,6 @@ public class RadarContraption extends BearingContraption {
             receiverFacing = capture.getKey().state().getValue(RadarReceiverBlock.FACING);
             com.happysg.radar.CreateRadar.getLogger().info("RADAR CONTRAPTION {}: Added receiver", pos);
         }
-
     }
 
 
@@ -94,7 +103,4 @@ public class RadarContraption extends BearingContraption {
     public java.util.List<com.happysg.radar.block.radar.track.RadarTrack> getTracks() {
         return java.util.Collections.emptyList();
     }
-
-    @Override
-    public void removeBlocksFromWorld(Level level, BlockPos pos) {}
 }

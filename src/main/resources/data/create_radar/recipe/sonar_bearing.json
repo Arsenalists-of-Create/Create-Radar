@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "B": {
+      "item": "create:mechanical_bearing"
+    },
+    "C": {
+      "item": "minecraft:prismarine_crystals"
+    }
+  },
+  "pattern": [
+    " C ",
+    " B "
+  ],
+  "result": { "id": "create_radar:sonar_bearing"
+  },
+  "show_notification": true
+}
+
+

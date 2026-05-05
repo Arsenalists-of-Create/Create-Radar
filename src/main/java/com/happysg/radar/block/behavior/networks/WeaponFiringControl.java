@@ -62,6 +62,7 @@ public class WeaponFiringControl {
     private Entity targetEntity;
     private Ship targetShip;
     private BlockPos binoTargetPos;
+    private java.util.UUID binoTargetSubLevelId;
     private boolean binoMode;
     private long targetShipId = -1;
     @Nullable private Vec3 lastAimPoint = null;
@@ -69,7 +70,7 @@ public class WeaponFiringControl {
     private List<List<Double>> cachedVS2Angles = null;
     private Vec3 cachedVS2AimTarget = null;
     private long cachedVS2SolveTick = -1;
-    private static final int VS2_SOLVE_INTERVAL = 3;
+    private static final int VS2_SOLVE_INTERVAL = 1;
     private static final double VS2_AIM_CHANGE_THRESHOLD = 0.3;
 
     private static final int VIS_REFRESH_TICKS = 3; // recompute every N ticks per entity
@@ -138,12 +139,14 @@ public class WeaponFiringControl {
         c.hasFrac = true;
     }
 
-    public List<AABB> safeZones = new ArrayList<>();
+    public List<com.happysg.radar.block.behavior.networks.config.SafeZone> safeZones = new ArrayList<>();
+    public java.util.Set<String> ignoreList = java.util.Collections.emptySet();
     private long lastTargetTick = -1;   // server-time when we last got a target update
     private enum RayResult {
         CLEAR,
         BLOCKED_BLOCK,
-        BLOCKED_SAFEZONE;
+        BLOCKED_SAFEZONE,
+        BLOCKED_ALLY;
 
         public boolean isClear() {
             return this == CLEAR;
@@ -156,49 +159,54 @@ public class WeaponFiringControl {
         this.yawController = yawController;
         this.level = cannonMount.getLevel();
 
-        LOGGER.debug("FiringControlBlockEntity.<init>() → controller={} mountPos={}", controller, cannonMount.getBlockPos());
+
     }
-    private RayResult rayClear(Vec3 start, Vec3 end) {
-
-        RayResult result = RayResult.CLEAR;
-
-
+    private RayResult rayClear(Vec3 worldStart, Vec3 worldEnd) {
         if (!safeZones.isEmpty()) {
-            for (AABB zone : safeZones) {
+            for (com.happysg.radar.block.behavior.networks.config.SafeZone zone : safeZones) {
                 if (zone == null) continue;
-                if (zone.contains(start) || zone.contains(end) || zone.clip(start, end).isPresent()) {
+                if (zone.clips(worldStart, worldEnd, level)) {
                     return RayResult.BLOCKED_SAFEZONE;
                 }
             }
         }
 
+        double targetDist = worldEnd.distanceTo(worldStart);
 
-        if (result == RayResult.CLEAR) {
-            ClipContext ctx = new ClipContext(
-                    start, end,
-                    ClipContext.Block.COLLIDER,
-                    ClipContext.Fluid.NONE,
-                    net.minecraft.world.phys.shapes.CollisionContext.empty()
-            );
-
-            HitResult hit = level.clip(ctx);
-
-            if (hit.getType() != HitResult.Type.MISS) {
-                double hitDist = hit.getLocation().distanceTo(start);
-                double targetDist = end.distanceTo(start);
-
-                if (hitDist < targetDist) {
-                    result = RayResult.BLOCKED_BLOCK;
+        if (com.happysg.radar.compat.Mods.SABLE.isLoaded()) {
+            com.happysg.radar.compat.aeronautics.SableUtils.ClipResult result = com.happysg.radar.compat.aeronautics.SableUtils.multiLevelClip(level, worldStart, worldEnd, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, null);
+            if (result.hit().getType() != HitResult.Type.MISS) {
+                double hitDist = result.worldHitPos().distanceTo(worldStart);
+                if (hitDist < targetDist - 0.1) {
+                    if (isAlly(result.hit(), result.subLevel())) return RayResult.BLOCKED_ALLY;
+                    return RayResult.BLOCKED_BLOCK;
                 }
+            }
+            return RayResult.CLEAR;
+        }
+
+        ClipContext ctx = new ClipContext(
+                worldStart, worldEnd,
+                ClipContext.Block.COLLIDER,
+                ClipContext.Fluid.NONE,
+                net.minecraft.world.phys.shapes.CollisionContext.empty()
+        );
+
+        HitResult hit = level.clip(ctx);
+        if (hit.getType() != HitResult.Type.MISS) {
+            double hitDist = hit.getLocation().distanceTo(worldStart);
+            if (hitDist < targetDist - 0.1) {
+                return RayResult.BLOCKED_BLOCK;
             }
         }
 
+        return RayResult.CLEAR;
+    }
 
-        if (RadarConfig.DEBUG_BEAMS && level instanceof ServerLevel server) {
-            debugRay(server, start, end, result);
-        }
-
-        return result;
+    private boolean isAlly(HitResult hit, @Nullable dev.ryanhcode.sable.sublevel.SubLevel sl) {
+        if (ignoreList.isEmpty() || sl == null) return false;
+        String name = com.happysg.radar.compat.aeronautics.SableUtils.getSubLevelNamespace(sl);
+        return name != null && ignoreList.contains(name.toLowerCase(java.util.Locale.ROOT));
     }
 
     public Vec3 getCannonRayStart() {
@@ -206,20 +214,14 @@ public class WeaponFiringControl {
             return null;
 
         PitchOrientedContraptionEntity poce = cannonMount.getContraption();
-
-        if (Mods.VALKYRIENSKIES.isLoaded() && VS2Utils.isBlockInShipyard(level, cannonMount.getBlockPos())) {
-            if (poce != null) {
-                // toGlobalVector gives shipyard-global coords
-                Vec3 shipyardPos = poce.toGlobalVector(VecHelper.getCenterOf(BlockPos.ZERO), 1.0f);
-                return VS2Utils.getWorldVec(level, shipyardPos);
-            }
-            return VS2Utils.getWorldVec(level, cannonMount.getBlockPos().getCenter());
+        Vec3 pos;
+        if (poce == null) {
+            pos = cannonMount.getBlockPos().getCenter();
+        } else {
+            pos = poce.toGlobalVector(VecHelper.getCenterOf(BlockPos.ZERO), 1.0f);
         }
 
-        if (poce == null)
-            return cannonMount.getBlockPos().getCenter();
-
-        return poce.toGlobalVector(VecHelper.getCenterOf(BlockPos.ZERO), 1.0f);
+        return PhysicsHandler.getWorldVec(level, pos);
     }
 
 
@@ -449,9 +451,6 @@ public class WeaponFiringControl {
         if (!binoMode && activetrack == null && target == null) {
             return false;
         }
-        if(!binoMode && activetrack == null){
-            boolean networkcast = true;
-        }
         if(!targetingConfig.lineOfSight()) return true;
 
         float height;
@@ -468,7 +467,7 @@ public class WeaponFiringControl {
         if (isOutOfKnownRange(target)) return false;
         if (!isPointInShootableRange(target)) return false;
 
-        LOGGER.warn("LOS DBG: trackCat={} entityType={} height={} blocksHigh={} target={}", activetrack != null ? activetrack.trackCategory() : "null", activetrack != null ? activetrack.entityType() : "null", height, blocksHigh, target);
+
         for (int h = blocksHigh - 1; h >= 0; h--) {
             // center of each block, top-first
             Vec3 end = target.add(0, h + 0.5, 0);
@@ -500,14 +499,24 @@ public class WeaponFiringControl {
     // LOS query for network controller
     public boolean hasLineOfSightTo(@Nullable RadarTrack track, boolean requireLos) {
         if (!isMountStateOk()) return false;
-        if (!requireLos) return true;
-
         if (track == null) return false;
 
         Vec3 p = track.position();
         if (p == null) return false;
 
         if (!isPointInShootableRange(p)) return false;
+
+        // Always check safe zones, even if LOS is not required
+        if (!safeZones.isEmpty()) {
+            Vec3 start = getCannonRayStart();
+            for (com.happysg.radar.block.behavior.networks.config.SafeZone zone : safeZones) {
+                if (zone != null && zone.clips(start, p, level)) {
+                    return false;
+                }
+            }
+        }
+
+        if (!requireLos) return true;
 
         long now = level.getGameTime();
         String key = track.getId();
@@ -568,38 +577,7 @@ public class WeaponFiringControl {
 
 
 
-    private void debugRay(ServerLevel server, Vec3 start, Vec3 end, RayResult result) {
 
-        float r, g, b;
-
-        switch (result) {
-            case CLEAR -> {  // GREEN
-                r = 0.0f; g = 1.0f; b = 0.0f;
-            }
-            case BLOCKED_BLOCK -> { // RED
-                r = 1.0f; g = 0.0f; b = 0.0f;
-            }
-            case BLOCKED_SAFEZONE -> { // YELLOW
-                r = 1.0f; g = 1.0f; b = 0.0f;
-            }
-            default -> {
-                r = 1.0f; g = 1.0f; b = 1.0f;
-            }
-        }
-
-        double dist = start.distanceTo(end);
-        Vec3 dir = end.subtract(start).normalize();
-
-        for (double d = 0; d < dist; d += 0.25) {
-            Vec3 p = start.add(dir.scale(d));
-
-            server.sendParticles(
-                    new DustParticleOptions(new Vector3f(r, g, b), 1.0f),
-                    p.x, p.y, p.z,
-                    1, 0, 0, 0, 0
-            );
-        }
-    }
 
 
     public void clearBinoTarget() {
@@ -616,9 +594,11 @@ public class WeaponFiringControl {
         stopFireCannon();
     }
 
-    public void setSafeZones(List<AABB> safeZones) {
-        LOGGER.debug("setSafeZones() → {} zones", safeZones.size());
+    public void setSafeZones(List<com.happysg.radar.block.behavior.networks.config.SafeZone> safeZones) {
         this.safeZones = safeZones;
+    }
+    public void setIgnoreList(java.util.Set<String> ignoreList) {
+        this.ignoreList = ignoreList;
     }
     public  Entity getEntityByUUID(net.minecraft.server.level.ServerLevel level, UUID uuid) {
         return level.getEntity(uuid);
@@ -689,7 +669,7 @@ public class WeaponFiringControl {
                 try {
                     id = Long.parseLong(activetrack.id());
                 } catch (NumberFormatException ignored) {
-                    LOGGER.warn("WFC: invalid VS2 ship id={}, stopping fire", activetrack.id());
+
                     stopFireCannon();
                     return;
                 }
@@ -697,7 +677,7 @@ public class WeaponFiringControl {
                     targetShip = getShipByUUID(sl, activetrack.id());
                     targetShipId = id;
                     if (targetShip == null) {
-                        LOGGER.warn("WFC: VS2 ship id={} not loaded, stopping fire", id);
+
                         stopFireCannon();
                         return;
                     }
@@ -716,7 +696,7 @@ public class WeaponFiringControl {
                     targetEntity = null;
                     targetShip = null;
                 } else {
-                    LOGGER.warn("WFC: entity id={} not loaded/alive, stopping fire", activetrack.id());
+
                     stopFireCannon();
                     return;
                 }
@@ -724,7 +704,7 @@ public class WeaponFiringControl {
         }
 
         if (!binoMode && activetrack != null && targetEntity == null && targetShip == null && activetrack.trackCategory() != TrackCategory.AERONAUTICS) {
-            LOGGER.warn("WFC: no resolved target entity/ship, stopping fire (trackId={})", activetrack.id());
+
             stopFireCannon();
             return;
         }
@@ -738,7 +718,17 @@ public class WeaponFiringControl {
                 target = activetrack.position();
             }
         }else {
-            target = binoTargetPos.getCenter();
+            if (binoMode && binoTargetPos != null) {
+                if (binoTargetSubLevelId != null) {
+                    if (com.happysg.radar.compat.Mods.SABLE.isLoaded()) {
+                        target = com.happysg.radar.compat.aeronautics.SableUtils.getWorldVec(level, binoTargetPos, binoTargetSubLevelId);
+                    } else {
+                        target = binoTargetPos.getCenter();
+                    }
+                } else {
+                    target = binoTargetPos.getCenter();
+                }
+            }
         }
 
 
@@ -753,7 +743,7 @@ public class WeaponFiringControl {
 
         if (targetEntity != null) {
             if (!targetEntity.isAlive()) {
-                LOGGER.warn("WFC: target entity died mid-tick, stopping fire (id={})", targetEntity.getUUID());
+
                 stopFireCannon();
                 return;
             }
@@ -763,14 +753,14 @@ public class WeaponFiringControl {
             try {
                 id = Long.parseLong(activetrack.id());
             } catch (NumberFormatException ignored) {
-                LOGGER.warn("WFC: invalid VS2 ship id on recheck={}, stopping fire", activetrack.id());
+
                 stopFireCannon();
                 return;
             }
 
             Ship live = VSGameUtilsKt.getShipObjectWorld(serverLevel).getLoadedShips().getById(id);
             if (live == null) {
-                LOGGER.warn("WFC: VS2 ship id={} unloaded mid-tick, stopping fire", id);
+
                 stopFireCannon();
                 return;
             }
@@ -785,16 +775,11 @@ public class WeaponFiringControl {
         Vec3 targetVel;
         Vec3 targetAccel;
         boolean lag;
-        if(PhysicsHandler.isBlockInShipyard(level,cannonMount.getBlockPos())){
+        if(PhysicsHandler.isBlockInShipyard(cannonMount)){
             shooterVel = PhysicsHandler.getShipVelocity(level, cannonMount.getBlockPos());
-            String shipId = PhysicsHandler.getShipId(level, cannonMount.getBlockPos());
+            String shipId = PhysicsHandler.getShipId(cannonMount);
             if (shipId != null) {
-                try {
-                    long idLong = Long.parseLong(shipId);
-                    shooterAccel = AccelerationTracker.getAccelerationPerTick2(idLong, shooterVel);
-                } catch (NumberFormatException e) {
-                    shooterAccel = AccelerationTracker.getAccelerationPerTick2(UUID.fromString(shipId), shooterVel);
-                }
+                shooterAccel = AccelerationTracker.getAccelerationPerTick2(shipId, shooterVel);
             } else {
                 shooterAccel = Vec3.ZERO;
             }
@@ -803,11 +788,22 @@ public class WeaponFiringControl {
             shooterAccel = Vec3.ZERO;
         }
         if (binoMode && binoTargetPos != null) {
-            target = binoTargetPos.getCenter();
-            targetVel = Vec3.ZERO;
+            if (binoTargetSubLevelId != null) {
+                if (com.happysg.radar.compat.Mods.SABLE.isLoaded()) {
+                    target = com.happysg.radar.compat.aeronautics.SableUtils.getWorldVec(level, binoTargetPos, binoTargetSubLevelId);
+                    targetVel = com.happysg.radar.compat.aeronautics.SableUtils.getVelocity(level, binoTargetPos, binoTargetSubLevelId);
+                } else {
+                    target = binoTargetPos.getCenter();
+                    targetVel = Vec3.ZERO;
+                }
+            } else {
+                target = binoTargetPos.getCenter();
+                targetVel = Vec3.ZERO;
+            }
             targetAccel = Vec3.ZERO;
         } else if (activetrack != null) {
-            target = activetrack.position();
+            long timeDelta = level.getGameTime() - activetrack.scannedTime();
+            target = activetrack.position().add(activetrack.velocity().scale(timeDelta));
             targetVel = activetrack.velocity();
             targetAccel = AccelerationTracker.getLastAccelerationPerTick2(activetrack.getId());
             
@@ -822,7 +818,7 @@ public class WeaponFiringControl {
         if (!binoMode && activetrack != null) {
             Vec3 testPos = activetrack.position();
             if (!checkLineOfSight(testPos)) {
-                LOGGER.warn("WFC: LOS blocked to track, stopping fire (id={})", activetrack.id());
+
                 stopFireCannon();
                 return;
             }
@@ -836,7 +832,13 @@ public class WeaponFiringControl {
         }else {
             lag = true;
         }
-        // Calculate lead only when the radar scan is fresh or if it's the first time
+        // If not a physics structure and speed < 2 blocks/sec (0.1 blocks/tick), disable lead
+        boolean isAeronautics = activetrack != null && activetrack.trackCategory() == TrackCategory.AERONAUTICS;
+        if (!isAeronautics && targetVel.lengthSqr() < 0.01) {
+            targetVel = Vec3.ZERO;
+            targetAccel = Vec3.ZERO;
+        }
+
         CannonLead.LeadSolution lead = null;
         if (!CannonUtil.isLaserCannon(cannonContraption) && dist > noLeadDist) {
             // Optional: always recalculate lead for better accuracy, but base it on RAW radar data
@@ -900,7 +902,7 @@ public class WeaponFiringControl {
         Vec3 offsetAim = hasLeadSolution ? lead.aimPoint : solvePos;
         lastAimPoint = offsetAim;
 
-        double stableEps = (activetrack != null && activetrack.trackCategory() == TrackCategory.AERONAUTICS) ? 1.0 : RadarConfig.server().autoFireStabilityEps.get();
+        double stableEps = (PhysicsHandler.isBlockInShipyard(level, cannonMount.getBlockPos())) ? 2.0 : RadarConfig.server().autoFireStabilityEps.get();
 
         if (lastOffsetAim == null || lastOffsetAim.distanceTo(offsetAim) > stableEps) {
             aimStableTicks = 0;
@@ -912,7 +914,7 @@ public class WeaponFiringControl {
         Double desiredPitch = null;
         Double desiredYaw = null;
 
-        if (Mods.VALKYRIENSKIES.isLoaded() && PhysicsHandler.isBlockInShipyard(level, cannonMount.getBlockPos())) {
+        if (PhysicsHandler.isBlockInShipyard(level, cannonMount.getBlockPos())) {
             long now = level.getGameTime();
             boolean needSolve = cachedVS2Angles == null
                     || (now - cachedVS2SolveTick) >= VS2_SOLVE_INTERVAL
@@ -920,7 +922,11 @@ public class WeaponFiringControl {
                     || cachedVS2AimTarget.distanceToSqr(offsetAim) > VS2_AIM_CHANGE_THRESHOLD * VS2_AIM_CHANGE_THRESHOLD;
 
             if (needSolve) {
-                cachedVS2Angles = VS2CannonTargeting.calculatePitchAndYawVS2(cannonMount, offsetAim, serverLevel);
+                if (Mods.VALKYRIENSKIES.isLoaded() && VS2Utils.isBlockInShipyard(level, cannonMount.getBlockPos())) {
+                    cachedVS2Angles = VS2CannonTargeting.calculatePitchAndYawVS2(cannonMount, offsetAim, serverLevel);
+                } else if (Mods.SABLE.isLoaded() || Mods.AERONAUTICS.isLoaded() || Mods.SIMULATED.isLoaded()) {
+                    cachedVS2Angles = SableCannonTargeting.calculatePitchAndYawSable(cannonMount, offsetAim, serverLevel);
+                }
                 cachedVS2AimTarget = offsetAim;
                 cachedVS2SolveTick = now;
             }
@@ -990,8 +996,7 @@ public class WeaponFiringControl {
     }
 
     public void setTarget(Vec3 target, TargetingConfig config, RadarTrack track, WeaponNetworkData.WeaponGroupView view){
-        LOGGER.warn("setTarget() → new target={} config={} atTick={}",
-                target, config, level != null ? level.getGameTime() : -1L);
+
         if (target == null) {
             this.target = null;
             this.activetrack = null;
@@ -1024,7 +1029,7 @@ public class WeaponFiringControl {
         this.targetShip = null;
     }
 
-    public void setBinoTarget(@Nullable BlockPos binoTarget, TargetingConfig config,
+    public void setBinoTarget(@Nullable BlockPos binoTarget, @Nullable java.util.UUID subLevelId, TargetingConfig config,
                               WeaponNetworkData.WeaponGroupView view, boolean reset) {
 
         this.view = view;
@@ -1034,6 +1039,7 @@ public class WeaponFiringControl {
         if (reset || binoTarget == null) {
             this.binoMode = false;
             this.binoTargetPos = null;
+            this.binoTargetSubLevelId = null;
             this.target = null;
             stopFireCannon();
             return;
@@ -1041,6 +1047,7 @@ public class WeaponFiringControl {
 
         this.binoMode = true;
         this.binoTargetPos = binoTarget.immutable();
+        this.binoTargetSubLevelId = subLevelId;
         if (level != null) this.lastTargetTick = level.getGameTime();
     }
 
@@ -1051,14 +1058,10 @@ public class WeaponFiringControl {
         if (aim == null) return false;
 
         Vec3 start = getCannonRayStart();
-        for (AABB zone : safeZones) {
+        for (com.happysg.radar.block.behavior.networks.config.SafeZone zone : safeZones) {
             if (zone == null) continue;
 
-            if (zone.contains(start) || zone.contains(aim)) {
-                return true;
-            }
-
-            if (zone.clip(start, aim).isPresent()) {
+            if (zone.clips(start, aim, level)) {
                 return true;
             }
         }
@@ -1088,7 +1091,7 @@ public class WeaponFiringControl {
     private void tryFireCannon() {
         if(this.fireController == null) return;
         fireController.setPowered(true);
-        LOGGER.debug("firing!");
+
 
     }
 

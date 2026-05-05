@@ -2,7 +2,7 @@ plugins {
     id 'idea'
     id 'maven-publish'
     id 'net.neoforged.moddev' version '2.0.78'
-        id 'org.jetbrains.kotlin.jvm'
+    id 'org.jetbrains.kotlin.jvm'
 }
 
 String buildNumber = System.getenv("GITHUB_RUN_NUMBER")
@@ -92,6 +92,14 @@ repositories {
         dirs 'lib'
     }
     maven { url = "https://maven.ryanhcode.dev/releases" }
+    maven {
+        name = 'GeckoLib'
+        url = 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/'
+        content {
+            includeGroupByRegex("software\\.bernie.*")
+            includeGroup("com.eliotlash.mclib")
+        }
+    }
 }
 
 dependencies {
@@ -99,16 +107,16 @@ dependencies {
         transitive = false
     }
     implementation("com.tterrag.registrate:Registrate:${registrate_version}")
-    implementation("net.createmod.ponder:Ponder-NeoForge-${minecraft_version}:${ponder_version}")
+    implementation("net.createmod.ponder:ponder-neoforge:${ponder_version}")
     implementation("dev.engine-room.flywheel:flywheel-neoforge-${minecraft_version}:${flywheel_version}")
     
     // Mixin Extras
     compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:0.4.1"))
     implementation("io.github.llamalad7:mixinextras-neoforge:0.4.1")
 
-    // CBC (Create Big Cannons) - using specific version IDs for NeoForge 1.21.1
-    implementation("maven.modrinth:create-big-cannons:mFWvbnn8")
-    implementation("maven.modrinth:rpl:hZ6B2Z0x")
+    // CBC (Create Big Cannons)
+    implementation("maven.modrinth:create-big-cannons:${cbc_version}")
+    implementation("maven.modrinth:rpl:${rpl_version}")
 
     // JEI
     // compileOnly("mezz.jei:jei-${minecraft_version}-neoforge-api:${jei_version}")
@@ -129,8 +137,9 @@ dependencies {
     // compileOnly("org.valkyrienskies:valkyrienskies-121-neoforge:${vs2_version}") { transitive = false }
 
     // Create Aeronautics & Simulated physics engine
-    implementation("dev.eriksonn.aeronautics:aeronautics-neoforge-1.21.1:1.1.0")
-    implementation("dev.simulated_team.simulated:simulated-neoforge-1.21.1:1.1.0")
+    implementation("dev.eriksonn.aeronautics:aeronautics-neoforge-1.21.1:${aeronautics_version}")
+    implementation("dev.simulated_team.simulated:simulated-neoforge-1.21.1:${aeronautics_version}")
+    implementation("dev.ryanhcode.sable:sable-neoforge-1.21.1:${aeronautics_version}")
 
     // Other local jars
     implementation fileTree(dir: 'lib', include: ['*.jar', '*.jcl'])
@@ -141,6 +150,9 @@ dependencies {
     
     // Explicitly add missing architectury for 6.0.10
     implementation("dev.architectury:architectury-neoforge:13.0.8")
+    
+    // GeckoLib
+    implementation "software.bernie.geckolib:geckolib-neoforge-${minecraft_version}:${geckolib_version}"
 }
 
 configurations.all {
@@ -188,15 +200,9 @@ tasks.named('jar', Jar).configure {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+    options.compilerArgs << "-AoutRefMapFile=${projectDir}/src/main/resources/createradar.refmap.json"
 }
 
 kotlin {
     jvmToolchain(21)
 }
-
-
-
-
-
-
-

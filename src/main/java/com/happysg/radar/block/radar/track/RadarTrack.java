@@ -11,6 +11,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.valkyrienskies.core.api.ships.Ship;
+import dev.ryanhcode.sable.sublevel.SubLevel;
 
 import javax.annotation.Nullable;
 import java.util.UUID;
@@ -24,10 +25,11 @@ public class RadarTrack {
     private final TrackCategory trackCategory;
     private final String entityType;
     private final float entityheight;
+    private final String name;
 
     private Vec3 vector;
 
-    public RadarTrack(String id, Vec3 position, Vec3 velocity, long scannedTime, TrackCategory trackCategory, String entityType, float entityheight) {
+    public RadarTrack(String id, Vec3 position, Vec3 velocity, long scannedTime, TrackCategory trackCategory, String entityType, float entityheight, String name) {
         this.id = id;
         this.position = position;
         this.velocity = velocity;
@@ -35,12 +37,22 @@ public class RadarTrack {
         this.trackCategory = trackCategory;
         this.entityType = entityType;
         this.entityheight = entityheight;
-
+        this.name = name;
     }
 
     public RadarTrack(Entity entity) {
-        this(entity.getUUID().toString(), com.happysg.radar.compat.PhysicsHandler.getWorldVec(entity.level(), entity.position()), entity.getDeltaMovement(), entity.level().getGameTime(),
-                TrackCategory.get(entity), entity.getType().toString(), entity.getBbHeight());
+        this(entity.getUUID().toString(), com.happysg.radar.compat.PhysicsHandler.getWorldVec(entity.level(), entity.position()),
+                entity.getDeltaMovement().add(com.happysg.radar.compat.PhysicsHandler.getShipVelocity(entity.level(), entity.blockPosition())),
+                entity.level().getGameTime(),
+                TrackCategory.get(entity), entity.getType().toString(), entity.getBbHeight(), entity.getName().getString());
+    }
+
+    public RadarTrack(SubLevel sl, Level level) {
+        this(sl.getUniqueId().toString(),
+                sl.boundingBox() != null ? sl.boundingBox().toMojang().getCenter() : Vec3.ZERO,
+                com.happysg.radar.compat.aeronautics.AeronauticsUtils.getSubLevelVelocity(level, net.minecraft.core.BlockPos.ZERO), // dummy pos for vel
+                level.getGameTime(),
+                TrackCategory.AERONAUTICS, "Sable:sublevel", 10.0f, com.happysg.radar.compat.aeronautics.SableUtils.getSubLevelNamespace(sl));
     }
 
     public Color getColor() {
@@ -74,8 +86,8 @@ public class RadarTrack {
                 tag.getLong("scannedTime"),
                 TrackCategory.values()[tag.getInt("Category")],
                 tag.getString("entityType"),
-                tag.getFloat("eh")
-
+                tag.getFloat("eh"),
+                tag.getString("name")
         );
     }
 
@@ -93,13 +105,14 @@ public class RadarTrack {
         tag.putInt("Category", trackCategory.ordinal());
         tag.putString("entityType", entityType);
         tag.putFloat("eh", entityheight );
+        tag.putString("name", name);
 
         return tag;
     }
 
     public void updateRadarTrack(Entity entity) {
         position = com.happysg.radar.compat.PhysicsHandler.getWorldVec(entity.level(), entity.position());
-        velocity = entity.getDeltaMovement();
+        velocity = entity.getDeltaMovement().add(com.happysg.radar.compat.PhysicsHandler.getShipVelocity(entity.level(), entity.blockPosition()));
         scannedTime = entity.level().getGameTime();
     }
 
@@ -107,6 +120,14 @@ public class RadarTrack {
         position = RadarTrackUtil.getPosition(ship);
         velocity = RadarTrackUtil.getVelocity(ship);
         scannedTime = level.getGameTime();
+    }
+
+    public void updateRadarTrack(SubLevel sl, net.minecraft.world.level.Level level) {
+        if (sl.boundingBox() != null) position = sl.boundingBox().toMojang().getCenter();
+        velocity = com.happysg.radar.compat.aeronautics.AeronauticsUtils.getSubLevelVelocity(level, net.minecraft.core.BlockPos.ZERO);
+        scannedTime = level.getGameTime();
+        // note: name is final, but if it changed we might need to handle it. 
+        // For now, we assume namespace is stable.
     }
 
     public String getId() {
@@ -145,6 +166,10 @@ public class RadarTrack {
 
     public String getEntityType() {
         return entityType;
+    }
+
+    public String getName() {
+        return name;
     }
 
 

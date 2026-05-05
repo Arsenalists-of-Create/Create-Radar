@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "G": {
+      "item": "create:goggles"
+    },
+    "F": {
+      "item": "create_radar:radar_filter_item"
+    }
+  },
+  "pattern": [
+    "GF"
+  ],
+  "result": { "id": "create_radar:radar_goggles"
+  },
+  "show_notification": true
+}
+
+

@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "J": {
+      "item": "create_radar:shield_jammer"
+    },
+    "E": {
+      "item": "create:electron_tube"
+    }
+  },
+  "pattern": [
+    "E",
+    "J"
+  ],
+  "result": { "id": "create_radar:hoj_guidance"
+  },
+  "show_notification": true
+}
+
+

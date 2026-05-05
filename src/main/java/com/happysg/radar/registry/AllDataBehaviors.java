@@ -1,7 +1,7 @@
 package com.happysg.radar.registry;
 
 import com.happysg.radar.CreateRadar;
-//import com.happysg.radar.block.behavior.linking.PitchLinkBehavior;
+
 import com.happysg.radar.block.controller.track.TrackLinkBehavior;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
@@ -15,7 +15,7 @@ import com.happysg.radar.block.datalink.screens.AbstractDataLinkScreen;
 import com.happysg.radar.block.monitor.MonitorRadarBehavior;
 import org.jetbrains.annotations.NotNull;
 
-//import com.simibubi.create.foundation.utility.RegisteredObjects; //Deprecated
+
 import net.minecraft.core.registries.BuiltInRegistries;
 import com.simibubi.create.api.registry.SimpleRegistry;
 import com.tterrag.registrate.util.nullness.NonNullConsumer;
@@ -69,7 +69,7 @@ public class AllDataBehaviors {
                     NetworkData data = NetworkData.get(sl);
                     NetworkData.Group group = data.getOrCreateGroup(sl.dimension(), targetPos);
                     if (data.canAttachRadar(group, sourcePos, NetworkData.RadarKind.BEARING)) {
-                        data.attachRadar(group, sourcePos, NetworkData.RadarKind.BEARING);
+                        data.attachRadar(group, sourcePos, sl.dimension().location(), NetworkData.RadarKind.BEARING);
                         data.addDataLinkToGroup(group, context.blockEntity().getBlockPos(), sourcePos);
                     }
                 }

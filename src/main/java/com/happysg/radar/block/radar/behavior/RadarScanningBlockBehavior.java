@@ -26,6 +26,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.valkyrienskies.core.api.ships.Ship;
+import dev.ryanhcode.sable.sublevel.SubLevel;
 
 import java.lang.reflect.Method;
 import java.util.*;
@@ -133,9 +134,24 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             scannedSubLevels.clear();
             scannedProjectiles.clear();
 
-            scanForEntityTracks();
-            if (Mods.VALKYRIENSKIES.isLoaded() && scanVS2)
-                scanForVSTracks();
+            Level worldLevel = PhysicsHandler.getWorldLevel(blockEntity);
+            Level localLevel = blockEntity.getLevel();
+
+            // Scan parent world
+            if (worldLevel != null) {
+                scanForEntityTracks(worldLevel, scanPos);
+                if (Mods.VALKYRIENSKIES.isLoaded() && scanVS2)
+                    scanForVSTracks(worldLevel, scanPos);
+                if (Mods.SABLE.isLoaded() && scanAeronautics)
+                    scanForSableTracks(worldLevel, scanPos);
+            }
+
+            // Scan local sub-level if on a ship
+            if (localLevel != null && localLevel != worldLevel) {
+                Vec3 localPos = Vec3.atCenterOf(blockEntity.getBlockPos());
+                scanForEntityTracks(localLevel, localPos);
+                // Usually VS2 doesn't nest ships in sub-levels, but we could scan if needed
+            }
 
             updateRadarTracks();
 
@@ -157,24 +173,35 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
 
     private void updateRadarTracks() {
-        net.minecraft.world.level.Level level = blockEntity.getLevel();
+        net.minecraft.world.level.Level level = PhysicsHandler.getWorldLevel(blockEntity);
+        if (level == null )return;
         boolean isServer = level instanceof net.minecraft.server.level.ServerLevel;
         net.minecraft.server.level.ServerLevel sl = isServer ? (net.minecraft.server.level.ServerLevel) level : null;
-        if (level == null )return;
 
 
         for (Entity entity : scannedEntities) {
-            Vec3 testPos = entity.position();
+            Vec3 worldPos = PhysicsHandler.getWorldVec(entity.level(), entity.position());
+            Vec3 testPos = worldPos;
+            
             if (entity.getBbWidth() > 1 || entity.getBbHeight() > 1) {
-               AABB bb = entity.getBoundingBox();
+               // Approximate closest point to beam in world space
+               AABB bb = entity.getBoundingBox(); // This might be local BB if on ship
+               // We need world-space BB for distance check
+               Vec3 min = PhysicsHandler.getWorldVec(entity.level(), new Vec3(bb.minX, bb.minY, bb.minZ));
+               Vec3 max = PhysicsHandler.getWorldVec(entity.level(), new Vec3(bb.maxX, bb.maxY, bb.maxZ));
+               AABB worldBB = new AABB(min, max);
+
                testPos = new Vec3(
-                   Math.max(bb.minX, Math.min(scanPos.x, bb.maxX)),
-                   Math.max(bb.minY, Math.min(scanPos.y, bb.maxY)),
-                   Math.max(bb.minZ, Math.min(scanPos.z, bb.maxZ))
+                   Math.max(worldBB.minX, Math.min(scanPos.x, worldBB.maxX)),
+                   Math.max(worldBB.minY, Math.min(scanPos.y, worldBB.maxY)),
+                   Math.max(worldBB.minZ, Math.min(scanPos.z, worldBB.maxZ))
                );
             }
 
             if (entity.isAlive() && isInFovAndRange(testPos)) {
+                if (blockEntity.getLevel() != null && blockEntity.getLevel().getGameTime() % 60 == 0) {
+                     com.happysg.radar.CreateRadar.getLogger().info("Radar {} found entity {} at {}", blockEntity.getBlockPos(), entity.getName().getString(), testPos);
+                }
                 radarTracks.compute(entity.getUUID().toString(), (id, track) -> {
                     if (track == null) return new RadarTrack(entity);
                     track.updateRadarTrack(entity);
@@ -212,6 +239,29 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             }
         }
 
+        for (Object obj : scannedSubLevels) {
+            if (!(obj instanceof SubLevel subLevel)) continue;
+            net.minecraft.world.phys.AABB bb = subLevel.boundingBox().toMojang();
+            if (bb == null) continue;
+
+            Vec3 testPos = bb.getCenter();
+            if (bb.getXsize() > 4 || bb.getZsize() > 4) {
+                testPos = new Vec3(
+                        Math.max(bb.minX, Math.min(scanPos.x, bb.maxX)),
+                        Math.max(bb.minY, Math.min(scanPos.y, bb.maxY)),
+                        Math.max(bb.minZ, Math.min(scanPos.z, bb.maxZ))
+                );
+            }
+
+            if (isInFovAndRange(testPos)) {
+                radarTracks.compute(subLevel.getUniqueId().toString(), (id, track) -> {
+                    if (track == null) return new RadarTrack(subLevel, level);
+                    track.updateRadarTrack(subLevel, level);
+                    return track;
+                });
+            }
+        }
+
     }
 
     private boolean isInFovAndRange(Vec3 target) {
@@ -229,7 +279,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         angleToEntity = (angleToEntity + 360) % 360;
 
         // Account for ship rotation
-        double shipYaw = PhysicsHandler.getShipYawDeg(blockEntity.getLevel(), blockEntity.getBlockPos());
+        double shipYaw = PhysicsHandler.getShipYawDeg(blockEntity);
         double actualRadarAngle = (angle + 180 + shipYaw) % 360;
         actualRadarAngle = (actualRadarAngle + 360) % 360;
 
@@ -276,15 +326,13 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return dead;
         });
     }
-    private void scanForEntityTracks() {
-        net.minecraft.world.level.Level level = blockEntity.getLevel();
+    private void scanForEntityTracks(Level level, Vec3 center) {
         if (level == null) return;
-
 
         boolean scanAll =
                 scanPlayers && scanContraptions && scanMobs && scanAnimals && scanProjectiles && scanItems;
 
-        for (AABB aabb : splitAABB(getRadarAABB(level), 256)) {
+        for (AABB aabb : splitAABB(getRadarAABB(level, center), 256)) {
             if (scanAll) {
                 scannedEntities.addAll(level.getEntities(null, aabb));
                 continue;
@@ -316,20 +364,30 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         }
     }
 
-    private void scanForVSTracks() {
-        net.minecraft.world.level.Level level = blockEntity.getLevel();
+    private void scanForVSTracks(Level level, Vec3 center) {
         if (level == null || !Mods.VALKYRIENSKIES.isLoaded()) return;
 
-
-        Level finalLevel = level;
-        splitAABB(getRadarAABB(finalLevel), 256).forEach(aabb ->
-                VS2Utils.getLoadedShips(finalLevel, aabb).forEach(scannedShips::add));
+        splitAABB(getRadarAABB(level, center), 256).forEach(aabb ->
+                VS2Utils.getLoadedShips(level, aabb).forEach(scannedShips::add));
 
         scannedShips.remove(VS2Utils.getShipManagingPos(blockEntity));
     }
 
-    private AABB getRadarAABB(Level level) {
-        Vec3 center = PhysicsHandler.getScanningVec(blockEntity);
+    private void scanForSableTracks(Level level, Vec3 center) {
+        if (level == null || !Mods.SABLE.isLoaded()) return;
+        net.minecraft.world.phys.AABB aabb = getRadarAABB(level, center);
+        for (SubLevel subLevel : com.happysg.radar.compat.aeronautics.SableUtils.getLoadedSubLevels(level)) {
+            net.minecraft.world.phys.AABB slAABB = subLevel.boundingBox().toMojang();
+            if (slAABB != null && slAABB.intersects(aabb)) {
+                scannedSubLevels.add(subLevel);
+            }
+        }
+    }
+
+    private AABB getRadarAABB(Level level, Vec3 center) {
+        if (blockEntity.getLevel() != null && blockEntity.getLevel().getGameTime() % 60 == 0) {
+            com.happysg.radar.CreateRadar.getLogger().info("Radar {} AABB Center: {}, Level used for scan: {}", blockEntity.getBlockPos(), center, level != null ? level.dimension().location() : "null");
+        }
         double x = center.x();
         double y = center.y();
         double z = center.z();

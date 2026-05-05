@@ -215,65 +215,19 @@ public class MonitorScreen extends Screen {
 
     private void renderSweep(GuiGraphics gg, MonitorBlockEntity monitor, IRadar radar, float partialTicks) {
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
-        float a = (radar.getGlobalAngle() + 360f) % 360f;
-        Direction monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
-        Direction radarFacing = Direction.NORTH;
-        if (radarFacing == null) return;
-        float facingOffset = radarFacingOffsetDeg(monitorFacing, radarFacing);
-        float screenAngle = (a + facingOffset) % 360f;
 
-        if (monitor.getController().getShip() == null && radar.getRadarType().equals("spinning")) {
-            monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
-            radarFacing = Direction.NORTH;
-            if (radarFacing == null) return;
-            MonitorRenderer.ConeDir2D cone = MonitorRenderer.ConeDir2D.NORTH;
-            switch (cone) {
-                case NORTH -> screenAngle = 0 + radar.getGlobalAngle();
-                case DOWN -> screenAngle = 180 + radar.getGlobalAngle();
-                case LEFT -> screenAngle = 90 + radar.getGlobalAngle();
-                case RIGHT -> screenAngle = 270 + radar.getGlobalAngle();
-                default -> screenAngle = 30;
-            }
-
-        } else if (monitor.getController().getShip() != null && radar.getRadarType().equals("spinning")) { // spinning radar on a ship
-            // Calculate the current angle
-            monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
-            Vec3 facingVec = new Vec3(monitorFacing.getStepX(), monitorFacing.getStepY(), monitorFacing.getStepZ());
-            Vec3 angleVec = PhysicsHandler.getWorldVecDirectionTransform(facingVec, monitor.getController());
-            screenAngle = (float) Math.toDegrees(Math.atan2(angleVec.x, angleVec.z));
-                screenAngle = screenAngle + radar.getGlobalAngle();
-            if (monitorFacing == Direction.NORTH || monitorFacing == Direction.SOUTH) {
-                screenAngle = (screenAngle + 180) % 360;
-            }
-
-            // Normalize to positive angles
-            screenAngle = (screenAngle + 360 + 180) % 360;
+        MonitorBlockEntity controller = monitor.getController();
+        float angle = controller.cachedRadarAngle;
+        if (controller.cachedRadarRunning) {
+            angle += controller.cachedRadarSpeed * partialTicks;
         }
+        angle = (angle + 360f) % 360f;
 
-        if (radar.renderRelativeToMonitor() && monitor.getController().getShip() != null && !radar.getRadarType().equals("spinning")) {  // plane radar on a ship
-            // Plane radar on ship - cone stays fixed, tracks rotate inside
-            monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
-            radarFacing = radar.getradarDirection();
-            if (radarFacing == null) return;
-
-            MonitorRenderer.ConeDir2D cone = MonitorRenderer.ConeDir2D.NORTH;
-            switch (cone) {
-                case NORTH -> screenAngle = 0;
-                case DOWN -> screenAngle = 180;
-                case LEFT -> screenAngle = 90;
-                case RIGHT -> screenAngle = 270;
-                default -> screenAngle = 30;
-            }
-        }
-
-        if (radar.renderRelativeToMonitor() && monitor.getController().getShip() != null
-                && radar.getRadarType().equals("spinning")) {
-            float shipYawDeg = monitor.getController().getShipYawDeg();
-            screenAngle += -(shipYawDeg + 180f);
-        }
-
-        int cx = left + uiSize / 2;
-        int cy = top + uiSize / 2;
+        Direction facing = controller.getBlockState().getValue(MonitorBlock.FACING);
+        float screenAngle = angle;
+        if (facing == Direction.NORTH) screenAngle += 180;
+        else if (facing == Direction.EAST) screenAngle += 90;
+        else if (facing == Direction.WEST) screenAngle -= 90;
 
         RenderSystem.enableBlend();
         gg.setColor(color.getRedAsFloat(), color.getGreenAsFloat(), color.getBlueAsFloat(), ALPHA_SWEEP);

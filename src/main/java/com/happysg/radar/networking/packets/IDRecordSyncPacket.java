@@ -35,9 +35,9 @@ public class IDRecordSyncPacket extends SimplePacketBase {
     public void write(FriendlyByteBuf buffer) {
         buffer.writeInt(records.size());
         for (IDRecord record : records) {
-            buffer.writeLong(record.shipId());
+            buffer.writeLong(record.idInt());
             buffer.writeUtf(record.secretID());
-            buffer.writeUtf(record.shipSlug());
+            buffer.writeUtf(record.name());
         }
     }
 

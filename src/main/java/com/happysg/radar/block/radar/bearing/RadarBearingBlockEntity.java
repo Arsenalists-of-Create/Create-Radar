@@ -37,6 +37,16 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     @Override
+    public void initialize() {
+        super.initialize();
+        if (com.happysg.radar.compat.Mods.SABLE.isLoaded() || com.happysg.radar.compat.Mods.AERONAUTICS.isLoaded() || com.happysg.radar.compat.Mods.SIMULATED.isLoaded()) {
+            if (PhysicsHandler.isBlockInShipyard(this)) {
+                com.happysg.radar.block.radar.behavior.SableRadarRegistry.register(level.dimension().location(), worldPosition, this);
+            }
+        }
+    }
+
+    @Override
     public boolean isRunning() { return running; }
 
     @Override
@@ -58,7 +68,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     @Override
-    public BlockPos getWorldPos() { return getBlockPos(); }
+    public BlockPos getWorldPos() { return PhysicsHandler.getWorldPos(this); }
 
     @Override
     public net.minecraft.world.phys.Vec3 getRadarCenterPos(float partialTicks) {
@@ -73,7 +83,8 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
             }
             if (count > 0) {
                 net.minecraft.world.phys.Vec3 localCenter = sum.scale(1.0 / count);
-                return movedContraption.toGlobalVector(localCenter, partialTicks);
+                net.minecraft.world.phys.Vec3 subLevelCenter = movedContraption.toGlobalVector(localCenter, partialTicks);
+                return PhysicsHandler.getWorldVec(level, subLevelCenter);
             }
         }
         return PhysicsHandler.getWorldVec(this);
@@ -149,6 +160,11 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
             scanningBehavior.setAngle(effectiveAngle);
             scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
 
+            // Keep registry up-to-date while on a ship
+            if (com.happysg.radar.compat.Mods.SABLE.isLoaded() || com.happysg.radar.compat.Mods.AERONAUTICS.isLoaded() || com.happysg.radar.compat.Mods.SIMULATED.isLoaded()) {
+                com.happysg.radar.block.radar.behavior.SableRadarRegistry.register(level.dimension().location(), worldPosition, this);
+            }
+
             // Update range based on dish count
             if (!level.isClientSide) {
                 int dishCount = getDishCount();
@@ -189,5 +205,11 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     public boolean isAttachedTo(AbstractContraptionEntity entity) {
         return movedContraption != null && movedContraption.equals(entity);
+    }
+
+    @Override
+    public void destroy() {
+        super.destroy();
+        com.happysg.radar.block.radar.behavior.SableRadarRegistry.unregister(level.dimension().location(), worldPosition);
     }
 }

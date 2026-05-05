@@ -27,6 +27,7 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
     
     public com.happysg.radar.block.behavior.networks.WeaponFiringControl wfc;
     private Vec3 lastMuzzlePos = null;
+    private List<com.happysg.radar.block.behavior.networks.config.SafeZone> safeZones = new java.util.ArrayList<>();
 
     public AutoPitchControllerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -67,7 +68,11 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
     public void setLastTargetPos(Vec3 pos) { this.lastTargetPos = pos; }
     public boolean isArtillery() { return false; }
     public FiringControl getFiringControl() { return firingControl; }
-    public boolean canEngageTrack(Object track, boolean requireLos) { return true; }
+    public boolean canEngageTrack(Object track, boolean requireLos) {
+        if (!(track instanceof com.happysg.radar.block.radar.track.RadarTrack rt)) return false;
+        if (wfc == null) return true;
+        return wfc.hasLineOfSightTo(rt, requireLos);
+    }
     public void setAndAcquireTrack(@Nullable Object track, Object cfg) {
         if (track instanceof com.happysg.radar.block.radar.track.RadarTrack rt) {
              setRunning(true);
@@ -80,12 +85,21 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         }
     }
 
-    public void setAndAcquirePos(BlockPos pos, Object cfg, boolean reset) {
+    public void setAndAcquirePos(BlockPos pos, @Nullable java.util.UUID subLevelId, Object cfg, boolean reset) {
         setLastTargetPos(pos.getCenter());
         setRunning(true);
+        if (wfc != null) {
+            wfc.setBinoTarget(pos, subLevelId, (com.happysg.radar.block.behavior.networks.config.TargetingConfig) cfg, wfc.view, reset);
+        }
     }
 
-    public void setSafeZones(List<AABB> zones) {}
+    public void setSafeZones(List<com.happysg.radar.block.behavior.networks.config.SafeZone> zones) {
+        this.safeZones = zones;
+        if (wfc != null) wfc.setSafeZones(zones);
+    }
+    public void setIgnoreList(java.util.Set<String> ignoreList) {
+        if (wfc != null) wfc.setIgnoreList(ignoreList);
+    }
     public void markMountDirtyExternal() {}
     public void onRelevantNeighborChanged(BlockPos pos) {}
 
@@ -122,6 +136,7 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
             
             if (wfc == null || wfc.cannonMount != cm) {
                 wfc = new com.happysg.radar.block.behavior.networks.WeaponFiringControl(this, cm, autoyaw);
+                wfc.setSafeZones(safeZones);
             }
             wfc.refreshControllers();
             wfc.tick();
@@ -132,6 +147,47 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
             if (level.getGameTime() % 60 == 0) {
                  com.happysg.radar.CreateRadar.getLogger().warn("AUTO CONTROLLER {}: No mount found at orientation {}", getBlockPos(), getBlockState().getValue(AutoPitchControllerBlock.HORIZONTAL_FACING));
             }
+        }
+    }
+    
+    @Override
+    protected void write(net.minecraft.nbt.CompoundTag compound, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.write(compound, provider, clientPacket);
+        compound.putDouble("TargetAngle", internalTargetAngle);
+        compound.putBoolean("Running", isRunning);
+        compound.putDouble("MinAngle", minAngleDeg);
+        compound.putDouble("MaxAngle", maxAngleDeg);
+        if (lastTargetPos != null) {
+            compound.putDouble("TargetX", lastTargetPos.x);
+            compound.putDouble("TargetY", lastTargetPos.y);
+            compound.putDouble("TargetZ", lastTargetPos.z);
+        }
+        if (!safeZones.isEmpty()) {
+            net.minecraft.nbt.ListTag list = new net.minecraft.nbt.ListTag();
+            for (com.happysg.radar.block.behavior.networks.config.SafeZone sz : safeZones) {
+                list.add(sz.toTag());
+            }
+            compound.put("SafeZones", list);
+        }
+    }
+
+    @Override
+    protected void read(net.minecraft.nbt.CompoundTag compound, net.minecraft.core.HolderLookup.Provider provider, boolean clientPacket) {
+        super.read(compound, provider, clientPacket);
+        internalTargetAngle = compound.getDouble("TargetAngle");
+        isRunning = compound.getBoolean("Running");
+        minAngleDeg = compound.getDouble("MinAngle");
+        maxAngleDeg = compound.getDouble("MaxAngle");
+        if (compound.contains("TargetX")) {
+            lastTargetPos = new Vec3(compound.getDouble("TargetX"), compound.getDouble("TargetY"), compound.getDouble("TargetZ"));
+        }
+        if (compound.contains("SafeZones", net.minecraft.nbt.Tag.TAG_LIST)) {
+            safeZones.clear();
+            net.minecraft.nbt.ListTag list = compound.getList("SafeZones", net.minecraft.nbt.Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+                safeZones.add(com.happysg.radar.block.behavior.networks.config.SafeZone.fromTag(list.getCompound(i)));
+            }
+            if (wfc != null) wfc.setSafeZones(safeZones);
         }
     }
 

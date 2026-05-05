@@ -46,6 +46,7 @@ public class NetworkData extends SavedData {
         public final Set<BlockPos> monitorEndpoints = new HashSet<>();
 
         public @Nullable BlockPos radarPos;
+        public @Nullable ResourceLocation radarDim;
         public @Nullable RadarKind radarKind;
 
         /** Controllers linked into this filter group. */
@@ -239,6 +240,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
             if (g.contains("RadarPos")) {
                 group.radarPos = net.minecraft.nbt.NbtUtils.readBlockPos(g, "RadarPos").orElse(net.minecraft.core.BlockPos.ZERO);
+                if (g.contains("RadarDim")) group.radarDim = ResourceLocation.parse(g.getString("RadarDim"));
                 group.radarKind = RadarKind.valueOf(g.getString("RadarKind"));
                 data.endpointToFilterer.put(key(dim, group.radarPos), groupKey);
             }
@@ -335,6 +337,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
             if (group.radarPos != null && group.radarKind != null) {
                 g.put("RadarPos", NbtUtils.writeBlockPos(group.radarPos));
+                if (group.radarDim != null) g.putString("RadarDim", group.radarDim.toString());
                 g.putString("RadarKind", group.radarKind.name());
             }
 
@@ -483,11 +486,12 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
     }
 
 
-    public void attachRadar(Group group, BlockPos radarPos, RadarKind kind) {
+    public void attachRadar(Group group, BlockPos radarPos, ResourceLocation radarDim, RadarKind kind) {
         ResourceKey<Level> dim = group.key.dim();
         String filtererKey = key(dim, group.key.filtererPos());
 
         group.radarPos = radarPos;
+        group.radarDim = radarDim;
         group.radarKind = kind;
 
         endpointToFilterer.put(key(dim, radarPos), filtererKey);

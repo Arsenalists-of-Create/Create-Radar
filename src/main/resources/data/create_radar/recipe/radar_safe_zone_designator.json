@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "I": {
+      "item": "minecraft:iron_nugget"
+    },
+    "T": {
+      "item": "create:transmitter"
+    },
+    "S": {
+      "tag": "c:plates/iron"
+    }
+  },
+  "pattern": [
+    "I",
+    "T",
+    "S"
+  ],
+  "result": { "id": "create_radar:radar_safe_zone_designator"
+  },
+  "show_notification": true
+}
+
+

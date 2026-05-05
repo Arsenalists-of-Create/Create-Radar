@@ -27,17 +27,47 @@ public class BinocularHandler {
 
         if (!(mc.player.getMainHandItem().getItem() instanceof Binoculars)) return;
 
-        boolean isActionPressed = ModKeybinds.SCOPE_ACTION.isDown();
-        if (isActionPressed != wasActionPressed) {
-            ModMessages.sendToServer(new FirePacket(isActionPressed));
-            wasActionPressed = isActionPressed;
-        }
+        boolean isUsing = mc.player.isUsingItem() && mc.player.getUseItem().getItem() instanceof Binoculars;
+        boolean isFirePressed = ModKeybinds.BINO_FIRE.isDown() || ModKeybinds.SCOPE_ACTION.isDown();
 
-        if (isActionPressed) {
-            HitResult hit = mc.hitResult;
-            if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
-                BlockPos pos = ((BlockHitResult) hit).getBlockPos();
-                ModMessages.sendToServer(new RaycastPacket(pos));
+        if (isUsing) {
+            net.minecraft.world.phys.Vec3 eyePosition = mc.player.getEyePosition();
+            net.minecraft.world.phys.Vec3 lookVector = mc.player.getViewVector(1.0F);
+            net.minecraft.world.phys.Vec3 reachVector = eyePosition.add(lookVector.x * 512.0, lookVector.y * 512.0, lookVector.z * 512.0);
+
+            BlockHitResult hitResult;
+                java.util.UUID subLevelId = null;
+
+                if (com.happysg.radar.compat.Mods.SABLE.isLoaded()) {
+                    com.happysg.radar.compat.aeronautics.SableUtils.ClipResult result = com.happysg.radar.compat.aeronautics.SableUtils.multiLevelClip(
+                            mc.level, eyePosition, reachVector,
+                            net.minecraft.world.level.ClipContext.Block.OUTLINE,
+                            net.minecraft.world.level.ClipContext.Fluid.NONE, mc.player);
+                    hitResult = result.hit();
+                    if (result.subLevel() != null) {
+                        subLevelId = result.subLevel().getUniqueId();
+                    }
+                } else {
+                    hitResult = mc.level.clip(new net.minecraft.world.level.ClipContext(eyePosition, reachVector, net.minecraft.world.level.ClipContext.Block.OUTLINE, net.minecraft.world.level.ClipContext.Fluid.NONE, mc.player));
+                }
+
+                if (isFirePressed != wasFirePressed) {
+                    if (hitResult.getType() == HitResult.Type.BLOCK) {
+                        ModMessages.sendToServer(new FirePacket(isFirePressed, hitResult.getBlockPos(), subLevelId));
+                    } else {
+                        ModMessages.sendToServer(new FirePacket(isFirePressed));
+                    }
+                    wasFirePressed = isFirePressed;
+                }
+
+                if (hitResult.getType() == HitResult.Type.BLOCK) {
+                    BlockPos pos = hitResult.getBlockPos();
+                    ModMessages.sendToServer(new RaycastPacket(pos, subLevelId));
+                }
+            } else {
+                if (wasFirePressed) {
+                ModMessages.sendToServer(new FirePacket(false));
+                wasFirePressed = false;
             }
         }
     }

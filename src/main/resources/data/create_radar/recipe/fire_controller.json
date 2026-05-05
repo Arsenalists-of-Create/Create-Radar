@@ -1,0 +1,22 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "R": {
+      "item": "minecraft:redstone"
+    },
+    "B": {
+      "item": "create:brass_casing"
+    }
+  },
+  "pattern": [
+    " R ",
+    "RBR",
+    " R "
+  ],
+  "result": { "id": "create_radar:fire_controller"
+  },
+  "show_notification": true
+}
+
+

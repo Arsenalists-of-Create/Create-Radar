@@ -6,7 +6,7 @@
       "item": "create:mechanical_bearing"
     },
     "B": {
-      "tag": "forge:plates/iron"
+      "tag": "c:plates/iron"
     },
     "E": {
       "item": "create:electron_tube"

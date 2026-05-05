@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "D": {
+      "item": "minecraft:diamond"
+    },
+    "I": {
+      "item": "minecraft:iron_block"
+    },
+    "E": {
+      "item": "create:electron_tube"
+    }
+  },
+  "pattern": [
+    " E ",
+    "IDI",
+    " I "
+  ],
+  "result": { "id": "create_radar:shield_jammer"
+  },
+  "show_notification": true
+}
+
+

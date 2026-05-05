@@ -72,7 +72,4 @@ public class IdentificationFilterScreen extends AbstractSimiScreen {
     }
 
 
-        //TODO add state save
-
-
 }

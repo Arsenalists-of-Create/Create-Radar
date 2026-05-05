@@ -16,7 +16,8 @@ import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import org.jetbrains.annotations.Nullable;
+import com.happysg.radar.block.radar.track.RadarTrack;
+import net.minecraft.server.level.ServerLevel;
 import rbasamoyai.createbigcannons.munitions.AbstractCannonProjectile;
 import rbasamoyai.createbigcannons.munitions.fuzes.FuzeItem;
 
@@ -31,10 +32,50 @@ public class GuidedFuzeItem extends FuzeItem {
     @Override
     public InteractionResult useOn(UseOnContext pContext) {
         BlockPos clickedPos = pContext.getClickedPos();
-        if (pContext.getLevel().getBlockEntity(clickedPos) instanceof NetworkFiltererBlockEntity blockEntity) {
-            pContext.getItemInHand().getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag().put("monitorPos", NbtUtils.writeBlockPos(blockEntity.getBlockPos()));
+        Level level = pContext.getLevel();
+        net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(clickedPos);
+        ItemStack stack = pContext.getItemInHand();
+        CompoundTag tag = stack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
+
+        if (be instanceof NetworkFiltererBlockEntity filterer) {
+            tag.put("monitorPos", NbtUtils.writeBlockPos(filterer.getBlockPos()));
+            if (level instanceof ServerLevel sl) {
+                tag.putString("monitorDim", sl.dimension().location().toString());
+            }
+            stack.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(tag));
+            if (pContext.getPlayer() != null)
+                pContext.getPlayer().displayClientMessage(Component.translatable(CreateRadar.MODID + ".guided_fuze.linked_monitor", filterer.getBlockPos().toShortString()), true);
             return InteractionResult.SUCCESS;
         }
+
+        if (be instanceof MonitorBlockEntity monitor) {
+            MonitorBlockEntity controller = monitor.getController();
+            if (level instanceof ServerLevel sl) {
+                BlockPos filtererPos = com.happysg.radar.block.behavior.networks.NetworkData.get(sl).getFiltererForEndpoint(sl.dimension(), controller.getBlockPos());
+                if (filtererPos != null) {
+                    tag.put("monitorPos", NbtUtils.writeBlockPos(filtererPos));
+                    tag.putString("monitorDim", sl.dimension().location().toString());
+                    
+                    // Snapshot the target coordinates if one is selected
+                    if (controller.selectedEntity != null && controller.activetrack != null) {
+                        Vec3 pos = controller.activetrack.position();
+                        tag.putDouble("targetX", pos.x);
+                        tag.putDouble("targetY", pos.y);
+                        tag.putDouble("targetZ", pos.z);
+                        tag.putString("targetId", controller.selectedEntity);
+                        if (pContext.getPlayer() != null)
+                            pContext.getPlayer().displayClientMessage(Component.translatable(CreateRadar.MODID + ".guided_fuze.target_locked"), true);
+                    } else {
+                        if (pContext.getPlayer() != null)
+                            pContext.getPlayer().displayClientMessage(Component.translatable(CreateRadar.MODID + ".guided_fuze.linked_monitor", filtererPos.toShortString()), true);
+                    }
+                    
+                    stack.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(tag));
+                    return InteractionResult.SUCCESS;
+                }
+            }
+        }
+
         return super.useOn(pContext);
     }
 
@@ -53,52 +94,69 @@ public class GuidedFuzeItem extends FuzeItem {
             return detonate;
 
         BlockPos monitorPos = net.minecraft.nbt.NbtUtils.readBlockPos(tag, "monitorPos").orElse(net.minecraft.core.BlockPos.ZERO);
-        if (!(projectile.level().getBlockEntity(monitorPos) instanceof NetworkFiltererBlockEntity monitor))
-            return detonate;
+        Level monitorLevel = projectile.level();
+        if (tag.contains("monitorDim") && projectile.level().getServer() != null) {
+            net.minecraft.resources.ResourceKey<Level> dimKey = net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION, net.minecraft.resources.ResourceLocation.parse(tag.getString("monitorDim")));
+            ServerLevel sl = projectile.level().getServer().getLevel(dimKey);
+            if (sl != null) monitorLevel = sl;
+        }
 
-        if (monitor.activeTrackCache == null)
-            return detonate;
+        NetworkFiltererBlockEntity monitor = (monitorLevel.getBlockEntity(monitorPos) instanceof NetworkFiltererBlockEntity m) ? m : null;
 
-        Vec3 target = monitor.activeTrackCache.getPosition();
+        Vec3 target = null;
+        if (tag.contains("targetId") && monitor != null) {
+            String id = tag.getString("targetId");
+            // Try to find the specific target in the monitor's group
+            target = monitor.getCachedTracks().stream()
+                    .filter(t -> id.equals(t.getId()))
+                    .map(RadarTrack::position)
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        if (target == null && tag.contains("targetX")) {
+            target = new Vec3(tag.getDouble("targetX"), tag.getDouble("targetY"), tag.getDouble("targetZ"));
+        }
+
+        if (target == null && monitor != null && monitor.activeTrackCache != null) {
+            target = monitor.activeTrackCache.getPosition();
+        }
+
         if (target == null)
             return detonate;
 
-        // --- store initial heading at the top of the arc (first descending tick) ---
-        if (!tag.contains("initialHeadingYaw")) {
-            double yaw = yawFromHorizontal(vel);
-            tag.putDouble("initialHeadingYaw", yaw);
-        }
-
-        // --- enforce +/- 30 degree seeker cone from initial heading ---
-        double initialYaw = tag.getDouble("initialHeadingYaw");
+        // --- Guidance Logic ---
         Vec3 toTarget = target.subtract(projectile.position());
+        
+        // Optional: Simple Lead Calculation
+        // If we have a monitor, we can try to get the target's velocity for better accuracy
+        Vec3 targetVel = Vec3.ZERO;
+        if (monitor != null && monitor.getCachedTracks() != null) {
+             String id = tag.getString("targetId");
+             targetVel = monitor.getCachedTracks().stream()
+                     .filter(t -> id != null && id.equals(t.getId()))
+                     .map(RadarTrack::velocity)
+                     .findFirst()
+                     .orElse(Vec3.ZERO);
+        }
+        
+        // Predict target position based on travel time
+        double dist = toTarget.length();
+        double speed = Math.max(0.1, vel.length());
+        double timeToTarget = dist / speed;
+        Vec3 predictedTarget = target.add(targetVel.scale(timeToTarget));
+        Vec3 desiredDir = predictedTarget.subtract(projectile.position()).normalize();
 
-        double targetYaw = yawFromHorizontal(toTarget);
-        double yawDelta = wrapDegrees(targetYaw - initialYaw);
-
-        if (Math.abs(yawDelta) > RadarConfig.server().guidedFuzeMaxSeekDegrees.get()) {
-            // i refuse to seek anything outside the initial +/- 30 degree cone
+        // --- seeker cone (90 degrees from current velocity) ---
+        // we don't want the shell to try to pull a 180 and fly backwards
+        Vec3 currentDir = vel.normalize();
+        double cosAngle = currentDir.dot(desiredDir);
+        if (cosAngle < 0) { // More than 90 degrees away
             return detonate;
         }
 
-        // --- your existing "valid" gating ---
-        double dx = projectile.position().x - target.x;
-        double dz = projectile.position().z - target.z;
-        double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
-
-        if (Math.abs(projectile.position().y - target.y) > horizontalDistance / 2 || tag.getBoolean("valid")) {
-            tag.putBoolean("valid", true);
-        } else {
-            return detonate;
-        }
-
-        // --- turn limiting (keeps it from snapping around) ---
-        Vec3 desiredDir = toTarget.normalize();
-
-        double speed = Math.max(0.01, vel.length());
-        Vec3 currentDir = speed < 1e-6 ? desiredDir : vel.normalize();
-
-        double maxTurnDeg = RadarConfig.server().guidedFuzeMaxDegreesPerTick.get(); // i tune this for how "small" the adjustments should feel
+        // --- turn limiting ---
+        double maxTurnDeg = RadarConfig.server().guidedFuzeMaxDegreesPerTick.get();
         double maxTurnRad = Math.toRadians(maxTurnDeg);
 
         double dot = currentDir.dot(desiredDir);
@@ -108,13 +166,14 @@ public class GuidedFuzeItem extends FuzeItem {
         Vec3 newDir;
         if (angle <= maxTurnRad) {
             newDir = desiredDir;
-        } else if (angle >= Math.PI - 1e-6) {
-            Vec3 fallbackAxis = Math.abs(currentDir.y) < 0.99 ? new Vec3(0, 1, 0) : new Vec3(1, 0, 0);
-            Vec3 axis = currentDir.cross(fallbackAxis).normalize();
-            newDir = rotateAroundAxis(currentDir, axis, maxTurnRad);
         } else {
-            Vec3 axis = currentDir.cross(desiredDir).normalize();
-            newDir = rotateAroundAxis(currentDir, axis, maxTurnRad);
+            Vec3 axis = currentDir.cross(desiredDir);
+            if (axis.lengthSqr() < 1e-9) {
+                // Parallel or anti-parallel (anti-parallel handled by cosAngle < 0)
+                newDir = desiredDir;
+            } else {
+                newDir = rotateAroundAxis(currentDir, axis.normalize(), maxTurnRad);
+            }
         }
 
         projectile.setDeltaMovement(newDir.scale(speed));
@@ -161,9 +220,15 @@ public class GuidedFuzeItem extends FuzeItem {
     @Override
     public void appendHoverText(ItemStack pStack, net.minecraft.world.item.Item.TooltipContext context, List<Component> pTooltipComponents, net.minecraft.world.item.TooltipFlag pIsAdvanced) {
         super.appendHoverText(pStack, context, pTooltipComponents, pIsAdvanced);
-        if (pStack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag().contains("monitorPos")) {
-            BlockPos monitorPos = net.minecraft.nbt.NbtUtils.readBlockPos(pStack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag(), "monitorPos").orElse(net.minecraft.core.BlockPos.ZERO);
+        CompoundTag tag = pStack.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
+        if (tag.contains("monitorPos")) {
+            BlockPos monitorPos = net.minecraft.nbt.NbtUtils.readBlockPos(tag, "monitorPos").orElse(net.minecraft.core.BlockPos.ZERO);
             pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.linked_monitor").append(monitorPos.toShortString()));
+            if (tag.contains("targetId")) {
+                pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.target_locked").withStyle(net.minecraft.ChatFormatting.GOLD));
+            } else if (tag.contains("targetX")) {
+                pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.coords_locked").withStyle(net.minecraft.ChatFormatting.AQUA));
+            }
         } else
             pTooltipComponents.add(Component.translatable(CreateRadar.MODID + ".guided_fuze.no_monitor"));
     }

@@ -6,14 +6,15 @@ import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.arad.jammer.shield.ShieldJammerBlock;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
 import com.happysg.radar.block.controller.firing.FireControllerBlock;
+import com.happysg.radar.block.controller.id.IdentificationTransponder;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlock;
-
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorBlock;
 import com.happysg.radar.block.mount.SmartMountBlock;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
+import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
 import com.happysg.radar.block.radar.radome.CannonMountRadomeBlock;
 import com.happysg.radar.block.radar.receiver.AbstractRadarFrame;
 import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
@@ -21,6 +22,9 @@ import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlock;
 import com.happysg.radar.block.radar.sonar.panel.SonarPanel;
+import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlock;
+import com.happysg.radar.block.arad.arad_guidance.AntiRadarGuidanceBlock;
+import com.happysg.radar.block.arad.hoj_guidance.HomeJamGuidanceBlock;
 import com.happysg.radar.block.siren.SirenBlock;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BuilderTransformers;
@@ -262,6 +266,54 @@ public class ModBlocks {
                     .properties(properties -> properties.noOcclusion())
                     .properties(p -> p.strength(0.8f))
                     .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+
+    public static final BlockEntry<RadarWarningReceiverBlock> RADAR_WARNING_RECEIVER =
+            REGISTRATE.block("radar_warning_receiver", RadarWarningReceiverBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+
+    public static final BlockEntry<AntiRadarGuidanceBlock> ANTI_RADAR_GUIDANCE =
+            REGISTRATE.block("arad_guidance", AntiRadarGuidanceBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+
+    public static final BlockEntry<HomeJamGuidanceBlock> HOJ_GUIDANCE =
+            REGISTRATE.block("hoj_guidance", HomeJamGuidanceBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+
+    public static final BlockEntry<StationaryRadarBlock> PLANE_RADAR =
+            REGISTRATE.block("plane_radar", StationaryRadarBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .addLayer(() -> RenderType::cutout)
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .blockstate((c, p) -> p.horizontalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+
+    public static final BlockEntry<IdentificationTransponder> IDENTIFICATION_TRANSPONDER =
+            REGISTRATE.block("identification_transponder", IdentificationTransponder::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .blockstate((c, p) -> p.simpleBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
                     .simpleItem()
                     .register();
 

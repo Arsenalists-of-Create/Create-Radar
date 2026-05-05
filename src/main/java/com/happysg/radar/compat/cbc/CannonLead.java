@@ -181,13 +181,21 @@ public class CannonLead {
         Vec3 targetVelRel = targetVelPerTick.subtract(shooterVelAtFire);
         Vec3 targetAccelRel = targetAccelPerTick2.subtract(shooterAccelPerTick2);
 
-        // If target isn't moving, just aim directly at it (still compute yaw/pitch)
+        // If target isn't moving, just aim directly at it but with gravity compensation
         if (!targetMoving) {
             Vec3 to = targetPosNow.subtract(shooterPosAtFire);
             double yaw = Math.atan2(to.z, to.x);
-            double horiz = Math.sqrt(to.x * to.x + to.z * to.z);
-            double pitch = Math.atan2(to.y, Math.max(1.0e-6, horiz));
-            return new LeadSolution(targetPosNow, Math.toDegrees(pitch), yaw, 0);
+            
+            double pitchDeg = 0;
+            List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, targetPosNow, level);
+            if (pitchRoots != null && !pitchRoots.isEmpty()) {
+                pitchDeg = pitchRoots.get(0);
+            } else {
+                // Fallback to direct LOS if no ballistic solution
+                double horiz = Math.sqrt(to.x * to.x + to.z * to.z);
+                pitchDeg = Math.toDegrees(Math.atan2(to.y, Math.max(1.0e-6, horiz)));
+            }
+            return new LeadSolution(targetPosNow, pitchDeg, yaw, 0);
         }
 
         // Initial guess: horizontal distance / muzzle speed
@@ -282,8 +290,7 @@ public class CannonLead {
 
         double muzzleSpeedPerTick = CannonUtil.getInitialVelocity(cannon, level);
         if (muzzleSpeedPerTick <= 0.0) {
-            LOGGER.debug("[LEAD] muzzleSpeedPerTick={} (no ammo/invalid state?) cannon={} mountPos={}",
-                    muzzleSpeedPerTick, cannon.getClass().getSimpleName(), mount.getBlockPos());
+
             return null;
         }
 
@@ -307,13 +314,21 @@ public class CannonLead {
         Vec3 relPos0 = targetPosAtFire.subtract(shooterPosAtFire);
         Vec3 relVel = targetVelAtFire.subtract(shooterVelAtFire);
 
-        // If target isn't moving (or effectively not), just do a direct aim solve
+        // If target isn't moving (or effectively not), just do a direct aim solve with gravity compensation
         if (!targetMoving) {
             Vec3 to = targetPosAtFire.subtract(shooterPosAtFire);
             double yaw = Math.atan2(to.z, to.x);
-            double horiz = Math.sqrt(to.x * to.x + to.z * to.z);
-            double pitch = Math.atan2(to.y, Math.max(1.0e-6, horiz));
-            return new LeadSolution(targetPosAtFire, Math.toDegrees(pitch), yaw, 0);
+            
+            double pitchDeg = 0;
+            List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, targetPosAtFire, level);
+            if (pitchRoots != null && !pitchRoots.isEmpty()) {
+                pitchDeg = pitchRoots.get(0);
+            } else {
+                // Fallback to direct LOS if no ballistic solution
+                double horiz = Math.sqrt(to.x * to.x + to.z * to.z);
+                pitchDeg = Math.toDegrees(Math.atan2(to.y, Math.max(1.0e-6, horiz)));
+            }
+            return new LeadSolution(targetPosAtFire, pitchDeg, yaw, 0);
         }
 
         // Initial time guess from horizontal distance / muzzle speed
@@ -411,7 +426,6 @@ public class CannonLead {
             directionalLead = leadVec.dot(targetVelPerTick.normalize());
         }
 
-        LOGGER.warn("Lead debug → totalLead={} directionalLead={} leadVec={} targetVelPerTick={}",
-                totalLead, directionalLead, leadVec, targetVelPerTick);
+
     }
 }

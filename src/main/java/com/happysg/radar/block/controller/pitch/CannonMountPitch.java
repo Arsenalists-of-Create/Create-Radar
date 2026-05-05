@@ -5,6 +5,7 @@ import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
+import com.happysg.radar.compat.cbc.SableCannonTargeting;
 import com.happysg.radar.compat.PhysicsHandler;
 import com.happysg.radar.compat.vs2.VS2Utils;
 import com.mojang.logging.LogUtils;
@@ -46,6 +47,9 @@ public class CannonMountPitch {
         }
 
         double tol = AutoPitchControllerBlockEntity.getCbcTolerance();
+        if (PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
+            tol += 1.0;
+        }
 
         double currentPitch = contraption.pitch;
         int invert = -cannonContraption.initialOrientation().getStepX() + cannonContraption.initialOrientation().getStepZ();
@@ -79,7 +83,7 @@ public class CannonMountPitch {
         }
 
         double r = CannonUtil.getMaxProjectileRangeBlocks(cannon, sl);
-        LOGGER.debug("RANGE DBG endpoint={} cannon={} range={} blocks", controller.getBlockPos(), cannon.getClass().getSimpleName(), r);
+
         return r;
     }
 
@@ -113,9 +117,14 @@ public class CannonMountPitch {
             }
         }
 
-        if (Mods.VALKYRIENSKIES.isLoaded() && PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
-            Vec3 mountPos = VS2Utils.getWorldVec(controller.getLevel(), mount.getBlockPos().getCenter());
-            List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, p, sl);
+        if (PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
+            List<List<Double>> angles = null;
+            if (Mods.VALKYRIENSKIES.isLoaded() && VS2Utils.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
+                angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, p, sl);
+            } else if (Mods.SABLE.isLoaded() || Mods.AERONAUTICS.isLoaded() || Mods.SIMULATED.isLoaded()) {
+                angles = SableCannonTargeting.calculatePitchAndYawSable(mount, p, sl);
+            }
+            
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
                 return false;
             }
@@ -132,7 +141,7 @@ public class CannonMountPitch {
 
     private void rotateCBC(CannonMountBlockEntity mount) {
         if (!controller.isRunningController()) {
-            LOGGER.debug("PITCH.rotateCBC aborted: isRunning=false");
+
             return;
         }
 
@@ -181,7 +190,7 @@ public class CannonMountPitch {
 
         double rpm = Math.abs(controller.getSpeed());
         if (rpm <= 0.0) return;
-        double stepDeg = rpm / 24.0;
+        double stepDeg = rpm / 4.0; // Increased further for high-speed ship tracking
 
         // Apply Pitch
         if (Math.abs(diff) <= nearDeadbandDeg) {
@@ -214,9 +223,15 @@ public class CannonMountPitch {
         }
 
         if (PhysicsHandler.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
-            List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
+            List<List<Double>> angles = null;
+            if (Mods.VALKYRIENSKIES.isLoaded() && VS2Utils.isBlockInShipyard(controller.getLevel(), controller.getBlockPos())) {
+                angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
+            } else if (Mods.SABLE.isLoaded() || Mods.AERONAUTICS.isLoaded() || Mods.SIMULATED.isLoaded()) {
+                angles = SableCannonTargeting.calculatePitchAndYawSable(mount, targetPos, serverLevel);
+            }
+            
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
-                LOGGER.warn("ping-3{}", angles);
+
                 return;
             }
 
@@ -230,11 +245,11 @@ public class CannonMountPitch {
         Vec3 origin = controller.getRayStart();
         List<Double> angles = CannonTargeting.calculatePitch(mount, origin, targetPos, serverLevel);
 
-        LOGGER.debug("PITCH.solve origin={} target={} mountPos={}", origin, targetPos, mount.getBlockPos());
+
         controller.setLastTargetPos(targetPos);
 
         if (angles == null || angles.isEmpty()) {
-            LOGGER.debug("PITCH.solve FAILED: no pitch roots");
+
             controller.setRunning(false);
             return;
         }
@@ -245,7 +260,7 @@ public class CannonMountPitch {
             controller.setInternalTargetAngle(angles.get(0));
         }
 
-        LOGGER.debug("PITCH.solve targetAngle={}", controller.getTargetAngle());
+
 
         controller.setRunning(true);
         controller.notifyUpdate();

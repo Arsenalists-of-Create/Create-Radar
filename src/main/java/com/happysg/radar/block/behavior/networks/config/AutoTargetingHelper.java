@@ -147,6 +147,10 @@ public final class AutoTargetingHelper {
     public static boolean isIgnoredByIdentification(RadarTrack track, @Nullable ServerLevel sl, Set<String> ignoreList) {
         if (track == null || ignoreList == null || ignoreList.isEmpty()) return false;
 
+        String trackName = track.getName();
+        if (trackName != null && !trackName.isBlank() && ignoreList.contains(trackName.toLowerCase(Locale.ROOT)))
+            return true;
+
         // PLAYER → username
         if (track.trackCategory() == TrackCategory.PLAYER) {
             if (sl == null) return false;
@@ -175,6 +179,24 @@ public final class AutoTargetingHelper {
 
                 return key != null && !key.isBlank() && ignoreList.contains(key.toLowerCase(Locale.ROOT));
             } catch (NumberFormatException ignored) {
+                return false;
+            }
+        }
+
+        // Aeronautics → ID via UUID
+        if (track.trackCategory() == TrackCategory.AERONAUTICS) {
+            try {
+                UUID uuid = UUID.fromString(track.getId());
+                long shipId = uuid.getMostSignificantBits();
+                var rec = com.happysg.radar.block.controller.id.IDManager.getIDRecordByShipId(shipId);
+                if (rec == null) return false;
+
+                String key = (rec.secretID() != null && !rec.secretID().isBlank())
+                        ? rec.secretID()
+                        : rec.name();
+
+                return key != null && !key.isBlank() && ignoreList.contains(key.toLowerCase(Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
                 return false;
             }
         }
