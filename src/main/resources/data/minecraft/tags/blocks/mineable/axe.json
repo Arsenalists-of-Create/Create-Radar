@@ -11,6 +11,9 @@
     "create_radar:auto_yaw_controller",
     "create_radar:auto_pitch_controller",
     "create_radar:fire_controller",
-    "create_radar:network_filterer"
+    "create_radar:network_filterer",
+    { "id": "create_radar:plane_radar", "required": false },
+    { "id": "create_radar:identification_transponder", "required": false },
+    { "id": "create_radar:radar_warning_receiver", "required": false }
   ]
 }
