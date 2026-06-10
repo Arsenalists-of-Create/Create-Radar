@@ -1,6 +1,5 @@
 package com.happysg.radar.datagen;
 
-import com.happysg.radar.compat.vs2.VS2CompatRegister;
 import com.happysg.radar.registry.ModBlocks;
 import com.tterrag.registrate.util.entry.BlockEntry;
 import java.util.ArrayList;
@@ -20,18 +19,11 @@ public final class ModBlockData {
                 ModBlocks.AUTO_YAW_CONTROLLER_BLOCK,
                 ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK,
                 ModBlocks.FIRE_CONTROLLER_BLOCK,
-                ModBlocks.NETWORK_FILTERER_BLOCK
+                ModBlocks.NETWORK_FILTERER_BLOCK,
+                ModBlocks.STATIONARY_RADAR,
+                ModBlocks.ID_BLOCK,
+                ModBlocks.RWR_BLOCK
         ));
-
-        if (VS2CompatRegister.STATIONARY_RADAR != null) {
-            blocks.add(VS2CompatRegister.STATIONARY_RADAR);
-        }
-        if (VS2CompatRegister.ID_BLOCK != null) {
-            blocks.add(VS2CompatRegister.ID_BLOCK);
-        }
-        if (VS2CompatRegister.RWR_BLOCK != null) {
-            blocks.add(VS2CompatRegister.RWR_BLOCK);
-        }
 
         return blocks;
     }

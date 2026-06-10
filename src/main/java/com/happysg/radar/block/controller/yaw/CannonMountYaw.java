@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.yaw;
 
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
+import com.happysg.radar.config.RadarConfig;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
@@ -60,7 +61,7 @@ public class CannonMountYaw {
 
         double effectiveTolerance = AutoYawControllerBlockEntity.getToleranceDeg();
         if (!lag) {
-            effectiveTolerance += 0.15;
+            effectiveTolerance += RadarConfig.server().targetLoosenAmount.get();
         }
 
         double desired = AutoYawControllerBlockEntity.wrap360(controller.getTargetAngle());

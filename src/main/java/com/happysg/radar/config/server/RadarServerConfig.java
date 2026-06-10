@@ -10,6 +10,8 @@ public class RadarServerConfig extends ConfigBase {
 
     public final ConfigInt radarLinkRange = i(128, 1, "radarLinkRange", "Maximum possible distance in blocks between radar links in blocks");
     public final ConfigInt monitorMaxSize = i(9, 1, "monitorMaxSize", "Maximum size of monitor MultiBlock");
+    public final ConfigFloat targetLoosenThreshold = f(3,0,"targetLoosenThreshold", "how fast a target must be moving before looser firing conditions are applied (value is in m/s)");
+    public final ConfigInt targetLoosenAmount = i(15,0,180,"targetLoosenAmount", "increases the tolerance used to determine if cannons are pointing at the target (degrees)");
    // public final ConfigFloat radarGuidanceTurnRate = f(.15f, 0f, 1f, "radarGuidanceTurnRate", "Turn rate of radar guidance for CBCMW Missiles");
     public final ConfigInt leadFiringDelay = i(0,0,1000,"firingDelay", "The firing delay used in leading calculation. Higher values may prove useful in laggy environments");
     public final ConfigFloat controllerPhysbearingMaxSpeed = f(25,2,25,"controllerPhysbearingMaxSpeed", "Increases the max Rotational speed of phys bearings controlled by Pitch/Yaw controllers");

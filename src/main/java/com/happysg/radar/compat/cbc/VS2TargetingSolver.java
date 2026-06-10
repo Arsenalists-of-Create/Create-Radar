@@ -37,6 +37,8 @@ public class VS2TargetingSolver {
     double initialPsi;
     double l;
     private final SubLevelAccess ship;
+    private Double preferredThetaDeg = null;
+    private Double preferredZetaDeg = null;
 
     private static final double TOLERANCE = 1e-3;
     private static final double MAX_MISS_DISTANCE_BLOCKS = 0.5;
@@ -61,6 +63,12 @@ public class VS2TargetingSolver {
         this.l = barrelLength;
 
 
+    }
+
+    public VS2TargetingSolver(Level level, double u, double drag, double g, double barrelLength, Vec3 mountPos, Vec3 targetPos, double initialTheta, double initialZeta, double initialPsi, SubLevelAccess ship, Double preferredThetaDeg, Double preferredZetaDeg) {
+        this(level, u, drag, g, barrelLength, mountPos, targetPos, initialTheta, initialZeta, initialPsi, ship);
+        this.preferredThetaDeg = preferredThetaDeg;
+        this.preferredZetaDeg = preferredZetaDeg;
     }
 
     private MultivariateFunction createFunction() {
@@ -142,7 +150,8 @@ public class VS2TargetingSolver {
     }
 
     RandomVectorGenerator randomVectorGenerator = new RandomVectorGenerator() {
-        private final Random random = new Random();
+//        private final Random random = new Random();
+        private final Random random = new Random(0L);
         @Override
         public double[] nextVector() {
             // Define your bounds:
@@ -205,7 +214,29 @@ public class VS2TargetingSolver {
                 }
             }
         }
-        results.sort(Comparator.comparingDouble(pair -> abs(pair.get(0))));
+//        results.sort(Comparator.comparingDouble(pair -> abs(pair.get(0))));
+        results.sort(this::compareSolutionsByContinuity);
         return results;
+    }
+
+    private int compareSolutionsByContinuity(List<Double> a, List<Double> b) {
+        return Double.compare(solutionScore(a), solutionScore(b));
+    }
+
+    private double solutionScore(List<Double> pair) {
+        double theta = pair.get(0);
+        double zeta = pair.get(1);
+
+        if (preferredThetaDeg == null || preferredZetaDeg == null) {
+            return abs(theta);
+        }
+
+        double pitchDelta = theta - preferredThetaDeg;
+        double yawDelta = shortestAngleDelta(preferredZetaDeg, zeta);
+        return pitchDelta * pitchDelta + yawDelta * yawDelta;
+    }
+
+    private static double shortestAngleDelta(double fromDeg, double toDeg) {
+        return ((toDeg - fromDeg + 540.0) % 360.0) - 180.0;
     }
 }

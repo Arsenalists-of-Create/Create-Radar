@@ -5,7 +5,6 @@ import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorInputHandler;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.computercraft.CCCompatRegister;
-import com.happysg.radar.compat.vs2.VS2CompatRegister;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.datagen.ModDataGenerators;
 import com.happysg.radar.ponder.RadarPonderPlugin;
@@ -83,9 +82,6 @@ public class CreateRadar {
         NeoForge.EVENT_BUS.addListener(CreateRadar::clientTick);
         NeoForge.EVENT_BUS.addListener(CreateRadar::onLoadWorld);
 
-        if (Mods.SABLE.isLoaded()) {
-            VS2CompatRegister.registerVS2();
-        }
         if (Mods.COMPUTERCRAFT.isLoaded())
             CCCompatRegister.registerPeripherals();
     }

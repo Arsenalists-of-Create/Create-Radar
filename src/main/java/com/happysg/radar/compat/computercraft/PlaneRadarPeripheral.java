@@ -4,8 +4,12 @@ import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.plane.StationaryRadarBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.vs2.VS2Utils;
 import dan200.computercraft.api.lua.LuaFunction;
 import dan200.computercraft.api.peripheral.GenericPeripheral;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -37,9 +41,13 @@ public class PlaneRadarPeripheral implements GenericPeripheral {
 
     @LuaFunction(mainThread = true)
     public static HashMap<String, Double> getPosition(StationaryRadarBlockEntity radarEntity){
-        return getMapFromVector(
-                radarEntity.getWorldPos().getCenter()
-        );
+        BlockPos blockPos = radarEntity.getWorldPos();
+        if((Mods.SABLE.isLoaded()) && PhysicsHandler.isBlockInPlotyard(radarEntity.getLevel(),blockPos)){
+            Vec3 pos = PhysicsHandler.getWorldPos(radarEntity.getLevel(),blockPos).getCenter();
+            return getMapFromVector(pos);
+        }else{
+            return getMapFromVector(blockPos.getCenter());
+        }
     }
 
 

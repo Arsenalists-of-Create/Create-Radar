@@ -1,6 +1,5 @@
 package com.happysg.radar.block.arad.rwr;
 
-import com.happysg.radar.compat.vs2.VS2CompatRegister;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.server.level.ServerLevel;
@@ -35,7 +34,7 @@ public class RadarWarningReceiverBlock extends Block implements IBE<RadarWarning
 
     @Override
     public BlockEntityType<? extends RadarWarningReceiverBlockEntity> getBlockEntityType() {
-        return VS2CompatRegister.RWR_BE.get();
+        return ModBlockEntityTypes.RWR_BE.get();
     }
 
 }

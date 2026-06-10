@@ -204,6 +204,47 @@ public class ModBlocks {
 
 
 
+    public static final BlockEntry<StationaryRadarBlock> STATIONARY_RADAR =
+            REGISTRATE.block("plane_radar", StationaryRadarBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .addLayer(() -> RenderType::cutout)
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .blockstate((c, p) -> p.horizontalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+
+    public static final BlockEntry<IdentificationTransponder> ID_BLOCK =
+            REGISTRATE.block("identification_transponder", IdentificationTransponder::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .blockstate((c, p) -> p.simpleBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
+                    .simpleItem()
+                    .register();
+
+    public static final BlockEntry<RadarWarningReceiverBlock> RWR_BLOCK =
+            REGISTRATE.block("radar_warning_receiver", RadarWarningReceiverBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(BlockBehaviour.Properties::noOcclusion)
+                    .properties(p -> p.strength(0.5f))
+                    .transform(axeOrPickaxe())
+                    .blockstate((c, p) -> p.getVariantBuilder(c.get())
+                            .partialState().with(RadarWarningReceiverBlock.ON_SHIP, false)
+                            .modelForState()
+                            .modelFile(p.models().getExistingFile(ResourceLocation.fromNamespaceAndPath("create_radar", "block/radar_warning_receiver_off")))
+                            .addModel()
+                            .partialState().with(RadarWarningReceiverBlock.ON_SHIP, true)
+                            .modelForState()
+                            .modelFile(p.models().getExistingFile(ResourceLocation.fromNamespaceAndPath("create_radar", "block/radar_warning_receiver_on")))
+                            .addModel())
+                    .item()
+                    .model((c, p) -> p.withExistingParent(c.getName(), ResourceLocation.fromNamespaceAndPath("create_radar", "block/radar_warning_receiver_off")))
+                    .build()
+                    .register();
+
     public static void register() {
         CreateRadar.getLogger().info("Registering blocks!");
 //        BlockStressValues.IMPACTS.register(RADAR_BEARING_BLOCK.get(), () -> 4d);

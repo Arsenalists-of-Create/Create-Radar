@@ -21,9 +21,6 @@ base {
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
-configurations {
-    sqliteRuntime
-}
 tasks.withType(JavaExec).configureEach {
     javaLauncher = javaToolchains.launcherFor {
         languageVersion = JavaLanguageVersion.of(21)
@@ -61,10 +58,7 @@ neoForge {
             programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
         }
 
-        configureEach {
-            systemProperty 'forge.logging.markers', 'REGISTRIES'
-            additionalRuntimeClasspathConfiguration.extendsFrom(configurations.getByName("sqliteRuntime"))
-        }
+
     }
 
     mods {
@@ -190,14 +184,6 @@ dependencies {
     //Aeronautics
     compileOnly("dev.eriksonn.aeronautics:aeronautics-neoforge-${minecraft_version}:${aeronautics_version}")
     localRuntime("dev.eriksonn.aeronautics:aeronautics-neoforge-${minecraft_version}:${aeronautics_version}")
-
-    sqliteRuntime 'org.xerial:sqlite-jdbc:3.45.1.0'
-    jarJar('org.xerial:sqlite-jdbc') {
-        version {
-            strictly '[3.45.0.0, 3.50.0.0)'
-            prefer '3.45.1.0'
-        }
-    }
 
     jarJar(api("dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_companion_version}"))
 }

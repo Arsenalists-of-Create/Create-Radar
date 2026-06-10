@@ -408,7 +408,7 @@ public class CannonLead {
             directionalLead = leadVec.dot(targetVelPerTick.normalize());
         }
 
-        LOGGER.warn("Lead debug -> totalLead={} directionalLead={} leadVec={} targetVelPerTick={}",
+        LOGGER.debug("Lead debug -> totalLead={} directionalLead={} leadVec={} targetVelPerTick={}",
                 totalLead, directionalLead, leadVec, targetVelPerTick);
     }
 }

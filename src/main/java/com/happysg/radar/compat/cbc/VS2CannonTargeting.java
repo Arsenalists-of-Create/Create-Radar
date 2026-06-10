@@ -63,12 +63,48 @@ public class VS2CannonTargeting {
         return calculatePitchAndYawVS2(level, chargePower, targetPos, mountPos, barrelLength, initialDirection, drag, gravity);
     }
 
+    public static List<List<Double>> calculatePitchAndYawVS2(CannonMountBlockEntity mount, Vec3 targetPos, ServerLevel level, Double preferredPitchDeg, Double preferredYawDeg) {
+        if (mount == null || targetPos == null) {
+            return null;
+        }
+
+        PitchOrientedContraptionEntity contraption = mount.getContraption();
+        if (contraption == null || !(contraption.getContraption() instanceof AbstractMountedCannonContraption cannonContraption)) {
+            return null;
+        }
+
+        Vec3 mountPos = mount.getBlockPos().getCenter();
+        int barrelLength = CannonUtil.getBarrelLength(cannonContraption);
+        Direction initialDirection = cannonContraption.initialOrientation();
+
+        if (CannonUtil.isLaserCannon(cannonContraption)) {
+            SubLevelAccess ship = SableCompanion.INSTANCE.getContaining(level, mountPos);
+            Vec3 localTarget = ship == null ? targetPos : toShipPosition(ship, targetPos);
+            return directAimToTarget(mountPos, localTarget);
+        }
+
+        float chargePower = CannonUtil.getInitialVelocity(cannonContraption, level);
+        double drag = CannonUtil.getProjectileDrag(cannonContraption, level);
+        double gravity = CannonUtil.getProjectileGravity(cannonContraption, level);
+
+        if (chargePower <= 0) {
+            return directAimToTarget(mountPos, targetPos);
+        }
+
+//        return calculatePitchAndYawVS2(level, chargePower, targetPos, mountPos, barrelLength, initialDirection, drag, gravity);
+        return calculatePitchAndYawVS2(level, chargePower, targetPos, mountPos, barrelLength, initialDirection, drag, gravity, preferredPitchDeg, preferredYawDeg);
+    }
+
     private static Vec3 toShipPosition(SubLevelAccess ship, Vec3 worldPos) {
         Vector3d local = ship.logicalPose().transformPositionInverse(new Vector3d(worldPos.x, worldPos.y, worldPos.z));
         return new Vec3(local.x(), local.y(), local.z());
     }
 
     public static List<List<Double>> calculatePitchAndYawVS2(Level level, double speed, Vec3 targetPos, Vec3 mountPos, int barrelLength, Direction initialDirection, double drag, double gravity) {
+        return calculatePitchAndYawVS2(level, speed, targetPos, mountPos, barrelLength, initialDirection, drag, gravity, null, null);
+    }
+
+    public static List<List<Double>> calculatePitchAndYawVS2(Level level, double speed, Vec3 targetPos, Vec3 mountPos, int barrelLength, Direction initialDirection, double drag, double gravity, Double preferredPitchDeg, Double preferredYawDeg) {
         SubLevelAccess ship = SableCompanion.INSTANCE.getContaining(level, mountPos);
         if (ship == null) {
             System.out.println("null");
@@ -100,7 +136,8 @@ public class VS2CannonTargeting {
             initialTheta = -z;
         }
 
-        VS2TargetingSolver targetingSolver = new VS2TargetingSolver(level, speed, drag, gravity, barrelLength, mountPos, targetPos, initialTheta, initialZeta, initialPsi, ship);
+//        VS2TargetingSolver targetingSolver = new VS2TargetingSolver(level, speed, drag, gravity, barrelLength, mountPos, targetPos, initialTheta, initialZeta, initialPsi, ship);
+        VS2TargetingSolver targetingSolver = new VS2TargetingSolver(level, speed, drag, gravity, barrelLength, mountPos, targetPos, initialTheta, initialZeta, initialPsi, ship, preferredPitchDeg, preferredYawDeg);
         return targetingSolver.solveThetaZeta();
     }
 }

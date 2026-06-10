@@ -3,6 +3,7 @@ package com.happysg.radar.registry;
 import com.happysg.radar.CreateRadar;
 
 
+import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererRenderer;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
@@ -13,6 +14,7 @@ import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.monitor.MonitorRenderer;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
+import com.happysg.radar.block.radar.plane.StationaryRadarBlockEntity;
 
 import com.simibubi.create.content.contraptions.bearing.BearingRenderer;
 import com.simibubi.create.content.contraptions.bearing.BearingVisual;
@@ -68,6 +70,16 @@ public class ModBlockEntityTypes {
             .blockEntity("network_filterer_block_entity", NetworkFiltererBlockEntity::new)
             .validBlocks(ModBlocks.NETWORK_FILTERER_BLOCK)
             .renderer(()-> NetworkFiltererRenderer::new)
+            .register();
+
+    public static final BlockEntityEntry<StationaryRadarBlockEntity> STATIONARY_RADAR_BE = REGISTRATE
+            .blockEntity("plane_radar", StationaryRadarBlockEntity::new)
+            .validBlocks(ModBlocks.STATIONARY_RADAR)
+            .register();
+
+    public static final BlockEntityEntry<RadarWarningReceiverBlockEntity> RWR_BE = REGISTRATE
+            .blockEntity("rwr_be", RadarWarningReceiverBlockEntity::new)
+            .validBlocks(ModBlocks.RWR_BLOCK)
             .register();
 
 

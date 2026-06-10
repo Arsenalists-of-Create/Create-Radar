@@ -7,6 +7,8 @@ import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.SableUtils;
+import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.config.server.RadarServerConfig;
 import com.mojang.logging.LogUtils;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
@@ -47,7 +49,7 @@ public class CannonMountPitch {
 
         double tol = AutoPitchControllerBlockEntity.getCbcTolerance();
         if (!lag) {
-            tol += 0.15;
+            tol += RadarConfig.server().targetLoosenAmount.get();
         }
 
         double currentPitch = contraption.pitch;
@@ -189,7 +191,7 @@ public class CannonMountPitch {
         if (PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
             List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
-                LOGGER.warn("ping-3{}", angles);
+                LOGGER.debug("ping-3{}", angles);
                 return;
             }
 

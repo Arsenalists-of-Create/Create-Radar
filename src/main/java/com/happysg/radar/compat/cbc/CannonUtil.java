@@ -199,10 +199,6 @@ public class CannonUtil {
     }
 
     public static float getInitialVelocity(AbstractMountedCannonContraption cannon, ServerLevel level) {
-        LOGGER.debug("→ getInitialVelocity for contraption={} mods: BigCannon={}, AutoCannon={}, Rotary={}, Medium={}, Energy={}",
-                cannon != null ? cannon.getClass().getSimpleName() : "null",
-                isBigCannon(cannon), isAutoCannon(cannon), isEnergyCannon(cannon)
-        );
         if (cannon == null) return 0f;
 
 
