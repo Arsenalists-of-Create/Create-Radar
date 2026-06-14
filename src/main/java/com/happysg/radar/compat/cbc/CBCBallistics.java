@@ -24,7 +24,7 @@ public final class CBCBallistics {
     /**
      * Estimate time-of-flight (ticks) and drop for a projectile traveling toward a point.
      *
-     * @param props CBC ballistic props (gravity, drag, quadratic flag)
+     * @param props CBC ballistic props (gravity and drag)
      * @param muzzlePos world-space muzzle
      * @param aimDir normalized direction you currently aim (from your existing equations)
      * @param muzzleSpeedBlocksPerTick initial speed in blocks/tick (IMPORTANT: match your existing units)
@@ -49,8 +49,6 @@ public final class CBCBallistics {
         Vec3 vel = aimDir.scale(muzzleSpeedBlocksPerTick);
         double gravity = props.gravity(); // CBC defaults negative (e.g. -0.05)
         double drag = props.drag();
-        boolean quad = props.isQuadraticDrag();
-
 
         double x = 0.0;
         double y = 0.0;
@@ -83,8 +81,8 @@ public final class CBCBallistics {
             vel = vel.add(0.0, gravity, 0.0);
 
 
-// drag (approx; stable)
-            vel = applyDrag(vel, drag, quad);
+// linear per-tick drag
+            vel = applyDrag(vel, drag);
         }
 
 
@@ -95,21 +93,11 @@ public final class CBCBallistics {
     }
 
 
-    /** Drag approximation in tick space. */
-    public static Vec3 applyDrag(Vec3 vel, double drag, boolean quadratic) {
+    /** Linear per-tick drag approximation in tick space. */
+    public static Vec3 applyDrag(Vec3 vel, double drag) {
         if (drag <= 0) return vel;
 
-
-        if (!quadratic) {
-// linear-ish damping
-            double f = Mth.clamp(1.0 - drag, 0.0, 1.0);
-            return vel.scale(f);
-        } else {
-// quadratic-ish: stronger effect at higher speeds
-            double speed = vel.length();
-            if (speed < 1e-9) return vel;
-            double f = 1.0 / (1.0 + drag * speed);
-            return vel.scale(f);
-        }
+        double f = Mth.clamp(1.0 - drag, 0.0, 1.0);
+        return vel.scale(f);
     }
 }

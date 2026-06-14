@@ -11,6 +11,13 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigBase.ConfigBool forceLegacyCannonLeadSolver = this.b(false, "forceLegacyCannonLeadSolver", new String[]{"Force CBC auto aiming to use the legacy lead solver instead of the new targeting computer"});
     public final ConfigBase.ConfigBool allowLegacyCannonLeadFallback = this.b(true, "allowLegacyCannonLeadFallback", new String[]{"Allow the legacy lead solver when the new targeting computer cannot produce a usable shot"});
     public final ConfigBase.ConfigInt leadFiringDelay = this.i(0, 0, 1000, "firingDelay", new String[]{"The firing delay used in leading calculation. Higher values may prove useful in laggy environments"});
+    public final ConfigBase.ConfigFloat sprintJumpMinHorizontalSpeed = this.f(0.12F, 0.0F, "sprintJumpMinHorizontalSpeed", new String[]{"Minimum horizontal target speed in blocks/tick for sprint-jump movement classification"});
+    public final ConfigBase.ConfigFloat sprintJumpVerticalSpeedThreshold = this.f(0.12F, 0.0F, "sprintJumpVerticalSpeedThreshold", new String[]{"Minimum vertical target speed in blocks/tick for sprint-jump movement classification"});
+    public final ConfigBase.ConfigInt sprintJumpStableTicks = this.i(1, 0, 20, "sprintJumpStableTicks", new String[]{"Stable aim ticks required before firing at sprint-jumping targets"});
+    public final ConfigBase.ConfigFloat sprintJumpMinConfidence = this.f(0.08F, 0.0F, 1.0F, "sprintJumpMinConfidence", new String[]{"Minimum new solver confidence required for sprint-jumping targets"});
+    public final ConfigBase.ConfigInt erraticTargetStableTicks = this.i(0, 0, 20, "erraticTargetStableTicks", new String[]{"Stable aim ticks required before firing at elytra or erratic targets"});
+    public final ConfigBase.ConfigFloat erraticTargetMinConfidence = this.f(0.03F, 0.0F, 1.0F, "erraticTargetMinConfidence", new String[]{"Minimum new solver confidence required for elytra or erratic targets"});
+    public final ConfigBase.ConfigFloat erraticTargetAimStableEpsilon = this.f(1.5F, 0.0F, "erraticTargetAimStableEpsilon", new String[]{"Allowed aim point movement in blocks before resetting stability for elytra or erratic targets"});
     public final ConfigBase.ConfigFloat controllerPhysbearingMaxSpeed = this.f(25.0F, 2.0F, 25.0F, "controllerPhysbearingMaxSpeed", new String[]{"Increases the max Rotational speed of phys bearings controlled by Pitch/Yaw controllers"});
     public final ConfigBase.ConfigInt binoRaycastRange = this.i(512, 1, 1000, "binocularRange", new String[]{"The range at which the binocular can acquire a target"});
     public final ConfigBase.ConfigGroup radarStats = this.group(3, "radarStatsConfig", new String[]{"Configs for radar bearing and radar stats"});

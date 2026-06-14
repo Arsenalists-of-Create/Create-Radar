@@ -1,11 +1,15 @@
 package com.happysg.radar.targeting;
 
+import com.happysg.radar.compat.Mods;
 import com.happysg.radar.config.RadarConfig;
 import com.mojang.logging.LogUtils;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import javax.annotation.Nullable;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
@@ -64,11 +68,13 @@ public class SimulatedAimSolver implements AimSolver {
                debug.add("miss=" + best.missDistance);
                debug.add("score=" + best.score);
                debug.add("confidence=" + best.confidence);
+               debug.add("motionClass=" + snapshot.targetMotionClass());
                debug.add("obstruction=" + (best.obstruction.blocked() ? "blocked" : "clear"));
                if (best.obstruction.blocked()) {
                   debug.add("blockedTick=" + best.obstruction.blockedTick());
                   debug.add("blockedBlock=" + String.valueOf(best.obstruction.blockPosition()));
-                  debug.add("blockedSplashDistance=" + distanceFromObstructionToTarget(best));
+                  debug.add("blockedDistanceToTarget=" + distanceFromObstructionToTarget(best));
+                  debug.add("blockedTargetSublevel=" + isObstructionInTargetSublevel(snapshot, best));
                }
 
                if (RadarConfig.DEBUG_BEAMS) {
@@ -128,7 +134,7 @@ public class SimulatedAimSolver implements AimSolver {
       for(Trajectory.Sample sample : trajectory.trajectory().samples()) {
          double tick = (double)sample.tick();
          Vec3 predictedTarget = this.targetPredictor.predictPosition(snapshot, tick);
-         AABB predictedBox = this.targetPredictor.predictAabb(snapshot.targetAabb(), snapshot.targetVelocity(), snapshot.targetAcceleration(), tick);
+         AABB predictedBox = this.targetPredictor.predictAabb(snapshot, tick);
          double miss = distanceToTarget(sample.position(), predictedTarget, predictedBox);
          if (miss < bestMiss) {
             bestMiss = miss;
@@ -225,7 +231,7 @@ public class SimulatedAimSolver implements AimSolver {
          } else if (!candidate.obstruction.blocked()) {
             return true;
          } else {
-            return isObstructionAtPredictedTarget(snapshot, candidate) || snapshot.projectileEffect().allowsSplash() && isSplashObstructionNearTarget(snapshot, candidate);
+            return isObstructionAtPredictedTarget(snapshot, candidate) || isObstructionInTargetSublevel(snapshot, candidate);
          }
       } else {
          return false;
@@ -233,62 +239,45 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private static double hitTolerance(TargetingSnapshot snapshot) {
-      if (snapshot.projectileEffect().allowsSplash()) {
-         return Math.max((double)1.0F, snapshot.splashRadius());
-      } else {
-         return snapshot.targetAabb() == null ? (double)0.75F : (double)0.5F;
-      }
+      return directTargetHitTolerance(snapshot);
    }
 
    private static double acceptableMissDistance(TargetingSnapshot snapshot) {
-      if (snapshot.projectileEffect().allowsSplash()) {
-         return Math.max((double)1.25F, snapshot.splashRadius());
-      } else {
-         return snapshot.targetAabb() == null ? (double)1.0F : (double)0.75F;
-      }
+      return directTargetHitTolerance(snapshot);
    }
 
    private static double obstructionPenalty(TargetingSnapshot snapshot, Candidate candidate) {
       if (!candidate.obstruction.blocked()) {
          return (double)0.0F;
-      } else if (isObstructionAtPredictedTarget(snapshot, candidate)) {
+      } else if (isObstructionAtPredictedTarget(snapshot, candidate) || isObstructionInTargetSublevel(snapshot, candidate)) {
          return 0.1;
-      } else if (!snapshot.projectileEffect().allowsSplash()) {
-         return (double)1000000.0F;
-      } else if (!isSplashObstructionNearTarget(snapshot, candidate)) {
-         return (double)1000000.0F;
       } else {
-         double splashDistance = distanceFromObstructionToTarget(candidate);
-         double splashRadius = Math.max((double)0.5F, snapshot.splashRadius());
-         return (double)1.0F + splashDistance / splashRadius;
+         return (double)1000000.0F;
       }
    }
 
    private static double obstructionConfidenceFactor(TargetingSnapshot snapshot, Candidate candidate) {
       if (!candidate.obstruction.blocked()) {
          return (double)1.0F;
-      } else if (isObstructionAtPredictedTarget(snapshot, candidate)) {
+      } else if (isObstructionAtPredictedTarget(snapshot, candidate) || isObstructionInTargetSublevel(snapshot, candidate)) {
          return 0.95;
-      } else if (snapshot.projectileEffect().allowsSplash() && isSplashObstructionNearTarget(snapshot, candidate)) {
-         double splashDistance = distanceFromObstructionToTarget(candidate);
-         double splashRadius = Math.max((double)0.5F, snapshot.splashRadius());
-         return Math.max(0.1, Math.min(0.8, (double)1.0F - splashDistance / (splashRadius * (double)1.5F)));
       } else {
          return (double)0.0F;
       }
    }
 
-   private static boolean isSplashObstructionNearTarget(TargetingSnapshot snapshot, Candidate candidate) {
-      if (candidate.obstruction.blocked() && candidate.obstruction.blockedPosition() != null) {
-         double splashRadius = Math.max((double)0.0F, snapshot.splashRadius());
-         if (splashRadius <= (double)0.0F) {
-            return false;
-         } else {
-            return distanceFromObstructionToTarget(candidate) <= splashRadius;
-         }
-      } else {
+   private static boolean isObstructionInTargetSublevel(TargetingSnapshot snapshot, Candidate candidate) {
+      if (!Mods.SABLE.isLoaded() || snapshot.targetSublevelId() == null || !candidate.obstruction.blocked()) {
          return false;
       }
+
+      BlockPos blockPosition = candidate.obstruction.blockPosition();
+      if (blockPosition == null || snapshot.level() == null) {
+         return false;
+      }
+
+      SubLevelAccess hitSublevel = SableCompanion.INSTANCE.getContaining(snapshot.level(), blockPosition);
+      return hitSublevel != null && snapshot.targetSublevelId().equals(hitSublevel.getUniqueId());
    }
 
    private static boolean isObstructionAtPredictedTarget(TargetingSnapshot snapshot, Candidate candidate) {
@@ -309,6 +298,12 @@ public class SimulatedAimSolver implements AimSolver {
 
    private static Vec3 predictTargetPosition(TargetingSnapshot snapshot, double tick) {
       double safeTick = Double.isFinite(tick) ? Math.max((double)0.0F, tick) : (double)0.0F;
+      if (snapshot.targetMotionClass() == TargetMotionClass.SPRINT_JUMP) {
+         Vec3 velocity = snapshot.targetVelocity();
+         double gravity = Double.isFinite(snapshot.gravity()) ? snapshot.gravity() : (double)-0.08F;
+         return snapshot.targetPosition().add(velocity.x * safeTick, velocity.y * safeTick + (double)0.5F * gravity * safeTick * safeTick, velocity.z * safeTick);
+      }
+
       return snapshot.targetPosition().add(snapshot.targetVelocity().scale(safeTick)).add(snapshot.targetAcceleration().scale((double)0.5F * safeTick * safeTick));
    }
 

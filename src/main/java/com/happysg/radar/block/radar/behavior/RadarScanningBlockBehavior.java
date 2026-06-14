@@ -19,6 +19,7 @@ import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -27,8 +28,10 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import redstonedubstep.mods.vanishmod.VanishUtil;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
@@ -148,6 +151,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
                     return track;
                 });
 
+
                 if (entity instanceof Projectile)
                     scannedProjectiles.add((Projectile) entity);
             }
@@ -217,18 +221,15 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     private void scanForEntityTracks() {
         Level level = blockEntity.getLevel();
         if (level == null) return;
-
+        Predicate<Entity> radarFilter = this::shouldRadarSee;
         boolean scanAll =
                 scanPlayers && scanContraptions && scanMobs && scanAnimals && scanProjectiles && scanItems;
 
         for (AABB aabb : splitAABB(getRadarAABB(), 256)) {
-            if (scanAll) {
-                scannedEntities.addAll(level.getEntities(null, aabb));
-                continue;
-            }
+
 
             if (scanPlayers)
-                scannedEntities.addAll(level.getEntitiesOfClass(Player.class, aabb));
+                scannedEntities.addAll(level.getEntitiesOfClass(Player.class, aabb, radarFilter));
 
             if (scanProjectiles)
                 scannedEntities.addAll(level.getEntitiesOfClass(Projectile.class, aabb));
@@ -248,6 +249,16 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             }
         }
     }
+    private boolean shouldRadarSee(Entity entity) {
+        if(!(entity instanceof ServerPlayer serverPlayer)){
+            return false;
+        }
+        if(Mods.VMOD.isLoaded()) {
+            return !VanishUtil.isVanished(serverPlayer);
+        }
+        return true;
+    }
+
 
     private void scanForSableTracks() {
         if (blockEntity.getLevel() == null || !Mods.SABLE.isLoaded()) return;
@@ -272,6 +283,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
                 x + range, maxY, z + range
         );
     }
+
 
     public static List<AABB> splitAABB(AABB aabb, double maxSize) {
         List<AABB> result = new ArrayList<>();

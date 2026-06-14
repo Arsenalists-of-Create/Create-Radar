@@ -268,10 +268,6 @@ public class CannonUtil {
         if (isAutocannonFamily(cannon)) {
             BallisticPropertiesComponent bp = getAutocannonBallistics(cannon, level);
 
-            if (bp.isQuadraticDrag()) {
-                return speed * lifeTicks; // generous upper bound
-            }
-
             double drag = Math.max(0.0, Math.min(0.25, bp.drag()));
             double retained = Math.pow(1.0 - drag, lifeTicks);
             double avg = (1.0 + retained) * 0.5;

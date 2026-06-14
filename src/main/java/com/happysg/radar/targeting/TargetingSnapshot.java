@@ -1,12 +1,13 @@
 package com.happysg.radar.targeting;
 
 import javax.annotation.Nullable;
+import java.util.UUID;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inheritedVelocity, Vec3 targetPosition, Vec3 targetVelocity, Vec3 targetAcceleration, @Nullable AABB targetAabb, double projectileSpeed, double gravity, double drag, int maxFlightTicks, long gameTime, @Nullable Double preferredYawDeg, @Nullable Double preferredPitchDeg, @Nullable Double currentYawDeg, @Nullable Double currentPitchDeg, ProjectileEffect projectileEffect, double splashRadius) {
-   public TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inheritedVelocity, Vec3 targetPosition, Vec3 targetVelocity, Vec3 targetAcceleration, @Nullable AABB targetAabb, double projectileSpeed, double gravity, double drag, int maxFlightTicks, long gameTime, @Nullable Double preferredYawDeg, @Nullable Double preferredPitchDeg, @Nullable Double currentYawDeg, @Nullable Double currentPitchDeg, ProjectileEffect projectileEffect, double splashRadius) {
+public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inheritedVelocity, Vec3 targetPosition, Vec3 targetVelocity, Vec3 targetAcceleration, @Nullable AABB targetAabb, double projectileSpeed, double gravity, double drag, int maxFlightTicks, long gameTime, @Nullable Double preferredYawDeg, @Nullable Double preferredPitchDeg, @Nullable Double currentYawDeg, @Nullable Double currentPitchDeg, ProjectileEffect projectileEffect, double splashRadius, @Nullable UUID targetSublevelId, TargetMotionClass targetMotionClass) {
+   public TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inheritedVelocity, Vec3 targetPosition, Vec3 targetVelocity, Vec3 targetAcceleration, @Nullable AABB targetAabb, double projectileSpeed, double gravity, double drag, int maxFlightTicks, long gameTime, @Nullable Double preferredYawDeg, @Nullable Double preferredPitchDeg, @Nullable Double currentYawDeg, @Nullable Double currentPitchDeg, ProjectileEffect projectileEffect, double splashRadius, @Nullable UUID targetSublevelId, TargetMotionClass targetMotionClass) {
       if (muzzlePosition == null) {
          muzzlePosition = Vec3.ZERO;
       }
@@ -55,6 +56,10 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
          splashRadius = (double)0.0F;
       }
 
+      if (targetMotionClass == null) {
+         targetMotionClass = TargetMotionClass.UNKNOWN;
+      }
+
       this.level = level;
       this.muzzlePosition = muzzlePosition;
       this.inheritedVelocity = inheritedVelocity;
@@ -73,6 +78,8 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
       this.currentPitchDeg = currentPitchDeg;
       this.projectileEffect = projectileEffect;
       this.splashRadius = splashRadius;
+      this.targetSublevelId = targetSublevelId;
+      this.targetMotionClass = targetMotionClass;
    }
 
    public boolean isValid() {
@@ -115,6 +122,9 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
       private Double currentPitchDeg;
       private ProjectileEffect projectileEffect;
       private double splashRadius;
+      @Nullable
+      private UUID targetSublevelId;
+      private TargetMotionClass targetMotionClass;
 
       private Builder(Level level) {
          this.muzzlePosition = Vec3.ZERO;
@@ -125,6 +135,7 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
          this.maxFlightTicks = 200;
          this.projectileEffect = ProjectileEffect.UNKNOWN;
          this.splashRadius = (double)0.0F;
+         this.targetMotionClass = TargetMotionClass.UNKNOWN;
          this.level = level;
          this.gameTime = level == null ? 0L : level.getGameTime();
       }
@@ -214,8 +225,18 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
          return this;
       }
 
+      public Builder targetSublevelId(@Nullable UUID targetSublevelId) {
+         this.targetSublevelId = targetSublevelId;
+         return this;
+      }
+
+      public Builder targetMotionClass(TargetMotionClass targetMotionClass) {
+         this.targetMotionClass = targetMotionClass;
+         return this;
+      }
+
       public TargetingSnapshot build() {
-         return new TargetingSnapshot(this.level, this.muzzlePosition, this.inheritedVelocity, this.targetPosition, this.targetVelocity, this.targetAcceleration, this.targetAabb, this.projectileSpeed, this.gravity, this.drag, this.maxFlightTicks, this.gameTime, this.preferredYawDeg, this.preferredPitchDeg, this.currentYawDeg, this.currentPitchDeg, this.projectileEffect, this.splashRadius);
+         return new TargetingSnapshot(this.level, this.muzzlePosition, this.inheritedVelocity, this.targetPosition, this.targetVelocity, this.targetAcceleration, this.targetAabb, this.projectileSpeed, this.gravity, this.drag, this.maxFlightTicks, this.gameTime, this.preferredYawDeg, this.preferredPitchDeg, this.currentYawDeg, this.currentPitchDeg, this.projectileEffect, this.splashRadius, this.targetSublevelId, this.targetMotionClass);
       }
    }
 }

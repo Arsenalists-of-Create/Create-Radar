@@ -184,7 +184,7 @@ dependencies {
     //Aeronautics
     compileOnly("dev.eriksonn.aeronautics:aeronautics-neoforge-${minecraft_version}:${aeronautics_version}")
     localRuntime("dev.eriksonn.aeronautics:aeronautics-neoforge-${minecraft_version}:${aeronautics_version}")
-
+    implementation "curse.maven:vanishmod-423535:7668159"
     jarJar(api("dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_companion_version}"))
 }
 
