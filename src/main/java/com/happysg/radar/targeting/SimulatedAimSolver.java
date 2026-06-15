@@ -298,12 +298,6 @@ public class SimulatedAimSolver implements AimSolver {
 
    private static Vec3 predictTargetPosition(TargetingSnapshot snapshot, double tick) {
       double safeTick = Double.isFinite(tick) ? Math.max((double)0.0F, tick) : (double)0.0F;
-      if (snapshot.targetMotionClass() == TargetMotionClass.SPRINT_JUMP) {
-         Vec3 velocity = snapshot.targetVelocity();
-         double gravity = Double.isFinite(snapshot.gravity()) ? snapshot.gravity() : (double)-0.08F;
-         return snapshot.targetPosition().add(velocity.x * safeTick, velocity.y * safeTick + (double)0.5F * gravity * safeTick * safeTick, velocity.z * safeTick);
-      }
-
       return snapshot.targetPosition().add(snapshot.targetVelocity().scale(safeTick)).add(snapshot.targetAcceleration().scale((double)0.5F * safeTick * safeTick));
    }
 

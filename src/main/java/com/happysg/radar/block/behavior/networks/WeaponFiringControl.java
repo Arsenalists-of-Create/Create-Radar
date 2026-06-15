@@ -20,6 +20,7 @@ import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.item.radarproxfuze.AdvancedProximityFuze;
 import com.happysg.radar.targeting.TargetingComputer;
 import com.happysg.radar.targeting.TargetMotionClass;
 import com.happysg.radar.targeting.TargetingResult;
@@ -1017,7 +1018,7 @@ public class WeaponFiringControl {
                     TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)slewTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
                     TargetingResult result = this.targetingComputer.solve(snapshot);
                     if (this.level.getGameTime() % 20L == 1L && result != null) {
-                        LOGGER.warn("WFC TargetingComputer {}", result.debugString());
+                        LOGGER.debug("WFC TargetingComputer {}", result.debugString());
                     }
 
                     return result;
@@ -1101,61 +1102,38 @@ public class WeaponFiringControl {
         Vec3 smoothedAcceleration = previous == null ? rawAcceleration : previous.smoothedAcceleration.scale(0.55).add(rawAcceleration.scale(0.45));
         Vec3 jerkVec = previous == null ? Vec3.ZERO : rawAcceleration.subtract(previous.rawAcceleration).scale((double)1.0F / (double)dt);
         double jerk = jerkVec.length();
-        double horizontalSpeed = horizontalSpeed(smoothedVelocity);
-        double rawHorizontalSpeed = horizontalSpeed(rawVelocity);
-        double verticalSpeed = Math.abs(rawVelocity.y);
-        double directionChange = previous == null ? (double)0.0F : horizontalDirectionChange(previous.smoothedVelocity, rawVelocity);
         boolean onGround = targetEntity != null && targetEntity.onGround();
-        boolean wasOnGround = previous != null && previous.onGround;
-        boolean sprinting = targetEntity != null && targetEntity.isSprinting();
-        boolean player = targetEntity instanceof Player;
-        boolean fallFlying = targetEntity instanceof Player targetPlayer && targetPlayer.isFallFlying();
-        double sprintMinSpeed = Math.max((double)0.0F, (Double)RadarConfig.server().sprintJumpMinHorizontalSpeed.get());
-        double sprintVerticalThreshold = Math.max((double)0.0F, (Double)RadarConfig.server().sprintJumpVerticalSpeedThreshold.get());
-        boolean jumpTransition = wasOnGround && !onGround && rawVelocity.y > 0.03;
-        boolean playerSprintJump = player && sprinting && !fallFlying && rawHorizontalSpeed >= sprintMinSpeed && (!onGround || verticalSpeed >= sprintVerticalThreshold || jumpTransition);
-        boolean inferredSprintJump = !fallFlying && rawHorizontalSpeed >= sprintMinSpeed && verticalSpeed >= sprintVerticalThreshold && jerk < 0.22;
-        boolean erratic = fallFlying || jerk >= 0.18 || (directionChange >= 0.45 && rawHorizontalSpeed >= sprintMinSpeed);
-
-        TargetMotionClass motionClass;
-        String reason;
-        if (playerSprintJump || inferredSprintJump) {
-            motionClass = TargetMotionClass.SPRINT_JUMP;
-            smoothedAcceleration = new Vec3((double)0.0F, smoothedAcceleration.y, (double)0.0F);
-            reason = playerSprintJump ? "player_sprint_jump" : "inferred_jump_arc";
-        } else if (erratic) {
-            motionClass = TargetMotionClass.ELYTRA_ERRATIC;
-            reason = fallFlying ? "fall_flying" : "jerk_or_direction_change";
-        } else {
-            motionClass = previous == null ? TargetMotionClass.UNKNOWN : TargetMotionClass.STEADY;
-            reason = previous == null ? "warming_up" : "steady";
+        double rawHorizontalSpeed = horizontalSpeed(rawVelocity);
+        double verticalSpeed = rawVelocity.y;
+        double directionChange = previous == null ? (double)0.0F : horizontalDirectionChange(previous.smoothedVelocity, rawVelocity);
+        boolean sprinting = false;
+        boolean fallFlying = false;
+        if (targetEntity instanceof Player player) {
+            sprinting = player.isSprinting();
+            fallFlying = player.isFallFlying();
         }
+
+        double sprintJumpMinSpeed = (Double)RadarConfig.server().sprintJumpMinHorizontalSpeed.get();
+        double sprintJumpVerticalSpeed = (Double)RadarConfig.server().sprintJumpVerticalSpeedThreshold.get();
+        boolean jumpTransition = previous != null && previous.onGround && !onGround && verticalSpeed > sprintJumpVerticalSpeed;
+        boolean playerSprintJump = sprinting && jumpTransition && rawHorizontalSpeed >= sprintJumpMinSpeed;
+        boolean inferredSprintJump = jumpTransition && rawHorizontalSpeed >= sprintJumpMinSpeed * (double)1.15F;
+        boolean erratic = previous != null && (fallFlying || playerSprintJump || inferredSprintJump || jerk > 0.08 || directionChange > 0.55);
+        TargetMotionClass motionClass = previous == null ? TargetMotionClass.UNKNOWN : (erratic ? TargetMotionClass.ERRATIC : TargetMotionClass.STEADY);
+        String reason = previous == null ? "warming_up" : (fallFlying ? "fall_flying" : (playerSprintJump ? "sprint_jump" : (inferredSprintJump ? "inferred_sprint_jump" : (jerk > 0.08 ? "jerk" : (directionChange > 0.55 ? "direction_change" : "steady")))));
 
         this.targetMotionStates.put(targetId, new TargetMotionState(targetWorldPosition == null ? Vec3.ZERO : targetWorldPosition, rawVelocity, rawAcceleration, smoothedVelocity, smoothedAcceleration, onGround, tick));
         if (this.targetMotionStates.size() > 256) {
             this.targetMotionStates.entrySet().removeIf(entry -> tick - entry.getValue().tick > 200L);
         }
 
-        return this.motionEstimate(motionClass, smoothedVelocity, smoothedAcceleration, jerk, motionClass == TargetMotionClass.ELYTRA_ERRATIC, reason);
+        return this.motionEstimate(motionClass, smoothedVelocity, smoothedAcceleration, jerk, false, reason);
     }
 
     private TargetMotionEstimate motionEstimate(TargetMotionClass motionClass, Vec3 velocity, Vec3 acceleration, double jerk, boolean looseAim, String reason) {
-        int stableTicks;
-        double minConfidence;
-        double aimStableEps;
-        if (motionClass == TargetMotionClass.SPRINT_JUMP) {
-            stableTicks = Math.max(0, (Integer)RadarConfig.server().sprintJumpStableTicks.get());
-            minConfidence = Math.max((double)0.0F, Math.min((double)1.0F, (Double)RadarConfig.server().sprintJumpMinConfidence.get()));
-            aimStableEps = Math.max((double)0.75F, AIM_STABLE_EPS);
-        } else if (motionClass == TargetMotionClass.ELYTRA_ERRATIC) {
-            stableTicks = Math.max(0, (Integer)RadarConfig.server().erraticTargetStableTicks.get());
-            minConfidence = Math.max((double)0.0F, Math.min((double)1.0F, (Double)RadarConfig.server().erraticTargetMinConfidence.get()));
-            aimStableEps = Math.max(AIM_STABLE_EPS, (Double)RadarConfig.server().erraticTargetAimStableEpsilon.get());
-        } else {
-            stableTicks = AIM_STABLE_REQUIRED;
-            minConfidence = NEW_SOLVER_MIN_CONFIDENCE;
-            aimStableEps = AIM_STABLE_EPS;
-        }
+        int stableTicks = motionClass == TargetMotionClass.ERRATIC ? Math.min(AIM_STABLE_REQUIRED, (Integer)RadarConfig.server().erraticTargetStableTicks.get()) : AIM_STABLE_REQUIRED;
+        double minConfidence = NEW_SOLVER_MIN_CONFIDENCE;
+        double aimStableEps = AIM_STABLE_EPS;
 
         return new TargetMotionEstimate(motionClass == null ? TargetMotionClass.UNKNOWN : motionClass, finiteOrZero(velocity), clampAcceleration(finiteOrZero(acceleration)), jerk, stableTicks, minConfidence, aimStableEps, looseAim, reason);
     }
@@ -1165,14 +1143,15 @@ public class WeaponFiringControl {
     }
 
     private static double horizontalDirectionChange(Vec3 previous, Vec3 current) {
-        double prevLen = horizontalSpeed(previous);
-        double curLen = horizontalSpeed(current);
-        if (prevLen < 1.0E-6 || curLen < 1.0E-6) {
+        double prevSpeed = horizontalSpeed(previous);
+        double currentSpeed = horizontalSpeed(current);
+        if (prevSpeed < 1.0E-6 || currentSpeed < 1.0E-6) {
             return (double)0.0F;
         }
 
-        double dot = (previous.x * current.x + previous.z * current.z) / (prevLen * curLen);
-        return (double)1.0F - Math.max((double)-1.0F, Math.min((double)1.0F, dot));
+        double dot = previous.x * current.x + previous.z * current.z;
+        double cos = Math.max((double)-1.0F, Math.min((double)1.0F, dot / (prevSpeed * currentSpeed)));
+        return (double)1.0F - cos;
     }
 
     @Nullable
@@ -1310,12 +1289,6 @@ public class WeaponFiringControl {
 
     private static Vec3 predictTarget(Vec3 pos, Vec3 vel, Vec3 accel, double ticks, TargetMotionClass motionClass, double gravity) {
         double safeTicks = Double.isFinite(ticks) ? Math.max((double)0.0F, ticks) : (double)0.0F;
-        if (motionClass == TargetMotionClass.SPRINT_JUMP) {
-            double safeGravity = Double.isFinite(gravity) ? gravity : (double)-0.08F;
-            Vec3 horizontal = new Vec3(vel.x, (double)0.0F, vel.z).scale(safeTicks);
-            double y = vel.y * safeTicks + (double)0.5F * safeGravity * safeTicks * safeTicks;
-            return pos.add(horizontal.x, y, horizontal.z);
-        }
         return pos.add(vel.scale(safeTicks)).add(accel.scale((double)0.5F * safeTicks * safeTicks));
     }
 
@@ -1391,7 +1364,16 @@ public class WeaponFiringControl {
 
     private void tryFireCannon() {
         if (this.fireController != null) {
-            this.fireController.setPowered(true);
+            if (this.level instanceof ServerLevel serverLevel) {
+                AdvancedProximityFuze.pushLaunchContext(serverLevel, this.cannonMount.getBlockPos());
+                try {
+                    this.fireController.setPowered(true);
+                } finally {
+                    AdvancedProximityFuze.popLaunchContext();
+                }
+            } else {
+                this.fireController.setPowered(true);
+            }
             LOGGER.debug("firing!");
         }
     }

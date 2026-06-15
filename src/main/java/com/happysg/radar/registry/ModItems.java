@@ -6,6 +6,7 @@ import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.item.SafeZoneDesignatorItem;
 import com.happysg.radar.item.detectionfilter.DetectionFilterItem;
 import com.happysg.radar.item.identfilter.IdentFilterItem;
+import com.happysg.radar.item.radarproxfuze.AdvancedProximityFuze;
 import com.happysg.radar.item.targetfilter.TargetFilterItem;
 import com.tterrag.registrate.util.entry.ItemEntry;
 
@@ -29,6 +30,9 @@ public class ModItems {
                     .register();
     public static final ItemEntry<GuidedFuzeItem> GUIDED_FUZE = REGISTRATE.item("guided_fuze", GuidedFuzeItem::new)
             .register();
+    public static final ItemEntry<AdvancedProximityFuze> ADVANCED_PROXY_FUZE = REGISTRATE.item("advanced_proxy_fuze", AdvancedProximityFuze::new)
+            .register();
+
     public static void register() {
         CreateRadar.getLogger().info("Registering Items!");
     }

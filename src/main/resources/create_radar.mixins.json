@@ -9,7 +9,16 @@
   "mixins": [
     "AbstractCannonAccessor",
     "AutoCannonAccessor",
-    "AutocannonProjectileAccessor"
+    "AutocannonProjectileAccessor",
+    "CBCATAutocannonHEIProjectileMixin",
+    "CBCATAutocannonHEProjectileMixin",
+    "CBCATFuzedHeavyAutocannonProjectileMixin",
+    "CBCATMountedHeavyAutocannonContraptionMixin",
+    "CBCATMountedTwinAutocannonContraptionMixin",
+    "FlakAutocannonProjectileMixin",
+    "FuzedBigCannonProjectileMixin",
+    "MountedAutocannonContraptionMixin",
+    "MountedBigCannonContraptionMixin"
   ],
   "injectors": {
     "defaultRequire": 1
