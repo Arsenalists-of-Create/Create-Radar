@@ -13,6 +13,7 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigFloat sprintJumpMinHorizontalSpeed = this.f(0.16F, 0.0F, "sprintJumpMinHorizontalSpeed", "Minimum horizontal target speed in blocks per tick for sprint-jump movement to count as erratic");
     public final ConfigFloat sprintJumpVerticalSpeedThreshold = this.f(0.12F, 0.0F, "sprintJumpVerticalSpeedThreshold", "Minimum upward target speed in blocks per tick for sprint-jump movement to count as erratic");
     public final ConfigInt erraticTargetStableTicks = this.i(1, 0, 20, "erraticTargetStableTicks", "Required stable aim ticks when target motion is erratic");
+    public final ConfigInt targetTrackingLeadTicks = this.i(3, 0, 20, "targetTrackingLeadTicks", "Extra target prediction ticks used to compensate for radar and cannon tracking latency");
     public final ConfigInt leadFiringDelay = this.i(0, 0, 1000, "firingDelay", "The firing delay used in leading calculation. Higher values may prove useful in laggy environments");
     public final ConfigFloat controllerPhysbearingMaxSpeed = this.f(25.0F, 2.0F, 25.0F, "controllerPhysbearingMaxSpeed", "Increases the max Rotational speed of phys bearings controlled by Pitch/Yaw controllers");
     public final ConfigInt binoRaycastRange = this.i(512, 1, 1000, "binocularRange", "The range at which the binocular can acquire a target");

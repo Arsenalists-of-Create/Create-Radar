@@ -19,6 +19,8 @@ public final class TargetingSolverSelfTest {
       results.add(checkIntercept("moving_toward_cannon", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)-2.0F, (double)0.0F, (double)0.0F), (double)10.0F, true));
       results.add(checkIntercept("moving_away", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)2.0F, (double)0.0F, (double)0.0F), (double)10.0F, true));
       results.add(checkIntercept("target_too_fast_to_intercept", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)12.0F, (double)0.0F, (double)0.0F), (double)10.0F, false));
+      results.add(checkProjectileIntegrationOrder());
+      results.add(checkTrustedAccelerationPrediction());
       results.add(new Result("obstructed_trajectory", true, "requires a real Level.clip context; covered by ObstructionChecker integration"));
       return List.copyOf(results);
    }
@@ -72,6 +74,32 @@ public final class TargetingSolverSelfTest {
       } else {
          return Double.NaN;
       }
+   }
+
+   private static Result checkProjectileIntegrationOrder() {
+      ProjectileSimulator simulator = new ProjectileSimulator();
+      ProjectileSimulator.SimulationResult result = simulator.simulate(Vec3.ZERO, new Vec3((double)1.0F, (double)0.0F, (double)0.0F), Vec3.ZERO, (double)10.0F, (double)-1.0F, (double)0.0F, 2);
+      if (result.samples().size() < 3) {
+         return new Result("projectile_integration_order", false, "missing samples");
+      }
+
+      Vec3 tick1 = result.samples().get(1).position();
+      Vec3 tick2 = result.samples().get(2).position();
+      boolean passed = close(tick1, new Vec3((double)10.0F, (double)0.0F, (double)0.0F)) && close(tick2, new Vec3((double)20.0F, (double)-1.0F, (double)0.0F));
+      return new Result("projectile_integration_order", passed, "tick1=" + tick1 + " tick2=" + tick2);
+   }
+
+   private static Result checkTrustedAccelerationPrediction() {
+      TargetPredictor predictor = new TargetPredictor();
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null).targetPosition(Vec3.ZERO).targetVelocity(new Vec3((double)1.0F, (double)0.0F, (double)0.0F)).targetAcceleration(new Vec3((double)0.2F, (double)0.0F, (double)0.0F)).projectileSpeed((double)1.0F).maxFlightTicks(20).build();
+      Vec3 fullTrust = predictor.predictPosition(snapshot, (double)10.0F, (double)1.0F);
+      Vec3 lowTrust = predictor.predictPosition(snapshot, (double)10.0F, 0.25);
+      boolean passed = fullTrust.x > lowTrust.x && lowTrust.x > (double)10.0F;
+      return new Result("trusted_acceleration_prediction", passed, "full=" + fullTrust + " low=" + lowTrust);
+   }
+
+   private static boolean close(Vec3 actual, Vec3 expected) {
+      return actual.distanceToSqr(expected) <= EPS * EPS;
    }
 
    private static boolean finite(Vec3 vec) {

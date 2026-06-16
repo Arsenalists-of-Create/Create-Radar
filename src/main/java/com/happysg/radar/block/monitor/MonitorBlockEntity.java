@@ -52,6 +52,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     protected @Nullable BlockPos radarPos;
 
     protected @Nullable IRadar radar;
+    protected final Map<BlockPos, IRadar> radarCache = new HashMap<>();
+    protected List<RadarDisplayInfo> radarInfos = List.of();
     protected String hoveredEntity;
     public String selectedEntity;
     public RadarTrack activetrack;
@@ -71,6 +73,17 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     public MonitorBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
     }
+
+    public record RadarDisplayInfo(
+            BlockPos pos,
+            Vec3 center,
+            float range,
+            boolean running,
+            String type,
+            float globalAngle,
+            @Nullable net.minecraft.core.Direction direction,
+            boolean renderRelativeToMonitor
+    ) {}
 
     @Override
     public void initialize() {
@@ -142,6 +155,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         this.activetrack = null;
         this.radarPos = null;
         this.radar = null;
+        this.radarCache.clear();
+        this.radarInfos = List.of();
         this.controller = null;
 
 
@@ -165,14 +180,35 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
 
 
-        BlockPos netRadar = g.radarPos;
-        if (!Objects.equals(netRadar, radarPos)) {
-            radarPos = netRadar;
-            radar = null;
-        }
+        List<RadarDisplayInfo> newRadarInfos = buildRadarInfos(sl, g);
+        BlockPos netRadar = newRadarInfos.isEmpty() ? null : newRadarInfos.get(0).pos();
+        if (!Objects.equals(netRadar, radarPos)) radar = null;
+        radarPos = netRadar;
+        radarInfos = newRadarInfos;
 
         filter = DetectionConfig.fromTag(g.detectionTag);
         selectedEntity = g.selectedTargetId;
+    }
+
+    private List<RadarDisplayInfo> buildRadarInfos(ServerLevel sl, NetworkData.Group g) {
+        List<RadarDisplayInfo> infos = new ArrayList<>();
+        for (NetworkData.RadarEndpoint endpoint : g.getRadarEndpoints()) {
+            BlockEntity be = sl.getBlockEntity(endpoint.pos());
+            if (!(be instanceof IRadar radar)) {
+                continue;
+            }
+            infos.add(new RadarDisplayInfo(
+                    endpoint.pos(),
+                    PhysicsHandler.getWorldVec(sl, endpoint.pos()),
+                    radar.getRange(),
+                    radar.isRunning(),
+                    radar.getRadarType(),
+                    radar.getGlobalAngle(),
+                    radar.getradarDirection(),
+                    radar.renderRelativeToMonitor()
+            ));
+        }
+        return List.copyOf(infos);
     }
 
     public void setSelectedTargetServer(@Nullable RadarTrack track) {
@@ -282,7 +318,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         // Client: DO NOT rebuild cachedTracks; it should come from packets.
         if (level.isClientSide) {
             // If radarPos got cleared, clean up selection state.
-            if (radarPos == null) {
+            if (radarInfos.isEmpty()) {
                 cachedTracks = List.of();
                 activetrack = null;
                 selectedEntity = null;
@@ -291,24 +327,37 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
 
         // Server: rebuild and apply filter
-        Optional<IRadar> r = getRadar();
-        if (r.isEmpty()) {
+        List<IRadar> radars = getRunningRadars();
+        if (radars.isEmpty()) {
             cachedTracks = List.of();
             activetrack = null;
             selectedEntity = null;
             return;
         }
 
-        IRadar radar = r.get();
         DetectionConfig det = this.filter; // already synced from network (or legacy)
-        cachedTracks = radar.getTracks().stream().filter(det::test).toList();
+        LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
+        for (IRadar radar : radars) {
+            for (RadarTrack track : radar.getTracks()) {
+                if (track == null || !det.test(track)) continue;
+                String id = track.getId();
+                if (id == null || id.isBlank()) id = track.id();
+                if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
+                merged.merge(id, track, MonitorBlockEntity::newerTrack);
+            }
+        }
+        cachedTracks = List.copyOf(merged.values());
 
         if (!level.isClientSide) {
             activetrack = resolveActiveTrack();
         }
     }
     public boolean isLinked() {
-        return getRadarCenterPos() != null;
+        return !radarInfos.isEmpty() || getRadarCenterPos() != null;
+    }
+
+    private static RadarTrack newerTrack(RadarTrack first, RadarTrack second) {
+        return second.scannedTime() >= first.scannedTime() ? second : first;
     }
 
     @Nullable
@@ -356,6 +405,54 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             radar = r;
         }
         return Optional.ofNullable(radar);
+    }
+
+    public List<IRadar> getRadars() {
+        if (level == null) return List.of();
+        List<IRadar> radars = new ArrayList<>();
+        for (RadarDisplayInfo info : radarInfos) {
+            IRadar radar = resolveRadar(info.pos());
+            if (radar != null) radars.add(radar);
+        }
+        return List.copyOf(radars);
+    }
+
+    private List<IRadar> getRunningRadars() {
+        List<IRadar> radars = new ArrayList<>();
+        for (IRadar radar : getRadars()) {
+            if (radar.isRunning()) radars.add(radar);
+        }
+        return radars;
+    }
+
+    private @Nullable IRadar resolveRadar(BlockPos pos) {
+        if (level == null || pos == null) return null;
+
+        IRadar cached = radarCache.get(pos);
+        if (cached instanceof BlockEntity be && be.getBlockPos().equals(pos)) {
+            return cached;
+        }
+
+        if (level.getBlockEntity(pos) instanceof IRadar radar) {
+            radarCache.put(pos, radar);
+            return radar;
+        }
+
+        radarCache.remove(pos);
+        return null;
+    }
+
+    public List<RadarDisplayInfo> getRadarInfos() {
+        return radarInfos;
+    }
+
+    public List<RadarDisplayInfo> getRunningRadarInfos() {
+        if (radarInfos.isEmpty()) return List.of();
+        List<RadarDisplayInfo> running = new ArrayList<>();
+        for (RadarDisplayInfo info : radarInfos) {
+            if (info.running()) running.add(info);
+        }
+        return List.copyOf(running);
     }
 
     // Basics
@@ -407,7 +504,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public float getRange() {
-        return getRadar().map(IRadar::getRange).orElse(0f);
+        float range = 0f;
+        for (RadarDisplayInfo info : radarInfos) {
+            range = Math.max(range, info.range());
+        }
+        return range;
     }
 
     @Nullable
@@ -423,12 +524,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     public Vec3 getTargetPos(TargetingConfig targetingConfig) {
         AtomicReference<Vec3> targetPos = new AtomicReference<>();
 
-        getRadar().ifPresent(radar -> {
-            if (selectedEntity == null)
-                return;
-
+        if (selectedEntity != null) {
             targetPos.set(AutoTargetingHelper.resolveSelectedTargetPos(selectedEntity, getController().cachedTracks));
-        });
+        }
 
         if (targetPos.get() == null)
             selectedEntity = null;
@@ -495,8 +593,17 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (clientPacket && tag.contains("HasRadarPos", Tag.TAG_BYTE) && !tag.getBoolean("HasRadarPos")) {
             radarPos = null;
             radar = null;
+            radarCache.clear();
+            radarInfos = List.of();
         } else if (tag.contains("radarPos")) {
             radarPos = NbtUtils.readBlockPos(tag, "radarPos").orElse(null);
+        }
+
+        if (clientPacket && tag.contains("Radars", Tag.TAG_LIST)) {
+            radarInfos = readRadarInfos(tag.getList("Radars", Tag.TAG_COMPOUND));
+            radarPos = radarInfos.isEmpty() ? null : radarInfos.get(0).pos();
+            radar = null;
+            radarCache.clear();
         }
 
         selectedEntity = tag.contains("SelectedEntity", Tag.TAG_STRING)
@@ -559,6 +666,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             if (radarPos != null)
                 tag.put("radarPos", NbtUtils.writeBlockPos(radarPos));
 
+            tag.put("Radars", writeRadarInfos());
+
             tag.put("Filter", filter.toTag());
             tag.put("tracks", RadarTrackUtil.serializeNBTList(cachedTracks));
         } else {
@@ -572,6 +681,49 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
 
         tag.put("SafeZones", saveSafeZones());
+    }
+
+    private ListTag writeRadarInfos() {
+        ListTag list = new ListTag();
+        for (RadarDisplayInfo info : radarInfos) {
+            CompoundTag tag = new CompoundTag();
+            tag.put("Pos", NbtUtils.writeBlockPos(info.pos()));
+            tag.putDouble("CenterX", info.center().x);
+            tag.putDouble("CenterY", info.center().y);
+            tag.putDouble("CenterZ", info.center().z);
+            tag.putFloat("Range", info.range());
+            tag.putBoolean("Running", info.running());
+            tag.putString("Type", info.type() == null ? "" : info.type());
+            tag.putFloat("GlobalAngle", info.globalAngle());
+            if (info.direction() != null) tag.putString("Direction", info.direction().getName());
+            tag.putBoolean("RenderRelative", info.renderRelativeToMonitor());
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private List<RadarDisplayInfo> readRadarInfos(ListTag list) {
+        List<RadarDisplayInfo> infos = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            BlockPos pos = NbtUtils.readBlockPos(tag, "Pos").orElse(null);
+            if (pos == null) continue;
+            net.minecraft.core.Direction direction = null;
+            if (tag.contains("Direction", Tag.TAG_STRING)) {
+                direction = net.minecraft.core.Direction.byName(tag.getString("Direction"));
+            }
+            infos.add(new RadarDisplayInfo(
+                    pos,
+                    new Vec3(tag.getDouble("CenterX"), tag.getDouble("CenterY"), tag.getDouble("CenterZ")),
+                    tag.getFloat("Range"),
+                    tag.getBoolean("Running"),
+                    tag.getString("Type"),
+                    tag.getFloat("GlobalAngle"),
+                    direction,
+                    tag.getBoolean("RenderRelative")
+            ));
+        }
+        return List.copyOf(infos);
     }
 
 

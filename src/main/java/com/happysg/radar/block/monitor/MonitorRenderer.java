@@ -2,6 +2,7 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.controller.id.IDManager;
+import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
@@ -74,15 +75,11 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             // Set up transformation matrix for the monitor face
             setupMonitorTransform(ms, blockEntity.getBlockState().getValue(MonitorBlock.FACING));
 
-            // Get radar and render if it's running
-            blockEntity.getRadar().ifPresent(radar -> {
-                if (!radar.isRunning()) {
-                    return;
-                }
+            if (blockEntity.getRunningRadarInfos().isEmpty()) {
+                return;
+            }
 
-                // Render all radar display elements
-                renderRadarDisplay(radar, blockEntity, ms, bufferSource, partialTicks);
-            });
+            renderRadarDisplay(blockEntity, ms, bufferSource, partialTicks);
         }
     }
 
@@ -104,31 +101,35 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     /**
      * Main method for rendering all radar display elements
      */
-    private void renderRadarDisplay(IRadar radar, MonitorBlockEntity blockEntity, PoseStack ms,
+    private void renderRadarDisplay(MonitorBlockEntity blockEntity, PoseStack ms,
                                     MultiBufferSource bufferSource, float partialTicks) {
         // Render in order from back to front to prevent z-fighting
+        MonitorProjection projection = MonitorProjection.create(blockEntity);
 
-        renderGrid(radar, blockEntity, ms, bufferSource);
-        renderSafeZones(radar, blockEntity, ms, bufferSource);
-        renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_FILLER);
-        renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_CIRCLE);
-        renderSweep(radar, blockEntity, ms, bufferSource, partialTicks);
-        renderRadarTracks(radar, blockEntity, ms, bufferSource);
+        renderGrid(projection, blockEntity, ms, bufferSource);
+        renderSafeZones(projection, blockEntity, ms, bufferSource);
+
+        for (MonitorBlockEntity.RadarDisplayInfo radarInfo : blockEntity.getRunningRadarInfos()) {
+            MonitorProjection.DisplayPoint radarCenter = projection.project(radarInfo.center());
+            float scale = projection.displayScale(radarInfo.range());
+            renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_FILLER, radarCenter, scale);
+            renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_CIRCLE, radarCenter, scale);
+            IRadar liveRadar = resolveLiveRadar(blockEntity, radarInfo);
+            renderSweep(radarInfo, liveRadar, blockEntity, ms, bufferSource, radarCenter, scale, partialTicks);
+        }
+
+        renderRadarTracks(projection, blockEntity, ms, bufferSource);
     }
 
     /**
      * Renders safety zones on the radar display
      */
-    private void renderSafeZones(IRadar radar, MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource) {
+    private void renderSafeZones(MonitorProjection projection, MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource) {
         List<AABB> safeZones = blockEntity.safeZones;
         if (safeZones == null || safeZones.isEmpty()) {
             return;
         }
-        
-        int size = blockEntity.getSize();
-        float range = radar.getRange();
-        Direction facing = blockEntity.getBlockState().getValue(MonitorBlock.FACING);
-        
+
         Matrix4f m = ms.last().pose();
         Matrix3f n = ms.last().normal();
         Color color = new Color(0x383b42);
@@ -137,8 +138,8 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         // Render each safe zone
         for (AABB zone : safeZones) {
             // Transform zone coordinates to display coordinates
-            Vec3 zoneMin = transformWorldToRadar(zone.minX, zone.minY, zone.minZ, radar, blockEntity, facing, range, size);
-            Vec3 zoneMax = transformWorldToRadar(zone.maxX, zone.maxY, zone.maxZ, radar, blockEntity, facing, range, size);
+            Vec3 zoneMin = transformWorldToRadar(zone.minX, zone.minY, zone.minZ, projection, blockEntity.getSize());
+            Vec3 zoneMax = transformWorldToRadar(zone.maxX, zone.maxY, zone.maxZ, projection, blockEntity.getSize());
 
             // Skip zones that are outside the display
             if (isOutsideDisplay(zoneMin) && isOutsideDisplay(zoneMax)) {
@@ -186,9 +187,9 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     /**
      * Renders the grid pattern on the radar display
      */
-    private void renderGrid(IRadar radar, MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource) {
+    private void renderGrid(MonitorProjection projection, MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource) {
         int size = blockEntity.getSize();
-        float range = radar.getRange();
+        float range = projection.halfSpan();
         float gridSpacing = range * 2 / RadarConfig.client().gridBoxScale.get();
 
         VertexConsumer buffer = bufferSource.getBuffer(RenderType.entityTranslucent(MonitorSprite.GRID_SQUARE.getTexture()));
@@ -234,54 +235,26 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     }
 
 
-    private void renderRadarTracks(IRadar radar, MonitorBlockEntity monitor, PoseStack ms, MultiBufferSource bufferSource) {
+    private void renderRadarTracks(MonitorProjection projection, MonitorBlockEntity monitor, PoseStack ms, MultiBufferSource bufferSource) {
         AtomicInteger depthCounter = new AtomicInteger(0);
         for (RadarTrack track : monitor.getTracks()) {
-            renderTrack(track, monitor, radar, ms, bufferSource, depthCounter.getAndIncrement());
+            renderTrack(track, monitor, projection, ms, bufferSource, depthCounter.getAndIncrement());
         }
     }
 
-    private void renderTrack(RadarTrack track, MonitorBlockEntity monitor, IRadar radar,
+    private void renderTrack(RadarTrack track, MonitorBlockEntity monitor, MonitorProjection projection,
                              PoseStack ms, MultiBufferSource bufferSource,
                              int depthMultiplier) {
-        Direction monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
-        float scale = radar.getRange();
         int size = monitor.getSize();
 
-        // i treat both positions as world positions here
-        Vec3 radarPos = PhysicsHandler.getWorldPos(monitor.getLevel(), radar.getWorldPos()).getCenter();
-        Vec3 relativePos = track.position().subtract(radarPos);
-
-        // if we're rendering relative to the monitor, and the monitor is on a ship,
-        // rotate the relative vector into ship-local axes so the screen rotates with the ship
-        if (radar.renderRelativeToMonitor()) {
-            if(!Mods.SABLE.isLoaded())return;
-            SubLevelAccess ship = monitor.getShip();
-            if (ship != null) {
-                // i keep the cone "north-up" by counter-rotating track vectors by the ship yaw
-                double shipYawRad = getShipYawRad(ship);
-                relativePos = rotateAroundY(relativePos, -(shipYawRad + Math.PI));
-
-            }
-        }
-        // Transform to display coordinates
-        float xOff = calculateTrackOffset(relativePos, monitorFacing, scale, true);
-        float zOff = calculateTrackOffset(relativePos, monitorFacing, scale, false);
+        MonitorProjection.DisplayPoint point = projection.project(track.position());
 
         // Skip tracks that are outside the display range
-        if (Math.abs(xOff) > 0.5f || Math.abs(zOff) > 0.5f) {
+        if (point.outside()) {
             return;
         }
 
-        // Scale positions to fit within display
-        xOff = xOff * TRACK_POSITION_SCALE;
-        zOff = zOff * TRACK_POSITION_SCALE;
-
-        // Calculate final display coordinates
-        float xmin = 1 - size + (xOff * size);
-        float zmin = 1 - size + (zOff * size);
-        float xmax = xOff * size + 1;
-        float zmax = zOff * size + 1;
+        MonitorProjection.Quad quad = MonitorProjection.fullSizeQuad(point, size);
 
         // Calculate depth to prevent z-fighting between tracks
         float depth = DEPTH_TRACK_BASE + (depthMultiplier * DEPTH_TRACK_INCREMENT);
@@ -301,25 +274,25 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         VertexConsumer buffer = getBuffer(bufferSource, track.getSprite());
         Matrix4f m = ms.last().pose();
         Matrix3f n = ms.last().normal();
-        renderVertices(buffer, m, n, color, alpha, depth, xmin, zmin, xmax, zmax);
+        renderVertices(buffer, m, n, color, alpha, depth, quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
 
         // Render selection indicators if needed
         if (track.id().equals(monitor.hoveredEntity)) {
             renderVertices(getBuffer(bufferSource, MonitorSprite.TARGET_HOVERED),
                     m, n, new Color(255, 255, 0), alpha, depth - 0.0001f,
-                    xmin, zmin, xmax, zmax);
+                    quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
         }
         if (track.id().equals(monitor.selectedEntity)) {
             renderVertices(getBuffer(bufferSource, MonitorSprite.TARGET_SELECTED),
                     m, n, new Color(255, 0, 0), alpha, depth - 0.0002f,
-                    xmin, zmin, xmax, zmax);
+                    quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
         }
 
         String slug = getSlugForTrack(track, monitor);
         if (slug != null) {
             // i anchor the label to the center of the track quad
-            float xCenter = (xmin + xmax) * 0.5f;
-            float zCenter = (zmin + zmax) * 0.5f;
+            float xCenter = (quad.minX() + quad.maxX()) * 0.5f;
+            float zCenter = (quad.minZ() + quad.maxZ()) * 0.5f;
 
             // i nudge it "down" the screen ( +Z on your monitor plane )
             float zBelow = zCenter + LABEL_Z_OFFSET;
@@ -400,17 +373,10 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     /**
      * Transforms world coordinates to radar display coordinates
      */
-    private Vec3 transformWorldToRadar(double x, double y, double z, IRadar radar,
-                                       MonitorBlockEntity monitor, Direction facing,
-                                       float range, int size) {
-        Vec3 radarPos = PhysicsHandler.getWorldPos(monitor.getLevel(), radar.getWorldPos()).getCenter();
-        Vec3 relativePos = new Vec3(x, y, z).subtract(radarPos);
-
-        float xOff = calculateTrackOffset(relativePos, facing, range, true) * TRACK_POSITION_SCALE;
-        float zOff = calculateTrackOffset(relativePos, facing, range, false) * TRACK_POSITION_SCALE;
-
-        float displayX = 1 - size + (xOff * size);
-        float displayZ = 1 - size + (zOff * size);
+    private Vec3 transformWorldToRadar(double x, double y, double z, MonitorProjection projection, int size) {
+        MonitorProjection.DisplayPoint point = projection.project(new Vec3(x, y, z));
+        float displayX = 1 - size / 2f + (point.xOffset() * size);
+        float displayZ = 1 - size / 2f + (point.zOffset() * size);
 
         return new Vec3(displayX, DEPTH_GRID, displayZ);
     }
@@ -463,27 +429,25 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
      * Renders a background element on the display
      */
     private void renderBG(MonitorBlockEntity blockEntity, PoseStack ms,
-                          MultiBufferSource bufferSource, MonitorSprite monitorSprite) {
+                          MultiBufferSource bufferSource, MonitorSprite monitorSprite,
+                          MonitorProjection.DisplayPoint center, float scale) {
         int size = blockEntity.getSize();
         Matrix4f m = ms.last().pose();
         Matrix3f n = ms.last().normal();
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
 
-        float minX = 1f - size;
-        float minZ = 1f - size;
-        float maxX = 1;
-        float maxZ = 1;
+        MonitorProjection.Quad quad = MonitorProjection.scaledQuad(center, size, scale);
 
         renderVertices(getBuffer(bufferSource, monitorSprite), m, n, color, ALPHA_BACKGROUND, DEPTH_BACKGROUND,
-                minX, minZ, maxX, maxZ);
+                quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
     }
 
     /**
      * Renders the radar sweep animation
      */
-    public void renderSweep(IRadar radar, MonitorBlockEntity controller, PoseStack ms,
-                            MultiBufferSource bufferSource, float partialTicks) {
-        if (!radar.isRunning())
+    public void renderSweep(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar, MonitorBlockEntity controller, PoseStack ms,
+                            MultiBufferSource bufferSource, MonitorProjection.DisplayPoint center, float scale, float partialTicks) {
+        if (!radar.running())
             return;
 
         VertexConsumer buffer = bufferSource.getBuffer(ModRenderTypes.polygonOffset(MonitorSprite.RADAR_SWEEP.getTexture()));
@@ -492,7 +456,12 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
 
         float monitorAngle = 0;
-        if (controller.getShip() != null && radar.getRadarType().equals("spinning")) { // spinning radar on a ship
+        String radarType = liveRadar != null ? liveRadar.getRadarType() : radar.type();
+        boolean renderRelative = liveRadar != null ? liveRadar.renderRelativeToMonitor() : radar.renderRelativeToMonitor();
+        Direction liveDirection = liveRadar != null ? liveRadar.getradarDirection() : radar.direction();
+        float globalAngle = getRenderGlobalAngle(radar, liveRadar, partialTicks);
+
+        if (controller.getShip() != null && radarType.equals("spinning")) { // spinning radar on a ship
             // Calculate the current angle
             Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
             Vec3 facingVec = new Vec3(monitorFacing.getStepX(), monitorFacing.getStepY(), monitorFacing.getStepZ());
@@ -507,20 +476,9 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             monitorAngle = (monitorAngle + 360 + 180) % 360;
         }
         float currentAngle;
-        if(radar.renderRelativeToMonitor() && controller.getShip() != null && !radar.getRadarType().equals("spinning")){  // plane radar on a ship
-            // Plane radar on ship - cone stays fixed, tracks rotate inside
+        if(renderRelative && controller.getShip() != null && !radarType.equals("spinning")){  // plane radar on a ship
             Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
-            Direction radarFacing   = radar.getradarDirection();
-            if(radarFacing == null)return;
-
-            ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, radarFacing);
-            switch (cone){
-                case NORTH -> currentAngle = 0;
-                case DOWN -> currentAngle = 180;
-                case LEFT -> currentAngle = 90;
-                case RIGHT -> currentAngle = 270;
-                default -> currentAngle = 30;
-            }
+            currentAngle = alignGlobalAngleToMonitor(monitorFacing, globalAngle);
 
         }else{ // ground based spinning radar
             Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
@@ -528,10 +486,10 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             Direction radarFacing   = Direction.NORTH;
             ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, radarFacing);
             switch (cone){
-                case NORTH -> currentAngle = 0 + radar.getGlobalAngle();
-                case DOWN -> currentAngle = 180 + radar.getGlobalAngle();
-                case LEFT -> currentAngle = 90 + radar.getGlobalAngle();
-                case RIGHT -> currentAngle = 270 + radar.getGlobalAngle();
+                case NORTH -> currentAngle = 0 + globalAngle;
+                case DOWN -> currentAngle = 180 + globalAngle;
+                case LEFT -> currentAngle = 90 + globalAngle;
+                case RIGHT -> currentAngle = 270 + globalAngle;
                 default -> currentAngle = 30;
             }
 
@@ -555,6 +513,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         float centerX = 0.5f;
         float centerY = 0.5f;
         int size = controller.getSize();
+        MonitorProjection.Quad quad = MonitorProjection.scaledQuad(center, size, scale);
 
         // Calculate UV coordinates for rotating sweep
         float u0 = centerX + (0 - centerX) * cos - (0 - centerY) * sin;
@@ -570,10 +529,37 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         float g = color.getGreenAsFloat();
         float b = color.getBlueAsFloat();
 
-        addSweepVertex(buffer, m, 1f - size, DEPTH_SWEEP, 1f - size, r, g, b, ALPHA_SWEEP, u0, v0);
-        addSweepVertex(buffer, m, 1,        DEPTH_SWEEP, 1f - size, r, g, b, ALPHA_SWEEP, u1, v1);
-        addSweepVertex(buffer, m, 1,        DEPTH_SWEEP, 1f,        r, g, b, ALPHA_SWEEP, u2, v2);
-        addSweepVertex(buffer, m, 1f - size, DEPTH_SWEEP, 1f,       r, g, b, ALPHA_SWEEP, u3, v3);
+        addSweepVertex(buffer, m, quad.minX(), DEPTH_SWEEP, quad.minZ(), r, g, b, ALPHA_SWEEP, u0, v0);
+        addSweepVertex(buffer, m, quad.maxX(), DEPTH_SWEEP, quad.minZ(), r, g, b, ALPHA_SWEEP, u1, v1);
+        addSweepVertex(buffer, m, quad.maxX(), DEPTH_SWEEP, quad.maxZ(), r, g, b, ALPHA_SWEEP, u2, v2);
+        addSweepVertex(buffer, m, quad.minX(), DEPTH_SWEEP, quad.maxZ(), r, g, b, ALPHA_SWEEP, u3, v3);
+    }
+
+    private IRadar resolveLiveRadar(MonitorBlockEntity monitor, MonitorBlockEntity.RadarDisplayInfo info) {
+        if (monitor.getLevel() == null) return null;
+        if (monitor.getLevel().getBlockEntity(info.pos()) instanceof IRadar radar) {
+            return radar;
+        }
+        return null;
+    }
+
+    private float getRenderGlobalAngle(MonitorBlockEntity.RadarDisplayInfo info, IRadar liveRadar, float partialTicks) {
+        float angle = liveRadar != null ? liveRadar.getGlobalAngle() : info.globalAngle();
+        if (liveRadar instanceof RadarBearingBlockEntity bearing) {
+            angle += bearing.getAngularSpeed() * partialTicks;
+        }
+        return (angle + 360f) % 360f;
+    }
+
+    private float alignGlobalAngleToMonitor(Direction monitorFacing, float globalAngle) {
+        ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, Direction.NORTH);
+        return switch (cone) {
+            case NORTH -> globalAngle;
+            case DOWN -> 180 + globalAngle;
+            case LEFT -> 90 + globalAngle;
+            case RIGHT -> 270 + globalAngle;
+            default -> globalAngle;
+        };
     }
     private void addSweepVertex(VertexConsumer buffer, Matrix4f matrix,
                                 float x, float y, float z,

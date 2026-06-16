@@ -89,23 +89,14 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
 
     @Override
     public float getGlobalAngle() {
-        if(!Mods.SABLE.isLoaded())return 0;
+        Direction scanFacing = getScanFacing();
+        if(!Mods.SABLE.isLoaded())return getAngleForDirection(scanFacing);
         SubLevelAccess ship = SableCompanion.INSTANCE.getContaining(level, getBlockPos());
-        if(ship == null) return 0;
+        if(ship == null) return getAngleForDirection(scanFacing);
 
-        org.joml.Vector3d fwd = ship.logicalPose().transformNormal(new org.joml.Vector3d(0, 0, 1));
-        float rot = (float) -Math.toDegrees(Math.atan2(fwd.x(), fwd.z()));
-
-        Direction facing = this.getBlockState().getValue(StationaryRadarBlock.FACING);
-        int fOffset;
-        switch (facing){
-            case NORTH -> fOffset = 0;
-            case EAST -> fOffset = 90;
-            case SOUTH -> fOffset = 180;
-            case WEST -> fOffset = 270;
-            default -> fOffset = 0;
-        }
-        return fOffset + rot;
+        Vec3 facingVec = new Vec3(scanFacing.getStepX(), scanFacing.getStepY(), scanFacing.getStepZ());
+        Vec3 worldVec = PhysicsHandler.getWorldVecDirectionTransform(facingVec, this);
+        return (float) ((Math.toDegrees(Math.atan2(worldVec.x, worldVec.z)) + 360) % 360);
     }
 
     @Override
@@ -124,5 +115,10 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
 
     private Direction getScanFacing() {
         return getBlockState().getValue(StationaryRadarBlock.FACING).getOpposite();
+    }
+
+    private float getAngleForDirection(Direction direction) {
+        Vec3 vec = new Vec3(direction.getStepX(), direction.getStepY(), direction.getStepZ());
+        return (float) ((Math.toDegrees(Math.atan2(vec.x, vec.z)) + 360) % 360);
     }
 }

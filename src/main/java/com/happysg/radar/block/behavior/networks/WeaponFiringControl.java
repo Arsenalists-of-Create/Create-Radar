@@ -21,10 +21,16 @@ import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.item.radarproxfuze.AdvancedProximityFuze;
+import com.happysg.radar.targeting.AimSolution;
+import com.happysg.radar.targeting.ObstructionChecker;
+import com.happysg.radar.targeting.ObstructionResult;
+import com.happysg.radar.targeting.ProjectileModel;
+import com.happysg.radar.targeting.ProjectileSimulator;
 import com.happysg.radar.targeting.TargetingComputer;
 import com.happysg.radar.targeting.TargetMotionClass;
 import com.happysg.radar.targeting.TargetingResult;
 import com.happysg.radar.targeting.TargetingSnapshot;
+import com.happysg.radar.targeting.TargetingMath;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.contraptions.Contraption;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
@@ -36,6 +42,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import javax.annotation.Nullable;
 import net.createmod.catnip.math.VecHelper;
 import net.minecraft.core.BlockPos;
@@ -103,9 +113,27 @@ public class WeaponFiringControl {
     double maxSimDistanceBlocks;
     private static final double NEW_SOLVER_MIN_CONFIDENCE = 0.05;
     private static final int TARGETING_DEBUG_LOG_INTERVAL_TICKS = 20;
-    private static final int MAX_NEW_SOLVER_FLIGHT_TICKS = 400;
+    private static final int MAX_NEW_SOLVER_FLIGHT_TICKS = 500;
+    private static final double CLOSE_TARGET_SOLVE_EVERY_TICK_BLOCKS = 64.0;
+    private static final double EXTREME_TARGET_SPEED_MULTIPLIER = 2.0;
+    private static final int ASYNC_TARGETING_RESULT_TTL_TICKS = 4;
+    private static final ExecutorService TARGETING_EXECUTOR = Executors.newSingleThreadExecutor(new TargetingThreadFactory());
     private final TargetingComputer targetingComputer;
+    private final TargetingComputer asyncTargetingComputer;
+    private final ProjectileSimulator validationProjectileSimulator;
+    private final ObstructionChecker mainThreadObstructionChecker;
     private long lastTargetingDebugLogTick;
+    @Nullable
+    private TargetingResult cachedTargetingResult;
+    @Nullable
+    private UUID cachedTargetingTargetId;
+    @Nullable
+    private Vec3 cachedTargetingSolvePos;
+    private long cachedTargetingSolveTick;
+    @Nullable
+    private CompletableFuture<AsyncTargetingResult> pendingTargetingFuture;
+    @Nullable
+    private AsyncTargetingRequest pendingTargetingRequest;
     @Nullable
     private UUID lastSableVelocityTargetId;
     @Nullable
@@ -155,7 +183,16 @@ public class WeaponFiringControl {
         this.visCache = new HashMap<>();
         this.maxSimDistanceBlocks = (double)4096.0F;
         this.targetingComputer = TargetingComputer.createDefault();
+        this.asyncTargetingComputer = new TargetingComputer(null, new ProjectileSimulator(), null, null);
+        this.validationProjectileSimulator = new ProjectileSimulator();
+        this.mainThreadObstructionChecker = new ObstructionChecker();
         this.lastTargetingDebugLogTick = Long.MIN_VALUE;
+        this.cachedTargetingResult = null;
+        this.cachedTargetingTargetId = null;
+        this.cachedTargetingSolvePos = null;
+        this.cachedTargetingSolveTick = Long.MIN_VALUE;
+        this.pendingTargetingFuture = null;
+        this.pendingTargetingRequest = null;
         this.lastSableVelocityTargetId = null;
         this.lastSableVelocityTargetPos = null;
         this.lastSableVelocityTargetTick = Long.MIN_VALUE;
@@ -566,6 +603,7 @@ public class WeaponFiringControl {
         this.lastAimPoint = null;
         this.lastOffsetAim = null;
         this.aimStableTicks = 0;
+        this.clearTargetingResultCache();
         this.stopFireCannon();
     }
 
@@ -782,29 +820,40 @@ public class WeaponFiringControl {
                                             }
                                         }
 
-                                        if (best > (double)0.0F) {
-                                            this.maxSimDistanceBlocks = best;
-                                        }
+                                    if (best > (double)0.0F) {
+                                        this.maxSimDistanceBlocks = best;
                                     }
+                                }
 
+                                    int trackingLeadTicks = this.targetTrackingLeadTicks(motion.motionClass());
+                                    Vec3 trackingSolvePos = predictTarget(solvePos, targetVel, targetAccel, (double)trackingLeadTicks, motion.motionClass(), (double)-0.08F);
                                     CannonLead.LeadSolution lead = null;
                                     TargetingResult targetingResult = null;
                                     boolean forceLegacyLead = (Boolean)RadarConfig.server().forceLegacyCannonLeadSolver.get();
-                                    boolean useNewSolver = !forceLegacyLead && (Boolean)RadarConfig.server().useNewTargetingComputer.get() && !CannonUtil.isLaserCannon(cannon) && !this.isSableMount();
+                                    boolean useNewSolver = !forceLegacyLead && (Boolean)RadarConfig.server().useNewTargetingComputer.get() && !CannonUtil.isLaserCannon(cannon);
                                     if (useNewSolver) {
-                                        targetingResult = this.solveWithTargetingComputer(serverLevel, cannon, rawTargetPos, solvePos, targetVel, targetAccel, shooterVel, this.targetEntity, this.targetSublevel, motion.motionClass());
+                                        targetingResult = this.pollCompletedAsyncTargetingResult(serverLevel, cannon, targetMotionId, solvePos);
+                                        boolean completedAsyncResult = targetingResult != null;
+                                        boolean solveEveryTick = this.shouldSolveEveryTick(targetVel, motion, dist);
+                                        if (targetingResult == null && this.shouldReuseTargetingResult(serverLevel, targetMotionId, solvePos, targetVel, motion, dist)) {
+                                            targetingResult = this.cachedTargetingResult;
+                                        }
+
+                                        if ((!completedAsyncResult && targetingResult == null) || (completedAsyncResult && solveEveryTick)) {
+                                            this.submitAsyncTargetingSolve(serverLevel, cannon, rawTargetPos, solvePos, targetVel, targetAccel, shooterVel, this.targetEntity, this.targetSublevel, motion.motionClass(), trackingLeadTicks, targetMotionId);
+                                        }
                                     }
 
                                     boolean newSolverOk = targetingResult != null && targetingResult.valid() && targetingResult.hasShot() && targetingResult.confidence() >= motion.minConfidence();
                                     boolean allowLegacyFallback = forceLegacyLead || (Boolean)RadarConfig.server().allowLegacyCannonLeadFallback.get();
                                     if (!newSolverOk && allowLegacyFallback && !CannonUtil.isLaserCannon(cannon) && dist > noLeadDist) {
-                                        lead = CannonLead.solveLeadPerTickConstantVelocity(this.cannonMount, cannon, serverLevel, shooterVel, solvePos, targetVel, (Integer)RadarConfig.server().leadFiringDelay.get(), this.maxSimDistanceBlocks);
+                                        lead = CannonLead.solveLeadPerTickConstantVelocity(this.cannonMount, cannon, serverLevel, shooterVel, solvePos, targetVel, (Integer)RadarConfig.server().leadFiringDelay.get() + trackingLeadTicks, this.maxSimDistanceBlocks);
                                     }
 
                                     boolean hasLeadSolution = lead != null && lead.aimPoint != null;
                                     boolean hasNewTargetingSolution = newSolverOk && targetingResult.aimSolution() != null;
                                     boolean canFireWithoutLead = CannonUtil.isLaserCannon(cannon);
-                                    Vec3 offsetAim = hasNewTargetingSolution && targetingResult.aimSolution().aimPoint() != null ? targetingResult.aimSolution().aimPoint() : (hasLeadSolution ? lead.aimPoint : solvePos);
+                                    Vec3 offsetAim = hasNewTargetingSolution && targetingResult.aimSolution().aimPoint() != null ? targetingResult.aimSolution().aimPoint() : (hasLeadSolution ? lead.aimPoint : trackingSolvePos);
                                     this.lastAimPoint = offsetAim;
                                     if (this.lastOffsetAim != null && !(this.lastOffsetAim.distanceTo(offsetAim) > motion.aimStableEps())) {
                                         ++this.aimStableTicks;
@@ -817,7 +866,8 @@ public class WeaponFiringControl {
                                     Double desiredYaw = null;
                                     if (Mods.SABLE.isLoaded() && PhysicsHandler.isBlockInPlotyard(this.level, this.cannonMount.getBlockPos())) {
                                         long now = this.level.getGameTime();
-                                        boolean needSolve = this.cachedSableAngles == null || now - this.cachedSableSolveTick >= 3L || this.cachedSableAimTarget == null || this.cachedSableAimTarget.distanceToSqr(offsetAim) > 0.09;
+                                        int sableSolveInterval = motion.motionClass() == TargetMotionClass.ERRATIC ? 1 : SABLE_SOLVE_INTERVAL;
+                                        boolean needSolve = this.cachedSableAngles == null || now - this.cachedSableSolveTick >= (long)sableSolveInterval || this.cachedSableAimTarget == null || this.cachedSableAimTarget.distanceToSqr(offsetAim) > 0.09;
                                         if (needSolve) {
                                             this.cachedSableAngles = VS2CannonTargeting.calculatePitchAndYawVS2(this.cannonMount, offsetAim, serverLevel, this.cachedSablePitchDeg, this.cachedSableYawDeg);
                                             this.cachedSableAimTarget = offsetAim;
@@ -926,6 +976,7 @@ public class WeaponFiringControl {
         this.cachedSableSolveTick = -1L;
         this.cachedSablePitchDeg = null;
         this.cachedSableYawDeg = null;
+        this.clearTargetingResultCache();
         this.stopFireCannon();
     }
 
@@ -940,12 +991,14 @@ public class WeaponFiringControl {
             this.lastAimPoint = null;
             this.lastOffsetAim = null;
             this.aimStableTicks = 0;
+            this.clearTargetingResultCache();
             this.stopFireCannon();
         } else {
             this.binoMode = false;
             this.target = target;
             this.lastOffsetAim = null;
             this.aimStableTicks = 0;
+            this.clearTargetingResultCache();
             this.targetingConfig = config;
             if (this.level != null) {
                 this.lastTargetTick = this.level.getGameTime();
@@ -965,6 +1018,7 @@ public class WeaponFiringControl {
         if (!reset && binoTarget != null) {
             this.binoMode = true;
             this.binoTargetPos = binoTarget.immutable();
+            this.clearTargetingResultCache();
             if (this.level != null) {
                 this.lastTargetTick = this.level.getGameTime();
             }
@@ -973,12 +1027,238 @@ public class WeaponFiringControl {
             this.binoMode = false;
             this.binoTargetPos = null;
             this.target = null;
+            this.clearTargetingResultCache();
             this.stopFireCannon();
         }
     }
 
+    private boolean shouldReuseTargetingResult(ServerLevel serverLevel, @Nullable UUID targetMotionId, Vec3 solvePos, Vec3 targetVel, TargetMotionEstimate motion, double distanceToTarget) {
+        if (this.cachedTargetingResult == null || !this.cachedTargetingResult.valid() || !this.cachedTargetingResult.hasShot()) {
+            return false;
+        }
+
+        long now = serverLevel.getGameTime();
+        if (now - this.cachedTargetingSolveTick != 1L) {
+            return false;
+        }
+
+        if (this.shouldSolveEveryTick(targetVel, motion, distanceToTarget)) {
+            return false;
+        }
+
+        if (targetMotionId != null || this.cachedTargetingTargetId != null) {
+            if (targetMotionId == null || !targetMotionId.equals(this.cachedTargetingTargetId)) {
+                return false;
+            }
+        }
+
+        return this.cachedTargetingSolvePos != null && solvePos.distanceToSqr(this.cachedTargetingSolvePos) <= (double)4.0F;
+    }
+
+    private boolean shouldSolveEveryTick(Vec3 targetVel, TargetMotionEstimate motion, double distanceToTarget) {
+        if (motion.motionClass() == TargetMotionClass.ERRATIC || distanceToTarget <= CLOSE_TARGET_SOLVE_EVERY_TICK_BLOCKS) {
+            return true;
+        }
+
+        double fastThreshold = (Double)RadarConfig.server().targetLoosenThreshold.get();
+        double extremeSpeedMps = Math.max((double)6.0F, fastThreshold * EXTREME_TARGET_SPEED_MULTIPLIER);
+        return targetVel.length() * (double)20.0F >= extremeSpeedMps;
+    }
+
+    private void storeTargetingResult(ServerLevel serverLevel, @Nullable UUID targetMotionId, Vec3 solvePos, @Nullable TargetingResult targetingResult) {
+        if (targetingResult != null && targetingResult.valid() && targetingResult.hasShot()) {
+            this.cachedTargetingResult = targetingResult;
+            this.cachedTargetingTargetId = targetMotionId;
+            this.cachedTargetingSolvePos = solvePos;
+            this.cachedTargetingSolveTick = serverLevel.getGameTime();
+        } else {
+            this.clearTargetingResultCache();
+        }
+    }
+
+    private void clearTargetingResultCache() {
+        this.cachedTargetingResult = null;
+        this.cachedTargetingTargetId = null;
+        this.cachedTargetingSolvePos = null;
+        this.cachedTargetingSolveTick = Long.MIN_VALUE;
+        this.pendingTargetingFuture = null;
+        this.pendingTargetingRequest = null;
+    }
+
     @Nullable
-    private TargetingResult solveWithTargetingComputer(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, Vec3 rawTargetPos, Vec3 targetWorldPos, Vec3 targetVel, Vec3 targetAccel, Vec3 shooterVel, @Nullable Entity targetEntity, @Nullable SubLevelAccess targetSublevel, TargetMotionClass targetMotionClass) {
+    private TargetingResult pollCompletedAsyncTargetingResult(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, @Nullable UUID targetMotionId, Vec3 solvePos) {
+        CompletableFuture<AsyncTargetingResult> future = this.pendingTargetingFuture;
+        if (future == null || !future.isDone()) {
+            return null;
+        }
+
+        this.pendingTargetingFuture = null;
+        this.pendingTargetingRequest = null;
+
+        try {
+            AsyncTargetingResult asyncResult = future.getNow(null);
+            if (asyncResult == null || !this.isAsyncResultFresh(serverLevel, asyncResult.request(), targetMotionId, solvePos)) {
+                return null;
+            }
+
+            TargetingResult validated = this.validateAsyncTargetingResult(serverLevel, cannonContraption, asyncResult.request(), asyncResult.result());
+            this.storeTargetingResult(serverLevel, targetMotionId, solvePos, validated);
+            return validated;
+        } catch (Throwable throwable) {
+            LOGGER.debug("WFC TargetingComputer async solve failed", throwable);
+            return null;
+        }
+    }
+
+    private boolean isAsyncResultFresh(ServerLevel serverLevel, AsyncTargetingRequest request, @Nullable UUID targetMotionId, Vec3 solvePos) {
+        long age = serverLevel.getGameTime() - request.requestTick();
+        if (age < 0L || age > (long)ASYNC_TARGETING_RESULT_TTL_TICKS) {
+            return false;
+        }
+
+        if (!this.cannonMount.getBlockPos().equals(request.mountPos())) {
+            return false;
+        }
+
+        if (targetMotionId != null || request.targetId() != null) {
+            if (targetMotionId == null || !targetMotionId.equals(request.targetId())) {
+                return false;
+            }
+        }
+
+        return solvePos != null && solvePos.distanceToSqr(request.solvePos()) <= (double)4.0F;
+    }
+
+    private void submitAsyncTargetingSolve(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, Vec3 rawTargetPos, Vec3 targetWorldPos, Vec3 targetVel, Vec3 targetAccel, Vec3 shooterVel, @Nullable Entity targetEntity, @Nullable SubLevelAccess targetSublevel, TargetMotionClass targetMotionClass, int trackingLeadTicks, @Nullable UUID targetMotionId) {
+        if (this.pendingTargetingFuture != null && !this.pendingTargetingFuture.isDone()) {
+            return;
+        }
+
+        AsyncTargetingRequest request = this.buildAsyncTargetingRequest(serverLevel, cannonContraption, rawTargetPos, targetWorldPos, targetVel, targetAccel, shooterVel, targetEntity, targetSublevel, targetMotionClass, trackingLeadTicks, targetMotionId);
+        if (request == null) {
+            return;
+        }
+
+        this.pendingTargetingRequest = request;
+        this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, this.asyncTargetingComputer.solve(request.snapshot())), TARGETING_EXECUTOR);
+    }
+
+    @Nullable
+    private AsyncTargetingRequest buildAsyncTargetingRequest(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, Vec3 rawTargetPos, Vec3 targetWorldPos, Vec3 targetVel, Vec3 targetAccel, Vec3 shooterVel, @Nullable Entity targetEntity, @Nullable SubLevelAccess targetSublevel, TargetMotionClass targetMotionClass, int trackingLeadTicks, @Nullable UUID targetMotionId) {
+        if (serverLevel == null || cannonContraption == null || targetWorldPos == null) {
+            return null;
+        }
+
+        Vec3 rawMuzzlePos = this.getCannonRayStart();
+        Vec3 muzzleWorldPos = this.resolveMuzzleWorldPosition();
+        if (muzzleWorldPos == null) {
+            return null;
+        }
+
+        double projectileSpeed = (double)CannonUtil.getInitialVelocity(cannonContraption, serverLevel);
+        if (!Double.isFinite(projectileSpeed) || projectileSpeed <= (double)0.0F) {
+            return null;
+        }
+
+        BallisticPropertiesComponent ballistics = CannonUtil.getBallistics(cannonContraption, serverLevel);
+        double gravity = ballistics != null ? ballistics.gravity() : CannonUtil.getProjectileGravity(cannonContraption, serverLevel);
+        double drag = ballistics != null ? ballistics.drag() : CannonUtil.getProjectileDrag(cannonContraption, serverLevel);
+        if (!Double.isFinite(gravity)) {
+            gravity = 0.05;
+        }
+
+        if (!Double.isFinite(drag)) {
+            drag = 0.01;
+        }
+
+        Vec3 safeTargetVel = finiteOrZero(targetVel);
+        Vec3 safeTargetAccel = clampAcceleration(finiteOrZero(targetAccel));
+        Vec3 safeShooterVel = finiteOrZero(shooterVel);
+        int predictedTicks = this.predictedAsyncSolveTicks(serverLevel, cannonContraption, trackingLeadTicks);
+        Vec3 delayedTargetPos = predictTarget(targetWorldPos, safeTargetVel, safeTargetAccel, (double)predictedTicks, targetMotionClass, gravity);
+        AABB targetAabb = targetEntity != null ? this.resolveEntityWorldAabb(serverLevel, targetEntity) : this.resolveSublevelWorldAabb(targetSublevel);
+        if (targetAabb != null && predictedTicks > 0) {
+            targetAabb = targetAabb.move(delayedTargetPos.subtract(targetWorldPos));
+        }
+
+        if (this.shouldLogTargetingDebug(serverLevel)) {
+            this.logTargetingCoordinateResolution(serverLevel, rawTargetPos, targetWorldPos, rawMuzzlePos, muzzleWorldPos, safeShooterVel);
+        }
+
+        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
+        return new AsyncTargetingRequest(this.cannonMount.getBlockPos().immutable(), targetMotionId, targetWorldPos, serverLevel.getGameTime(), snapshot);
+    }
+
+    private int predictedAsyncSolveTicks(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, int trackingLeadTicks) {
+        int predictedTicks = Math.max(0, trackingLeadTicks);
+        TargetingResult previous = this.cachedTargetingResult;
+        if (previous != null && previous.valid() && previous.hasShot()) {
+            Vec3 aimPoint = previous.aimSolution() != null && previous.aimSolution().aimPoint() != null ? previous.aimSolution().aimPoint() : null;
+            if (aimPoint != null) {
+                predictedTicks = this.estimateSlewTicksForAimPoint(serverLevel, cannonContraption, aimPoint, previous.desiredYawDeg() + (double)270.0F, previous.desiredPitchDeg()) + Math.max(0, trackingLeadTicks);
+            }
+        }
+
+        return Math.max(0, Math.min(60, predictedTicks));
+    }
+
+    @Nullable
+    private TargetingResult validateAsyncTargetingResult(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, AsyncTargetingRequest request, @Nullable TargetingResult result) {
+        if (result == null || !result.valid() || !result.hasShot() || result.aimSolution() == null) {
+            return null;
+        }
+
+        AimSolution aim = result.aimSolution();
+        Vec3 direction = aim.aimDirection();
+        if (direction == null || direction.lengthSqr() < 1.0E-12) {
+            return null;
+        }
+
+        TargetingSnapshot snapshot = request.snapshot();
+        ProjectileModel model = ProjectileModel.simple(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag());
+        ProjectileSimulator.SimulationResult trajectory = this.validationProjectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), model, snapshot.maxFlightTicks());
+        ObstructionResult obstruction = this.mainThreadObstructionChecker.check(serverLevel, trajectory, Math.max(0, result.predictedFlightTicks()));
+        if (obstruction.clear() || this.isValidatedObstructionAtTarget(snapshot, obstruction)) {
+            return result;
+        }
+
+        return null;
+    }
+
+    private boolean isValidatedObstructionAtTarget(TargetingSnapshot snapshot, ObstructionResult obstruction) {
+        if (!obstruction.blocked() || obstruction.blockedPosition() == null) {
+            return false;
+        }
+
+        int blockedTick = Math.max(0, obstruction.blockedTick());
+        Vec3 targetAtBlock = predictTarget(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), (double)blockedTick, snapshot.targetMotionClass(), snapshot.gravity());
+        AABB targetAabb = snapshot.targetAabb() == null ? null : snapshot.targetAabb().move(targetAtBlock.subtract(snapshot.targetPosition()));
+        double distance = targetAabb == null ? obstruction.blockedPosition().distanceTo(targetAtBlock) : TargetingMath.distancePointToAabb(obstruction.blockedPosition(), targetAabb);
+        if (distance <= this.directTargetHitTolerance(snapshot)) {
+            return true;
+        }
+
+        if (Mods.SABLE.isLoaded() && snapshot.targetSublevelId() != null && obstruction.blockPosition() != null) {
+            SubLevelAccess hitSublevel = SableCompanion.INSTANCE.getContaining(snapshot.level(), obstruction.blockPosition());
+            return hitSublevel != null && snapshot.targetSublevelId().equals(hitSublevel.getUniqueId());
+        }
+
+        return false;
+    }
+
+    private double directTargetHitTolerance(TargetingSnapshot snapshot) {
+        double speedMargin = snapshot.targetVelocity().length() * (double)2.0F;
+        if (snapshot.targetAabb() == null) {
+            return Math.max((double)0.75F, Math.min((double)2.5F, (double)0.75F + speedMargin));
+        }
+
+        AABB box = snapshot.targetAabb();
+        double sizeMargin = Math.max((double)0.25F, Math.min((double)1.5F, Math.max(box.getXsize(), Math.max(box.getYsize(), box.getZsize())) * (double)0.25F));
+        return Math.max((double)0.35F, Math.min((double)3.0F, sizeMargin + speedMargin));
+    }
+
+    @Nullable
+    private TargetingResult solveWithTargetingComputer(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, Vec3 rawTargetPos, Vec3 targetWorldPos, Vec3 targetVel, Vec3 targetAccel, Vec3 shooterVel, @Nullable Entity targetEntity, @Nullable SubLevelAccess targetSublevel, TargetMotionClass targetMotionClass, int trackingLeadTicks) {
         if (serverLevel != null && cannonContraption != null && targetWorldPos != null) {
             Vec3 rawMuzzlePos = this.getCannonRayStart();
             Vec3 muzzleWorldPos = this.resolveMuzzleWorldPosition();
@@ -1001,24 +1281,40 @@ public class WeaponFiringControl {
                     Vec3 safeTargetVel = finiteOrZero(targetVel);
                     Vec3 safeTargetAccel = clampAcceleration(finiteOrZero(targetAccel));
                     Vec3 safeShooterVel = finiteOrZero(shooterVel);
-                    double initialYaw = oldControllerYawForWorldTarget(muzzleWorldPos, targetWorldPos);
-                    double initialPitch = oldLosPitchForWorldTarget(muzzleWorldPos, targetWorldPos);
-                    int slewTicks = this.estimateSlewTicks(cannonContraption, initialYaw, initialPitch);
-                    Vec3 delayedTargetPos = predictTarget(targetWorldPos, safeTargetVel, safeTargetAccel, (double)slewTicks, targetMotionClass, gravity);
-                    AABB targetAabb = targetEntity != null ? this.resolveEntityWorldAabb(serverLevel, targetEntity) : this.resolveSublevelWorldAabb(targetSublevel);
-                    if (targetAabb != null && slewTicks > 0) {
-                        targetAabb = targetAabb.move(delayedTargetPos.subtract(targetWorldPos));
-                    }
-
                     boolean logTargetingDebug = this.shouldLogTargetingDebug(serverLevel);
                     if (logTargetingDebug) {
                         this.logTargetingCoordinateResolution(serverLevel, rawTargetPos, targetWorldPos, rawMuzzlePos, muzzleWorldPos, safeShooterVel);
                     }
 
-                    TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)slewTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
-                    TargetingResult result = this.targetingComputer.solve(snapshot);
+                    AABB baseTargetAabb = targetEntity != null ? this.resolveEntityWorldAabb(serverLevel, targetEntity) : this.resolveSublevelWorldAabb(targetSublevel);
+                    int predictedTicks = Math.max(0, trackingLeadTicks);
+                    TargetingResult result = null;
+                    for(int i = 0; i < 3; ++i) {
+                        Vec3 delayedTargetPos = predictTarget(targetWorldPos, safeTargetVel, safeTargetAccel, (double)predictedTicks, targetMotionClass, gravity);
+                        AABB targetAabb = baseTargetAabb;
+                        if (targetAabb != null && predictedTicks > 0) {
+                            targetAabb = targetAabb.move(delayedTargetPos.subtract(targetWorldPos));
+                        }
+
+                        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
+                        result = this.targetingComputer.solve(snapshot);
+                        if (result == null || !result.valid() || !result.hasShot()) {
+                            break;
+                        }
+
+                        Vec3 aimPoint = result.aimSolution() != null && result.aimSolution().aimPoint() != null ? result.aimSolution().aimPoint() : delayedTargetPos;
+                        int nextTicks = this.estimateSlewTicksForAimPoint(serverLevel, cannonContraption, aimPoint, result.desiredYawDeg() + (double)270.0F, result.desiredPitchDeg()) + Math.max(0, trackingLeadTicks);
+                        nextTicks = Math.max(0, Math.min(60, nextTicks));
+                        if (Math.abs(nextTicks - predictedTicks) <= 1) {
+                            predictedTicks = nextTicks;
+                            break;
+                        }
+
+                        predictedTicks = nextTicks;
+                    }
+
                     if (this.level.getGameTime() % 20L == 1L && result != null) {
-                        LOGGER.debug("WFC TargetingComputer {}", result.debugString());
+                        LOGGER.debug("WFC TargetingComputer trackingLead={} {}", predictedTicks, result.debugString());
                     }
 
                     return result;
@@ -1119,23 +1415,33 @@ public class WeaponFiringControl {
         boolean playerSprintJump = sprinting && jumpTransition && rawHorizontalSpeed >= sprintJumpMinSpeed;
         boolean inferredSprintJump = jumpTransition && rawHorizontalSpeed >= sprintJumpMinSpeed * (double)1.15F;
         boolean erratic = previous != null && (fallFlying || playerSprintJump || inferredSprintJump || jerk > 0.08 || directionChange > 0.55);
+        boolean fastMoving = rawVelocity.length() * (double)20.0F >= (Double)RadarConfig.server().targetLoosenThreshold.get();
         TargetMotionClass motionClass = previous == null ? TargetMotionClass.UNKNOWN : (erratic ? TargetMotionClass.ERRATIC : TargetMotionClass.STEADY);
-        String reason = previous == null ? "warming_up" : (fallFlying ? "fall_flying" : (playerSprintJump ? "sprint_jump" : (inferredSprintJump ? "inferred_sprint_jump" : (jerk > 0.08 ? "jerk" : (directionChange > 0.55 ? "direction_change" : "steady")))));
+        String reason = previous == null ? "warming_up" : (fallFlying ? "fall_flying" : (playerSprintJump ? "sprint_jump" : (inferredSprintJump ? "inferred_sprint_jump" : (jerk > 0.08 ? "jerk" : (directionChange > 0.55 ? "direction_change" : (fastMoving ? "fast_moving" : "steady"))))));
 
         this.targetMotionStates.put(targetId, new TargetMotionState(targetWorldPosition == null ? Vec3.ZERO : targetWorldPosition, rawVelocity, rawAcceleration, smoothedVelocity, smoothedAcceleration, onGround, tick));
         if (this.targetMotionStates.size() > 256) {
             this.targetMotionStates.entrySet().removeIf(entry -> tick - entry.getValue().tick > 200L);
         }
 
-        return this.motionEstimate(motionClass, smoothedVelocity, smoothedAcceleration, jerk, false, reason);
+        return this.motionEstimate(motionClass, smoothedVelocity, smoothedAcceleration, jerk, fastMoving || erratic, reason);
     }
 
     private TargetMotionEstimate motionEstimate(TargetMotionClass motionClass, Vec3 velocity, Vec3 acceleration, double jerk, boolean looseAim, String reason) {
-        int stableTicks = motionClass == TargetMotionClass.ERRATIC ? Math.min(AIM_STABLE_REQUIRED, (Integer)RadarConfig.server().erraticTargetStableTicks.get()) : AIM_STABLE_REQUIRED;
+        int stableTicks = motionClass == TargetMotionClass.ERRATIC || looseAim ? Math.min(AIM_STABLE_REQUIRED, (Integer)RadarConfig.server().erraticTargetStableTicks.get()) : AIM_STABLE_REQUIRED;
         double minConfidence = NEW_SOLVER_MIN_CONFIDENCE;
-        double aimStableEps = AIM_STABLE_EPS;
+        double aimStableEps = looseAim ? Math.max(AIM_STABLE_EPS, (Double)RadarConfig.server().targetLoosenThreshold.get()) : AIM_STABLE_EPS;
 
         return new TargetMotionEstimate(motionClass == null ? TargetMotionClass.UNKNOWN : motionClass, finiteOrZero(velocity), clampAcceleration(finiteOrZero(acceleration)), jerk, stableTicks, minConfidence, aimStableEps, looseAim, reason);
+    }
+
+    private int targetTrackingLeadTicks(TargetMotionClass motionClass) {
+        int configured = (Integer)RadarConfig.server().targetTrackingLeadTicks.get();
+        if (configured <= 0 || motionClass == TargetMotionClass.UNKNOWN) {
+            return 0;
+        }
+
+        return motionClass == TargetMotionClass.ERRATIC ? configured : Math.max(0, configured / 2);
     }
 
     private static double horizontalSpeed(Vec3 vec) {
@@ -1234,6 +1540,20 @@ public class WeaponFiringControl {
         return Mods.SABLE.isLoaded() && this.level != null && PhysicsHandler.isBlockInPlotyard(this.level, this.cannonMount.getBlockPos());
     }
 
+    private int estimateSlewTicksForAimPoint(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, Vec3 aimPoint, double fallbackControllerYaw, double fallbackPitch) {
+        if (this.isSableMount() && aimPoint != null) {
+            List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(this.cannonMount, aimPoint, serverLevel, this.cachedSablePitchDeg, this.cachedSableYawDeg);
+            if (angles != null && !angles.isEmpty()) {
+                List<Double> firstAngles = angles.get(0);
+                if (firstAngles != null && firstAngles.size() >= 2) {
+                    return this.estimateSlewTicks(cannonContraption, firstAngles.get(1), firstAngles.get(0));
+                }
+            }
+        }
+
+        return this.estimateSlewTicks(cannonContraption, fallbackControllerYaw, fallbackPitch);
+    }
+
     private int estimateSlewTicks(AbstractMountedCannonContraption cannonContraption, double desiredControllerYaw, double desiredPitch) {
         PitchOrientedContraptionEntity contraption = this.cannonMount.getContraption();
         if (contraption == null) {
@@ -1265,22 +1585,10 @@ public class WeaponFiringControl {
         return !(angleDeg <= (double)0.0F) && !(stepDegPerTick <= 1.0E-6) ? angleDeg / stepDegPerTick : (double)0.0F;
     }
 
-    private static double oldControllerYawForWorldTarget(Vec3 origin, Vec3 target) {
-        double dx = target.x - origin.x;
-        double dz = target.z - origin.z;
-        return Math.toDegrees(Math.atan2(dz, dx)) + (double)270.0F;
-    }
-
-    private static double oldLosPitchForWorldTarget(Vec3 origin, Vec3 target) {
-        Vec3 delta = target.subtract(origin);
-        double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
-        return Math.toDegrees(Math.atan2(delta.y, Math.max(1.0E-6, horizontal)));
-    }
-
     private int computeNewSolverMaxFlightTicks(double projectileSpeed) {
         double speed = Math.max(1.0E-6, projectileSpeed);
         int ticks = (int)Math.ceil(Math.max((double)1.0F, this.maxSimDistanceBlocks) / speed) + 40;
-        return Math.max(40, Math.min(400, ticks));
+        return Math.max(40, Math.min(MAX_NEW_SOLVER_FLIGHT_TICKS, ticks));
     }
 
     private static Vec3 predictTarget(Vec3 pos, Vec3 vel, Vec3 accel, double ticks) {
@@ -1406,6 +1714,20 @@ public class WeaponFiringControl {
     }
 
     private static record TargetMotionEstimate(TargetMotionClass motionClass, Vec3 velocity, Vec3 acceleration, double jerk, int stableTicksRequired, double minConfidence, double aimStableEps, boolean looseAim, String reason) {
+    }
+
+    private static record AsyncTargetingRequest(BlockPos mountPos, @Nullable UUID targetId, Vec3 solvePos, long requestTick, TargetingSnapshot snapshot) {
+    }
+
+    private static record AsyncTargetingResult(AsyncTargetingRequest request, @Nullable TargetingResult result) {
+    }
+
+    private static final class TargetingThreadFactory implements ThreadFactory {
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "CreateRadar-Targeting");
+            thread.setDaemon(true);
+            return thread;
+        }
     }
 
     private static final class VisCache {

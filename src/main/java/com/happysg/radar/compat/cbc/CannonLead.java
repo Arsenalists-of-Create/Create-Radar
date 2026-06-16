@@ -105,15 +105,14 @@ public class CannonLead {
                 return new SimResult(tick, pos, vel);
             }
 
-            // gravity per tick^2
-            vel = vel.add(0.0, gravityPerTick, 0.0);
-
-            // per-tick damping style drag (only valid if drag is small, like 0..1)
-            if (applyDrag && drag != 0.0) {
-                vel = vel.scale(1.0 - drag);
-            }
-
             pos = pos.add(vel);
+
+            // Match the primary targeting simulator: move with the current velocity,
+            // then apply gravity and drag for the next tick.
+            vel = vel.add(0.0, gravityPerTick, 0.0);
+            if (applyDrag && drag != 0.0) {
+                vel = vel.scale(Math.max(0.0, 1.0 - drag));
+            }
         }
 
         return new SimResult(maxTicks, pos, vel);

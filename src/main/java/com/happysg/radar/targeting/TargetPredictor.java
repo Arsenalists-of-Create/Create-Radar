@@ -23,12 +23,31 @@ public class TargetPredictor {
       return safePosition.add(safeVelocity.scale(safeTicks)).add(safeAcceleration.scale((double)0.5F * safeTicks * safeTicks));
    }
 
+   public Vec3 predictPosition(TargetingSnapshot snapshot, double ticksAhead, double accelerationTrust) {
+      if (snapshot == null) {
+         return Vec3.ZERO;
+      } else {
+         Vec3 acceleration = this.sanitizeAcceleration(snapshot.targetAcceleration()).scale(clamp01(accelerationTrust));
+         return this.predictPosition(snapshot.targetPosition(), snapshot.targetVelocity(), acceleration, ticksAhead);
+      }
+   }
+
    @Nullable
    public AABB predictAabb(TargetingSnapshot snapshot, double ticksAhead) {
       if (snapshot == null || snapshot.targetAabb() == null) {
          return null;
       } else {
          Vec3 offset = this.predictPosition(snapshot, ticksAhead).subtract(snapshot.targetPosition());
+         return snapshot.targetAabb().move(offset);
+      }
+   }
+
+   @Nullable
+   public AABB predictAabb(TargetingSnapshot snapshot, double ticksAhead, double accelerationTrust) {
+      if (snapshot == null || snapshot.targetAabb() == null) {
+         return null;
+      } else {
+         Vec3 offset = this.predictPosition(snapshot, ticksAhead, accelerationTrust).subtract(snapshot.targetPosition());
          return snapshot.targetAabb().move(offset);
       }
    }
@@ -55,5 +74,13 @@ public class TargetPredictor {
       double lenSqr = acceleration.lengthSqr();
       double maxSqr = (double)0.0625F;
       return !(lenSqr <= maxSqr) && !(lenSqr < 1.0E-12) ? acceleration.normalize().scale((double)0.25F) : acceleration;
+   }
+
+   private static double clamp01(double value) {
+      if (!Double.isFinite(value)) {
+         return (double)0.0F;
+      } else {
+         return Math.max((double)0.0F, Math.min((double)1.0F, value));
+      }
    }
 }

@@ -175,7 +175,7 @@ public class CannonMountPitch {
 
 
 
-        double stepDeg = rpm / 24.0;
+        double stepDeg = rpm / 12.0;
         double move = Math.signum(diff) * Math.min(Math.abs(diff), stepDeg);
         double nextCtl = currentPitch + move;
 

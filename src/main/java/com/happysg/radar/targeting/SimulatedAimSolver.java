@@ -21,7 +21,8 @@ public class SimulatedAimSolver implements AimSolver {
    private static final double FLIGHT_TIME_SCORE_WEIGHT = (double)0.25F;
    private static final double CONFIDENCE_SCORE_WEIGHT = (double)0.5F;
    private static final double REJECT_SCORE = (double)1000000.0F;
-   private static final int OBSTRUCTION_SHORTLIST_SIZE = 8;
+   private static final int OBSTRUCTION_SHORTLIST_SIZE = 16;
+   private static final int FRACTIONAL_DISTANCE_REFINEMENT_STEPS = 9;
    private final ProjectileSimulator projectileSimulator;
    private final TargetPredictor targetPredictor;
 
@@ -38,7 +39,7 @@ public class SimulatedAimSolver implements AimSolver {
          } else {
             InitialGuess initial = this.initialGuess(snapshot, projectileModel);
             Candidate best = null;
-            List<Candidate> shortlist = new ArrayList<>(9);
+            List<Candidate> shortlist = new ArrayList<>(17);
 
             for(SearchPass pass : searchPasses()) {
                double centerYaw = best == null ? initial.yawDeg : best.yawDeg;
@@ -62,9 +63,10 @@ public class SimulatedAimSolver implements AimSolver {
             } else {
                best = this.chooseObstructionCheckedBest(snapshot, projectileModel, obstructionChecker, shortlist);
                List<String> debug = new ArrayList<>();
-               debug.add("solver=simulated_moving_v2");
+               debug.add("solver=simulated_moving_v3");
                debug.add("initialInterceptTicks=" + initial.interceptTicks);
                debug.add("bestTick=" + best.flightTick);
+               debug.add("bestTime=" + best.flightTime);
                debug.add("miss=" + best.missDistance);
                debug.add("score=" + best.score);
                debug.add("confidence=" + best.confidence);
@@ -97,7 +99,7 @@ public class SimulatedAimSolver implements AimSolver {
 
    private InitialGuess initialGuess(TargetingSnapshot snapshot, ProjectileModel projectileModel) {
       double interceptTicks = this.estimateInterceptTicks(snapshot, projectileModel);
-      Vec3 aimPoint = this.targetPredictor.predictPosition(snapshot, interceptTicks);
+      Vec3 aimPoint = this.predictTargetPositionTrusted(snapshot, interceptTicks);
       Vec3 aimVector = aimPoint.subtract(snapshot.muzzlePosition());
       if (aimVector.lengthSqr() < 1.0E-8) {
          aimVector = snapshot.targetPosition().subtract(snapshot.muzzlePosition());
@@ -128,32 +130,33 @@ public class SimulatedAimSolver implements AimSolver {
       ProjectileSimulator.SimulationResult trajectory = this.projectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), projectileModel, snapshot.maxFlightTicks());
       double bestMiss = Double.POSITIVE_INFINITY;
       int bestTick = 0;
+      double bestTime = (double)0.0F;
       Vec3 bestTargetPos = snapshot.targetPosition();
       Vec3 bestProjectilePos = snapshot.muzzlePosition();
 
-      for(Trajectory.Sample sample : trajectory.trajectory().samples()) {
-         double tick = (double)sample.tick();
-         Vec3 predictedTarget = this.targetPredictor.predictPosition(snapshot, tick);
-         AABB predictedBox = this.targetPredictor.predictAabb(snapshot, tick);
-         double miss = distanceToTarget(sample.position(), predictedTarget, predictedBox);
-         if (miss < bestMiss) {
-            bestMiss = miss;
-            bestTick = sample.tick();
-            bestTargetPos = predictedTarget;
-            bestProjectilePos = sample.position();
+      List<Trajectory.Sample> samples = trajectory.trajectory().samples();
+      for(int i = 0; i < samples.size(); ++i) {
+         Trajectory.Sample sample = samples.get(i);
+         ClosestApproach closest = i + 1 < samples.size() ? this.closestApproachOnSegment(snapshot, sample, samples.get(i + 1)) : this.closestApproachAt(snapshot, (double)sample.tick(), sample.position());
+         if (closest.missDistance < bestMiss) {
+            bestMiss = closest.missDistance;
+            bestTick = (int)Math.max((double)0.0F, Math.round(closest.tick));
+            bestTime = closest.tick;
+            bestTargetPos = closest.targetPosition;
+            bestProjectilePos = closest.projectilePosition;
          }
       }
 
-      Candidate candidate = new Candidate(yawDeg, pitchDeg, bestTick, bestMiss, bestTargetPos, bestProjectilePos, trajectory, obstruction, (double)0.0F, (double)0.0F);
+      Candidate candidate = new Candidate(yawDeg, pitchDeg, bestTick, bestTime, bestMiss, bestTargetPos, bestProjectilePos, trajectory, obstruction, (double)0.0F, (double)0.0F);
       double confidence = this.confidence(snapshot, candidate);
       double score = score(snapshot, candidate, confidence);
-      return new Candidate(yawDeg, pitchDeg, bestTick, bestMiss, bestTargetPos, bestProjectilePos, trajectory, obstruction, confidence, score);
+      return new Candidate(yawDeg, pitchDeg, bestTick, bestTime, bestMiss, bestTargetPos, bestProjectilePos, trajectory, obstruction, confidence, score);
    }
 
    private static void addToShortlist(List<Candidate> shortlist, Candidate candidate) {
       shortlist.add(candidate);
       shortlist.sort(Comparator.comparingDouble(Candidate::score));
-      if (shortlist.size() > 8) {
+      if (shortlist.size() > OBSTRUCTION_SHORTLIST_SIZE) {
          shortlist.remove(shortlist.size() - 1);
       }
 
@@ -173,8 +176,54 @@ public class SimulatedAimSolver implements AimSolver {
       return best;
    }
 
+   private ClosestApproach closestApproachOnSegment(TargetingSnapshot snapshot, Trajectory.Sample from, Trajectory.Sample to) {
+      double startTick = (double)from.tick();
+      double endTick = (double)to.tick();
+      if (!(endTick > startTick)) {
+         return this.closestApproachAt(snapshot, startTick, from.position());
+      }
+
+      double left = startTick;
+      double right = endTick;
+      for(int i = 0; i < FRACTIONAL_DISTANCE_REFINEMENT_STEPS; ++i) {
+         double m1 = left + (right - left) / (double)3.0F;
+         double m2 = right - (right - left) / (double)3.0F;
+         double d1 = this.closestApproachAt(snapshot, m1, interpolate(from.position(), to.position(), (m1 - startTick) / (endTick - startTick))).missDistance;
+         double d2 = this.closestApproachAt(snapshot, m2, interpolate(from.position(), to.position(), (m2 - startTick) / (endTick - startTick))).missDistance;
+         if (d1 <= d2) {
+            right = m2;
+         } else {
+            left = m1;
+         }
+      }
+
+      double tick = (left + right) * (double)0.5F;
+      double alpha = (tick - startTick) / (endTick - startTick);
+      return this.closestApproachAt(snapshot, tick, interpolate(from.position(), to.position(), alpha));
+   }
+
+   private ClosestApproach closestApproachAt(TargetingSnapshot snapshot, double tick, Vec3 projectilePosition) {
+      Vec3 predictedTarget = this.predictTargetPositionTrusted(snapshot, tick);
+      AABB predictedBox = this.predictTargetAabbTrusted(snapshot, tick);
+      return new ClosestApproach(tick, distanceToTarget(projectilePosition, predictedTarget, predictedBox), predictedTarget, projectilePosition);
+   }
+
+   private Vec3 predictTargetPositionTrusted(TargetingSnapshot snapshot, double tick) {
+      return this.targetPredictor.predictPosition(snapshot, tick, accelerationTrust(snapshot));
+   }
+
+   @Nullable
+   private AABB predictTargetAabbTrusted(TargetingSnapshot snapshot, double tick) {
+      return this.targetPredictor.predictAabb(snapshot, tick, accelerationTrust(snapshot));
+   }
+
    private static double distanceToTarget(Vec3 projectilePosition, Vec3 targetPosition, @Nullable AABB targetAabb) {
       return targetAabb != null ? TargetingMath.distancePointToAabb(projectilePosition, targetAabb) : projectilePosition.distanceTo(targetPosition);
+   }
+
+   private static Vec3 interpolate(Vec3 from, Vec3 to, double alpha) {
+      double safeAlpha = Double.isFinite(alpha) ? Math.max((double)0.0F, Math.min((double)1.0F, alpha)) : (double)0.0F;
+      return from.add(to.subtract(from).scale(safeAlpha));
    }
 
    private static double clampPitch(double pitchDeg) {
@@ -190,7 +239,7 @@ public class SimulatedAimSolver implements AimSolver {
          double hitTolerance = hitTolerance(snapshot);
          double normalizedMiss = candidate.missDistance / Math.max(0.05, hitTolerance);
          double continuity = continuityPenalty(snapshot, candidate.yawDeg, candidate.pitchDeg);
-         double timePenalty = Math.max((double)0.0F, (double)candidate.flightTick) / (double)120.0F;
+         double timePenalty = Math.max((double)0.0F, candidate.flightTime) / (double)120.0F;
          double obstructionPenalty = obstructionPenalty(snapshot, candidate);
          double confidencePenalty = (double)1.0F - Math.max((double)0.0F, Math.min((double)1.0F, confidence));
          return normalizedMiss * (double)2.0F + continuity * 0.015 + timePenalty * (double)0.25F + confidencePenalty * (double)0.5F + obstructionPenalty;
@@ -213,7 +262,7 @@ public class SimulatedAimSolver implements AimSolver {
    private double confidence(TargetingSnapshot snapshot, Candidate candidate) {
       if (Double.isFinite(candidate.missDistance) && Double.isFinite(candidate.yawDeg) && Double.isFinite(candidate.pitchDeg)) {
          double missFactor = (double)1.0F / ((double)1.0F + candidate.missDistance);
-         double timeFactor = (double)1.0F / ((double)1.0F + (double)candidate.flightTick / (double)120.0F);
+         double timeFactor = (double)1.0F / ((double)1.0F + candidate.flightTime / (double)120.0F);
          double accelMag = this.targetPredictor.sanitizeAcceleration(snapshot.targetAcceleration()).length();
          double accelFactor = (double)1.0F / ((double)1.0F + accelMag * (double)8.0F);
          double dataFactor = snapshot.targetAabb() == null ? 0.9 : (double)1.0F;
@@ -282,9 +331,9 @@ public class SimulatedAimSolver implements AimSolver {
 
    private static boolean isObstructionAtPredictedTarget(TargetingSnapshot snapshot, Candidate candidate) {
       if (candidate.obstruction.blocked() && candidate.obstruction.blockedPosition() != null) {
-         int blockedTick = Math.max(0, candidate.obstruction.blockedTick());
-         Vec3 targetAtBlock = predictTargetPosition(snapshot, (double)blockedTick);
-         AABB targetBoxAtBlock = predictTargetAabb(snapshot, (double)blockedTick);
+         double blockedTick = Math.max(0, candidate.obstruction.blockedTick());
+         Vec3 targetAtBlock = predictTargetPosition(snapshot, blockedTick);
+         AABB targetBoxAtBlock = predictTargetAabb(snapshot, blockedTick);
          double distance = distanceToTarget(candidate.obstruction.blockedPosition(), targetAtBlock, targetBoxAtBlock);
          return distance <= directTargetHitTolerance(snapshot);
       } else {
@@ -293,17 +342,47 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private static double directTargetHitTolerance(TargetingSnapshot snapshot) {
-      return snapshot.targetAabb() == null ? (double)0.75F : (double)0.25F;
+      double speedMargin = snapshot.targetVelocity().length() * (double)2.0F;
+      if (snapshot.targetAabb() == null) {
+         return Math.max((double)0.75F, Math.min((double)2.5F, (double)0.75F + speedMargin));
+      }
+
+      AABB box = snapshot.targetAabb();
+      double sizeMargin = Math.max((double)0.25F, Math.min((double)1.5F, Math.max(box.getXsize(), Math.max(box.getYsize(), box.getZsize())) * (double)0.25F));
+      return Math.max((double)0.35F, Math.min((double)3.0F, sizeMargin + speedMargin));
    }
 
    private static Vec3 predictTargetPosition(TargetingSnapshot snapshot, double tick) {
       double safeTick = Double.isFinite(tick) ? Math.max((double)0.0F, tick) : (double)0.0F;
-      return snapshot.targetPosition().add(snapshot.targetVelocity().scale(safeTick)).add(snapshot.targetAcceleration().scale((double)0.5F * safeTick * safeTick));
+      Vec3 acceleration = clampAcceleration(finiteOrZero(snapshot.targetAcceleration())).scale(accelerationTrust(snapshot));
+      return snapshot.targetPosition().add(finiteOrZero(snapshot.targetVelocity()).scale(safeTick)).add(acceleration.scale((double)0.5F * safeTick * safeTick));
    }
 
    @Nullable
    private static AABB predictTargetAabb(TargetingSnapshot snapshot, double tick) {
       return snapshot.targetAabb() == null ? null : snapshot.targetAabb().move(predictTargetPosition(snapshot, tick).subtract(snapshot.targetPosition()));
+   }
+
+   private static double accelerationTrust(TargetingSnapshot snapshot) {
+      if (snapshot == null) {
+         return (double)0.0F;
+      } else if (snapshot.targetMotionClass() == TargetMotionClass.ERRATIC) {
+         return 0.25;
+      } else if (snapshot.targetMotionClass() == TargetMotionClass.UNKNOWN) {
+         return 0.5;
+      } else {
+         return (double)1.0F;
+      }
+   }
+
+   private static Vec3 finiteOrZero(Vec3 vec) {
+      return vec != null && Double.isFinite(vec.x) && Double.isFinite(vec.y) && Double.isFinite(vec.z) ? vec : Vec3.ZERO;
+   }
+
+   private static Vec3 clampAcceleration(Vec3 acceleration) {
+      double max = (double)0.25F;
+      double lenSqr = acceleration.lengthSqr();
+      return !(lenSqr <= max * max) && !(lenSqr < 1.0E-12) ? acceleration.normalize().scale(max) : acceleration;
    }
 
    private static double distanceFromObstructionToTarget(Candidate candidate) {
@@ -316,7 +395,7 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private static List<SearchPass> searchPasses() {
-      return List.of(new SearchPass((double)20.0F, (double)18.0F, (double)50.0F, (double)4.0F), new SearchPass((double)3.0F, (double)5.0F, (double)5.0F, (double)1.0F), new SearchPass((double)1.0F, (double)1.0F, (double)1.0F, (double)0.25F));
+      return List.of(new SearchPass((double)24.0F, (double)20.0F, (double)55.0F, (double)4.0F), new SearchPass((double)6.0F, (double)8.0F, (double)8.0F, (double)1.0F), new SearchPass((double)1.5F, (double)1.5F, (double)1.5F, (double)0.25F), new SearchPass(0.3, 0.3, 0.3, 0.1));
    }
 
    private static double smallestPositiveRoot(double a, double b, double c) {
@@ -356,6 +435,9 @@ public class SimulatedAimSolver implements AimSolver {
    private static record InitialGuess(double yawDeg, double pitchDeg, double interceptTicks) {
    }
 
-   private static record Candidate(double yawDeg, double pitchDeg, int flightTick, double missDistance, Vec3 predictedTargetPosition, Vec3 closestProjectilePosition, ProjectileSimulator.SimulationResult trajectory, ObstructionResult obstruction, double confidence, double score) {
+   private static record ClosestApproach(double tick, double missDistance, Vec3 targetPosition, Vec3 projectilePosition) {
+   }
+
+   private static record Candidate(double yawDeg, double pitchDeg, int flightTick, double flightTime, double missDistance, Vec3 predictedTargetPosition, Vec3 closestProjectilePosition, ProjectileSimulator.SimulationResult trajectory, ObstructionResult obstruction, double confidence, double score) {
    }
 }

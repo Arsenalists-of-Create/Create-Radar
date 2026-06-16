@@ -100,7 +100,7 @@ public class CannonMountYaw {
 
 
 
-        double stepDeg = rpm / 24.0;
+        double stepDeg = rpm / 12.0;
         double move = Math.signum(yawDiff) * Math.min(Math.abs(yawDiff), stepDeg);
         double nextYaw = AutoYawControllerBlockEntity.wrap360(currentYaw + move);
 
