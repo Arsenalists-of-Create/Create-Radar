@@ -1,19 +1,25 @@
 package com.happysg.radar.registry;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.targeting.Trajectory;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.logging.LogUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSource;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
@@ -33,6 +39,9 @@ import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.fml.loading.FMLLoader;
 import net.neoforged.neoforge.internal.versions.neoforge.NeoForgeVersion;
+import org.joml.Vector3f;
+import org.slf4j.Logger;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 
 import javax.annotation.Nullable;
 import java.awt.*;
@@ -45,6 +54,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class  ModCommands {
+    private static final Logger LOGGER = LogUtils.getLogger();
     static String DIR_NAME = "create_radar_debug";
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         dispatcher.register(
@@ -105,6 +115,21 @@ public class  ModCommands {
                 Commands.literal("radar")
                         .then(Commands.literal("debug")
                                 .requires(src -> src.hasPermission(2))
+                                .then(Commands.literal("cannon_solver")
+                                        .executes(ctx -> cannonSolverDebug(ctx.getSource(), false, 160))
+                                        .then(Commands.literal("arc")
+                                                .executes(ctx -> cannonSolverDebug(ctx.getSource(), true, 160))
+                                                .then(Commands.argument("ticks", IntegerArgumentType.integer(20, 400))
+                                                        .executes(ctx -> cannonSolverDebug(ctx.getSource(), true, IntegerArgumentType.getInteger(ctx, "ticks")))
+                                                )
+                                        )
+                                )
+                        )
+        );
+        dispatcher.register(
+                Commands.literal("radar")
+                        .then(Commands.literal("debug")
+                                .requires(src -> src.hasPermission(2))
                                 .then(Commands.literal("gen_debug_file")
                                         .executes(ctx -> {
                                             genDebugFile(ctx.getSource());
@@ -133,6 +158,105 @@ public class  ModCommands {
 
 
     }
+
+    private static int cannonSolverDebug(CommandSourceStack source, boolean drawArc, int arcTicks) throws CommandSyntaxException {
+        SolverDebugContext context = resolveSolverDebugContext(source);
+        if (context == null || context.pitch == null) {
+            source.sendFailure(Component.literal("Look at a linked cannon mount, pitch controller, yaw controller, or firing controller."));
+            return 0;
+        }
+
+        context.pitch.getFiringControl();
+        WeaponFiringControl control = context.pitch.firingControl;
+        if (control == null) {
+            source.sendFailure(Component.literal("No WeaponFiringControl is available for that cannon group."));
+            return 0;
+        }
+
+        WeaponFiringControl.SolverDebugReport report = control.buildSolverDebugReport(context.level, arcTicks);
+        for (String line : report.lines()) {
+            source.sendSuccess(() -> Component.literal(line), false);
+        }
+
+        if (drawArc) {
+            if (report.trajectory() == null || report.trajectory().samples().isEmpty()) {
+                source.sendFailure(Component.literal("No trajectory arc could be generated."));
+            } else {
+                drawTrajectoryArc(context.level, report.trajectory().samples());
+                source.sendSuccess(() -> Component.literal("Drew cannon solver arc with " + report.trajectory().samples().size() + " samples."), false);
+            }
+        }
+
+        LOGGER.warn("Ran cannon solver debug command for mount={} pitch={} arc={} ticks={}",
+                context.mount == null ? null : context.mount.getBlockPos(),
+                context.pitch.getBlockPos(),
+                drawArc,
+                arcTicks);
+        return 1;
+    }
+
+    @Nullable
+    private static SolverDebugContext resolveSolverDebugContext(CommandSourceStack source) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        ServerLevel level = player.serverLevel();
+        BlockHitResult hit = raycastBlock(player, 12.0);
+        if (hit.getType() != HitResult.Type.BLOCK) {
+            return null;
+        }
+
+        BlockPos pos = hit.getBlockPos();
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null) {
+            return null;
+        }
+
+        CannonMountBlockEntity mount = be instanceof CannonMountBlockEntity cbcMount ? cbcMount : null;
+        AutoPitchControllerBlockEntity pitch = be instanceof AutoPitchControllerBlockEntity pitchController ? pitchController : null;
+        AutoYawControllerBlockEntity yaw = be instanceof AutoYawControllerBlockEntity yawController ? yawController : null;
+
+        WeaponNetworkData data = WeaponNetworkData.get(level);
+        WeaponNetworkData.Group group = null;
+        if (mount != null) {
+            group = data.getGroup(level.dimension(), mount.getBlockPos());
+        } else if (pitch != null || yaw != null || be instanceof FireControllerBlockEntity) {
+            group = data.getGroupForController(level.dimension(), pos);
+        }
+
+        if (group != null) {
+            if (mount == null && level.getBlockEntity(group.key.mountPos()) instanceof CannonMountBlockEntity linkedMount) {
+                mount = linkedMount;
+            }
+            if (pitch == null && group.pitchPos != null && level.getBlockEntity(group.pitchPos) instanceof AutoPitchControllerBlockEntity linkedPitch) {
+                pitch = linkedPitch;
+            }
+            if (yaw == null && group.yawPos != null && level.getBlockEntity(group.yawPos) instanceof AutoYawControllerBlockEntity linkedYaw) {
+                yaw = linkedYaw;
+            }
+        }
+
+        return new SolverDebugContext(level, mount, pitch, yaw);
+    }
+
+    private static void drawTrajectoryArc(ServerLevel level, List<Trajectory.Sample> samples) {
+        int step = Math.max(1, samples.size() / 120);
+        int last = Math.max(1, samples.size() - 1);
+        for (int i = 0; i < samples.size(); i += step) {
+            Trajectory.Sample sample = samples.get(i);
+            float t = (float) i / (float) last;
+            float r = 0.15F + 0.85F * t;
+            float g = 1.0F - 0.75F * t;
+            float b = 0.10F;
+            Vec3 pos = sample.position();
+            level.sendParticles(new DustParticleOptions(new Vector3f(r, g, b), 1.0F), pos.x, pos.y, pos.z, 1, 0, 0, 0, 0);
+        }
+    }
+
+    private record SolverDebugContext(ServerLevel level,
+                                      @Nullable CannonMountBlockEntity mount,
+                                      @Nullable AutoPitchControllerBlockEntity pitch,
+                                      @Nullable AutoYawControllerBlockEntity yaw) {
+    }
+
     private static void setControllerAngle(CommandSourceStack source, float minIn, float maxIn) throws CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
         ServerLevel level = player.serverLevel();

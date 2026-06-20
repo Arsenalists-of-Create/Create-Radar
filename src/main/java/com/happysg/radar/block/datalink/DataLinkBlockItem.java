@@ -3,22 +3,22 @@ package com.happysg.radar.block.datalink;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
-import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
 import com.happysg.radar.block.controller.firing.FireControllerBlock;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
+import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
+import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
 import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.AllDataBehaviors;
 import com.happysg.radar.registry.ModBlocks;
-import kotlin.reflect.jvm.internal.impl.descriptors.Visibilities;
 import net.arsenalists.createenergycannons.content.energymount.EnergyCannonMount;
-import net.arsenalists.createenergycannons.content.energymount.EnergyCannonMountBlockEntity;
 import net.createmod.catnip.outliner.Outliner;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -28,7 +28,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
@@ -44,19 +43,36 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.common.util.TriState;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
-import net.neoforged.bus.api.Event;
-import net.neoforged.bus.api.SubscribeEvent;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlock;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
-import rbasamoyai.createbigcannons.cannon_control.fixed_cannon_mount.FixedCannonMountBlock;
-import rbasamoyai.createbigcannons.cannon_control.fixed_cannon_mount.FixedCannonMountBlockEntity;
-
 
 import javax.annotation.Nullable;
 
 public class DataLinkBlockItem extends BlockItem {
+    private static final String SELECTED_MOUNT_POS = "SelectedMountPos";
+    private static final String SELECTED_FILTERER_POS = "SelectedFiltererPos";
+    private static final String SELECTED_YAW_POS = "SelectedYawPos";
+    private static final String SELECTED_PITCH_POS = "SelectedPitchPos";
+    private static final String SELECTED_FIRING_POS = "SelectedFiringPos";
+    private static final String SELECTED_POS = "SelectedPos";
+
+    private static final String DISPLAY_CLEAR = "display_link.clear";
+    private static final String DISPLAY_SUCCESS = "display_link.success";
+    private static final String DISPLAY_TOO_FAR = "display_link.too_far";
+    private static final String DATA_LINK_COMMIT_FAILED = CreateRadar.MODID + ".data_link.commit_failed";
+    private static final String DATA_LINK_CONTROLLER_ALREADY_LINKED = CreateRadar.MODID + ".data_link.controller_already_linked";
+    private static final String DATA_LINK_CONTROLLER_NO_WEAPON_GROUP = CreateRadar.MODID + ".data_link.controller_no_weapon_group";
+    private static final String DATA_LINK_DUPLICATE_CONTROLLER_TYPE = CreateRadar.MODID + ".data_link.duplicate_controller_type";
+    private static final String DATA_LINK_FILTER_ATTACH_DENIED = CreateRadar.MODID + ".data_link.filter_attach_denied";
+    private static final String DATA_LINK_FILTERER_SET = CreateRadar.MODID + ".data_link.filterer_set";
+    private static final String DATA_LINK_INVALID_FILTER_TARGET = CreateRadar.MODID + ".data_link.invalid_filter_target";
+    private static final String DATA_LINK_MOUNT_SET = CreateRadar.MODID + ".data_link.mount_set";
+    private static final String DATA_LINK_ONLY_PITCH_ALLOWED = CreateRadar.MODID + ".data_link.only_pitch_allowed";
+    private static final String DATA_LINK_PLACE_FAILED = CreateRadar.MODID + ".data_link.place_failed";
+    private static final String DATA_LINK_SELECT_FIRST = CreateRadar.MODID + ".data_link.select_mount_or_filterer_first";
+    private static final String DATA_LINK_TOO_FAR = CreateRadar.MODID + ".data_link.too_far";
 
     public DataLinkBlockItem(Block pBlock, Properties pProperties) {
         super(pBlock, pProperties);
@@ -77,371 +93,240 @@ public class DataLinkBlockItem extends BlockItem {
         event.setUseBlock(TriState.FALSE);
     }
 
-
     @Override
     public InteractionResult useOn(UseOnContext ctx) {
-        ItemStack stack = ctx.getItemInHand();
-        BlockPos clickedPos = ctx.getClickedPos();
-        Level level = ctx.getLevel();
-        BlockState clickedState = level.getBlockState(clickedPos);
         Player player = ctx.getPlayer();
-
         if (player == null)
             return InteractionResult.FAIL;
 
-        // Shift-click clears any in-progress selection
+        ItemStack stack = ctx.getItemInHand();
+        Level level = ctx.getLevel();
+
         if (player.isShiftKeyDown() && hasLinkTag(stack)) {
             if (!level.isClientSide) {
-                player.displayClientMessage(Component.translatable("display_link.clear"), true);
+                player.displayClientMessage(Component.translatable(DISPLAY_CLEAR), true);
                 clearLinkTag(stack);
             }
             return InteractionResult.SUCCESS;
         }
 
-        CompoundTag tag = getLinkTag(stack);
-        var be = level.getBlockEntity(clickedPos);
+        LinkUse use = LinkUse.create(ctx, stack, player, level, getLinkTag(stack));
 
-        // ==========================================
-        // MODE SELECT: Mount-first (weapon group)
-        // ==========================================
-        boolean isEnergyMount = Mods.CREATEENERGYCANNONS.isLoaded() && clickedState.getBlock() instanceof EnergyCannonMount;
-        if (clickedState.getBlock() instanceof CannonMountBlock || isEnergyMount) {
-            if (!level.isClientSide) {
-                tag.put("SelectedMountPos", NbtUtils.writeBlockPos(clickedPos));
-                // Ensure other mode is cleared
-                tag.remove("SelectedFiltererPos");
+        InteractionResult selection = trySelectSource(use);
+        if (selection != null)
+            return selection;
 
-                // Clear any controller picks
-                tag.remove("SelectedYawPos");
-                tag.remove("SelectedPitchPos");
-                tag.remove("SelectedFiringPos");
+        ControllerType controllerType = ControllerType.from(use.be(), use.clickedState());
+        if (controllerType != null && use.tag().contains(SELECTED_MOUNT_POS))
+            return completeWeaponLink(use, controllerType);
 
-                setLinkTag(stack, tag);
-                player.displayClientMessage(Component.translatable(CreateRadar.MODID + ".data_link.mount_set"), true);
-            }
-            return InteractionResult.SUCCESS;
-        }
-
-        // ==========================================
-        // MODE SELECT: Filterer-first (filter network)
-        // ==========================================
-        if (clickedState.getBlock() instanceof NetworkFiltererBlock) {
-            if (!level.isClientSide) {
-                tag.put("SelectedFiltererPos", NbtUtils.writeBlockPos(clickedPos));
-                // Ensure other mode is cleared
-                tag.remove("SelectedMountPos");
-                // Clear any controller picks
-                tag.remove("SelectedYawPos");
-                tag.remove("SelectedPitchPos");
-                tag.remove("SelectedFiringPos");
-
-                setLinkTag(stack, tag);
-                player.displayClientMessage(Component.translatable(CreateRadar.MODID + ".data_link.filterer_set"), true);
-            }
-            return InteractionResult.SUCCESS;
-        }
-
-
-
-        ControllerType controllerType = getControllerType(be, clickedState);
-        if (controllerType != null && tag.contains("SelectedMountPos")) {
-
-
-            if (level.isClientSide)
-                return InteractionResult.SUCCESS;
-
-            if (!(level instanceof ServerLevel serverLevel))
-                return InteractionResult.FAIL;
-
-            BlockPos mountPos = NbtUtils.readBlockPos(tag, "SelectedMountPos").orElse(null);
-            if (mountPos == null) {
-                clearLinkTag(stack);
-                return InteractionResult.FAIL;
-            }
-
-            WeaponNetworkData weaponData = WeaponNetworkData.get(serverLevel);
-            BlockPos existingMount = weaponData.getMountForController(serverLevel.dimension(), clickedPos);
-            if (existingMount != null) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID + ".data_link.controller_already_linked")
-                                .withStyle(ChatFormatting.RED),
-                        true
-                );
-                clearLinkTag(stack); // user must restart each time
-                return InteractionResult.FAIL;
-            }
-
-            // Placement position: adjacent to controller on clicked face
-            BlockPos placedPos = clickedPos.relative(ctx.getClickedFace(), clickedState.canBeReplaced() ? 0 : 1);
-
-            // Range check: mount + controller must reach the datalink placement
-            double range = RadarConfig.server().radarLinkRange.get();
-            if (!withinRange(level, placedPos, mountPos, range) || !withinRange(level, placedPos, clickedPos, range)) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID+ ".data_link.too_far").withStyle(ChatFormatting.RED),
-                        true
-                );
-                clearLinkTag(stack); // user must restart each time
-                return InteractionResult.FAIL;
-            }
-
-            // Validate group merge before placement (no mutation)
-            WeaponNetworkData.Group group = weaponData.getOrCreateGroup(serverLevel.dimension(), mountPos);
-
-            BlockPos yawPos = null, pitchPos = null, firePos = null;
-            switch (controllerType) {
-                case YAW -> yawPos = clickedPos;
-                case PITCH -> pitchPos = clickedPos;
-                case FIRING -> firePos = clickedPos;
-            }
-
-            if (!weaponData.canMergeIntoGroup(group, yawPos, pitchPos, firePos)) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID + ".data_link.duplicate_controller_type")
-                                .withStyle(ChatFormatting.RED),
-                        true
-                );
-                clearLinkTag(stack); // user must restart each time
-                return InteractionResult.FAIL;
-            }
-
-            // Place the DataLink (this is the ONLY place call in weapon mode)
-            InteractionResult placed = super.useOn(ctx);
-            if (placed == InteractionResult.FAIL) {
-                clearLinkTag(stack);
-                return placed;
-            }
-
-            // Verify placement landed where expected
-            if (!(level.getBlockState(placedPos).getBlock() instanceof DataLinkBlock)) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID + ".data_link.place_failed")
-                                .withStyle(ChatFormatting.RED),
-                        true
-                );
-                clearLinkTag(stack);
-                return InteractionResult.FAIL;
-            }
-
-            // Set texture/style for this link method
-            BlockState dlState = level.getBlockState(placedPos);
-            if (dlState.hasProperty(DataLinkBlock.LINK_STYLE)) {
-                level.setBlock(placedPos,
-                        dlState.setValue(DataLinkBlock.LINK_STYLE, DataLinkBlock.LinkStyle.CONTROLLER),
-                        3);
-            }
-
-            // Commit now that placement succeeded
-            boolean merged = weaponData.tryMergeIntoGroup(group, yawPos, pitchPos, firePos);
-            if (!merged) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID + ".data_link.commit_failed")
-                                .withStyle(ChatFormatting.RED),
-                        true
-                );
-                clearLinkTag(stack);
-                return InteractionResult.SUCCESS;
-            }
-
-            weaponData.addDataLinkToGroup(group, placedPos);
-
-            player.displayClientMessage(
-                    Component.translatable("display_link.success").withStyle(ChatFormatting.GREEN),
-                    true
-            );
-
-            clearLinkTag(stack); // do NOT keep mount selected; user must restart each time
-            return InteractionResult.SUCCESS;
-        }
-
-
-
-        // Requires: filterer selected
-        // Allowed targets: Monitor (0..1), RadarBearing OR Stationary (0..1), Controllers (unbounded, but no duplicate weapon group)
-
-        if (tag.contains("SelectedFiltererPos")) {
-            // Determine allowed target type
-            FilterTarget target = getFilterTarget(be, clickedState);
-
-            if (target == null) {
-                if (!level.isClientSide) {
-                    player.displayClientMessage(
-                            Component.translatable(CreateRadar.MODID + ".data_link.invalid_filter_target")
-                                    .withStyle(ChatFormatting.RED),
-                            true
-                    );
-                    clearLinkTag(stack); // user must restart each time
-                }
-                return InteractionResult.FAIL;
-            }
-
-            if (level.isClientSide)
-                return InteractionResult.SUCCESS;
-
-            if (!(level instanceof ServerLevel serverLevel))
-                return InteractionResult.FAIL;
-
-            BlockPos filtererPos = NbtUtils.readBlockPos(tag, "SelectedFiltererPos").orElse(null);
-            if (filtererPos == null) {
-                clearLinkTag(stack);
-                return InteractionResult.FAIL;
-            }
-
-            // adjacent to target on clicked face
-            BlockPos placedPos = clickedPos.relative(ctx.getClickedFace(), clickedState.canBeReplaced() ? 0 : 1);
-
-            //  filterer + target must reach datalink
-            double range = RadarConfig.server().radarLinkRange.get();
-            if (!withinRange(level, placedPos, filtererPos, range) || !withinRange(level, placedPos, clickedPos, range)) {
-                player.displayClientMessage(
-                        Component.translatable("display_link.too_far").withStyle(ChatFormatting.RED),
-                        true
-                );
-                clearLinkTag(stack);
-                return InteractionResult.FAIL;
-            }
-
-            NetworkData filterData = NetworkData.get(serverLevel);
-            NetworkData.Group fGroup = filterData.getOrCreateGroup(serverLevel.dimension(), filtererPos);
-
-            // Validate before placement
-            boolean canAttach;
-            BlockPos weaponMountPos = null;
-
-            switch (target.kind) {
-                case MONITOR -> canAttach = filterData.canAttachMonitor(fGroup, clickedPos);
-
-                case RADAR_BEARING -> canAttach = filterData.canAttachRadar(fGroup, clickedPos, NetworkData.RadarKind.BEARING);
-
-                case RADAR_STATIONARY -> canAttach = filterData.canAttachRadar(fGroup, clickedPos, NetworkData.RadarKind.STATIONARY);
-
-                case CONTROLLER -> {
-                    if (!(be instanceof AutoPitchControllerBlockEntity)) {
-                        player.displayClientMessage(
-                                Component.translatable(CreateRadar.MODID + ".data_link.only_pitch_allowed")
-                                        .withStyle(ChatFormatting.RED),
-                                true
-                        );
-                        clearLinkTag(stack);
-                        return InteractionResult.FAIL;
-                    }
-
-                    // // Controller MUST already belong to a weapon group for filter networks
-                    WeaponNetworkData weaponData = WeaponNetworkData.get(serverLevel);
-                    weaponMountPos = weaponData.getMountForController(serverLevel.dimension(), clickedPos);
-                    if (weaponMountPos == null) {
-                        player.displayClientMessage(
-                                Component.translatable(CreateRadar.MODID + ".data_link.controller_no_weapon_group")
-                                        .withStyle(ChatFormatting.RED),
-                                true
-                        );
-                        clearLinkTag(stack);
-                        return InteractionResult.FAIL;
-                    }
-
-                    canAttach = filterData.canAttachWeaponEndpoint(fGroup, clickedPos, weaponMountPos);
-                }
-
-
-                default -> canAttach = false;
-            }
-
-            if (!canAttach) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID + ".data_link.filter_attach_denied")
-                                .withStyle(ChatFormatting.RED),
-                        true
-                );
-                clearLinkTag(stack);
-                return InteractionResult.FAIL;
-            }
-
-            // Place the DataLink (ONLY placement path in filter mode)
-            InteractionResult placed = super.useOn(ctx);
-            if (placed == InteractionResult.FAIL) {
-                clearLinkTag(stack);
-                return placed;
-            }
-
-            if (!(level.getBlockState(placedPos).getBlock() instanceof DataLinkBlock)) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID + ".data_link.place_failed")
-                                .withStyle(ChatFormatting.RED),
-                        true
-                );
-                clearLinkTag(stack);
-                return InteractionResult.FAIL;
-            }
-
-            // Set texture/style for this link method
-            BlockState dlState = level.getBlockState(placedPos);
-            if (dlState.hasProperty(DataLinkBlock.LINK_STYLE)) {
-                level.setBlock(placedPos,
-                        dlState.setValue(DataLinkBlock.LINK_STYLE, DataLinkBlock.LinkStyle.RADAR),
-                        3);
-            }
-
-            // Commit after placement
-            switch (target.kind) {
-                case MONITOR -> {
-                    BlockPos pos = clickedPos;
-                    BlockEntity mbe = serverLevel.getBlockEntity(clickedPos);
-                    if (mbe instanceof MonitorBlockEntity m) {
-                        pos = m.getControllerPos();
-                    }
-                    filterData.attachMonitor(serverLevel,fGroup, pos);
-                }
-
-                case RADAR_BEARING -> {
-                    filterData.attachRadar(fGroup, clickedPos, NetworkData.RadarKind.BEARING);
-
-                    BlockEntity fbe = serverLevel.getBlockEntity(filtererPos);
-                    if (fbe instanceof com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity nfb) {
-                        nfb.applyFiltersToNetwork();
-                    }
-                }
-
-                case RADAR_STATIONARY -> {
-                    filterData.attachRadar(fGroup, clickedPos, NetworkData.RadarKind.STATIONARY);
-
-                    BlockEntity fbe = serverLevel.getBlockEntity(filtererPos);
-                    if (fbe instanceof com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity nfb) {
-                        nfb.applyFiltersToNetwork();
-                    }
-                }
-
-                case CONTROLLER -> filterData.attachWeaponEndpoint(fGroup, clickedPos, weaponMountPos);
-            }
-
-            filterData.addDataLinkToGroup(fGroup, placedPos,clickedPos); // Might be issue later
-
-            player.displayClientMessage(
-                    Component.translatable("display_link.success").withStyle(ChatFormatting.GREEN),
-                    true
-            );
-
-            clearLinkTag(stack);
-            return InteractionResult.SUCCESS;
-        }
-
+        if (use.tag().contains(SELECTED_FILTERER_POS))
+            return completeFilterLink(use);
 
         if (!level.isClientSide) {
-            player.displayClientMessage(
-                    Component.translatable(CreateRadar.MODID + ".data_link.select_mount_or_filterer_first")
-                            .withStyle(ChatFormatting.RED),
-                    true
-            );
+            sendError(player, DATA_LINK_SELECT_FIRST);
         }
         return InteractionResult.FAIL;
     }
 
-// -------------------------D
-// Helper types / methods
-// -------------------------
-private static CompoundTag getLinkTag(ItemStack stack) {
-    CustomData data = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
-    return data.copyTag();
-}
+    private InteractionResult trySelectSource(LinkUse use) {
+        if (isMount(use.clickedState())) {
+            if (!use.level().isClientSide) {
+                use.tag().put(SELECTED_MOUNT_POS, NbtUtils.writeBlockPos(use.clickedPos()));
+                use.tag().remove(SELECTED_FILTERER_POS);
+                clearControllerSelections(use.tag());
+                setLinkTag(use.stack(), use.tag());
+                use.player().displayClientMessage(Component.translatable(DATA_LINK_MOUNT_SET), true);
+            }
+            return InteractionResult.SUCCESS;
+        }
+
+        if (use.clickedState().getBlock() instanceof NetworkFiltererBlock) {
+            if (!use.level().isClientSide) {
+                use.tag().put(SELECTED_FILTERER_POS, NbtUtils.writeBlockPos(use.clickedPos()));
+                use.tag().remove(SELECTED_MOUNT_POS);
+                clearControllerSelections(use.tag());
+                setLinkTag(use.stack(), use.tag());
+                use.player().displayClientMessage(Component.translatable(DATA_LINK_FILTERER_SET), true);
+            }
+            return InteractionResult.SUCCESS;
+        }
+
+        return null;
+    }
+
+    private static boolean isMount(BlockState state) {
+        boolean isEnergyMount = Mods.CREATEENERGYCANNONS.isLoaded() && state.getBlock() instanceof EnergyCannonMount;
+        return state.getBlock() instanceof CannonMountBlock || isEnergyMount;
+    }
+
+    private InteractionResult completeWeaponLink(LinkUse use, ControllerType controllerType) {
+        if (use.level().isClientSide)
+            return InteractionResult.SUCCESS;
+
+        if (!(use.level() instanceof ServerLevel serverLevel))
+            return InteractionResult.FAIL;
+
+        BlockPos mountPos = readSelectedPos(use.tag(), SELECTED_MOUNT_POS);
+        if (mountPos == null) {
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        WeaponNetworkData weaponData = WeaponNetworkData.get(serverLevel);
+        BlockPos existingMount = weaponData.getMountForController(serverLevel.dimension(), use.clickedPos());
+        if (existingMount != null) {
+            sendError(use.player(), DATA_LINK_CONTROLLER_ALREADY_LINKED);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        BlockPos placedPos = getPlacementPos(use);
+        double range = RadarConfig.server().radarLinkRange.get();
+        if (!withinRange(use.level(), placedPos, mountPos, range) || !withinRange(use.level(), placedPos, use.clickedPos(), range)) {
+            sendError(use.player(), DATA_LINK_TOO_FAR);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        WeaponNetworkData.Group group = weaponData.getOrCreateGroup(serverLevel.dimension(), mountPos);
+        ControllerPositions controllerPositions = controllerType.positions(use.clickedPos());
+        if (!weaponData.canMergeIntoGroup(group, controllerPositions.yaw(), controllerPositions.pitch(), controllerPositions.fire())) {
+            sendError(use.player(), DATA_LINK_DUPLICATE_CONTROLLER_TYPE);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        InteractionResult placed = placeAndVerify(use, placedPos);
+        if (placed != null) {
+            clearLinkTag(use.stack());
+            return placed;
+        }
+
+        setLinkStyle(use.level(), placedPos, DataLinkBlock.LinkStyle.CONTROLLER);
+
+        boolean merged = weaponData.tryMergeIntoGroup(group, controllerPositions.yaw(), controllerPositions.pitch(), controllerPositions.fire());
+        if (!merged) {
+            sendError(use.player(), DATA_LINK_COMMIT_FAILED);
+            clearLinkTag(use.stack());
+            return InteractionResult.SUCCESS;
+        }
+
+        weaponData.addDataLinkToGroup(group, placedPos);
+        sendSuccess(use.player());
+        clearLinkTag(use.stack());
+        return InteractionResult.SUCCESS;
+    }
+
+    private InteractionResult completeFilterLink(LinkUse use) {
+        FilterTarget target = FilterTarget.from(use.be(), use.clickedState());
+        if (target == null) {
+            if (!use.level().isClientSide) {
+                sendError(use.player(), DATA_LINK_INVALID_FILTER_TARGET);
+                clearLinkTag(use.stack());
+            }
+            return InteractionResult.FAIL;
+        }
+
+        if (use.level().isClientSide)
+            return InteractionResult.SUCCESS;
+
+        if (!(use.level() instanceof ServerLevel serverLevel))
+            return InteractionResult.FAIL;
+
+        BlockPos filtererPos = readSelectedPos(use.tag(), SELECTED_FILTERER_POS);
+        if (filtererPos == null) {
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        BlockPos placedPos = getPlacementPos(use);
+        double range = RadarConfig.server().radarLinkRange.get();
+        if (!withinRange(use.level(), placedPos, filtererPos, range) || !withinRange(use.level(), placedPos, use.clickedPos(), range)) {
+            sendError(use.player(), DISPLAY_TOO_FAR);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        NetworkData filterData = NetworkData.get(serverLevel);
+        NetworkData.Group group = filterData.getOrCreateGroup(serverLevel.dimension(), filtererPos);
+
+        FilterCommit commit = target.validate(use, serverLevel, filterData, group);
+        if (commit.denial() != null) {
+            sendError(use.player(), commit.denial());
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        if (!commit.canAttach()) {
+            sendError(use.player(), DATA_LINK_FILTER_ATTACH_DENIED);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        InteractionResult placed = placeAndVerify(use, placedPos);
+        if (placed != null) {
+            clearLinkTag(use.stack());
+            return placed;
+        }
+
+        setLinkStyle(use.level(), placedPos, DataLinkBlock.LinkStyle.RADAR);
+
+        target.commit(use, serverLevel, filterData, group, filtererPos, commit);
+        filterData.addDataLinkToGroup(group, placedPos, use.clickedPos());
+
+        sendSuccess(use.player());
+        clearLinkTag(use.stack());
+        return InteractionResult.SUCCESS;
+    }
+
+    private InteractionResult placeAndVerify(LinkUse use, BlockPos placedPos) {
+        InteractionResult placed = super.useOn(use.ctx());
+        if (placed == InteractionResult.FAIL)
+            return placed;
+
+        if (!(use.level().getBlockState(placedPos).getBlock() instanceof DataLinkBlock)) {
+            sendError(use.player(), DATA_LINK_PLACE_FAILED);
+            return InteractionResult.FAIL;
+        }
+
+        return null;
+    }
+
+    private static BlockPos getPlacementPos(LinkUse use) {
+        return use.clickedPos().relative(use.ctx().getClickedFace(), use.clickedState().canBeReplaced() ? 0 : 1);
+    }
+
+    private static void setLinkStyle(Level level, BlockPos placedPos, DataLinkBlock.LinkStyle style) {
+        BlockState dlState = level.getBlockState(placedPos);
+        if (dlState.hasProperty(DataLinkBlock.LINK_STYLE)) {
+            level.setBlock(placedPos, dlState.setValue(DataLinkBlock.LINK_STYLE, style), 3);
+        }
+    }
+
+    private static void clearControllerSelections(CompoundTag tag) {
+        tag.remove(SELECTED_YAW_POS);
+        tag.remove(SELECTED_PITCH_POS);
+        tag.remove(SELECTED_FIRING_POS);
+    }
+
+    @Nullable
+    private static BlockPos readSelectedPos(CompoundTag tag, String key) {
+        return NbtUtils.readBlockPos(tag, key).orElse(null);
+    }
+
+    private static void sendError(Player player, String translationKey) {
+        player.displayClientMessage(Component.translatable(translationKey).withStyle(ChatFormatting.RED), true);
+    }
+
+    private static void sendSuccess(Player player) {
+        player.displayClientMessage(Component.translatable(DISPLAY_SUCCESS).withStyle(ChatFormatting.GREEN), true);
+    }
+
+    private static CompoundTag getLinkTag(ItemStack stack) {
+        CustomData data = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
+        return data.copyTag();
+    }
 
     private static boolean hasLinkTag(ItemStack stack) {
         CustomData data = stack.get(DataComponents.CUSTOM_DATA);
@@ -460,76 +345,164 @@ private static CompoundTag getLinkTag(ItemStack stack) {
     private static void clearLinkTag(ItemStack stack) {
         stack.remove(DataComponents.CUSTOM_DATA);
     }
+
     private static boolean withinRange(Level level, BlockPos a, BlockPos b, double range) {
         Vec3 wa = PhysicsHandler.getWorldPos(level, a).getCenter();
         Vec3 wb = PhysicsHandler.getWorldPos(level, b).getCenter();
         return wa.closerThan(wb, range);
     }
 
+    private record LinkUse(
+            UseOnContext ctx,
+            ItemStack stack,
+            Player player,
+            Level level,
+            BlockPos clickedPos,
+            BlockState clickedState,
+            @Nullable BlockEntity be,
+            CompoundTag tag
+    ) {
+        static LinkUse create(UseOnContext ctx, ItemStack stack, Player player, Level level, CompoundTag tag) {
+            BlockPos clickedPos = ctx.getClickedPos();
+            return new LinkUse(
+                    ctx,
+                    stack,
+                    player,
+                    level,
+                    clickedPos,
+                    level.getBlockState(clickedPos),
+                    level.getBlockEntity(clickedPos),
+                    tag
+            );
+        }
+    }
 
-    private static boolean isCannonMountBE(@Nullable BlockEntity be) {
-        if(be instanceof CannonMountBlockEntity)return true;
-        if(be instanceof FixedCannonMountBlockEntity) return true;
-        if(Mods.CREATEENERGYCANNONS.isLoaded()){
-            if(be instanceof EnergyCannonMountBlockEntity) return true;
+    private record ControllerPositions(@Nullable BlockPos yaw, @Nullable BlockPos pitch, @Nullable BlockPos fire) {}
+
+    private enum ControllerType {
+        YAW,
+        PITCH,
+        FIRING;
+
+        static @Nullable ControllerType from(@Nullable BlockEntity be, BlockState state) {
+            if (be instanceof AutoYawControllerBlockEntity) return YAW;
+            if (be instanceof AutoPitchControllerBlockEntity) return PITCH;
+            if (state.getBlock() instanceof FireControllerBlock) return FIRING;
+            if (be instanceof FireControllerBlockEntity) return FIRING;
+            return null;
         }
 
-        return false;
-    }
-    private enum MountType{NORMAL, FIXED, COMPACT, ENERGY}
-    private static MountType getMountType(BlockEntity be, BlockState state){
-        if(be instanceof FixedCannonMountBlockEntity) return MountType.FIXED;
-        if(Mods.CREATEENERGYCANNONS.isLoaded()){
-            if(be instanceof EnergyCannonMountBlockEntity) return MountType.ENERGY;
+        ControllerPositions positions(BlockPos pos) {
+            return switch (this) {
+                case YAW -> new ControllerPositions(pos, null, null);
+                case PITCH -> new ControllerPositions(null, pos, null);
+                case FIRING -> new ControllerPositions(null, null, pos);
+            };
         }
-        if(be instanceof CannonMountBlockEntity) return MountType.NORMAL;
-       
-        return null;
-    }
-    private enum ControllerType { YAW, PITCH, FIRING }
-
-    private static @Nullable ControllerType getControllerType(@Nullable BlockEntity be, BlockState state) {
-        if (be instanceof AutoYawControllerBlockEntity) return ControllerType.YAW;
-        if (be instanceof AutoPitchControllerBlockEntity) return ControllerType.PITCH;
-        if (state.getBlock() instanceof FireControllerBlock) return ControllerType.FIRING;
-        if (be instanceof FireControllerBlockEntity) return ControllerType.FIRING;
-        return null;
     }
 
-    private static String controllerKey(ControllerType type) {
-        return switch (type) {
-            case YAW -> "SelectedYawPos";
-            case PITCH -> "SelectedPitchPos";
-            case FIRING -> "SelectedFiringPos";
-        };
+    private record FilterCommit(boolean canAttach, @Nullable BlockPos weaponMountPos, @Nullable String denial) {
+        static FilterCommit allowed(boolean canAttach) {
+            return new FilterCommit(canAttach, null, null);
+        }
+
+        static FilterCommit weapon(boolean canAttach, BlockPos weaponMountPos) {
+            return new FilterCommit(canAttach, weaponMountPos, null);
+        }
+
+        static FilterCommit denied(String translationKey) {
+            return new FilterCommit(false, null, translationKey);
+        }
     }
 
-    private static class FilterTarget {
-        final FilterTargetKind kind;
-        FilterTarget(FilterTargetKind kind) { this.kind = kind; }
-    }
-
-    private enum FilterTargetKind {
+    private enum FilterTarget {
         MONITOR,
         RADAR_BEARING,
         RADAR_STATIONARY,
-        CONTROLLER
+        RADAR_SKY,
+        RADAR_SONAR,
+        CONTROLLER;
+
+        static @Nullable FilterTarget from(@Nullable BlockEntity be, BlockState state) {
+            if (be instanceof MonitorBlockEntity) return MONITOR;
+            if (state.getBlock() instanceof RadarBearingBlock) return RADAR_BEARING;
+            if (state.getBlock() instanceof StationaryRadarBlock) return RADAR_STATIONARY;
+            if (state.getBlock() instanceof SkyRadarBlock) return RADAR_SKY;
+            if (isSonarBlock(state)) return RADAR_SONAR;
+            if (ControllerType.from(be, state) != null) return CONTROLLER;
+            return null;
+        }
+
+        private static boolean isSonarBlock(BlockState state) {
+            Class<?> blockClass = state.getBlock().getClass();
+            Package blockPackage = blockClass.getPackage();
+            return blockPackage != null
+                    && blockPackage.getName().contains(".radar.sonar")
+                    && blockClass.getSimpleName().contains("Sonar");
+        }
+
+        FilterCommit validate(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group) {
+            return switch (this) {
+                case MONITOR -> FilterCommit.allowed(data.canAttachMonitor(group, use.clickedPos()));
+                case RADAR_BEARING -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.BEARING));
+                case RADAR_STATIONARY -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.STATIONARY));
+                case RADAR_SKY -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.SKY));
+                case RADAR_SONAR -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.SONAR));
+                case CONTROLLER -> validateController(use, serverLevel, data, group);
+            };
+        }
+
+        private static FilterCommit validateController(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group) {
+            if (!(use.be() instanceof AutoPitchControllerBlockEntity)) {
+                return FilterCommit.denied(DATA_LINK_ONLY_PITCH_ALLOWED);
+            }
+
+            WeaponNetworkData weaponData = WeaponNetworkData.get(serverLevel);
+            BlockPos weaponMountPos = weaponData.getMountForController(serverLevel.dimension(), use.clickedPos());
+            if (weaponMountPos == null) {
+                return FilterCommit.denied(DATA_LINK_CONTROLLER_NO_WEAPON_GROUP);
+            }
+
+            return FilterCommit.weapon(data.canAttachWeaponEndpoint(group, use.clickedPos(), weaponMountPos), weaponMountPos);
+        }
+
+        void commit(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group, BlockPos filtererPos, FilterCommit commit) {
+            switch (this) {
+                case MONITOR -> {
+                    BlockPos pos = use.clickedPos();
+                    BlockEntity mbe = serverLevel.getBlockEntity(use.clickedPos());
+                    if (mbe instanceof MonitorBlockEntity monitor) {
+                        pos = monitor.getControllerPos();
+                    }
+                    data.attachMonitor(serverLevel, group, pos);
+                }
+                case RADAR_BEARING -> {
+                    data.attachRadar(group, use.clickedPos(), NetworkData.RadarKind.BEARING);
+                    applyFilters(serverLevel, filtererPos);
+                }
+                case RADAR_STATIONARY -> {
+                    data.attachRadar(group, use.clickedPos(), NetworkData.RadarKind.STATIONARY);
+                    applyFilters(serverLevel, filtererPos);
+                }
+                case RADAR_SKY -> {
+                    data.attachRadar(group, use.clickedPos(), NetworkData.RadarKind.SKY);
+                    applyFilters(serverLevel, filtererPos);
+                }
+                case RADAR_SONAR -> {
+                    data.attachRadar(group, use.clickedPos(), NetworkData.RadarKind.SONAR);
+                    applyFilters(serverLevel, filtererPos);
+                }
+                case CONTROLLER -> data.attachWeaponEndpoint(group, use.clickedPos(), commit.weaponMountPos());
+            }
+        }
+
+        private static void applyFilters(ServerLevel serverLevel, BlockPos filtererPos) {
+            BlockEntity fbe = serverLevel.getBlockEntity(filtererPos);
+            if (fbe instanceof NetworkFiltererBlockEntity filterer) {
+                filterer.applyFiltersToNetwork();
+            }
+        }
     }
-
-
-    private static @Nullable FilterTarget getFilterTarget(@Nullable BlockEntity be, BlockState state) {
-        if (be instanceof MonitorBlockEntity) return new FilterTarget(FilterTargetKind.MONITOR);
-
-        if (state.getBlock() instanceof RadarBearingBlock) return new FilterTarget(FilterTargetKind.RADAR_BEARING);
-        if (state.getBlock() instanceof StationaryRadarBlock) return new FilterTarget(FilterTargetKind.RADAR_STATIONARY);
-
-
-        if (getControllerType(be, state) != null) return new FilterTarget(FilterTargetKind.CONTROLLER);
-
-        return null;
-    }
-
-
 
     private static BlockPos lastShownPos = null;
     private static AABB lastShownAABB = null;
@@ -553,7 +526,7 @@ private static CompoundTag getLinkTag(ItemStack stack) {
 
         CompoundTag stackTag = customData.copyTag();
 
-        BlockPos selectedPos = NbtUtils.readBlockPos(stackTag, "SelectedPos").orElse(null);
+        BlockPos selectedPos = NbtUtils.readBlockPos(stackTag, SELECTED_POS).orElse(null);
         if (selectedPos == null) {
             return;
         }
@@ -582,7 +555,4 @@ private static CompoundTag getLinkTag(ItemStack stack) {
                 : shape.bounds()
                 .move(pos);
     }
-
-
 }
-

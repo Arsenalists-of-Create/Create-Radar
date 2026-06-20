@@ -5,18 +5,12 @@ import com.happysg.radar.mixin.AbstractCannonAccessor;
 import com.happysg.radar.mixin.AutoCannonAccessor;
 import com.happysg.radar.mixin.AutocannonProjectileAccessor;
 import com.mojang.logging.LogUtils;
-import com.dsvv.cbcat.cannon.heavy_autocannon.HeavyAutocannonBlock;
-import com.dsvv.cbcat.cannon.heavy_autocannon.IHeavyAutocannonBlockEntity;
-import com.dsvv.cbcat.cannon.heavy_autocannon.contraption.MountedHeavyAutocannonContraption;
-import com.dsvv.cbcat.cannon.twin_autocannon.ITwinAutocannonBlockEntity;
-import com.dsvv.cbcat.cannon.twin_autocannon.TwinAutocannonBlock;
-import com.dsvv.cbcat.cannon.twin_autocannon.contraption.MountedTwinAutocannonContraption;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import net.arsenalists.createenergycannons.content.cannons.magnetic.railgun.MountedEnergyCannonContraption;
 import net.minecraft.core.BlockPos;
-import java.util.function.Predicate;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -34,13 +28,19 @@ import rbasamoyai.createbigcannons.cannon_control.contraption.MountedBigCannonCo
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import rbasamoyai.createbigcannons.cannons.autocannon.IAutocannonBlockEntity;
 import rbasamoyai.createbigcannons.cannons.autocannon.material.AutocannonMaterial;
+import rbasamoyai.createbigcannons.index.CBCEntityTypes;
+import rbasamoyai.createbigcannons.index.CBCMunitionPropertiesHandlers;
 
 import rbasamoyai.createbigcannons.cannons.big_cannons.BigCannonBehavior;
 import rbasamoyai.createbigcannons.cannons.big_cannons.IBigCannonBlockEntity;
+import rbasamoyai.createbigcannons.munitions.AbstractCannonProjectile;
+import rbasamoyai.createbigcannons.munitions.autocannon.AutocannonAmmoItem;
 import rbasamoyai.createbigcannons.munitions.big_cannon.AbstractBigCannonProjectile;
+import rbasamoyai.createbigcannons.munitions.big_cannon.config.BigCannonCommonShellProperties;
 import rbasamoyai.createbigcannons.munitions.big_cannon.ProjectileBlock;
 import rbasamoyai.createbigcannons.munitions.big_cannon.propellant.BigCannonPropellantBlock;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
+import rbasamoyai.createbigcannons.remix.GetItemStorage;
 
 
 import javax.annotation.Nullable;
@@ -53,8 +53,25 @@ import java.util.Map;
 
 public class CannonUtil {
     private static final Logger LOGGER = LogUtils.getLogger();
-
     private static final BallisticPropertiesComponent AC_FALLBACK = new BallisticPropertiesComponent(-0.025, 0.01, false, 0, 0, 0, 0);
+    private static final BallisticPropertiesComponent BIG_CANNON_LAST_RESORT_FALLBACK = new BallisticPropertiesComponent(-0.05, 0.0, false, 0, 0, 0, 0);
+
+    public record BigCannonShotState(
+            float speed,
+            BallisticPropertiesComponent ballistics,
+            @Nullable String projectileClass,
+            @Nullable BlockPos projectileLocalPos,
+            @Nullable BlockPos muzzleExitLocalPos,
+            double muzzleForwardOffset,
+            int propellantCharges,
+            float propellantPower,
+            float projectileAddedPower,
+            String reason
+    ) {
+        public boolean hasProjectile() {
+            return projectileClass != null;
+        }
+    }
 
     public static boolean isAutocannonFamily(AbstractMountedCannonContraption cannon) {
         return isAutoCannon(cannon)
@@ -98,39 +115,202 @@ public class CannonUtil {
     }
 
     public static BallisticPropertiesComponent getAutocannonBallistics(AbstractMountedCannonContraption cannon, Level level) {
-
+        BallisticPropertiesComponent loaded = getLoadedAutocannonBallistics(cannon, level);
+        if (loaded != null) {
+            return loaded;
+        }
         return AC_FALLBACK;
     }
 
+    @Nullable
+    private static BallisticPropertiesComponent getLoadedAutocannonBallistics(AbstractMountedCannonContraption cannon, Level level) {
+        if (cannon == null || level == null || !(cannon instanceof GetItemStorage storageOwner)) {
+            return null;
+        }
+
+        var storage = storageOwner.getItemStorage();
+        if (storage == null) {
+            return null;
+        }
+
+        for (int slot = 0; slot < storage.getSlots(); slot++) {
+            ItemStack stack = storage.getStackInSlot(slot);
+            if (stack.isEmpty()) {
+                continue;
+            }
+
+            AbstractCannonProjectile projectile = createAutocannonProjectile(stack, level);
+            if (projectile instanceof AutocannonProjectileAccessor accessor) {
+                BallisticPropertiesComponent props = accessor.getBallisticProperties();
+                if (props != null) {
+                    return props;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    @Nullable
+    private static AbstractCannonProjectile createAutocannonProjectile(ItemStack stack, Level level) {
+        try {
+            if (stack.getItem() instanceof AutocannonAmmoItem item) {
+                return item.getAutocannonProjectile(stack, level);
+            }
+            if (Mods.CBC_AT.isLoaded()) {
+                return CBCATCompat.createAutocannonProjectile(stack, level);
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Could not resolve loaded autocannon projectile ballistics for {}", stack, t);
+        }
+
+        return null;
+    }
+
     public static BallisticPropertiesComponent getBallistics(AbstractMountedCannonContraption cannon, ServerLevel level) {
-        if (cannon == null || level == null) return BallisticPropertiesComponent.DEFAULT;
+        if (cannon == null || level == null) {
+            LOGGER.warn("Could not read cannon type for ballistics: cannon={} level={}; using HE shell fallback", cannon, level);
+            return getBigCannonFallbackBallistics();
+        }
 
         if (isAutocannonFamily(cannon)) {
             return getAutocannonBallistics(cannon, level);
         }
 
-        Map<BlockPos, BlockEntity> presentBlockEntities = cannon.presentBlockEntities;
-        for (BlockEntity blockEntity : presentBlockEntities.values()) {
-            if (!(blockEntity instanceof IBigCannonBlockEntity cannonBlockEntity)) continue;
+        logCannonTypeReadFailure("getBallistics", cannon);
+        return resolveBigCannonShotState(cannon, level).ballistics();
+    }
 
+    public static BigCannonShotState resolveBigCannonShotState(AbstractMountedCannonContraption cannon, ServerLevel level) {
+        BallisticPropertiesComponent fallback = getBigCannonFallbackBallistics();
+        if (cannon == null || level == null) {
+            LOGGER.warn("Could not resolve big cannon shot state: cannon={} level={}; using HE shell fallback", cannon, level);
+            return new BigCannonShotState(0.0F, fallback, null, null, null, 0.0, 0, 0.0F, 0.0F, "missing_cannon_or_level");
+        }
+
+        Direction direction = cannon.initialOrientation();
+        BlockPos currentPos = cannon.getStartPos();
+        if (direction == null || currentPos == null || cannon.presentBlockEntities == null) {
+            LOGGER.warn("Could not resolve big cannon shot state for {}: direction={} start={} entities={}; using HE shell fallback",
+                    cannon.getClass().getName(), direction, currentPos, cannon.presentBlockEntities);
+            return new BigCannonShotState(0.0F, fallback, null, null, null, CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon), 0, 0.0F, 0.0F, "missing_cannon_geometry");
+        }
+
+        float speed = 0.0F;
+        float propellantPower = 0.0F;
+        float projectileAddedPower = 0.0F;
+        int propellantCharges = 0;
+        int cannonBlocksSeen = 0;
+        boolean projectileStarted = false;
+
+        while (cannon.presentBlockEntities.get(currentPos) instanceof IBigCannonBlockEntity cannonBlockEntity) {
             BigCannonBehavior behavior = cannonBlockEntity.cannonBehavior();
             StructureTemplate.StructureBlockInfo containedBlockInfo = behavior.block();
-            Block block = containedBlockInfo.state().getBlock();
+            if (containedBlockInfo == null) {
+                break;
+            }
 
-            if (block instanceof ProjectileBlock<?> projectileBlock) {
-                AbstractBigCannonProjectile projectile = projectileBlock.getProjectile(level, Collections.singletonList(containedBlockInfo));
-                try {
-                    Method method = projectile.getClass().getDeclaredMethod("getBallisticProperties");
-                    method.setAccessible(true);
-                    BallisticPropertiesComponent bp = (BallisticPropertiesComponent) method.invoke(projectile);
-                    return bp != null ? bp : BallisticPropertiesComponent.DEFAULT;
-                } catch (Throwable ignored) {
-                    return BallisticPropertiesComponent.DEFAULT;
+            Block block = containedBlockInfo.state().getBlock();
+            if (containedBlockInfo.state().isAir()) {
+                if (cannonBlocksSeen == 0) {
+                    return new BigCannonShotState(0.0F, fallback, null, null, currentPos, CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon), 0, 0.0F, 0.0F, "empty_start");
                 }
+                if (!projectileStarted) {
+                    speed = Math.max(speed - 1.0F, 0.0F);
+                } else {
+                    LOGGER.warn("Big cannon projectile assembly was interrupted by air at {}; using partial speed={} and HE shell fallback", currentPos, speed);
+                    return new BigCannonShotState(speed, fallback, null, null, currentPos, CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon), propellantCharges, propellantPower, projectileAddedPower, "projectile_air_gap");
+                }
+            } else if (block instanceof BigCannonPropellantBlock propellantBlock) {
+                float chargePower = Math.max(0.0F, propellantBlock.getChargePower(containedBlockInfo));
+                speed += chargePower;
+                propellantPower += chargePower;
+                propellantCharges++;
+            } else if (block instanceof ProjectileBlock<?> projectileBlock) {
+                projectileStarted = true;
+                AbstractBigCannonProjectile projectile = projectileBlock.getProjectile(level, Collections.singletonList(containedBlockInfo));
+                if (projectile != null) {
+                    projectileAddedPower = projectile.addedChargePower();
+                    speed += projectileAddedPower;
+                }
+                BallisticPropertiesComponent ballistics = getProjectileBallistics(projectile);
+                if (ballistics == null) {
+                    LOGGER.warn(
+                            "Could not read big cannon projectile ballistics for {}; using HE shell fallback {}",
+                            projectile == null ? "null" : projectile.getClass().getName(),
+                            fallback
+                    );
+                    ballistics = fallback;
+                }
+                if (speed <= 0.0F) {
+                    LOGGER.warn("Big cannon loaded projectile at {} resolved non-positive charge power {}; using projectile ballistics but speed is invalid", currentPos, speed);
+                }
+                BlockPos muzzleExit = CBCMuzzleUtil.getMuzzleExitLocal(cannon);
+                BigCannonShotState state = new BigCannonShotState(
+                        speed,
+                        ballistics,
+                        projectile == null ? null : projectile.getClass().getName(),
+                        currentPos.immutable(),
+                        muzzleExit,
+                        CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon),
+                        propellantCharges,
+                        propellantPower,
+                        projectileAddedPower,
+                        "loaded_projectile"
+                );
+                LOGGER.debug("Resolved big cannon shot state: speed={} projectile={} projectileLocal={} muzzleExit={} muzzleOffset={} gravity={} drag={} quadratic={}",
+                        state.speed(), state.projectileClass(), state.projectileLocalPos(), state.muzzleExitLocalPos(), state.muzzleForwardOffset(),
+                        state.ballistics().gravity(), state.ballistics().drag(), state.ballistics().isQuadraticDrag());
+                return state;
+            }
+
+            cannonBlocksSeen++;
+            currentPos = currentPos.relative(direction);
+        }
+
+        BlockPos muzzleExit = CBCMuzzleUtil.getMuzzleExitLocal(cannon);
+        LOGGER.warn("No loaded big cannon projectile found during ordered resolve; speed={} muzzleExit={} using HE shell fallback {}", speed, muzzleExit, fallback);
+        return new BigCannonShotState(speed, fallback, null, null, muzzleExit, CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon), propellantCharges, propellantPower, projectileAddedPower, "no_loaded_projectile");
+    }
+
+    public static BallisticPropertiesComponent getBigCannonFallbackBallistics() {
+        try {
+            BigCannonCommonShellProperties properties = CBCMunitionPropertiesHandlers.COMMON_SHELL_BIG_CANNON_PROJECTILE
+                    .getPropertiesOf((EntityType<?>) CBCEntityTypes.HE_SHELL.get());
+            BallisticPropertiesComponent ballistics = properties == null ? null : properties.ballistics();
+            if (ballistics != null) {
+                return ballistics;
+            }
+            LOGGER.warn("Could not read HE shell fallback ballistics: missing shell properties or ballistics; using last-resort fallback {}", BIG_CANNON_LAST_RESORT_FALLBACK);
+        } catch (Throwable t) {
+            LOGGER.warn("Could not read HE shell fallback ballistics; using last-resort fallback {}", BIG_CANNON_LAST_RESORT_FALLBACK, t);
+        }
+
+        return BIG_CANNON_LAST_RESORT_FALLBACK;
+    }
+
+    @Nullable
+    private static BallisticPropertiesComponent getProjectileBallistics(AbstractCannonProjectile projectile) {
+        if (projectile == null) {
+            return null;
+        }
+
+        Class<?> type = projectile.getClass();
+        while (type != null) {
+            try {
+                Method method = type.getDeclaredMethod("getBallisticProperties");
+                method.setAccessible(true);
+                Object result = method.invoke(projectile);
+                return result instanceof BallisticPropertiesComponent bp ? bp : null;
+            } catch (NoSuchMethodException ignored) {
+                type = type.getSuperclass();
+            } catch (IllegalAccessException | InvocationTargetException | ClassCastException e) {
+                LOGGER.warn("Could not invoke projectile ballistics method for {}", projectile.getClass().getName(), e);
+                return null;
             }
         }
 
-        return BallisticPropertiesComponent.DEFAULT;
+        return null;
     }
 
 //    public static float getRotarySpeed( AbstractMountedCannonContraption contraptionEntity) {
@@ -177,25 +357,9 @@ public class CannonUtil {
 //        return baseSpeed+speedIncrease*material.properties().speedIncreasePerBarrel();
 //    }
 
-    public static int getBigCannonSpeed(ServerLevel level, AbstractMountedCannonContraption cannon ,PitchOrientedContraptionEntity contraptionEntity) {
+    public static float getBigCannonSpeed(ServerLevel level, AbstractMountedCannonContraption cannon ,PitchOrientedContraptionEntity contraptionEntity) {
         if(contraptionEntity == null) return 0;
-
-        Map<BlockPos, BlockEntity> presentBlockEntities = cannon.presentBlockEntities;
-        int speeed = 0;
-        for (BlockEntity blockEntity : presentBlockEntities.values()) {
-            if (!(blockEntity instanceof IBigCannonBlockEntity cannonBlockEntity)) continue;
-            BigCannonBehavior behavior = cannonBlockEntity.cannonBehavior();
-            StructureTemplate.StructureBlockInfo containedBlockInfo = behavior.block();
-
-            Block block = containedBlockInfo.state().getBlock();
-            if (block instanceof BigCannonPropellantBlock propellantBlock) {
-                speeed += (int) propellantBlock.getChargePower(containedBlockInfo);
-            } else if (block instanceof ProjectileBlock<?> projectileBlock) {
-                AbstractBigCannonProjectile projectile = projectileBlock.getProjectile(level, Collections.singletonList(containedBlockInfo));
-                speeed += (int) projectile.addedChargePower();
-            }
-        }
-        return speeed;
+        return resolveBigCannonShotState(cannon, level).speed();
     }
 
     public static float getInitialVelocity(AbstractMountedCannonContraption cannon, ServerLevel level) {
@@ -288,73 +452,54 @@ public class CannonUtil {
         if (isAutocannonFamily(cannon)) {
             return getAutocannonBallistics(cannon, level).gravity();
         }
-        Map<BlockPos, BlockEntity> presentBlockEntities = cannon.presentBlockEntities;
-        for (BlockEntity blockEntity : presentBlockEntities.values()) {
-            if (!(blockEntity instanceof IBigCannonBlockEntity cannonBlockEntity)) continue;
-            BigCannonBehavior behavior = cannonBlockEntity.cannonBehavior();
-            StructureTemplate.StructureBlockInfo containedBlockInfo = behavior.block();
-
-            Block block = containedBlockInfo.state().getBlock();
-            if (block instanceof ProjectileBlock<?> projectileBlock) {
-                AbstractBigCannonProjectile projectile = projectileBlock.getProjectile(level, Collections.singletonList(containedBlockInfo));
-                BallisticPropertiesComponent ballisticProperties;
-                try {
-
-                    Method method = projectile.getClass().getDeclaredMethod("getBallisticProperties");
-                    method.setAccessible(true);
-                    ballisticProperties = (BallisticPropertiesComponent) method.invoke(projectile);
-                } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException |
-                         ClassCastException e) {
-                    return 0.05;
-                }
-                return ballisticProperties.gravity();
-            }
-        }
-        return 0.05;
+        return getBallistics(cannon, level).gravity();
     }
 
     public static double getProjectileDrag(AbstractMountedCannonContraption cannon, ServerLevel level) {
-        Map<BlockPos, BlockEntity> presentBlockEntities = cannon.presentBlockEntities;
-        double drag = 0.01;
-
         if (isAutocannonFamily(cannon)) {
             return getAutocannonBallistics(cannon, level).drag();
         }
-
-        for (BlockEntity blockEntity : presentBlockEntities.values()) {
-            if (!(blockEntity instanceof IBigCannonBlockEntity cannonBlockEntity)) continue;
-
-            BigCannonBehavior behavior = cannonBlockEntity.cannonBehavior();
-            StructureTemplate.StructureBlockInfo containedBlockInfo = behavior.block();
-
-            Block block = containedBlockInfo.state().getBlock();
-            if (block instanceof ProjectileBlock<?> projectileBlock) {
-                AbstractBigCannonProjectile projectile = projectileBlock.getProjectile(level, Collections.singletonList(containedBlockInfo));
-                try {
-                    Method method = projectile.getClass().getDeclaredMethod("getBallisticProperties");
-                    method.setAccessible(true);
-                    BallisticPropertiesComponent bp = (BallisticPropertiesComponent) method.invoke(projectile);
-                    if (bp != null) drag = bp.drag();
-                } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException | ClassCastException e) {
-                    return drag;
-                }
-            }
-        }
-        return drag;
+        return getBallistics(cannon, level).drag();
     }
 
     public static boolean isHeavyAutocannon(AbstractMountedCannonContraption cannon) {
         if(!Mods.CBC_AT.isLoaded()) return false;
-        return cannon instanceof MountedHeavyAutocannonContraption;
+        return CBCATCompat.isHeavyAutocannon(cannon);
     }
 
     public static boolean isTwinAutocannon(AbstractMountedCannonContraption cannon) {
         if(!Mods.CBC_AT.isLoaded()) return false;
-        return cannon instanceof MountedTwinAutocannonContraption;
+        return CBCATCompat.isTwinAutocannon(cannon);
     }
 
     public static boolean isBigCannon(AbstractMountedCannonContraption cannon) {
         return cannon instanceof MountedBigCannonContraption;
+    }
+
+    public static boolean hasBigCannonBlocks(AbstractMountedCannonContraption cannon) {
+        if (cannon == null || cannon.presentBlockEntities == null) {
+            return false;
+        }
+        for (BlockEntity blockEntity : cannon.presentBlockEntities.values()) {
+            if (blockEntity instanceof IBigCannonBlockEntity) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static void logCannonTypeReadFailure(String context, AbstractMountedCannonContraption cannon) {
+        if (cannon == null) {
+            LOGGER.warn("Could not read cannon type in {}: cannon=null", context);
+            return;
+        }
+        if (!isBigCannon(cannon) && hasBigCannonBlocks(cannon)) {
+            LOGGER.warn(
+                    "Could not read big cannon type in {}: contraption class {} contains big cannon block entities but is not MountedBigCannonContraption",
+                    context,
+                    cannon.getClass().getName()
+            );
+        }
     }
 
     public static boolean isAutoCannon(AbstractMountedCannonContraption cannon) {
@@ -396,18 +541,13 @@ public class CannonUtil {
         if (cann == null) return 0f;
         var props = cann.properties();
 
-        Predicate<BlockEntity> isBarrel =
-                e -> e instanceof IAutocannonBlockEntity
-                        || e instanceof ITwinAutocannonBlockEntity
-                        || e instanceof IHeavyAutocannonBlockEntity;
-
         float speed = props.baseSpeed();
         BlockPos pos = cannon.getStartPos().relative(cannon.initialOrientation());
         int count = 0;
 
         while (true) {
             BlockEntity be = cannon.presentBlockEntities.get(pos);
-            if (be == null || !isBarrel.test(be)) break;
+            if (be == null || !(be instanceof IAutocannonBlockEntity || (Mods.CBC_AT.isLoaded() && CBCATCompat.isAutocannonBarrel(be)))) break;
 
             count++;
             if (count <= props.maxSpeedIncreases())  speed += props.speedIncreasePerBarrel();
@@ -432,19 +572,7 @@ public class CannonUtil {
             }
         }
 
-        if (!Mods.CBC_AT.isLoaded()) return null;
-
-        for (BlockEntity blockEntity : cannon.presentBlockEntities.values()) {
-            Block block = blockEntity.getBlockState().getBlock();
-            if (block instanceof TwinAutocannonBlock twinAutocannonBlock) {
-                return twinAutocannonBlock.getAutocannonMaterial();
-            }
-            if (block instanceof HeavyAutocannonBlock heavyAutocannonBlock) {
-                return heavyAutocannonBlock.getAutocannonMaterial();
-            }
-        }
-
-        return null;
+        return Mods.CBC_AT.isLoaded() ? CBCATCompat.getAutocannonMaterial(cannon) : null;
     }
 
 

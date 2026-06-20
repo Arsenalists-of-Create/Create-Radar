@@ -6,8 +6,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inheritedVelocity, Vec3 targetPosition, Vec3 targetVelocity, Vec3 targetAcceleration, @Nullable AABB targetAabb, double projectileSpeed, double gravity, double drag, int maxFlightTicks, long gameTime, @Nullable Double preferredYawDeg, @Nullable Double preferredPitchDeg, @Nullable Double currentYawDeg, @Nullable Double currentPitchDeg, ProjectileEffect projectileEffect, double splashRadius, @Nullable UUID targetSublevelId, TargetMotionClass targetMotionClass) {
-   public TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inheritedVelocity, Vec3 targetPosition, Vec3 targetVelocity, Vec3 targetAcceleration, @Nullable AABB targetAabb, double projectileSpeed, double gravity, double drag, int maxFlightTicks, long gameTime, @Nullable Double preferredYawDeg, @Nullable Double preferredPitchDeg, @Nullable Double currentYawDeg, @Nullable Double currentPitchDeg, ProjectileEffect projectileEffect, double splashRadius, @Nullable UUID targetSublevelId, TargetMotionClass targetMotionClass) {
+public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inheritedVelocity, Vec3 targetPosition, Vec3 targetVelocity, Vec3 targetAcceleration, @Nullable AABB targetAabb, double projectileSpeed, double gravity, double drag, boolean quadraticDrag, boolean cbcPhysics, double dragDensity, int maxFlightTicks, long gameTime, @Nullable Double preferredYawDeg, @Nullable Double preferredPitchDeg, @Nullable Double currentYawDeg, @Nullable Double currentPitchDeg, ProjectileEffect projectileEffect, double splashRadius, @Nullable UUID targetSublevelId, TargetMotionClass targetMotionClass) {
+   public TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inheritedVelocity, Vec3 targetPosition, Vec3 targetVelocity, Vec3 targetAcceleration, @Nullable AABB targetAabb, double projectileSpeed, double gravity, double drag, boolean quadraticDrag, boolean cbcPhysics, double dragDensity, int maxFlightTicks, long gameTime, @Nullable Double preferredYawDeg, @Nullable Double preferredPitchDeg, @Nullable Double currentYawDeg, @Nullable Double currentPitchDeg, ProjectileEffect projectileEffect, double splashRadius, @Nullable UUID targetSublevelId, TargetMotionClass targetMotionClass) {
       if (muzzlePosition == null) {
          muzzlePosition = Vec3.ZERO;
       }
@@ -30,6 +30,10 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
 
       if (maxFlightTicks < 0) {
          maxFlightTicks = 0;
+      }
+
+      if (!Double.isFinite(dragDensity) || dragDensity < (double)0.0F) {
+         dragDensity = (double)1.0F;
       }
 
       if (preferredYawDeg != null && !Double.isFinite(preferredYawDeg)) {
@@ -70,6 +74,9 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
       this.projectileSpeed = projectileSpeed;
       this.gravity = gravity;
       this.drag = drag;
+      this.quadraticDrag = quadraticDrag;
+      this.cbcPhysics = cbcPhysics;
+      this.dragDensity = dragDensity;
       this.maxFlightTicks = maxFlightTicks;
       this.gameTime = gameTime;
       this.preferredYawDeg = preferredYawDeg;
@@ -110,6 +117,9 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
       private double projectileSpeed;
       private double gravity;
       private double drag;
+      private boolean quadraticDrag;
+      private boolean cbcPhysics;
+      private double dragDensity;
       private int maxFlightTicks;
       private long gameTime;
       @Nullable
@@ -136,6 +146,7 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
          this.projectileEffect = ProjectileEffect.UNKNOWN;
          this.splashRadius = (double)0.0F;
          this.targetMotionClass = TargetMotionClass.UNKNOWN;
+         this.dragDensity = (double)1.0F;
          this.level = level;
          this.gameTime = level == null ? 0L : level.getGameTime();
       }
@@ -182,6 +193,21 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
 
       public Builder drag(double drag) {
          this.drag = drag;
+         return this;
+      }
+
+      public Builder quadraticDrag(boolean quadraticDrag) {
+         this.quadraticDrag = quadraticDrag;
+         return this;
+      }
+
+      public Builder cbcPhysics(boolean cbcPhysics) {
+         this.cbcPhysics = cbcPhysics;
+         return this;
+      }
+
+      public Builder dragDensity(double dragDensity) {
+         this.dragDensity = dragDensity;
          return this;
       }
 
@@ -236,7 +262,7 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
       }
 
       public TargetingSnapshot build() {
-         return new TargetingSnapshot(this.level, this.muzzlePosition, this.inheritedVelocity, this.targetPosition, this.targetVelocity, this.targetAcceleration, this.targetAabb, this.projectileSpeed, this.gravity, this.drag, this.maxFlightTicks, this.gameTime, this.preferredYawDeg, this.preferredPitchDeg, this.currentYawDeg, this.currentPitchDeg, this.projectileEffect, this.splashRadius, this.targetSublevelId, this.targetMotionClass);
+         return new TargetingSnapshot(this.level, this.muzzlePosition, this.inheritedVelocity, this.targetPosition, this.targetVelocity, this.targetAcceleration, this.targetAabb, this.projectileSpeed, this.gravity, this.drag, this.quadraticDrag, this.cbcPhysics, this.dragDensity, this.maxFlightTicks, this.gameTime, this.preferredYawDeg, this.preferredPitchDeg, this.currentYawDeg, this.currentPitchDeg, this.projectileEffect, this.splashRadius, this.targetSublevelId, this.targetMotionClass);
       }
    }
 }

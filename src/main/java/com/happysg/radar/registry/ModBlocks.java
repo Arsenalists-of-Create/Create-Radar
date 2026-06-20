@@ -18,6 +18,7 @@ import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
 import com.happysg.radar.block.radar.receiver.AbstractRadarFrame;
 import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
 
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BuilderTransformers;
 import com.simibubi.create.foundation.data.SharedProperties;
@@ -244,6 +245,17 @@ public class ModBlocks {
                     .model((c, p) -> p.withExistingParent(c.getName(), ResourceLocation.fromNamespaceAndPath("create_radar", "block/radar_warning_receiver_off")))
                     .build()
                     .register();
+    public static final BlockEntry<SkyRadarBlock> SKY_RADAR = REGISTRATE.block("sky_radar",SkyRadarBlock::new)
+            .initialProperties(SharedProperties::softMetal)
+            .properties(p -> p.noOcclusion())
+            .properties(p -> p.strength(0.8f))
+            .blockstate((c, p) -> p.simpleBlock(c.getEntry(), AssetLookup.partialBaseModel(c, p)))
+            .transform(axeOrPickaxe())
+            .item()
+                    .model(AssetLookup.customBlockItemModel("_", "item"))
+            .build()
+            .register();
+
 
     public static void register() {
         CreateRadar.getLogger().info("Registering blocks!");

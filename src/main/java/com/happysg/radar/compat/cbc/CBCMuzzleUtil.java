@@ -60,6 +60,15 @@ public final class CBCMuzzleUtil {
             return poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 0);
         }
 
+        if (cannon instanceof MountedBigCannonContraption) {
+            Vec3 center = poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
+            Vec3 forward = getForwardWorld(poce);
+            if (forward.lengthSqr() < 1.0E-8) {
+                return center;
+            }
+            return center.add(forward.scale(getBigCannonSpawnForwardOffset(cannon)));
+        }
+
         BlockPos outside = getMuzzleExitLocal(cannon);
         if (outside == null) {
             return poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 0);
@@ -67,9 +76,19 @@ public final class CBCMuzzleUtil {
 
         Direction dir = cannon.initialOrientation();
 
-        // CBC spawns at centerOf(outside.relative(dir))
         BlockPos spawnAnchorLocal = outside.relative(dir);
-        return poce.toGlobalVector(Vec3.atCenterOf(spawnAnchorLocal), 0);
+        Vec3 anchor = poce.toGlobalVector(Vec3.atCenterOf(spawnAnchorLocal), 0);
+        Vec3 center = poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 0);
+        Vec3 forward = anchor.subtract(center);
+        if (forward.lengthSqr() < 1.0E-8) {
+            return anchor;
+        }
+
+        return anchor.subtract(forward.normalize().scale(2.0));
+    }
+
+    public static double getBigCannonSpawnForwardOffset(AbstractMountedCannonContraption cannon) {
+        return Math.max(0.0, CannonUtil.getBarrelLength(cannon));
     }
 
     /**

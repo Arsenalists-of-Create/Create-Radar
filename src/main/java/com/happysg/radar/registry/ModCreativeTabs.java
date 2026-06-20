@@ -68,6 +68,7 @@ public class ModCreativeTabs {
         pOutput.accept(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK);
         pOutput.accept(ModBlocks.NETWORK_FILTERER_BLOCK);
         pOutput.accept(ModBlocks.FIRE_CONTROLLER_BLOCK);
+        pOutput.accept(ModBlocks.SKY_RADAR);
         pOutput.accept(ModItems.SAFE_ZONE_DESIGNATOR);
         pOutput.accept(ModItems.IDENT_FILTER_ITEM);
         pOutput.accept(ModItems.RADAR_FILTER_ITEM);

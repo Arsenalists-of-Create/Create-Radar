@@ -2,11 +2,16 @@ package com.happysg.radar.compat.cbc;
 
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.mojang.logging.LogUtils;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
+import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
+import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionProperties;
+import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionPropertiesHandler;
+import rbasamoyai.createbigcannons.munitions.config.FluidDragHandler;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
 
 import java.util.List;
@@ -84,10 +89,13 @@ public class CannonLead {
             double muzzleSpeedPerTick,
             double gravityPerTick,
             double drag,
+            double dragDensity,
+            boolean quadraticDrag,
             Vec3 targetPoint,
             double targetHorizontalDist,
             int maxTicks,
-            boolean applyDrag
+            boolean applyDrag,
+            ServerLevel level
     ) {
         Vec3 pos = muzzlePos;
         Vec3 vel = shooterVelPerTickAtFire.add(dirUnit.scale(muzzleSpeedPerTick));
@@ -105,17 +113,35 @@ public class CannonLead {
                 return new SimResult(tick, pos, vel);
             }
 
-            pos = pos.add(vel);
-
-            // Match the primary targeting simulator: move with the current velocity,
-            // then apply gravity and drag for the next tick.
-            vel = vel.add(0.0, gravityPerTick, 0.0);
-            if (applyDrag && drag != 0.0) {
-                vel = vel.scale(Math.max(0.0, 1.0 - drag));
-            }
+            Vec3 acceleration = cbcAcceleration(pos, vel, gravityPerTick, applyDrag ? drag : 0.0, dragDensity, quadraticDrag, level);
+            pos = pos.add(vel).add(acceleration.scale(0.5));
+            vel = vel.add(acceleration);
         }
 
         return new SimResult(maxTicks, pos, vel);
+    }
+
+    private static Vec3 cbcAcceleration(Vec3 position, Vec3 velocity, double gravity, double drag, double dragDensity, boolean quadraticDrag, ServerLevel level) {
+        double speed = velocity.length();
+        Vec3 acceleration = new Vec3(0.0, gravity, 0.0);
+        if (speed <= 1.0e-8 || drag <= 0.0) {
+            return acceleration;
+        }
+
+        double density = Double.isFinite(dragDensity) && dragDensity >= 0.0 ? dragDensity : 1.0;
+        if (level != null) {
+            density += FluidDragHandler.getFluidDrag(level.getFluidState(BlockPos.containing(position)));
+        }
+        if (density <= 0.0) {
+            return acceleration;
+        }
+
+        double dragForce = drag * density * speed;
+        if (quadraticDrag) {
+            dragForce *= speed;
+        }
+        dragForce = Math.min(dragForce, speed);
+        return velocity.normalize().scale(-dragForce).add(acceleration);
     }
 
     // -------------------------
@@ -155,17 +181,20 @@ public class CannonLead {
             shooterAccelPerTick2 = Vec3.ZERO;
         }
 
-        double muzzleSpeedPerTick = CannonUtil.getInitialVelocity(cannon, level);
+        CannonUtil.BigCannonShotState shotState = CannonUtil.isBigCannon(cannon) ? CannonUtil.resolveBigCannonShotState(cannon, level) : null;
+        double muzzleSpeedPerTick = shotState != null ? shotState.speed() : CannonUtil.getInitialVelocity(cannon, level);
         if (muzzleSpeedPerTick <= 0.0) return null;
 
-        // "Origin" in world space (VS2-aware)
-        Vec3 originNow = PhysicsHandler.getWorldVec(level, mount.getControllerBlockPos().above(2).getCenter());
+        Vec3 originNow = getStableOrigin(mount, level);
         final double latencyTicks = 2.0; // tune 1..3
-        int barrelLength = CannonUtil.getBarrelLength(cannon);
+        double muzzleForwardOffset = shotState != null ? shotState.muzzleForwardOffset() : CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon);
 
-        BallisticPropertiesComponent bp = CannonUtil.getBallistics(cannon, level);
-        double gravityPerTick = bp.gravity();
+        BallisticPropertiesComponent bp = shotState != null ? shotState.ballistics() : CannonUtil.getBallistics(cannon, level);
+        DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(level);
+        double gravityPerTick = bp.gravity() * dimension.gravityMultiplier();
         double formDrag = bp.drag();
+        double dragDensity = dimension.dragMultiplier();
+        boolean quadraticDrag = bp.isQuadraticDrag();
 
         // Predict shooter state at fire time (projectile spawn moment)
         Vec3 shooterPosAtFire = predictPositionTicks(originNow, shooterVelPerTick, shooterAccelPerTick2, fireDelayTicks);
@@ -176,15 +205,6 @@ public class CannonLead {
         Vec3 targetPosRel0 = targetPosNow.subtract(shooterPosAtFire);
         Vec3 targetVelRel = targetVelPerTick.subtract(shooterVelAtFire);
         Vec3 targetAccelRel = targetAccelPerTick2.subtract(shooterAccelPerTick2);
-
-        // If target isn't moving, just aim directly at it (still compute yaw/pitch)
-        if (!targetMoving) {
-            Vec3 to = targetPosNow.subtract(shooterPosAtFire);
-            double yaw = Math.atan2(to.z, to.x);
-            double horiz = Math.sqrt(to.x * to.x + to.z * to.z);
-            double pitch = Math.atan2(to.y, Math.max(1.0e-6, horiz));
-            return new LeadSolution(targetPosNow, Math.toDegrees(pitch), yaw, 0);
-        }
 
         // Initial guess: horizontal distance / muzzle speed
         double dx0 = targetPosNow.x - shooterPosAtFire.x;
@@ -223,8 +243,7 @@ public class CannonLead {
             Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
             chosenPitchDeg = Math.toDegrees(pitchRad);
 
-            // Muzzle position offset by barrel length
-            Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(barrelLength));
+            Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(muzzleForwardOffset));
 
             double dx = aimPoint.x - muzzlePosAtFire.x;
             double dz = aimPoint.z - muzzlePosAtFire.z;
@@ -237,10 +256,13 @@ public class CannonLead {
                     muzzleSpeedPerTick,
                     gravityPerTick,
                     formDrag,
+                    dragDensity,
+                    quadraticDrag,
                     aimPoint,
                     horiz,
                     computeMaxSimTicks(horiz, muzzleSpeedPerTick, maxSimDistanceBlocks),
-                    true
+                    true,
+                    level
             );
 
             int newFlightTicks = sim.ticks;
@@ -276,7 +298,8 @@ public class CannonLead {
         if (shooterVelPerTick.lengthSqr() < VEL_EPS_SQR) shooterVelPerTick = Vec3.ZERO;
         boolean targetMoving = targetVelPerTick.lengthSqr() >= VEL_EPS_SQR;
 
-        double muzzleSpeedPerTick = CannonUtil.getInitialVelocity(cannon, level);
+        CannonUtil.BigCannonShotState shotState = CannonUtil.isBigCannon(cannon) ? CannonUtil.resolveBigCannonShotState(cannon, level) : null;
+        double muzzleSpeedPerTick = shotState != null ? shotState.speed() : CannonUtil.getInitialVelocity(cannon, level);
         if (muzzleSpeedPerTick <= 0.0) {
             LOGGER.debug("[LEAD] muzzleSpeedPerTick={} (no ammo/invalid state?) cannon={} mountPos={}",
                     muzzleSpeedPerTick, cannon.getClass().getSimpleName(), mount.getBlockPos());
@@ -284,13 +307,15 @@ public class CannonLead {
         }
 
 
-        // "Origin" in world space (VS2-aware)
-        Vec3 originNow = PhysicsHandler.getWorldVec(level, mount.getControllerBlockPos().above(2).getCenter());
-        int barrelLength = CannonUtil.getBarrelLength(cannon);
+        Vec3 originNow = getStableOrigin(mount, level);
+        double muzzleForwardOffset = shotState != null ? shotState.muzzleForwardOffset() : CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon);
 
-        BallisticPropertiesComponent bp = CannonUtil.getBallistics(cannon, level);
-        double gravityPerTick = bp.gravity();
+        BallisticPropertiesComponent bp = shotState != null ? shotState.ballistics() : CannonUtil.getBallistics(cannon, level);
+        DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(level);
+        double gravityPerTick = bp.gravity() * dimension.gravityMultiplier();
         double drag = bp.drag(); // NOTE: if this isn't a damping coefficient, consider using your CBC sim instead.
+        double dragDensity = dimension.dragMultiplier();
+        boolean quadraticDrag = bp.isQuadraticDrag();
 
         // Predict shooter and target at FIRE TIME under constant velocity
         Vec3 shooterPosAtFire = originNow.add(shooterVelPerTick.scale(fireDelayTicks));
@@ -302,15 +327,6 @@ public class CannonLead {
         // Relative state anchored at FIRE TIME
         Vec3 relPos0 = targetPosAtFire.subtract(shooterPosAtFire);
         Vec3 relVel = targetVelAtFire.subtract(shooterVelAtFire);
-
-        // If target isn't moving (or effectively not), just do a direct aim solve
-        if (!targetMoving) {
-            Vec3 to = targetPosAtFire.subtract(shooterPosAtFire);
-            double yaw = Math.atan2(to.z, to.x);
-            double horiz = Math.sqrt(to.x * to.x + to.z * to.z);
-            double pitch = Math.atan2(to.y, Math.max(1.0e-6, horiz));
-            return new LeadSolution(targetPosAtFire, Math.toDegrees(pitch), yaw, 0);
-        }
 
         // Initial time guess from horizontal distance / muzzle speed
         double horiz0 = Math.sqrt(relPos0.x * relPos0.x + relPos0.z * relPos0.z);
@@ -344,8 +360,7 @@ public class CannonLead {
             Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
             chosenPitchDeg = Math.toDegrees(pitchRad);
 
-            // Offset muzzle forward along barrel direction
-            Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(barrelLength));
+            Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(muzzleForwardOffset));
 
             // Horizontal distance from muzzle to predicted point (stop condition for sim)
             double dx = aimPoint.x - muzzlePosAtFire.x;
@@ -359,10 +374,13 @@ public class CannonLead {
                     muzzleSpeedPerTick,
                     gravityPerTick,
                     drag,
+                    dragDensity,
+                    quadraticDrag,
                     aimPoint,
                     horiz,
                     computeMaxSimTicks(horiz, muzzleSpeedPerTick, maxSimDistanceBlocks),
-                    true
+                    true,
+                    level
             );
 
             int newFlightTicks = sim.ticks;
@@ -393,6 +411,19 @@ public class CannonLead {
         if (ticks < 60) ticks = 60;
         if (ticks > HARD_MAX_TICKS) ticks = HARD_MAX_TICKS;
         return ticks;
+    }
+
+    private static Vec3 getStableOrigin(CannonMountBlockEntity mount, ServerLevel level) {
+        if (mount == null) {
+            return Vec3.ZERO;
+        }
+
+        PitchOrientedContraptionEntity contraption = mount.getContraption();
+        if (contraption != null) {
+            return contraption.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
+        }
+
+        return PhysicsHandler.getWorldVec(level, mount.getControllerBlockPos().above(2).getCenter());
     }
 
     // Optional debug helper

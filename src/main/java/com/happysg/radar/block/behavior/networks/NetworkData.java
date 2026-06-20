@@ -28,7 +28,7 @@ import java.util.function.Predicate;
 
 public class NetworkData extends SavedData {
 
-    public enum RadarKind { BEARING, STATIONARY }
+    public enum RadarKind { BEARING, STATIONARY, SKY, SONAR }
     public enum Mountkind { NORMAL, FIXED, COMPACT}
     private static final String DATA_NAME = "network_data";
 

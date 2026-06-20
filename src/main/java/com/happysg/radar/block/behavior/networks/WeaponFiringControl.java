@@ -11,6 +11,7 @@ import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.AccelerationTracker;
+import com.happysg.radar.compat.cbc.CBCMuzzleUtil;
 import com.happysg.radar.compat.cbc.CannonLead;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
@@ -47,7 +48,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import javax.annotation.Nullable;
-import net.createmod.catnip.math.VecHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.server.level.ServerLevel;
@@ -67,7 +67,10 @@ import org.joml.Vector3f;
 import org.slf4j.Logger;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
+import rbasamoyai.createbigcannons.cannon_control.contraption.MountedBigCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
+import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionProperties;
+import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionPropertiesHandler;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
 
 public class WeaponFiringControl {
@@ -175,6 +178,7 @@ public class WeaponFiringControl {
         this.aimStableTicks = 0;
         this.targetShipId = null;
         this.lastAimPoint = null;
+        this.lastAimPoint = null;
         this.cachedSableAngles = null;
         this.cachedSableAimTarget = null;
         this.cachedSableSolveTick = -1L;
@@ -245,13 +249,13 @@ public class WeaponFiringControl {
             PitchOrientedContraptionEntity poce = this.cannonMount.getContraption();
             if (Mods.SABLE.isLoaded() && SableUtils.isBlockInShipyard(this.level, this.cannonMount.getBlockPos())) {
                 if (poce != null) {
-                    Vec3 shipyardPos = poce.toGlobalVector(VecHelper.getCenterOf(BlockPos.ZERO), 1.0F);
+                    Vec3 shipyardPos = poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
                     return SableUtils.getWorldVec(this.level, shipyardPos);
                 } else {
                     return SableUtils.getWorldVec(this.level, this.cannonMount.getBlockPos().getCenter());
                 }
             } else {
-                return poce == null ? this.cannonMount.getBlockPos().getCenter() : poce.toGlobalVector(VecHelper.getCenterOf(BlockPos.ZERO), 1.0F);
+                return poce == null ? this.cannonMount.getBlockPos().getCenter() : poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
             }
         }
     }
@@ -342,11 +346,15 @@ public class WeaponFiringControl {
         double zMin = bb.minZ;
         double zMax = bb.maxZ;
         double yMid = (yMin + yMax) * (double)0.5F;
+        double yUpper = yMin + (yMax - yMin) * 0.75;
         double yChest = yMin + (yMax - yMin) * 0.45;
+        Vec3 upper = new Vec3(center.x, yUpper, center.z);
         Vec3 chest = new Vec3(center.x, yChest, center.z);
         Vec3 mid = new Vec3(center.x, yMid, center.z);
-        candidates.add(chest);
+        candidates.add(center);
+        candidates.add(upper);
         candidates.add(mid);
+        candidates.add(chest);
         boolean useX = ax >= ay && ax >= az;
         boolean useY = ay > ax && ay >= az;
         if (useX) {
@@ -385,11 +393,18 @@ public class WeaponFiringControl {
                     cache.blockedStreak = 0;
                     if (now - cache.lastReacquireTick >= 10L) {
                         cache.lastReacquireTick = now;
-                        if (cached.distanceToSqr(chest) > 1.0E-4 && this.isPointInShootableRange(chest) && !this.isOutOfKnownRange(chest) && this.rayClear(start, chest).isClear()) {
-                            worldToFrac(bb, chest, cache);
-                            cache.lastWorldPoint = chest;
+                        if (cached.distanceToSqr(center) > 1.0E-4 && this.isPointInShootableRange(center) && !this.isOutOfKnownRange(center) && this.rayClear(start, center).isClear()) {
+                            worldToFrac(bb, center, cache);
+                            cache.lastWorldPoint = center;
                             cache.probeCursor = 0;
-                            return chest;
+                            return center;
+                        }
+
+                        if (cached.distanceToSqr(upper) > 1.0E-4 && this.isPointInShootableRange(upper) && !this.isOutOfKnownRange(upper) && this.rayClear(start, upper).isClear()) {
+                            worldToFrac(bb, upper, cache);
+                            cache.lastWorldPoint = upper;
+                            cache.probeCursor = 0;
+                            return upper;
                         }
                     }
 
@@ -723,7 +738,7 @@ public class WeaponFiringControl {
                         if (this.targetSublevel != null) {
                             this.target = RadarTrackUtil.getPosition(this.targetSublevel);
                         } else if (this.targetEntity != null) {
-                            this.target = this.targetEntity.position();
+                            this.target = this.getEntityAimPoint(this.targetEntity);
                         }
                     } else {
                         this.target = this.binoTargetPos.getCenter();
@@ -749,7 +764,7 @@ public class WeaponFiringControl {
                                         this.targetSublevel = live;
                                     }
 
-                                    Vec3 cannonMuzzleWorld = this.resolveMuzzleWorldPosition();
+                                    Vec3 cannonMuzzleWorld = this.resolveMuzzleWorldPosition(cannon);
                                     Vec3 shooterVel = this.getPlatformVelocityAtMuzzle(serverLevel, cannonMuzzleWorld);
                                     this.getPlatformAcceleration(serverLevel, shooterVel);
                                     Vec3 targetVel;
@@ -763,7 +778,7 @@ public class WeaponFiringControl {
                                         targetAccel = AccelerationTracker.getAccelerationPerTick2(this.targetSublevel.getUniqueId(), targetVel);
                                         targetMotionId = this.targetSublevel.getUniqueId();
                                     } else if (!this.binoMode && this.targetEntity != null) {
-                                        rawTargetPos = this.targetEntity.position();
+                                        rawTargetPos = this.getEntityAimPoint(this.targetEntity);
                                         this.target = this.toWorldPosition(serverLevel, rawTargetPos, this.targetEntity);
                                         targetVel = VelocityTracker.getEstimatedVelocityPerTick(this.targetEntity);
                                         targetAccel = AccelerationTracker.getAccelerationPerTick2(this.targetEntity.getUUID(), targetVel);
@@ -787,13 +802,13 @@ public class WeaponFiringControl {
                                     double noLeadDist = (double)1.0F;
                                     Vec3 solvePos = this.target;
                                     if (!this.binoMode && this.targetEntity != null) {
-                                        if (!this.checkLineOfSight(this.targetEntity.position())) {
+                                        if (!this.checkLineOfSight(this.target)) {
                                             LOGGER.debug("WFC: LOS blocked to entity, stopping fire (id={})", this.targetEntity.getUUID());
                                             this.stopFireCannon();
                                             return;
                                         }
 
-                                        solvePos = this.targetEntity.position();
+                                        solvePos = this.target;
                                     }
 
                                     boolean lag = !motion.looseAim();
@@ -830,6 +845,7 @@ public class WeaponFiringControl {
                                     CannonLead.LeadSolution lead = null;
                                     TargetingResult targetingResult = null;
                                     boolean forceLegacyLead = (Boolean)RadarConfig.server().forceLegacyCannonLeadSolver.get();
+                                    boolean isBigCannon = CannonUtil.isBigCannon(cannon);
                                     boolean useNewSolver = !forceLegacyLead && (Boolean)RadarConfig.server().useNewTargetingComputer.get() && !CannonUtil.isLaserCannon(cannon);
                                     if (useNewSolver) {
                                         targetingResult = this.pollCompletedAsyncTargetingResult(serverLevel, cannon, targetMotionId, solvePos);
@@ -846,7 +862,7 @@ public class WeaponFiringControl {
 
                                     boolean newSolverOk = targetingResult != null && targetingResult.valid() && targetingResult.hasShot() && targetingResult.confidence() >= motion.minConfidence();
                                     boolean allowLegacyFallback = forceLegacyLead || (Boolean)RadarConfig.server().allowLegacyCannonLeadFallback.get();
-                                    if (!newSolverOk && allowLegacyFallback && !CannonUtil.isLaserCannon(cannon) && dist > noLeadDist) {
+                                    if (!newSolverOk && allowLegacyFallback && !isBigCannon && !CannonUtil.isLaserCannon(cannon) && dist > noLeadDist) {
                                         lead = CannonLead.solveLeadPerTickConstantVelocity(this.cannonMount, cannon, serverLevel, shooterVel, solvePos, targetVel, (Integer)RadarConfig.server().leadFiringDelay.get() + trackingLeadTicks, this.maxSimDistanceBlocks);
                                     }
 
@@ -887,12 +903,9 @@ public class WeaponFiringControl {
                                     } else if (hasNewTargetingSolution) {
                                         desiredPitch = targetingResult.desiredPitchDeg();
                                         desiredYaw = targetingResult.desiredYawDeg() + (double)270.0F;
-                                    } else {
+                                    } else if (!CannonUtil.isLaserCannon(cannon)) {
                                         Vec3 origin = this.getCannonRayStart();
-                                        double dx = offsetAim.x - origin.x;
-                                        double dz = offsetAim.z - origin.z;
-                                        double yawDeg = Math.toDegrees(Math.atan2(dz, dx)) + (double)90.0F;
-                                        desiredYaw = yawDeg + (double)180.0F;
+                                        desiredYaw = this.calculateControllerYaw(origin, offsetAim);
                                         List<Double> pitchRoots = CannonTargeting.calculatePitch(this.cannonMount, origin, offsetAim, serverLevel);
                                         if (pitchRoots != null && !pitchRoots.isEmpty()) {
                                             desiredPitch = pitchRoots.get(0);
@@ -1105,7 +1118,7 @@ public class WeaponFiringControl {
             this.storeTargetingResult(serverLevel, targetMotionId, solvePos, validated);
             return validated;
         } catch (Throwable throwable) {
-            LOGGER.debug("WFC TargetingComputer async solve failed", throwable);
+            LOGGER.warn("WFC TargetingComputer async solve failed", throwable);
             return null;
         }
     }
@@ -1150,21 +1163,32 @@ public class WeaponFiringControl {
         }
 
         Vec3 rawMuzzlePos = this.getCannonRayStart();
-        Vec3 muzzleWorldPos = this.resolveMuzzleWorldPosition();
+        Vec3 muzzleWorldPos = this.resolveMuzzleWorldPosition(cannonContraption);
         if (muzzleWorldPos == null) {
             return null;
         }
 
-        double projectileSpeed = (double)CannonUtil.getInitialVelocity(cannonContraption, serverLevel);
+        boolean cbcPhysics = CannonUtil.isBigCannon(cannonContraption);
+        CannonUtil.BigCannonShotState bigCannonShotState = cbcPhysics ? CannonUtil.resolveBigCannonShotState(cannonContraption, serverLevel) : null;
+        double projectileSpeed = bigCannonShotState != null ? bigCannonShotState.speed() : (double)CannonUtil.getInitialVelocity(cannonContraption, serverLevel);
         if (!Double.isFinite(projectileSpeed) || projectileSpeed <= (double)0.0F) {
             return null;
         }
 
-        BallisticPropertiesComponent ballistics = CannonUtil.getBallistics(cannonContraption, serverLevel);
+        BallisticPropertiesComponent ballistics = bigCannonShotState != null ? bigCannonShotState.ballistics() : CannonUtil.getBallistics(cannonContraption, serverLevel);
         double gravity = ballistics != null ? ballistics.gravity() : CannonUtil.getProjectileGravity(cannonContraption, serverLevel);
         double drag = ballistics != null ? ballistics.drag() : CannonUtil.getProjectileDrag(cannonContraption, serverLevel);
+        double dragDensity = (double)1.0F;
+        if (!cbcPhysics) {
+            CannonUtil.logCannonTypeReadFailure("async targeting snapshot", cannonContraption);
+        }
+        if (cbcPhysics) {
+            DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(serverLevel);
+            gravity *= dimension.gravityMultiplier();
+            dragDensity = dimension.dragMultiplier();
+        }
         if (!Double.isFinite(gravity)) {
-            gravity = 0.05;
+            gravity = -0.05;
         }
 
         if (!Double.isFinite(drag)) {
@@ -1183,9 +1207,15 @@ public class WeaponFiringControl {
 
         if (this.shouldLogTargetingDebug(serverLevel)) {
             this.logTargetingCoordinateResolution(serverLevel, rawTargetPos, targetWorldPos, rawMuzzlePos, muzzleWorldPos, safeShooterVel);
+            if (bigCannonShotState != null) {
+                LOGGER.warn("WFC async big cannon shot state: speed={} projectile={} projectileLocal={} muzzleExit={} muzzleOffset={} gravity={} drag={} quadratic={} reason={}",
+                        bigCannonShotState.speed(), bigCannonShotState.projectileClass(), bigCannonShotState.projectileLocalPos(),
+                        bigCannonShotState.muzzleExitLocalPos(), bigCannonShotState.muzzleForwardOffset(),
+                        gravity, drag, ballistics != null && ballistics.isQuadraticDrag(), bigCannonShotState.reason());
+            }
         }
 
-        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
+        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).quadraticDrag(ballistics != null && ballistics.isQuadraticDrag()).cbcPhysics(cbcPhysics).dragDensity(dragDensity).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
         return new AsyncTargetingRequest(this.cannonMount.getBlockPos().immutable(), targetMotionId, targetWorldPos, serverLevel.getGameTime(), snapshot);
     }
 
@@ -1215,8 +1245,10 @@ public class WeaponFiringControl {
         }
 
         TargetingSnapshot snapshot = request.snapshot();
-        ProjectileModel model = ProjectileModel.simple(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag());
-        ProjectileSimulator.SimulationResult trajectory = this.validationProjectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), model, snapshot.maxFlightTicks());
+        ProjectileModel model = snapshot.cbcPhysics()
+                ? ProjectileModel.cbc(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag(), snapshot.dragDensity(), snapshot.quadraticDrag())
+                : ProjectileModel.simple(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag(), snapshot.quadraticDrag());
+        ProjectileSimulator.SimulationResult trajectory = this.validationProjectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), model, snapshot.maxFlightTicks(), snapshot.level());
         ObstructionResult obstruction = this.mainThreadObstructionChecker.check(serverLevel, trajectory, Math.max(0, result.predictedFlightTicks()));
         if (obstruction.clear() || this.isValidatedObstructionAtTarget(snapshot, obstruction)) {
             return result;
@@ -1261,17 +1293,28 @@ public class WeaponFiringControl {
     private TargetingResult solveWithTargetingComputer(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, Vec3 rawTargetPos, Vec3 targetWorldPos, Vec3 targetVel, Vec3 targetAccel, Vec3 shooterVel, @Nullable Entity targetEntity, @Nullable SubLevelAccess targetSublevel, TargetMotionClass targetMotionClass, int trackingLeadTicks) {
         if (serverLevel != null && cannonContraption != null && targetWorldPos != null) {
             Vec3 rawMuzzlePos = this.getCannonRayStart();
-            Vec3 muzzleWorldPos = this.resolveMuzzleWorldPosition();
+            Vec3 muzzleWorldPos = this.resolveMuzzleWorldPosition(cannonContraption);
             if (muzzleWorldPos == null) {
                 return null;
             } else {
-                double projectileSpeed = (double)CannonUtil.getInitialVelocity(cannonContraption, serverLevel);
+                boolean cbcPhysics = CannonUtil.isBigCannon(cannonContraption);
+                CannonUtil.BigCannonShotState bigCannonShotState = cbcPhysics ? CannonUtil.resolveBigCannonShotState(cannonContraption, serverLevel) : null;
+                double projectileSpeed = bigCannonShotState != null ? bigCannonShotState.speed() : (double)CannonUtil.getInitialVelocity(cannonContraption, serverLevel);
                 if (Double.isFinite(projectileSpeed) && !(projectileSpeed <= (double)0.0F)) {
-                    BallisticPropertiesComponent ballistics = CannonUtil.getBallistics(cannonContraption, serverLevel);
+                    BallisticPropertiesComponent ballistics = bigCannonShotState != null ? bigCannonShotState.ballistics() : CannonUtil.getBallistics(cannonContraption, serverLevel);
                     double gravity = ballistics != null ? ballistics.gravity() : CannonUtil.getProjectileGravity(cannonContraption, serverLevel);
                     double drag = ballistics != null ? ballistics.drag() : CannonUtil.getProjectileDrag(cannonContraption, serverLevel);
+                    double dragDensity = (double)1.0F;
+                    if (!cbcPhysics) {
+                        CannonUtil.logCannonTypeReadFailure("targeting snapshot", cannonContraption);
+                    }
+                    if (cbcPhysics) {
+                        DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(serverLevel);
+                        gravity *= dimension.gravityMultiplier();
+                        dragDensity = dimension.dragMultiplier();
+                    }
                     if (!Double.isFinite(gravity)) {
-                        gravity = 0.05;
+                        gravity = -0.05;
                     }
 
                     if (!Double.isFinite(drag)) {
@@ -1284,6 +1327,12 @@ public class WeaponFiringControl {
                     boolean logTargetingDebug = this.shouldLogTargetingDebug(serverLevel);
                     if (logTargetingDebug) {
                         this.logTargetingCoordinateResolution(serverLevel, rawTargetPos, targetWorldPos, rawMuzzlePos, muzzleWorldPos, safeShooterVel);
+                        if (bigCannonShotState != null) {
+                            LOGGER.warn("WFC big cannon shot state: speed={} projectile={} projectileLocal={} muzzleExit={} muzzleOffset={} gravity={} drag={} quadratic={} reason={}",
+                                    bigCannonShotState.speed(), bigCannonShotState.projectileClass(), bigCannonShotState.projectileLocalPos(),
+                                    bigCannonShotState.muzzleExitLocalPos(), bigCannonShotState.muzzleForwardOffset(),
+                                    gravity, drag, ballistics != null && ballistics.isQuadraticDrag(), bigCannonShotState.reason());
+                        }
                     }
 
                     AABB baseTargetAabb = targetEntity != null ? this.resolveEntityWorldAabb(serverLevel, targetEntity) : this.resolveSublevelWorldAabb(targetSublevel);
@@ -1296,7 +1345,7 @@ public class WeaponFiringControl {
                             targetAabb = targetAabb.move(delayedTargetPos.subtract(targetWorldPos));
                         }
 
-                        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
+                        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).quadraticDrag(ballistics != null && ballistics.isQuadraticDrag()).cbcPhysics(cbcPhysics).dragDensity(dragDensity).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
                         result = this.targetingComputer.solve(snapshot);
                         if (result == null || !result.valid() || !result.hasShot()) {
                             break;
@@ -1314,7 +1363,7 @@ public class WeaponFiringControl {
                     }
 
                     if (this.level.getGameTime() % 20L == 1L && result != null) {
-                        LOGGER.debug("WFC TargetingComputer trackingLead={} {}", predictedTicks, result.debugString());
+                        LOGGER.warn("WFC TargetingComputer trackingLead={} {}", predictedTicks, result.debugString());
                     }
 
                     return result;
@@ -1328,8 +1377,162 @@ public class WeaponFiringControl {
     }
 
     @Nullable
-    private Vec3 resolveMuzzleWorldPosition() {
+    private Vec3 resolveMuzzleWorldPosition(AbstractMountedCannonContraption cannon) {
+        if (cannon instanceof MountedBigCannonContraption && this.cannonMount != null && this.cannonMount.getContraption() != null && !this.isSableMount()) {
+            return CBCMuzzleUtil.getCBCSpawnAnchorWorld(this.cannonMount.getContraption());
+        }
         return this.getCannonRayStart();
+    }
+
+    public SolverDebugReport buildSolverDebugReport(ServerLevel serverLevel, int arcTicks) {
+        List<String> lines = new ArrayList<>();
+        ProjectileSimulator.SimulationResult trajectory = null;
+        PitchOrientedContraptionEntity mounted = this.cannonMount == null ? null : this.cannonMount.getContraption();
+        AbstractMountedCannonContraption cannon = mounted != null && mounted.getContraption() instanceof AbstractMountedCannonContraption c ? c : null;
+        Vec3 rawMuzzlePos = this.getCannonRayStart();
+        Vec3 muzzleWorldPos = cannon == null ? rawMuzzlePos : this.resolveMuzzleWorldPosition(cannon);
+        Vec3 targetPos = this.target;
+        Vec3 aimPoint = this.lastAimPoint;
+        TargetingResult result = this.cachedTargetingResult;
+
+        lines.add("=== Create Radar Cannon Solver Debug ===");
+        lines.add("mount=" + (this.cannonMount == null ? "<null>" : this.cannonMount.getBlockPos().toShortString())
+                + " dim=" + (serverLevel == null ? "<null>" : serverLevel.dimension().location()));
+        lines.add("detected cannon type=" + describeCannonType(cannon));
+        lines.add("raw mount ray origin=" + fmtVec(rawMuzzlePos) + " resolved muzzle=" + fmtVec(muzzleWorldPos));
+        lines.add("target=" + fmtVec(targetPos)
+                + " targetDistanceFromMount=" + fmt(rawMuzzlePos != null && targetPos != null ? rawMuzzlePos.distanceTo(targetPos) : Double.NaN)
+                + " targetDistanceFromMuzzle=" + fmt(muzzleWorldPos != null && targetPos != null ? muzzleWorldPos.distanceTo(targetPos) : Double.NaN));
+        lines.add("current aim point=" + fmtVec(aimPoint)
+                + " aimDistanceFromMuzzle=" + fmt(muzzleWorldPos != null && aimPoint != null ? muzzleWorldPos.distanceTo(aimPoint) : Double.NaN));
+
+        double projectileSpeed = Double.NaN;
+        double gravity = Double.NaN;
+        double drag = Double.NaN;
+        double dragDensity = 1.0;
+        boolean quadraticDrag = false;
+        boolean cbcPhysics = cannon != null && CannonUtil.isBigCannon(cannon);
+        String shellType = "<unknown>";
+        String propellant = "<unknown>";
+        String ballisticsReason = "<none>";
+
+        if (cannon != null && serverLevel != null) {
+            CannonUtil.BigCannonShotState bigShot = cbcPhysics ? CannonUtil.resolveBigCannonShotState(cannon, serverLevel) : null;
+            BallisticPropertiesComponent ballistics = bigShot != null ? bigShot.ballistics() : CannonUtil.getBallistics(cannon, serverLevel);
+            projectileSpeed = bigShot != null ? bigShot.speed() : (double) CannonUtil.getInitialVelocity(cannon, serverLevel);
+            if (ballistics != null) {
+                gravity = ballistics.gravity();
+                drag = ballistics.drag();
+                quadraticDrag = ballistics.isQuadraticDrag();
+            }
+            if (cbcPhysics) {
+                DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(serverLevel);
+                gravity *= dimension.gravityMultiplier();
+                dragDensity = dimension.dragMultiplier();
+            }
+            if (bigShot != null) {
+                shellType = bigShot.projectileClass() == null ? "<none detected; using HE fallback ballistics>" : bigShot.projectileClass();
+                propellant = bigShot.propellantCharges() + " charges, propellantPower=" + fmt(bigShot.propellantPower())
+                        + ", projectileAddedPower=" + fmt(bigShot.projectileAddedPower());
+                ballisticsReason = bigShot.reason();
+            } else {
+                shellType = CannonUtil.isAutocannonFamily(cannon) ? "<autocannon ammo>" : "<unknown non-big-cannon>";
+                propellant = "n/a";
+            }
+        }
+
+        lines.add("detected shell type=" + shellType);
+        lines.add("detected ballistic properties: gravity=" + fmt(gravity)
+                + " drag=" + fmt(drag)
+                + " quadraticDrag=" + quadraticDrag
+                + " cbcPhysics=" + cbcPhysics
+                + " dragDensity=" + fmt(dragDensity)
+                + " reason=" + ballisticsReason);
+        lines.add("propellant=" + propellant);
+        lines.add("exit muzzle velocity=" + fmt(projectileSpeed) + " blocks/tick, " + fmt(projectileSpeed * 20.0) + " m/s");
+
+        Double expectedPitch = result != null && result.valid() && result.hasShot() ? result.desiredPitchDeg() : null;
+        Double expectedYaw = result != null && result.valid() && result.hasShot() ? result.desiredYawDeg() : null;
+        if (expectedPitch == null && this.pitchController != null) {
+            expectedPitch = this.pitchController.getTargetAngle();
+        }
+        if (expectedYaw == null && this.yawController != null) {
+            expectedYaw = this.yawController.getTargetAngle() - 270.0;
+        }
+        lines.add("expected pitch=" + fmt(expectedPitch == null ? Double.NaN : expectedPitch)
+                + " expected solver yaw=" + fmt(expectedYaw == null ? Double.NaN : expectedYaw)
+                + " controller yaw=" + (this.yawController == null ? "<none>" : fmt(this.yawController.getTargetAngle()))
+                + " controller pitch=" + (this.pitchController == null ? "<none>" : fmt(this.pitchController.getTargetAngle())));
+
+        if (result != null) {
+            lines.add("cached solver result: valid=" + result.valid()
+                    + " hasShot=" + result.hasShot()
+                    + " flightTicks=" + result.predictedFlightTicks()
+                    + " miss=" + fmt(result.missDistance())
+                    + " confidence=" + fmt(result.confidence())
+                    + " reason=" + result.reason());
+            if (result.debugInfo() != null && !result.debugInfo().isEmpty()) {
+                lines.add("cached solver debug=" + result.debugInfo());
+            }
+        } else {
+            lines.add("cached solver result=<none>");
+        }
+
+        Vec3 direction = result != null && result.aimSolution() != null ? result.aimSolution().aimDirection() : null;
+        if ((direction == null || direction.lengthSqr() < 1.0E-12) && expectedYaw != null && expectedPitch != null) {
+            direction = TargetingMath.directionFromYawPitch(expectedYaw, expectedPitch);
+        }
+        if (serverLevel != null && muzzleWorldPos != null && direction != null && direction.lengthSqr() >= 1.0E-12
+                && Double.isFinite(projectileSpeed) && projectileSpeed > 0.0
+                && Double.isFinite(gravity) && Double.isFinite(drag)) {
+            ProjectileModel model = cbcPhysics
+                    ? ProjectileModel.cbc(projectileSpeed, gravity, drag, dragDensity, quadraticDrag)
+                    : ProjectileModel.simple(projectileSpeed, gravity, drag, quadraticDrag);
+            int ticks = Math.max(20, Math.min(400, arcTicks));
+            trajectory = this.validationProjectileSimulator.simulate(muzzleWorldPos, direction, Vec3.ZERO, model, ticks, serverLevel);
+            lines.add("arc samples=" + trajectory.samples().size() + " ticks=" + ticks);
+        } else {
+            lines.add("arc unavailable: missing muzzle/direction/valid projectile model");
+        }
+
+        String joined = String.join(" | ", lines);
+        LOGGER.warn(joined);
+        return new SolverDebugReport(lines, trajectory);
+    }
+
+    private static String describeCannonType(@Nullable AbstractMountedCannonContraption cannon) {
+        if (cannon == null) {
+            return "<none>";
+        }
+        String family = CannonUtil.isBigCannon(cannon) ? "big_cannon"
+                : CannonUtil.isAutocannonFamily(cannon) ? "autocannon"
+                : CannonUtil.isEnergyCannon(cannon) ? "energy"
+                : CannonUtil.isLaserCannon(cannon) ? "laser"
+                : "unknown";
+        return family + " (" + cannon.getClass().getName() + ")";
+    }
+
+    private static String fmt(double value) {
+        return Double.isFinite(value) ? String.format(java.util.Locale.ROOT, "%.5f", value) : "<nan>";
+    }
+
+    private static String fmtVec(@Nullable Vec3 vec) {
+        if (vec == null) {
+            return "<null>";
+        }
+        return "(" + fmt(vec.x) + ", " + fmt(vec.y) + ", " + fmt(vec.z) + ")";
+    }
+
+    private Double calculateControllerYaw(Vec3 origin, Vec3 aimPoint) {
+        if (origin == null || aimPoint == null) {
+            return null;
+        }
+
+        double dx = aimPoint.x - origin.x;
+        double dz = aimPoint.z - origin.z;
+        double yawDeg = Math.toDegrees(Math.atan2(dz, dx)) + (double)90.0F;
+        double controllerYaw = wrap360(yawDeg + (double)180.0F);
+        return controllerYaw < 0.02 || controllerYaw > 359.98 ? (double)0.0F : controllerYaw;
     }
 
     private Vec3 toWorldPosition(ServerLevel serverLevel, Vec3 rawPosition, @Nullable Entity entity) {
@@ -1465,6 +1668,15 @@ public class WeaponFiringControl {
         return entity != null && entity.level() == serverLevel && entity.isAlive() ? entity.getBoundingBox() : null;
     }
 
+    private Vec3 getEntityAimPoint(Entity entity) {
+        AABB bounds = entity.getBoundingBox();
+        if (bounds != null && Double.isFinite(bounds.minX) && Double.isFinite(bounds.minY) && Double.isFinite(bounds.minZ) && Double.isFinite(bounds.maxX) && Double.isFinite(bounds.maxY) && Double.isFinite(bounds.maxZ)) {
+            return bounds.getCenter();
+        }
+
+        return entity.position().add((double)0.0F, (double)entity.getBbHeight() * (double)0.5F, (double)0.0F);
+    }
+
     @Nullable
     private AABB resolveSublevelWorldAabb(@Nullable SubLevelAccess subLevel) {
         if (Mods.SABLE.isLoaded() && subLevel != null && subLevel.boundingBox() != null) {
@@ -1501,7 +1713,7 @@ public class WeaponFiringControl {
 
     private void logTargetingCoordinateResolution(ServerLevel serverLevel, Vec3 rawTargetPos, Vec3 resolvedTargetPos, @Nullable Vec3 rawMuzzlePos, @Nullable Vec3 resolvedMuzzlePos, Vec3 inheritedVelocity) {
         if (RadarConfig.DEBUG_BEAMS) {
-            LOGGER.debug("WFC TargetingComputer coords dim={} rawTarget={} resolvedTarget={} rawMuzzle={} resolvedMuzzle={} inheritedVel={}", new Object[]{serverLevel.dimension().location(), rawTargetPos, resolvedTargetPos, rawMuzzlePos, resolvedMuzzlePos, inheritedVelocity});
+            LOGGER.warn("WFC TargetingComputer coords dim={} rawTarget={} resolvedTarget={} rawMuzzle={} resolvedMuzzle={} inheritedVel={}", new Object[]{serverLevel.dimension().location(), rawTargetPos, resolvedTargetPos, rawMuzzlePos, resolvedMuzzlePos, inheritedVelocity});
         }
     }
 
@@ -1714,6 +1926,9 @@ public class WeaponFiringControl {
     }
 
     private static record TargetMotionEstimate(TargetMotionClass motionClass, Vec3 velocity, Vec3 acceleration, double jerk, int stableTicksRequired, double minConfidence, double aimStableEps, boolean looseAim, String reason) {
+    }
+
+    public static record SolverDebugReport(List<String> lines, @Nullable ProjectileSimulator.SimulationResult trajectory) {
     }
 
     private static record AsyncTargetingRequest(BlockPos mountPos, @Nullable UUID targetId, Vec3 solvePos, long requestTick, TargetingSnapshot snapshot) {

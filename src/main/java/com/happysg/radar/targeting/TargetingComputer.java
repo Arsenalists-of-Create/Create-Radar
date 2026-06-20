@@ -24,7 +24,9 @@ public class TargetingComputer {
 
    public TargetingResult solve(TargetingSnapshot snapshot) {
       if (snapshot != null && snapshot.isValid()) {
-         ProjectileModel model = ProjectileModel.simple(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag());
+         ProjectileModel model = snapshot.cbcPhysics()
+                 ? ProjectileModel.cbc(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag(), snapshot.dragDensity(), snapshot.quadraticDrag())
+                 : ProjectileModel.simple(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag(), snapshot.quadraticDrag());
          return this.solver.solve(snapshot, model, this.obstructionChecker);
       } else {
          return TargetingResult.invalid("invalid snapshot");

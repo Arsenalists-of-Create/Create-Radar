@@ -1,5 +1,6 @@
 package com.happysg.radar.targeting;
 
+import com.happysg.radar.compat.cbc.CannonTargeting;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.world.phys.Vec3;
@@ -20,6 +21,11 @@ public final class TargetingSolverSelfTest {
       results.add(checkIntercept("moving_away", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)2.0F, (double)0.0F, (double)0.0F), (double)10.0F, true));
       results.add(checkIntercept("target_too_fast_to_intercept", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)12.0F, (double)0.0F, (double)0.0F), (double)10.0F, false));
       results.add(checkProjectileIntegrationOrder());
+      results.add(checkBigCannonPitch("big_cannon_pitch_50", 50.0));
+      results.add(checkBigCannonPitch("big_cannon_pitch_100", 100.0));
+      results.add(checkBigCannonReported150BlockShot());
+      results.add(checkBigCannonHighLowRoots());
+      results.add(checkBigCannonUnreachable());
       results.add(checkTrustedAccelerationPrediction());
       results.add(new Result("obstructed_trajectory", true, "requires a real Level.clip context; covered by ObstructionChecker integration"));
       return List.copyOf(results);
@@ -87,6 +93,105 @@ public final class TargetingSolverSelfTest {
       Vec3 tick2 = result.samples().get(2).position();
       boolean passed = close(tick1, new Vec3((double)10.0F, (double)0.0F, (double)0.0F)) && close(tick2, new Vec3((double)20.0F, (double)-1.0F, (double)0.0F));
       return new Result("projectile_integration_order", passed, "tick1=" + tick1 + " tick2=" + tick2);
+   }
+
+   private static Result checkBigCannonPitch(String name, double range) {
+      Vec3 origin = Vec3.ZERO;
+      Vec3 target = new Vec3(range, 0.0, 0.0);
+      double speed = 8.0;
+      double gravity = -0.05;
+      double drag = 0.01;
+      int barrelLength = 4;
+      List<Double> roots = CannonTargeting.calculateSimulatedPitchRoots(origin, target, speed, gravity, drag, barrelLength);
+      if (roots.isEmpty()) {
+         return new Result(name, false, "no roots");
+      }
+
+      double miss = Math.abs(simulatedHeightError(origin, target, roots.get(0), speed, gravity, drag, barrelLength));
+      return new Result(name, miss <= 0.05, "pitch=" + roots.get(0) + " miss=" + miss + " roots=" + roots);
+   }
+
+   private static Result checkBigCannonHighLowRoots() {
+      List<Double> roots = CannonTargeting.calculateSimulatedPitchRoots(Vec3.ZERO, new Vec3(80.0, 0.0, 0.0), 8.0, -0.05, 0.01, 4);
+      boolean passed = roots.size() >= 2 && roots.get(0) < roots.get(1);
+      return new Result("big_cannon_high_low_roots", passed, "roots=" + roots);
+   }
+
+   private static Result checkBigCannonReported150BlockShot() {
+      Vec3 origin = Vec3.ZERO;
+      Vec3 target = new Vec3(150.0, 0.0, 0.0);
+      double speed = 8.0;
+      double gravity = -0.05;
+      double drag = 0.01;
+      double muzzleForwardOffset = 10.0;
+      List<Double> roots = CannonTargeting.calculateSimulatedPitchRoots(origin, target, speed, gravity, drag, muzzleForwardOffset, 1.0, false);
+      if (roots.isEmpty()) {
+         return new Result("big_cannon_reported_150_block_shot", false, "no roots");
+      }
+
+      double low = roots.get(0);
+      double miss = Math.abs(simulatedHeightError(origin, target, low, speed, gravity, drag, muzzleForwardOffset));
+      double reportedPitchError = simulatedHeightError(origin, target, 2.2945, speed, gravity, drag, muzzleForwardOffset);
+      boolean passed = low > 2.5 && miss <= 0.05 && reportedPitchError < -1.0;
+      return new Result("big_cannon_reported_150_block_shot", passed, "low=" + low + " miss=" + miss + " reportedPitchError=" + reportedPitchError + " roots=" + roots);
+   }
+
+   private static Result checkBigCannonUnreachable() {
+      List<Double> roots = CannonTargeting.calculateSimulatedPitchRoots(Vec3.ZERO, new Vec3(1000.0, 0.0, 0.0), 4.0, -0.05, 0.01, 4);
+      return new Result("big_cannon_unreachable", roots.isEmpty(), "roots=" + roots);
+   }
+
+   private static double simulatedHeightError(Vec3 origin, Vec3 target, double pitchDeg, double speed, double gravity, double drag, int barrelLength) {
+      return simulatedHeightError(origin, target, pitchDeg, speed, gravity, drag, (double)barrelLength);
+   }
+
+   private static double simulatedHeightError(Vec3 origin, Vec3 target, double pitchDeg, double speed, double gravity, double drag, double muzzleForwardOffset) {
+      double dx = target.x - origin.x;
+      double dz = target.z - origin.z;
+      double horizontal = Math.hypot(dx, dz);
+      Vec3 horizontalUnit = new Vec3(dx / horizontal, 0.0, dz / horizontal);
+      double pitchRad = Math.toRadians(pitchDeg);
+      double cos = Math.cos(pitchRad);
+      Vec3 dir = new Vec3(horizontalUnit.x * cos, Math.sin(pitchRad), horizontalUnit.z * cos).normalize();
+      Vec3 muzzle = origin.add(dir.scale(muzzleForwardOffset));
+      double targetTravel = target.subtract(muzzle).dot(horizontalUnit);
+      Vec3 pos = muzzle;
+      Vec3 vel = dir.scale(speed);
+      double prevTravel = 0.0;
+      double prevY = pos.y;
+
+      for (int tick = 0; tick <= 8000; tick++) {
+         double travel = pos.subtract(muzzle).dot(horizontalUnit);
+         if (travel >= targetTravel) {
+            double span = travel - prevTravel;
+            double t = Math.abs(span) <= 1.0E-9 ? 0.0 : (targetTravel - prevTravel) / span;
+            double y = prevY + (pos.y - prevY) * Math.max(0.0, Math.min(1.0, t));
+            return y - target.y;
+         }
+
+         prevTravel = travel;
+         prevY = pos.y;
+         Vec3 acceleration = cbcAcceleration(vel, gravity, drag, 1.0, false);
+         pos = pos.add(vel).add(acceleration.scale(0.5));
+         vel = vel.add(acceleration);
+      }
+
+      return Double.POSITIVE_INFINITY;
+   }
+
+   private static Vec3 cbcAcceleration(Vec3 velocity, double gravity, double drag, double dragDensity, boolean quadraticDrag) {
+      double speed = velocity.length();
+      Vec3 acceleration = new Vec3(0.0, gravity, 0.0);
+      if (speed <= 1.0E-8 || drag <= 0.0 || dragDensity <= 0.0) {
+         return acceleration;
+      }
+
+      double dragForce = drag * dragDensity * speed;
+      if (quadraticDrag) {
+         dragForce *= speed;
+      }
+      dragForce = Math.min(dragForce, speed);
+      return velocity.normalize().scale(-dragForce).add(acceleration);
    }
 
    private static Result checkTrustedAccelerationPrediction() {

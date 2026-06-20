@@ -547,6 +547,9 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         float angle = liveRadar != null ? liveRadar.getGlobalAngle() : info.globalAngle();
         if (liveRadar instanceof RadarBearingBlockEntity bearing) {
             angle += bearing.getAngularSpeed() * partialTicks;
+        } else if (liveRadar == null && info.angularSpeed() != 0f && Minecraft.getInstance().level != null) {
+            long elapsed = Minecraft.getInstance().level.getGameTime() - info.angleSnapshotTime();
+            angle += info.angularSpeed() * (elapsed + partialTicks);
         }
         return (angle + 360f) % 360f;
     }

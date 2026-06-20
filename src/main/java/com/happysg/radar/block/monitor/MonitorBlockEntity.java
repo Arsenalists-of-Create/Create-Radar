@@ -5,6 +5,7 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
+import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
@@ -81,6 +82,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             boolean running,
             String type,
             float globalAngle,
+            float angularSpeed,
+            long angleSnapshotTime,
             @Nullable net.minecraft.core.Direction direction,
             boolean renderRelativeToMonitor
     ) {}
@@ -192,9 +195,18 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     private List<RadarDisplayInfo> buildRadarInfos(ServerLevel sl, NetworkData.Group g) {
         List<RadarDisplayInfo> infos = new ArrayList<>();
+        Map<BlockPos, RadarDisplayInfo> previousInfos = new HashMap<>();
+        for (RadarDisplayInfo info : radarInfos) {
+            previousInfos.put(info.pos(), info);
+        }
+
         for (NetworkData.RadarEndpoint endpoint : g.getRadarEndpoints()) {
             BlockEntity be = sl.getBlockEntity(endpoint.pos());
             if (!(be instanceof IRadar radar)) {
+                RadarDisplayInfo previousInfo = previousInfos.get(endpoint.pos());
+                if (previousInfo != null && !sl.hasChunkAt(endpoint.pos())) {
+                    infos.add(previousInfo);
+                }
                 continue;
             }
             infos.add(new RadarDisplayInfo(
@@ -204,6 +216,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     radar.isRunning(),
                     radar.getRadarType(),
                     radar.getGlobalAngle(),
+                    radar instanceof RadarBearingBlockEntity bearing ? bearing.getAngularSpeed() : 0f,
+                    sl.getGameTime(),
                     radar.getradarDirection(),
                     radar.renderRelativeToMonitor()
             ));
@@ -239,17 +253,16 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (g == null)
             return;
 
-        //NetworkData data = NetworkData.get(sl);
-        //data.setSelectedTargetId(g, track == null ? null : track.getId());
+        NetworkData data = NetworkData.get(sl);
+        data.setSelectedTargetId(g, track == null ? null : track.getId());
 
-        // // Update monitor-side state
-//        if (track == null) {
-//            controllerBe.selectedEntity = null;
-//            controllerBe.activetrack = null;
-//        } else {
-//            controllerBe.selectedEntity = track.getId();
-//            controllerBe.activetrack = track;
-//        }
+        if (track == null) {
+            controllerBe.selectedEntity = null;
+            controllerBe.activetrack = null;
+        } else {
+            controllerBe.selectedEntity = track.getId();
+            controllerBe.activetrack = track;
+        }
 
 
 
@@ -695,6 +708,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.putBoolean("Running", info.running());
             tag.putString("Type", info.type() == null ? "" : info.type());
             tag.putFloat("GlobalAngle", info.globalAngle());
+            tag.putFloat("AngularSpeed", info.angularSpeed());
+            tag.putLong("AngleSnapshotTime", info.angleSnapshotTime());
             if (info.direction() != null) tag.putString("Direction", info.direction().getName());
             tag.putBoolean("RenderRelative", info.renderRelativeToMonitor());
             list.add(tag);
@@ -719,6 +734,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     tag.getBoolean("Running"),
                     tag.getString("Type"),
                     tag.getFloat("GlobalAngle"),
+                    tag.getFloat("AngularSpeed"),
+                    tag.getLong("AngleSnapshotTime"),
                     direction,
                     tag.getBoolean("RenderRelative")
             ));

@@ -127,7 +127,7 @@ public class SimulatedAimSolver implements AimSolver {
 
    private Candidate evaluate(TargetingSnapshot snapshot, ProjectileModel projectileModel, double yawDeg, double pitchDeg, ObstructionResult obstruction) {
       Vec3 direction = TargetingMath.directionFromYawPitch(yawDeg, pitchDeg);
-      ProjectileSimulator.SimulationResult trajectory = this.projectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), projectileModel, snapshot.maxFlightTicks());
+      ProjectileSimulator.SimulationResult trajectory = this.projectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), projectileModel, snapshot.maxFlightTicks(), snapshot.level());
       double bestMiss = Double.POSITIVE_INFINITY;
       int bestTick = 0;
       double bestTime = (double)0.0F;
@@ -218,7 +218,13 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private static double distanceToTarget(Vec3 projectilePosition, Vec3 targetPosition, @Nullable AABB targetAabb) {
-      return targetAabb != null ? TargetingMath.distancePointToAabb(projectilePosition, targetAabb) : projectilePosition.distanceTo(targetPosition);
+      if (targetAabb == null) {
+         return projectilePosition.distanceTo(targetPosition);
+      }
+
+      Vec3 center = targetAabb.getCenter();
+      Vec3 upperCenter = new Vec3(center.x, targetAabb.minY + targetAabb.getYsize() * 0.75, center.z);
+      return Math.min(projectilePosition.distanceTo(center), projectilePosition.distanceTo(upperCenter));
    }
 
    private static Vec3 interpolate(Vec3 from, Vec3 to, double alpha) {

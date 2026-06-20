@@ -15,6 +15,8 @@ import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.monitor.MonitorRenderer;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.plane.StationaryRadarBlockEntity;
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
+import com.happysg.radar.block.radar.skyradar.SkyRadarVisual;
 
 import com.simibubi.create.content.contraptions.bearing.BearingRenderer;
 import com.simibubi.create.content.contraptions.bearing.BearingVisual;
@@ -75,6 +77,12 @@ public class ModBlockEntityTypes {
     public static final BlockEntityEntry<StationaryRadarBlockEntity> STATIONARY_RADAR_BE = REGISTRATE
             .blockEntity("plane_radar", StationaryRadarBlockEntity::new)
             .validBlocks(ModBlocks.STATIONARY_RADAR)
+            .register();
+
+    public static final BlockEntityEntry<SkyRadarBlockEntity> SKY_RADAR_BE = REGISTRATE
+            .blockEntity("sky_radar", SkyRadarBlockEntity::new)
+            .visual(() -> SkyRadarVisual::new, true)
+            .validBlocks(ModBlocks.SKY_RADAR)
             .register();
 
     public static final BlockEntityEntry<RadarWarningReceiverBlockEntity> RWR_BE = REGISTRATE

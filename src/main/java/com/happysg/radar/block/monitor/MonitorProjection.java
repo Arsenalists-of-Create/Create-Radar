@@ -26,10 +26,18 @@ public class MonitorProjection {
     }
 
     public static MonitorProjection create(MonitorBlockEntity monitor) {
+        return create(monitor, null);
+    }
+
+    public static MonitorProjection create(MonitorBlockEntity monitor, View view) {
         List<MonitorBlockEntity.RadarDisplayInfo> radars = monitor.getRunningRadarInfos();
         Direction facing = monitor.getBlockState().getValue(MonitorBlock.FACING);
         boolean renderRelative = radars.stream().anyMatch(MonitorBlockEntity.RadarDisplayInfo::renderRelativeToMonitor);
         SubLevelAccess ship = Mods.SABLE.isLoaded() && renderRelative ? monitor.getShip() : null;
+
+        if (view != null) {
+            return new MonitorProjection(monitor, facing, new Vec3(view.centerX(), 0, view.centerZ()), view.halfSpan(), ship);
+        }
 
         if (radars.isEmpty()) {
             Vec3 fallback = monitor.getRadarCenterPos();
@@ -59,6 +67,11 @@ public class MonitorProjection {
 
     public DisplayPoint project(Vec3 worldPos) {
         Vec3 p = framePosition(monitor, ship, worldPos);
+        return projectFramePosition(p.x, p.z);
+    }
+
+    public DisplayPoint projectFramePosition(double frameX, double frameZ) {
+        Vec3 p = new Vec3(frameX, 0, frameZ);
         Vec3 rel = p.subtract(center);
         float xOff = calculateOffset(rel, true) * FIT_SCALE;
         float zOff = calculateOffset(rel, false) * FIT_SCALE;
@@ -71,6 +84,57 @@ public class MonitorProjection {
 
     public float halfSpan() {
         return halfSpan;
+    }
+
+    public View view() {
+        return new View(center.x, center.z, halfSpan);
+    }
+
+    public View viewCenteredOn(Vec3 worldPos, float newHalfSpan) {
+        Vec3 frameCenter = framePosition(monitor, ship, worldPos);
+        return new View(frameCenter.x, frameCenter.z, Math.max(1f, newHalfSpan));
+    }
+
+    public View zoomAround(DisplayPoint anchor, float newHalfSpan) {
+        float clampedHalfSpan = Math.max(1f, newHalfSpan);
+        Vec3 frameAnchor = unproject(anchor);
+        Vec3 rel = frameVectorFromDisplay(anchor, clampedHalfSpan);
+        Vec3 newCenter = frameAnchor.subtract(rel);
+        return new View(newCenter.x, newCenter.z, clampedHalfSpan);
+    }
+
+    public View panByDisplayDelta(float xOffsetDelta, float zOffsetDelta) {
+        Vec3 frameDelta = frameVectorFromDisplay(new DisplayPoint(xOffsetDelta, zOffsetDelta), halfSpan);
+        Vec3 newCenter = center.subtract(frameDelta);
+        return new View(newCenter.x, newCenter.z, halfSpan);
+    }
+
+    public DisplayPoint displayPointFromUi(double mouseX, double mouseY, int left, int top, int uiSize) {
+        float xOffset = (float) ((mouseX - left) / uiSize - 0.5);
+        float zOffset = (float) ((mouseY - top) / uiSize - 0.5);
+        return new DisplayPoint(xOffset, zOffset);
+    }
+
+    public Vec3 unproject(DisplayPoint point) {
+        return center.add(frameVectorFromDisplay(point, halfSpan));
+    }
+
+    private Vec3 frameVectorFromDisplay(DisplayPoint point, float span) {
+        double displayX = point.xOffset() / FIT_SCALE * 2f * span;
+        double displayZ = point.zOffset() / FIT_SCALE * 2f * span;
+
+        double relX;
+        double relZ;
+
+        if (monitorFacing.getAxis() == Direction.Axis.Z) {
+            relX = (monitorFacing == Direction.NORTH || monitorFacing == Direction.EAST) ? -displayX : displayX;
+            relZ = (monitorFacing == Direction.NORTH || monitorFacing == Direction.WEST) ? -displayZ : displayZ;
+        } else {
+            relZ = (monitorFacing == Direction.NORTH || monitorFacing == Direction.EAST) ? -displayX : displayX;
+            relX = (monitorFacing == Direction.NORTH || monitorFacing == Direction.WEST) ? -displayZ : displayZ;
+        }
+
+        return new Vec3(relX, 0, relZ);
     }
 
     private float calculateOffset(Vec3 relativePos, boolean isXOffset) {
@@ -111,6 +175,8 @@ public class MonitorProjection {
             return Math.abs(xOffset) > 0.5f || Math.abs(zOffset) > 0.5f;
         }
     }
+
+    public record View(double centerX, double centerZ, float halfSpan) {}
 
     public record Quad(float minX, float minZ, float maxX, float maxZ) {}
 

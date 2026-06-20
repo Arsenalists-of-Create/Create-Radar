@@ -8,6 +8,7 @@ import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
+import com.happysg.radar.block.radar.behavior.SkyRadarScanningBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -77,6 +78,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
 
     private @Nullable String lastPushedTrackId = null;
+    private @Nullable Vec3 lastPushedTrackPos = null;
+    private long lastPushedTrackScanTime = Long.MIN_VALUE;
     private int lastPushedCfgHash = 0;
     private long lastPushedSafeZonesHash = 0;
 
@@ -217,11 +220,15 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         TargetingConfig cfg2 = targeting != null ? targeting : TargetingConfig.DEFAULT;
 
         String newId = selected == null ? null : selected.getId();
+        Vec3 newPos = selected == null ? null : selected.position();
+        long newScanTime = selected == null ? Long.MIN_VALUE : selected.scannedTime();
         int newCfgHash = cfgHash(cfg2);
         long newZonesHash = safeZonesHash(safeZones);
 
         boolean changed =
                 !Objects.equals(lastPushedTrackId, newId) ||
+                        !sameTrackPos(lastPushedTrackPos, newPos) ||
+                        lastPushedTrackScanTime != newScanTime ||
                         lastPushedCfgHash != newCfgHash ||
                         lastPushedSafeZonesHash != newZonesHash;
 
@@ -229,6 +236,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
         if (changed) {
             lastPushedTrackId = newId;
+            lastPushedTrackPos = newPos;
+            lastPushedTrackScanTime = newScanTime;
             lastPushedCfgHash = newCfgHash;
             lastPushedSafeZonesHash = newZonesHash;
             pushToEndpoints(selected);
@@ -291,8 +300,24 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
         activeTrackCache = track;
         pushToEndpoints(track);
+        markPushedTrack(track);
 
         data.setDirty();
+    }
+
+    private void markPushedTrack(@Nullable RadarTrack track) {
+        TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
+        lastPushedTrackId = track == null ? null : track.getId();
+        lastPushedTrackPos = track == null ? null : track.position();
+        lastPushedTrackScanTime = track == null ? Long.MIN_VALUE : track.scannedTime();
+        lastPushedCfgHash = cfgHash(cfg);
+        lastPushedSafeZonesHash = safeZonesHash(safeZones);
+    }
+
+    private static boolean sameTrackPos(@Nullable Vec3 a, @Nullable Vec3 b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return a.distanceToSqr(b) <= 1.0e-8;
     }
 
     private double distSqFromFilterer(Vec3 pos) {
@@ -678,9 +703,15 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             if (!(be instanceof SmartBlockEntity sbe)) continue;
 
             RadarScanningBlockBehavior scan = BlockEntityBehaviour.get(sbe, RadarScanningBlockBehavior.TYPE);
-            if (scan == null) continue;
+            if (scan != null) {
+                scan.applyDetectionConfig(detection);
+                continue;
+            }
 
-            scan.applyDetectionConfig(detection);
+            SkyRadarScanningBehavior skyScan = BlockEntityBehaviour.get(sbe, SkyRadarScanningBehavior.TYPE);
+            if (skyScan != null) {
+                skyScan.applyDetectionConfig(detection);
+            }
         }
     }
 

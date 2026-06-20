@@ -7,6 +7,7 @@ public class ModPartials {
 
     public static final PartialModel RADAR_GLOW      = block("data_link/glow");
     public static final PartialModel RADAR_LINK_TUBE = block("data_link/tube");
+    public static final PartialModel ROTATING_MOUNT  = block("rotating_mount");
 
     private static PartialModel block(String path) {
         return PartialModel.of(CreateRadar.asResource("block/" + path));

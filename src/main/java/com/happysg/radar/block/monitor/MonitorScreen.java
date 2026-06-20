@@ -29,6 +29,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.Collection;
 import java.util.UUID;
+import org.lwjgl.glfw.GLFW;
 
 /**
  * A UI screen version of the MonitorRenderer. Draws the radar in 2D and lets the player hover/click tracks.
@@ -42,6 +43,9 @@ public class MonitorScreen extends Screen {
     private static final String OFFLINE_KEY = MONITOR_I18N_PREFIX + "offline";
     private static final String CLICK_HINT_KEY = MONITOR_I18N_PREFIX + "click_hint";
     private static final String TITLE_KEY = MONITOR_I18N_PREFIX + "title";
+    private static final String PRESET_SAVED_KEY = MONITOR_I18N_PREFIX + "preset_saved";
+    private static final String PRESET_LOADED_KEY = MONITOR_I18N_PREFIX + "preset_loaded";
+    private static final String PRESET_EMPTY_KEY = MONITOR_I18N_PREFIX + "preset_empty";
 
     private static final float ALPHA_BACKGROUND = 0.6f;
     private static final float ALPHA_GRID = 0.1f;
@@ -50,6 +54,12 @@ public class MonitorScreen extends Screen {
     // i treat 512px as the "design resolution" of the monitor ui
     private static final int TARGET_UI_PX = 900;
     private static final int GRID_MARGIN_PX = 21;
+    private static final int DRAG_THRESHOLD_PX = 3;
+    private static final float ZOOM_STEP = 0.85f;
+    private static final float MIN_HALF_SPAN = 8f;
+    private static final float MAX_AUTOFIT_MULTIPLIER = 8f;
+    private static final float MIN_MAX_HALF_SPAN = 1024f;
+    private static final long PRESET_STATUS_MS = 2000L;
 
     // i store the current ui size in gui units, and a scale factor relative to the old 512 design
     private int uiSize;
@@ -61,6 +71,16 @@ public class MonitorScreen extends Screen {
     private int top;
 
     private String hoveredId;
+    private MonitorProjection.View manualView;
+    private boolean loadedManualView;
+    private boolean pendingMonitorClick;
+    private boolean draggingMonitor;
+    private boolean dragStartedOnTrack;
+    private boolean dragViewDirty;
+    private double pressMouseX;
+    private double pressMouseY;
+    private Component presetStatus;
+    private long presetStatusUntilMs;
 
     public MonitorScreen(BlockPos controllerPos) {
         super(Component.translatable(TITLE_KEY));
@@ -130,23 +150,37 @@ public class MonitorScreen extends Screen {
             return;
         }
 
-        MonitorProjection projection = MonitorProjection.create(monitor);
+        MonitorProjection projection = currentProjection(monitor);
         updateHoverFromMouse(monitor, projection, mouseX, mouseY);
 
-        renderGrid(gg, projection);
-        for (MonitorBlockEntity.RadarDisplayInfo radarInfo : monitor.getRunningRadarInfos()) {
-            MonitorProjection.DisplayPoint radarCenter = projection.project(radarInfo.center());
-            float scale = projection.displayScale(radarInfo.range());
-            renderBG(gg, MonitorSprite.RADAR_BG_FILLER, ALPHA_BACKGROUND, radarCenter, scale);
-            renderBG(gg, MonitorSprite.RADAR_BG_CIRCLE, ALPHA_BACKGROUND, radarCenter, scale);
-            IRadar liveRadar = resolveLiveRadar(monitor, radarInfo);
-            renderSweep(gg, monitor, radarInfo, liveRadar, radarCenter, scale, partialTicks);
+        int clipMargin = Math.round(GRID_MARGIN_PX * uiScale);
+        gg.enableScissor(left + clipMargin, top + clipMargin, left + uiSize - clipMargin, top + uiSize - clipMargin);
+        try {
+            renderGrid(gg, projection);
+            for (MonitorBlockEntity.RadarDisplayInfo radarInfo : monitor.getRunningRadarInfos()) {
+                MonitorProjection.DisplayPoint radarCenter = projection.project(radarInfo.center());
+                float scale = projection.displayScale(radarInfo.range());
+                renderBG(gg, MonitorSprite.RADAR_BG_FILLER, ALPHA_BACKGROUND, radarCenter, scale);
+                renderBG(gg, MonitorSprite.RADAR_BG_CIRCLE, ALPHA_BACKGROUND, radarCenter, scale);
+                IRadar liveRadar = resolveLiveRadar(monitor, radarInfo);
+                renderSweep(gg, monitor, radarInfo, liveRadar, radarCenter, scale, partialTicks);
+            }
+            renderTracks(gg, monitor, projection);
+        } finally {
+            gg.disableScissor();
         }
-        renderTracks(gg, monitor, projection);
 
         gg.drawCenteredString(font, Component.translatable(CLICK_HINT_KEY), width / 2, top + uiSize + 6, 0xA0A0A0);
+        renderPresetStatus(gg);
 
         super.render(gg, mouseX, mouseY, partialTicks);
+    }
+
+    private void renderPresetStatus(GuiGraphics gg) {
+        if (presetStatus == null || System.currentTimeMillis() > presetStatusUntilMs)
+            return;
+
+        gg.drawCenteredString(font, presetStatus, width / 2, top + uiSize + 18, 0xD0D0D0);
     }
 
     private void drawPanelBackground(GuiGraphics gg) {
@@ -167,14 +201,13 @@ public class MonitorScreen extends Screen {
     }
 
     private void renderGrid(GuiGraphics gg, MonitorProjection projection) {
-        float range = projection.halfSpan();
+        MonitorProjection.View view = projection.view();
+        float range = projection.halfSpan() / MonitorProjection.FIT_SCALE;
 
         float cellWorld = 50f;
-        int halfCells = Mth.floor(range / cellWorld);
-        halfCells = Mth.clamp(halfCells, 2, 24);
-
-        int totalCells = halfCells * 2;
-
+        while ((range * 2f) / cellWorld > 48f) {
+            cellWorld *= 2f;
+        }
         int margin = Math.round(GRID_MARGIN_PX * uiScale);
 
         int gridLeft = left + margin;
@@ -182,27 +215,38 @@ public class MonitorScreen extends Screen {
         int gridRight = left + uiSize - margin;
         int gridBottom = top + uiSize - margin;
 
-        int gridSizePx = gridRight - gridLeft;
-        float spacing = gridSizePx / (float) totalCells;
-
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
         int a = (int) (ALPHA_GRID * 255f) & 0xFF;
         int argb = (a << 24) | (color.getRGB() & 0xFFFFFF);
 
-        for (int i = 0; i <= totalCells; i++) {
-            int x = gridLeft + Math.round(i * spacing);
-            gg.fill(x, gridTop, x + 1, gridBottom, argb);
-        }
-        for (int i = 0; i <= totalCells; i++) {
-            int y = gridTop + Math.round(i * spacing);
-            gg.fill(gridLeft, y, gridRight, y + 1, argb);
-        }
+        double minX = Math.floor((view.centerX() - range) / cellWorld) * cellWorld;
+        double maxX = Math.ceil((view.centerX() + range) / cellWorld) * cellWorld;
+        double minZ = Math.floor((view.centerZ() - range) / cellWorld) * cellWorld;
+        double maxZ = Math.ceil((view.centerZ() + range) / cellWorld) * cellWorld;
+        MonitorProjection.DisplayPoint xAxisProbe = projection.projectFramePosition(view.centerX() + cellWorld, view.centerZ());
+        boolean frameXMapsToScreenX = Math.abs(xAxisProbe.xOffset()) >= Math.abs(xAxisProbe.zOffset());
 
-        int cx = gridLeft + gridSizePx / 2;
-        int cy = gridTop + gridSizePx / 2;
+        for (double x = minX; x <= maxX; x += cellWorld) {
+            MonitorProjection.DisplayPoint point = projection.projectFramePosition(x, view.centerZ());
+            drawProjectedGridLine(gg, point, frameXMapsToScreenX, gridLeft, gridTop, gridRight, gridBottom, argb);
+        }
+        for (double z = minZ; z <= maxZ; z += cellWorld) {
+            MonitorProjection.DisplayPoint point = projection.projectFramePosition(view.centerX(), z);
+            drawProjectedGridLine(gg, point, !frameXMapsToScreenX, gridLeft, gridTop, gridRight, gridBottom, argb);
+        }
+    }
 
-        gg.fill(cx, gridTop, cx + 1, gridBottom, (a << 24) | (color.getRGB() & 0xFFFFFF));
-        gg.fill(gridLeft, cy, gridRight, cy + 1, (a << 24) | (color.getRGB() & 0xFFFFFF));
+    private void drawProjectedGridLine(GuiGraphics gg, MonitorProjection.DisplayPoint point, boolean vertical,
+                                       int gridLeft, int gridTop, int gridRight, int gridBottom, int argb) {
+        if (vertical) {
+            int x = left + Math.round((0.5f + point.xOffset()) * uiSize);
+            if (x >= gridLeft && x <= gridRight)
+                gg.fill(x, gridTop, x + 1, gridBottom, argb);
+        } else {
+            int y = top + Math.round((0.5f + point.zOffset()) * uiSize);
+            if (y >= gridTop && y <= gridBottom)
+                gg.fill(gridLeft, y, gridRight, y + 1, argb);
+        }
     }
 
     private void renderBG(GuiGraphics gg, MonitorSprite sprite, float alpha, MonitorProjection.DisplayPoint center, float scale) {
@@ -218,6 +262,53 @@ public class MonitorScreen extends Screen {
         gg.blit(sprite.getTexture(), sx, sy, 0, 0, drawSize, drawSize, drawSize, drawSize);
         gg.setColor(1f, 1f, 1f, 1f);
         RenderSystem.disableBlend();
+    }
+
+    private MonitorProjection currentProjection(MonitorBlockEntity monitor) {
+        ensureManualViewLoaded();
+        return MonitorProjection.create(monitor, manualView);
+    }
+
+    private void ensureManualViewLoaded() {
+        if (loadedManualView)
+            return;
+
+        manualView = MonitorViewStore.get(Minecraft.getInstance(), controllerPos).orElse(null);
+        loadedManualView = true;
+    }
+
+    private void setManualView(MonitorProjection.View view, boolean saveNow) {
+        manualView = view;
+        loadedManualView = true;
+        if (saveNow) {
+            MonitorViewStore.set(Minecraft.getInstance(), controllerPos, view);
+            dragViewDirty = false;
+        } else {
+            dragViewDirty = true;
+        }
+    }
+
+    public void resetMonitorViewToAutofit() {
+        manualView = null;
+        loadedManualView = true;
+        dragViewDirty = false;
+        MonitorViewStore.clear(Minecraft.getInstance(), controllerPos);
+    }
+
+    public void centerOnMonitorAtDefaultZoom() {
+        MonitorBlockEntity monitor = getController();
+        if (monitor == null)
+            return;
+
+        MonitorProjection autofitProjection = MonitorProjection.create(monitor);
+        Vec3 monitorCenter = Vec3.atCenterOf(monitor.getBlockPos());
+        setManualView(autofitProjection.viewCenteredOn(monitorCenter, autofitProjection.halfSpan()), true);
+    }
+
+    private float clampHalfSpan(MonitorBlockEntity monitor, float halfSpan) {
+        float autofitHalfSpan = MonitorProjection.create(monitor).halfSpan();
+        float maxHalfSpan = Math.max(MIN_MAX_HALF_SPAN, autofitHalfSpan * MAX_AUTOFIT_MULTIPLIER);
+        return Mth.clamp(halfSpan, MIN_HALF_SPAN, maxHalfSpan);
     }
 
     private Vec3 rotateAroundYDeg(Vec3 v, float deg) {
@@ -318,6 +409,9 @@ public class MonitorScreen extends Screen {
         float angle = liveRadar != null ? liveRadar.getGlobalAngle() : info.globalAngle();
         if (liveRadar instanceof RadarBearingBlockEntity bearing) {
             angle += bearing.getAngularSpeed() * partialTicks;
+        } else if (liveRadar == null && info.angularSpeed() != 0f && Minecraft.getInstance().level != null) {
+            long elapsed = Minecraft.getInstance().level.getGameTime() - info.angleSnapshotTime();
+            angle += info.angularSpeed() * (elapsed + partialTicks);
         }
         return (angle + 360f) % 360f;
     }
@@ -398,6 +492,8 @@ public class MonitorScreen extends Screen {
             return;
 
         DetectionConfig filter = monitor.filter;
+        float labelZoomScale = getLabelZoomScale(monitor, projection);
+        float trackZoomScale = labelZoomScale;
 
         for (RadarTrack track : tracks) {
 
@@ -418,7 +514,7 @@ public class MonitorScreen extends Screen {
 
             Color c = filter.getColor(track);
 
-            int spriteSize = Math.max(8, Math.round(256 * uiScale));
+            int spriteSize = Math.max(8, Math.round(256 * uiScale * trackZoomScale));
             int sx = px - spriteSize / 2;
             int sy = pz - spriteSize / 2;
 
@@ -440,9 +536,18 @@ public class MonitorScreen extends Screen {
 
             String label = getLabelForTrack(track, monitor);
             if (label != null && !label.isBlank()) {
-                renderLabel(gg, label, px, pz + Math.round(8 * uiScale), alpha,RadarConfig.client().monitorTextScale.getF());
+                renderLabel(gg, label, px, pz + Math.round(8 * uiScale), alpha,
+                        RadarConfig.client().monitorTextScale.getF() * labelZoomScale);
             }
         }
+    }
+
+    private float getLabelZoomScale(MonitorBlockEntity monitor, MonitorProjection projection) {
+        float autofitHalfSpan = MonitorProjection.create(monitor).halfSpan();
+        if (autofitHalfSpan <= 0f)
+            return 1f;
+
+        return Mth.clamp(autofitHalfSpan / projection.halfSpan(), 0.35f, 4f);
     }
 
     private void renderLabel(GuiGraphics gg, String text, int x, int y, float alpha, float scale) {
@@ -508,16 +613,129 @@ public class MonitorScreen extends Screen {
         if (!isMouseOverRadar((int) mouseX, (int) mouseY))
             return super.mouseClicked(mouseX, mouseY, button);
 
+        MonitorProjection projection = currentProjection(monitor);
+        updateHoverFromMouse(monitor, projection, (int) mouseX, (int) mouseY);
+        pendingMonitorClick = true;
+        draggingMonitor = false;
+        dragViewDirty = false;
+        dragStartedOnTrack = hoveredId != null;
+        pressMouseX = mouseX;
+        pressMouseY = mouseY;
+        return true;
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (button != 0 || !pendingMonitorClick)
+            return super.mouseReleased(mouseX, mouseY, button);
+
+        MonitorBlockEntity monitor = getController();
+        pendingMonitorClick = false;
+
+        if (draggingMonitor) {
+            draggingMonitor = false;
+            if (dragViewDirty && manualView != null)
+                MonitorViewStore.set(Minecraft.getInstance(), controllerPos, manualView);
+            dragViewDirty = false;
+            return true;
+        }
+
+        if (monitor == null || !isMouseOverRadar((int) mouseX, (int) mouseY))
+            return true;
+
+        MonitorProjection projection = currentProjection(monitor);
+        updateHoverFromMouse(monitor, projection, (int) mouseX, (int) mouseY);
         if (hoveredId != null) {
             monitor.selectedEntity = hoveredId;
             MonitorSelectionPacket.send(controllerPos, hoveredId);
             return true;
-        }else{
-            monitor.selectedEntity = null;
-            monitor.activetrack = null;
-            MonitorSelectionPacket.send(controllerPos, null);
+        }
+
+        monitor.selectedEntity = null;
+        monitor.activetrack = null;
+        MonitorSelectionPacket.send(controllerPos, null);
+        return true;
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (button != 0 || !pendingMonitorClick || dragStartedOnTrack)
+            return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+
+        MonitorBlockEntity monitor = getController();
+        if (monitor == null)
+            return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+
+        double totalDx = mouseX - pressMouseX;
+        double totalDy = mouseY - pressMouseY;
+        if (!draggingMonitor && totalDx * totalDx + totalDy * totalDy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX)
+            return true;
+
+        draggingMonitor = true;
+        MonitorProjection projection = currentProjection(monitor);
+         setManualView(projection.panByDisplayDelta((float) (dragX / uiSize), (float) (dragY / uiSize)), false);
+        return true;
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        MonitorBlockEntity monitor = getController();
+        if (monitor == null || !isMouseOverRadar((int) mouseX, (int) mouseY))
+            return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+
+        MonitorProjection projection = currentProjection(monitor);
+        MonitorProjection.DisplayPoint anchor = projection.displayPointFromUi(mouseX, mouseY, left, top, uiSize);
+        float factor = (float) Math.pow(ZOOM_STEP, scrollY);
+        float halfSpan = clampHalfSpan(monitor, projection.halfSpan() * factor);
+        setManualView(projection.zoomAround(anchor, halfSpan), true);
+        return true;
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        int slot = presetSlotForKey(keyCode);
+        if (slot == 0)
+            return super.keyPressed(keyCode, scanCode, modifiers);
+
+        MonitorBlockEntity monitor = getController();
+        if (monitor == null)
+            return super.keyPressed(keyCode, scanCode, modifiers);
+
+        Minecraft mc = Minecraft.getInstance();
+        if (Screen.hasControlDown()) {
+            MonitorProjection.View view = currentProjection(monitor).view();
+            MonitorViewStore.setPreset(mc, controllerPos, slot, view);
+            showPresetStatus(Component.translatable(PRESET_SAVED_KEY, slot));
             return true;
         }
+
+        return MonitorViewStore.getPreset(mc, controllerPos, slot)
+                .map(view -> {
+                    setManualView(view, true);
+                    showPresetStatus(Component.translatable(PRESET_LOADED_KEY, slot));
+                    return true;
+                })
+                .orElseGet(() -> {
+                    showPresetStatus(Component.translatable(PRESET_EMPTY_KEY, slot));
+                    return true;
+                });
+    }
+
+    private void showPresetStatus(Component status) {
+        presetStatus = status;
+        presetStatusUntilMs = System.currentTimeMillis() + PRESET_STATUS_MS;
+    }
+
+    private int presetSlotForKey(int keyCode) {
+        if (keyCode >= GLFW.GLFW_KEY_1 && keyCode <= GLFW.GLFW_KEY_9)
+            return keyCode - GLFW.GLFW_KEY_1 + 1;
+        if (keyCode == GLFW.GLFW_KEY_0)
+            return 10;
+        if (keyCode >= GLFW.GLFW_KEY_KP_1 && keyCode <= GLFW.GLFW_KEY_KP_9)
+            return keyCode - GLFW.GLFW_KEY_KP_1 + 1;
+        if (keyCode == GLFW.GLFW_KEY_KP_0)
+            return 10;
+        return 0;
     }
 
     private boolean isMouseOverRadar(int mx, int my) {
