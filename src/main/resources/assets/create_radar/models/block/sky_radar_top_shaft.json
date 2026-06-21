@@ -1,0 +1,23 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "particle": "create_radar:block/axis",
+    "0": "create_radar:block/axis",
+    "1": "create_radar:block/axis_top"
+  },
+  "elements": [
+    {
+      "name": "Long axis",
+      "from": [6, -4, 6],
+      "to": [10, 20, 10],
+      "faces": {
+        "north": {"uv": [6, 0, 10, 16], "texture": "#0"},
+        "east": {"uv": [6, 0, 10, 16], "texture": "#0"},
+        "south": {"uv": [6, 0, 10, 16], "texture": "#0"},
+        "west": {"uv": [6, 0, 10, 16], "texture": "#0"},
+        "up": {"uv": [6, 6, 10, 10], "texture": "#1"},
+        "down": {"uv": [6, 6, 10, 10], "texture": "#1"}
+      }
+    }
+  ]
+}

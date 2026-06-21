@@ -249,10 +249,12 @@ public class ModBlocks {
             .initialProperties(SharedProperties::softMetal)
             .properties(p -> p.noOcclusion())
             .properties(p -> p.strength(0.8f))
-            .blockstate((c, p) -> p.simpleBlock(c.getEntry(), AssetLookup.partialBaseModel(c, p)))
+            .blockstate((c, p) -> p.simpleBlock(c.getEntry(),
+                    p.models().getExistingFile(CreateRadar.asResource("block/sky_radar_mount"))))
             .transform(axeOrPickaxe())
             .item()
-                    .model(AssetLookup.customBlockItemModel("_", "item"))
+                    .model((c, p) -> p.withExistingParent(c.getName(),
+                            CreateRadar.asResource("block/sky_radar_mount_item")))
             .build()
             .register();
 

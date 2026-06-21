@@ -5,6 +5,7 @@ import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -160,9 +161,10 @@ public class MonitorScreen extends Screen {
             for (MonitorBlockEntity.RadarDisplayInfo radarInfo : monitor.getRunningRadarInfos()) {
                 MonitorProjection.DisplayPoint radarCenter = projection.project(radarInfo.center());
                 float scale = projection.displayScale(radarInfo.range());
-                renderBG(gg, MonitorSprite.RADAR_BG_FILLER, ALPHA_BACKGROUND, radarCenter, scale);
+                //renderBG(gg, MonitorSprite.RADAR_BG_FILLER, ALPHA_BACKGROUND, radarCenter, scale);
                 renderBG(gg, MonitorSprite.RADAR_BG_CIRCLE, ALPHA_BACKGROUND, radarCenter, scale);
                 IRadar liveRadar = resolveLiveRadar(monitor, radarInfo);
+                renderOwnedLockLine(gg, monitor, projection, radarInfo);
                 renderSweep(gg, monitor, radarInfo, liveRadar, radarCenter, scale, partialTicks);
             }
             renderTracks(gg, monitor, projection);
@@ -324,6 +326,10 @@ public class MonitorScreen extends Screen {
 
     private void renderSweep(GuiGraphics gg, MonitorBlockEntity monitor, MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar,
                              MonitorProjection.DisplayPoint center, float scale, float partialTicks) {
+        if (isOwnedSkyLock(radar, liveRadar)) {
+            return;
+        }
+
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
         float a = getRenderGlobalAngle(radar, liveRadar, partialTicks);
         Direction monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
@@ -334,8 +340,9 @@ public class MonitorScreen extends Screen {
         String radarType = liveRadar != null ? liveRadar.getRadarType() : radar.type();
         boolean renderRelative = liveRadar != null ? liveRadar.renderRelativeToMonitor() : radar.renderRelativeToMonitor();
         Direction liveDirection = liveRadar != null ? liveRadar.getradarDirection() : radar.direction();
+        boolean spinningLike = radarType.equals("spinning") || radarType.equals("sky");
 
-        if (monitor.getController().getShip() == null && radarType.equals("spinning")) {
+        if (monitor.getController().getShip() == null && spinningLike) {
             monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
             radarFacing = Direction.NORTH;
             if (radarFacing == null) return;
@@ -348,7 +355,7 @@ public class MonitorScreen extends Screen {
                 default -> screenAngle = 30;
             }
 
-        } else if (monitor.getController().getShip() != null && radarType.equals("spinning")) { // spinning radar on a ship
+        } else if (monitor.getController().getShip() != null && spinningLike) { // spinning radar on a ship
             // Calculate the current angle
             monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
             Vec3 facingVec = new Vec3(monitorFacing.getStepX(), monitorFacing.getStepY(), monitorFacing.getStepZ());
@@ -363,13 +370,13 @@ public class MonitorScreen extends Screen {
             screenAngle = (screenAngle + 360 + 180) % 360;
         }
 
-        if (renderRelative && monitor.getController().getShip() != null && !radarType.equals("spinning")) {  // plane radar on a ship
+        if (renderRelative && monitor.getController().getShip() != null && !spinningLike) {  // plane radar on a ship
             monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
             screenAngle = alignGlobalAngleToMonitor(monitorFacing, a);
         }
 
         if (renderRelative && monitor.getController().getShip() != null
-                && radarType.equals("spinning")) {
+                && spinningLike) {
             float shipYawDeg = (float) Math.toDegrees(getShipYawRad(monitor.getController().getShip()));
             screenAngle += -(shipYawDeg + 180f);
         }
@@ -397,6 +404,45 @@ public class MonitorScreen extends Screen {
         RenderSystem.disableBlend();
     }
 
+    private boolean isOwnedSkyLock(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar) {
+        String radarType = liveRadar != null ? liveRadar.getRadarType() : radar.type();
+        return "sky".equals(radarType) && radar.ownedLockedTargetPos() != null;
+    }
+
+    private void renderOwnedLockLine(GuiGraphics gg, MonitorBlockEntity monitor, MonitorProjection projection,
+                                     MonitorBlockEntity.RadarDisplayInfo radar) {
+        if (!"sky".equals(radar.type()) || radar.ownedLockedTargetPos() == null) {
+            return;
+        }
+
+        MonitorProjection.DisplayPoint start = projection.project(radar.center());
+        MonitorProjection.DisplayPoint end = projection.project(radar.ownedLockedTargetPos());
+        int x1 = left + Math.round((0.5f + start.xOffset()) * uiSize);
+        int y1 = top + Math.round((0.5f + start.zOffset()) * uiSize);
+        int x2 = left + Math.round((0.5f + end.xOffset()) * uiSize);
+        int y2 = top + Math.round((0.5f + end.zOffset()) * uiSize);
+        float dx = x2 - x1;
+        float dy = y2 - y1;
+        float length = Mth.sqrt(dx * dx + dy * dy);
+        if (length <= 1.0f) {
+            return;
+        }
+
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
+        int alpha = 0xD0;
+        int argb = (alpha << 24) | (color.getRGB() & 0xFFFFFF);
+        float zoomScale = getLabelZoomScale(monitor, projection);
+        int thickness = Math.max(2, Math.round(1 * uiScale * zoomScale));
+
+        RenderSystem.enableBlend();
+        gg.pose().pushPose();
+        gg.pose().translate(x1, y1, 0);
+        gg.pose().mulPose(Axis.ZP.rotationDegrees((float) Math.toDegrees(Math.atan2(dy, dx))));
+        gg.fill(0, -thickness / 2, Math.round(length), Math.max(1, thickness / 2 + 1), argb);
+        gg.pose().popPose();
+        RenderSystem.disableBlend();
+    }
+
     private IRadar resolveLiveRadar(MonitorBlockEntity monitor, MonitorBlockEntity.RadarDisplayInfo info) {
         if (monitor.getLevel() == null) return null;
         if (monitor.getLevel().getBlockEntity(info.pos()) instanceof IRadar radar) {
@@ -409,6 +455,8 @@ public class MonitorScreen extends Screen {
         float angle = liveRadar != null ? liveRadar.getGlobalAngle() : info.globalAngle();
         if (liveRadar instanceof RadarBearingBlockEntity bearing) {
             angle += bearing.getAngularSpeed() * partialTicks;
+        } else if (liveRadar instanceof SkyRadarBlockEntity skyRadar) {
+            angle += skyRadar.getEffectiveAngularSpeed() * partialTicks;
         } else if (liveRadar == null && info.angularSpeed() != 0f && Minecraft.getInstance().level != null) {
             long elapsed = Minecraft.getInstance().level.getGameTime() - info.angleSnapshotTime();
             angle += info.angularSpeed() * (elapsed + partialTicks);

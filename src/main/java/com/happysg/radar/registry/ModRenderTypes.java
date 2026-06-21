@@ -40,6 +40,18 @@ public class ModRenderTypes extends RenderType {
         return create("polygon_offset", DefaultVertexFormat.NEW_ENTITY, VertexFormat.Mode.QUADS, 256, true, true, state);
     });
 
+    private static final RenderType SOLID_POLYGON_OFFSET = createSolidPolygonOffset();
+
+    private static RenderType createSolidPolygonOffset() {
+        CompositeState state = CompositeState.builder()
+                .setShaderState(POSITION_COLOR_SHADER)
+                .setTransparencyState(TRANSLUCENT_TRANSPARENCY)
+                .setLayeringState(POLYGON_OFFSET_LAYERING)
+                .setCullState(NO_CULL)
+                .createCompositeState(false);
+        return create("solid_polygon_offset", DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.QUADS, 256, false, true, state);
+    }
+
     /**
      * Returns a RenderType with polygon offset applied to the specified texture.
      * Used by Monitor to render texture on screen.
@@ -49,5 +61,9 @@ public class ModRenderTypes extends RenderType {
      */
     public static RenderType polygonOffset(ResourceLocation texture) {
         return POLYGON_OFFSET.apply(texture, true);
+    }
+
+    public static RenderType solidPolygonOffset() {
+        return SOLID_POLYGON_OFFSET;
     }
 }

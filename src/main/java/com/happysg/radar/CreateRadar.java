@@ -63,6 +63,7 @@ public class CreateRadar {
 
         ModItems.register();
         ModBlocks.register();
+        ModEntityTypes.register();
         ModBlockEntityTypes.register();
         ModCreativeTabs.register(modEventBus);
         ModLang.register();

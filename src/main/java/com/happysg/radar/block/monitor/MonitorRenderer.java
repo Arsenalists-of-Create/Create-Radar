@@ -4,6 +4,7 @@ import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
@@ -45,6 +46,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     // Constants for rendering depths to prevent Z-fighting
     private static final float DEPTH_BACKGROUND = 0.94f;
     private static final float DEPTH_GRID = 0.945f;
+    private static final float DEPTH_LOCK_LINE = 0.946f;
     private static final float DEPTH_SWEEP = 0.947f;
     private static final float DEPTH_TRACK_BASE = 0.95f;
     private static final float DEPTH_TRACK_INCREMENT = 0.0001f;
@@ -112,9 +114,10 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         for (MonitorBlockEntity.RadarDisplayInfo radarInfo : blockEntity.getRunningRadarInfos()) {
             MonitorProjection.DisplayPoint radarCenter = projection.project(radarInfo.center());
             float scale = projection.displayScale(radarInfo.range());
-            renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_FILLER, radarCenter, scale);
+           // renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_FILLER, radarCenter, scale);
             renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_CIRCLE, radarCenter, scale);
             IRadar liveRadar = resolveLiveRadar(blockEntity, radarInfo);
+            renderOwnedLockLine(radarInfo, blockEntity, projection, ms, bufferSource);
             renderSweep(radarInfo, liveRadar, blockEntity, ms, bufferSource, radarCenter, scale, partialTicks);
         }
 
@@ -388,6 +391,10 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         return bufferSource.getBuffer(ModRenderTypes.polygonOffset(sprite.getTexture()));
     }
 
+    private VertexConsumer getSolidBuffer(MultiBufferSource bufferSource) {
+        return bufferSource.getBuffer(ModRenderTypes.solidPolygonOffset());
+    }
+
     /**
      * Renders vertices for a quad with the given parameters
      */
@@ -411,6 +418,32 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         addVertex(buffer, m, xmax, depth, zmin, r, g, b, alpha, u1, v1);
         addVertex(buffer, m, xmax, depth, zmax, r, g, b, alpha, u2, v2);
         addVertex(buffer, m, xmin, depth, zmax, r, g, b, alpha, u3, v3);
+    }
+
+    private void renderVertices(VertexConsumer buffer, Matrix4f m, Matrix3f n,
+                                Color color, float alpha, float depth,
+                                float x0, float z0, float x1, float z1, float x2, float z2, float x3, float z3) {
+        float r = color.getRedAsFloat();
+        float g = color.getGreenAsFloat();
+        float b = color.getBlueAsFloat();
+
+        addVertex(buffer, m, x0, depth, z0, r, g, b, alpha, 0, 0);
+        addVertex(buffer, m, x1, depth, z1, r, g, b, alpha, 1, 0);
+        addVertex(buffer, m, x2, depth, z2, r, g, b, alpha, 1, 1);
+        addVertex(buffer, m, x3, depth, z3, r, g, b, alpha, 0, 1);
+    }
+
+    private void renderSolidVertices(VertexConsumer buffer, Matrix4f m,
+                                     Color color, float alpha, float depth,
+                                     float x0, float z0, float x1, float z1, float x2, float z2, float x3, float z3) {
+        float r = color.getRedAsFloat();
+        float g = color.getGreenAsFloat();
+        float b = color.getBlueAsFloat();
+
+        buffer.addVertex(m, x0, depth, z0).setColor(r, g, b, alpha);
+        buffer.addVertex(m, x1, depth, z1).setColor(r, g, b, alpha);
+        buffer.addVertex(m, x2, depth, z2).setColor(r, g, b, alpha);
+        buffer.addVertex(m, x3, depth, z3).setColor(r, g, b, alpha);
     }
 
     private void addVertex(VertexConsumer buffer, Matrix4f matrix,
@@ -449,6 +482,8 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
                             MultiBufferSource bufferSource, MonitorProjection.DisplayPoint center, float scale, float partialTicks) {
         if (!radar.running())
             return;
+        if (isOwnedSkyLock(radar, liveRadar))
+            return;
 
         VertexConsumer buffer = bufferSource.getBuffer(ModRenderTypes.polygonOffset(MonitorSprite.RADAR_SWEEP.getTexture()));
         Matrix4f m = ms.last().pose();
@@ -460,8 +495,9 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         boolean renderRelative = liveRadar != null ? liveRadar.renderRelativeToMonitor() : radar.renderRelativeToMonitor();
         Direction liveDirection = liveRadar != null ? liveRadar.getradarDirection() : radar.direction();
         float globalAngle = getRenderGlobalAngle(radar, liveRadar, partialTicks);
+        boolean spinningLike = radarType.equals("spinning") || radarType.equals("sky");
 
-        if (controller.getShip() != null && radarType.equals("spinning")) { // spinning radar on a ship
+        if (controller.getShip() != null && spinningLike) { // spinning radar on a ship
             // Calculate the current angle
             Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
             Vec3 facingVec = new Vec3(monitorFacing.getStepX(), monitorFacing.getStepY(), monitorFacing.getStepZ());
@@ -476,7 +512,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             monitorAngle = (monitorAngle + 360 + 180) % 360;
         }
         float currentAngle;
-        if(renderRelative && controller.getShip() != null && !radarType.equals("spinning")){  // plane radar on a ship
+        if(renderRelative && controller.getShip() != null && !spinningLike){  // plane radar on a ship
             Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
             currentAngle = alignGlobalAngleToMonitor(monitorFacing, globalAngle);
 
@@ -547,6 +583,8 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         float angle = liveRadar != null ? liveRadar.getGlobalAngle() : info.globalAngle();
         if (liveRadar instanceof RadarBearingBlockEntity bearing) {
             angle += bearing.getAngularSpeed() * partialTicks;
+        } else if (liveRadar instanceof SkyRadarBlockEntity skyRadar) {
+            angle += skyRadar.getEffectiveAngularSpeed() * partialTicks;
         } else if (liveRadar == null && info.angularSpeed() != 0f && Minecraft.getInstance().level != null) {
             long elapsed = Minecraft.getInstance().level.getGameTime() - info.angleSnapshotTime();
             angle += info.angularSpeed() * (elapsed + partialTicks);
@@ -564,6 +602,44 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             default -> globalAngle;
         };
     }
+
+    private boolean isOwnedSkyLock(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar) {
+        String radarType = liveRadar != null ? liveRadar.getRadarType() : radar.type();
+        return "sky".equals(radarType) && radar.ownedLockedTargetPos() != null;
+    }
+
+    private void renderOwnedLockLine(MonitorBlockEntity.RadarDisplayInfo radar, MonitorBlockEntity monitor,
+                                     MonitorProjection projection, PoseStack ms, MultiBufferSource bufferSource) {
+        if (!"sky".equals(radar.type()) || radar.ownedLockedTargetPos() == null) {
+            return;
+        }
+
+        MonitorProjection.DisplayPoint start = projection.project(radar.center());
+        MonitorProjection.DisplayPoint end = projection.project(radar.ownedLockedTargetPos());
+        int size = monitor.getSize();
+        float x1 = 1f - size / 2f + start.xOffset() * size;
+        float z1 = 1f - size / 2f + start.zOffset() * size;
+        float x2 = 1f - size / 2f + end.xOffset() * size;
+        float z2 = 1f - size / 2f + end.zOffset() * size;
+        float dx = x2 - x1;
+        float dz = z2 - z1;
+        float length = Mth.sqrt(dx * dx + dz * dz);
+        if (length <= 0.001f) {
+            return;
+        }
+
+        float halfWidth = Math.max(0.015f, size * 0.01f);
+        float nx = -dz / length * halfWidth;
+        float nz = dx / length * halfWidth;
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
+        Matrix4f m = ms.last().pose();
+        renderSolidVertices(getSolidBuffer(bufferSource), m, color, 0.9f, DEPTH_LOCK_LINE,
+                x1 + nx, z1 + nz,
+                x2 + nx, z2 + nz,
+                x2 - nx, z2 - nz,
+                x1 - nx, z1 - nz);
+    }
+
     private void addSweepVertex(VertexConsumer buffer, Matrix4f matrix,
                                 float x, float y, float z,
                                 float r, float g, float b, float alpha,

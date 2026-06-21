@@ -29,9 +29,10 @@ public class RadarServerConfig extends ConfigBase {
 
     public final ConfigGroup skyRadarStats = group(4,"skyRadarStats", "Configs for sky radar");
     public final ConfigInt maxSkyRadarRange = i(4096, 1, "maxSkyRadarRange", "Maximum horizontal range of a sky radar in blocks");
-    //public final ConfigInt skyRadarYScanRange = i(20, 1, "skyRadarYScanRange", "Reserved vertical scan range setting for sky radars");
-    public final ConfigInt skyRadarBaseRange = i(0, 1, "skyRadarBaseRange", "Base horizontal range of a sky radar in blocks");
+    //public final ConfigInt skyRadarBaseRange = i(0, 1, "skyRadarBaseRange", "Base horizontal range of a sky radar in blocks");
     public final ConfigInt skyRadarFOV = i(90, 1, 360, "skyRadarFOV", "Field of view of a sky radar in degrees");
+    public final ConfigInt skyRadarMinY = i(85,-64,256, "skyRadarMinY", "The minimum Y level for a sky radar to function");
+    public final ConfigInt skyRadarDishRangeIncrease = i(64,1,"skyRadarDishRangeIncrease", "Range increase per dish block in blocks for the sky radar");
 
 
     public final ConfigGroup guidedFuzeConfig = group(3, "guidedFuzeConfig", "Configs for the guided fuze");

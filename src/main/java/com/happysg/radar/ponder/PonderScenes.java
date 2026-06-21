@@ -1,17 +1,23 @@
 package com.happysg.radar.ponder;
 
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
+import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlocks;
 
 import net.createmod.ponder.api.PonderPalette;
-import net.createmod.ponder.api.element.ElementLink;
-import net.createmod.ponder.api.element.WorldSectionElement;
+import net.createmod.ponder.api.element.*;
 import net.createmod.ponder.api.scene.SceneBuilder;
 import net.createmod.ponder.api.scene.SceneBuildingUtil;
 import net.createmod.ponder.api.scene.Selection;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.animal.Parrot;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.NotNull;
+import org.valkyrienskies.core.impl.shadow.Bl;
 
 public class PonderScenes {
     public static void radarContraption(SceneBuilder scene, SceneBuildingUtil util) {
@@ -171,7 +177,111 @@ public class PonderScenes {
 
 
     }
-    public static void weaponSimpleWeaponSetup(SceneBuilder scene, SceneBuildingUtil util){
+
+    public static void skyRadarSetup(SceneBuilder scene, SceneBuildingUtil util) {
+        scene.rotateCameraY(180);
+        scene.title("sky_radar_ponder", "Using the sky radar");
+        scene.configureBasePlate(0, 0, 15);
+        
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(20);
+        scene.world().showSection(util.select().layer(1), Direction.DOWN);
+
+        BlockPos radarPos = new BlockPos(10, 2, 2);
+        Selection skyRadar = util.select().fromTo(radarPos, radarPos.above());
+        scene.world().showSection(skyRadar, Direction.DOWN);
+        scene.idle(10);
+        scene.overlay().showText(60)
+                .text("The Sky Radar Mount is an alternative, high power variant of the Radar Bearing")
+                .pointAt(radarPos.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(70);
+        Selection radar = util.select().fromTo(8, 4, 2, 12, 10, 2);
+        ElementLink<WorldSectionElement> radarElement = scene.world()
+                .showIndependentSectionImmediately(radar);
+
+
+        scene.idle(20);
+        scene.overlay().showText(60)
+                .text("The Radar Contraption is the same between both radar types")
+                .pointAt(radar.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(40);
+        scene.world().configureCenterOfRotation(
+                radarElement,
+                util.vector().centerOf(util.grid().at(10, 2, 2))
+        );
+        scene.world().modifyBlockEntity(
+                radarPos,
+                SkyRadarBlockEntity.class,
+                SkyRadarBlockEntity::beginPonderVisual
+        );
+
+        for (int i = 0; i < 4; i++) {
+            scene.world().modifyBlockEntity(
+                    radarPos,
+                    SkyRadarBlockEntity.class,
+                    be -> be.animatePonderYaw(90.0f, 20)
+            );
+
+            scene.world().rotateSection(radarElement, 0, 90, 0, 20);
+
+            scene.idle(20);
+        }
+        scene.idle(20);
+        Selection datalink = util.select().position(10,2,3);
+        BlockPos network = new BlockPos(12,1,4);
+        scene.overlay().showText(60)
+                .text("And is linked to the Radar Network in the same way as well")
+                .pointAt(datalink.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(40);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, network, new AABB(new BlockPos(12,1,4)), 60);
+        scene.idle(10);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, datalink, new AABB(new BlockPos(10,2,3)).contract(0,0 , 0.5f), 50);
+        scene.world().showSection(datalink, Direction.NORTH);
+
+        scene.idle(60);
+        scene.overlay().showText(60)
+                .text("The Sky Radar must be above a specific altitude to function properly. By default, this value is y = 96")
+                .pointAt(datalink.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(70);
+        scene.special().createBirb(new Vec3(5,1,5), ParrotPose.DancePose::new);
+        scene.overlay().showText(60)
+                .text("Unlike the normal radar, The sky radar can not detect targets below its horizon")
+                .pointAt(new Vec3(5,1,5))
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(70);
+        ElementLink<EntityElement> targetMob = scene.world().createEntity(level -> {
+            Parrot parrrot = new Parrot(EntityType.PARROT, level);
+
+            parrrot.setPos(1,5,5);
+            parrrot.setYRot(180.0f);
+            parrrot.setYHeadRot(180.0f);
+
+            parrrot.setNoAi(true);          // It stays where you place it
+            parrrot.setInvulnerable(true);  // Prevents accidental removal
+            return parrrot;
+        });
+        //scene.special().createBirb(new Vec3(1,4,5), ParrotPose.FlappyPose::new);
+        scene.idle(10);
+        scene.overlay().showText(60)
+                .text("However, There is no upper detection bound, meaning that it can see anything above itself that is within its range")
+                .pointAt(new Vec3(1,5,5))
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(40);
+
+
+    }
+
+    public static void weaponSimpleWeaponSetup(@NotNull SceneBuilder scene, SceneBuildingUtil util){
         scene.title("weapon_setup", "Creating A Radar Network");
         scene.configureBasePlate(0, 0, 5);
         scene.world().showSection(util.select().layer(0), Direction.DOWN);

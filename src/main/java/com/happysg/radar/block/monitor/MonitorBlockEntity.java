@@ -7,6 +7,7 @@ import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
@@ -85,7 +86,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             float angularSpeed,
             long angleSnapshotTime,
             @Nullable net.minecraft.core.Direction direction,
-            boolean renderRelativeToMonitor
+            boolean renderRelativeToMonitor,
+            @Nullable String ownedLockedTargetId,
+            @Nullable Vec3 ownedLockedTargetPos
     ) {}
 
     @Override
@@ -200,6 +203,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             previousInfos.put(info.pos(), info);
         }
 
+        OwnedLock ownedLock = findOwnedSkyLock(sl, g);
         for (NetworkData.RadarEndpoint endpoint : g.getRadarEndpoints()) {
             BlockEntity be = sl.getBlockEntity(endpoint.pos());
             if (!(be instanceof IRadar radar)) {
@@ -216,14 +220,79 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     radar.isRunning(),
                     radar.getRadarType(),
                     radar.getGlobalAngle(),
-                    radar instanceof RadarBearingBlockEntity bearing ? bearing.getAngularSpeed() : 0f,
+                    getRadarAngularSpeed(radar),
                     sl.getGameTime(),
                     radar.getradarDirection(),
-                    radar.renderRelativeToMonitor()
+                    radar.renderRelativeToMonitor(),
+                    ownedLock != null && ownedLock.radarPos().equals(endpoint.pos()) ? ownedLock.targetId() : null,
+                    ownedLock != null && ownedLock.radarPos().equals(endpoint.pos()) ? ownedLock.targetPos() : null
             ));
         }
         return List.copyOf(infos);
     }
+
+    private static float getRadarAngularSpeed(IRadar radar) {
+        if (radar instanceof RadarBearingBlockEntity bearing) {
+            return bearing.getAngularSpeed();
+        }
+        if (radar instanceof SkyRadarBlockEntity skyRadar) {
+            return skyRadar.getEffectiveAngularSpeed();
+        }
+        return 0f;
+    }
+
+    private @Nullable OwnedLock findOwnedSkyLock(ServerLevel sl, NetworkData.Group g) {
+        String selectedId = g.selectedTargetId;
+        if (selectedId == null || selectedId.isBlank()) {
+            return null;
+        }
+
+        BlockPos closestRadarPos = null;
+        RadarTrack closestTrack = null;
+        double closestDistance = Double.MAX_VALUE;
+        boolean closestIsSky = false;
+
+        for (NetworkData.RadarEndpoint endpoint : g.getRadarEndpoints()) {
+            BlockEntity be = sl.getBlockEntity(endpoint.pos());
+            if (!(be instanceof IRadar radar) || !radar.isRunning()) {
+                continue;
+            }
+
+            RadarTrack track = findTrack(radar, selectedId);
+            if (track == null || track.position() == null) {
+                continue;
+            }
+
+            Vec3 radarPos = PhysicsHandler.getWorldVec(sl, endpoint.pos());
+            double distance = radarPos.distanceToSqr(track.position());
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestRadarPos = endpoint.pos();
+                closestTrack = track;
+                closestIsSky = "sky".equals(radar.getRadarType());
+            }
+        }
+
+        if (!closestIsSky || closestRadarPos == null || closestTrack == null) {
+            return null;
+        }
+
+        return new OwnedLock(closestRadarPos, selectedId, closestTrack.position());
+    }
+
+    private static @Nullable RadarTrack findTrack(IRadar radar, String selectedId) {
+        for (RadarTrack track : radar.getTracks()) {
+            if (track == null) {
+                continue;
+            }
+            if (selectedId.equals(track.getId()) || selectedId.equals(track.id())) {
+                return track;
+            }
+        }
+        return null;
+    }
+
+    private record OwnedLock(BlockPos radarPos, String targetId, Vec3 targetPos) {}
 
     public void setSelectedTargetServer(@Nullable RadarTrack track) {
         if (level == null || level.isClientSide) {
@@ -463,9 +532,20 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (radarInfos.isEmpty()) return List.of();
         List<RadarDisplayInfo> running = new ArrayList<>();
         for (RadarDisplayInfo info : radarInfos) {
-            if (info.running()) running.add(info);
+            if (shouldDisplayRadarInfo(info)) running.add(info);
         }
         return List.copyOf(running);
+    }
+
+    private boolean shouldDisplayRadarInfo(RadarDisplayInfo info) {
+        if (info.running()) {
+            return true;
+        }
+        if (!"sky".equals(info.type())) {
+            return false;
+        }
+        IRadar radar = resolveRadar(info.pos());
+        return radar instanceof SkyRadarBlockEntity skyRadar && skyRadar.isAssembled();
     }
 
     // Basics
@@ -712,6 +792,12 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.putLong("AngleSnapshotTime", info.angleSnapshotTime());
             if (info.direction() != null) tag.putString("Direction", info.direction().getName());
             tag.putBoolean("RenderRelative", info.renderRelativeToMonitor());
+            if (info.ownedLockedTargetId() != null && info.ownedLockedTargetPos() != null) {
+                tag.putString("OwnedLockedTargetId", info.ownedLockedTargetId());
+                tag.putDouble("OwnedTargetX", info.ownedLockedTargetPos().x);
+                tag.putDouble("OwnedTargetY", info.ownedLockedTargetPos().y);
+                tag.putDouble("OwnedTargetZ", info.ownedLockedTargetPos().z);
+            }
             list.add(tag);
         }
         return list;
@@ -737,7 +823,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     tag.getFloat("AngularSpeed"),
                     tag.getLong("AngleSnapshotTime"),
                     direction,
-                    tag.getBoolean("RenderRelative")
+                    tag.getBoolean("RenderRelative"),
+                    tag.contains("OwnedLockedTargetId", Tag.TAG_STRING) ? tag.getString("OwnedLockedTargetId") : null,
+                    tag.contains("OwnedTargetX", Tag.TAG_DOUBLE)
+                            ? new Vec3(tag.getDouble("OwnedTargetX"), tag.getDouble("OwnedTargetY"), tag.getDouble("OwnedTargetZ"))
+                            : null
             ));
         }
         return List.copyOf(infos);

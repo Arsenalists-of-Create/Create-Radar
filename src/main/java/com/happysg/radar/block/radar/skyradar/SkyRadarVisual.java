@@ -29,7 +29,7 @@ public class SkyRadarVisual extends AbstractBlockEntityVisual<SkyRadarBlockEntit
                 .instancer(AllInstanceTypes.ROTATING, Models.partial(AllPartialModels.SHAFT))
                 .createInstance();
         horizontalShaft = instancerProvider()
-                .instancer(AllInstanceTypes.ROTATING, Models.partial(AllPartialModels.SHAFT))
+                .instancer(AllInstanceTypes.ROTATING, Models.partial(ModPartials.SKY_RADAR_TOP_SHAFT))
                 .createInstance();
         applyYaw(partialTick);
     }
@@ -43,15 +43,18 @@ public class SkyRadarVisual extends AbstractBlockEntityVisual<SkyRadarBlockEntit
     }
 
     private void applyYaw(float partialTick) {
-        float yaw = blockEntity.getInterpolatedYaw(partialTick);
+        boolean unlocked = blockEntity.isVisualUnlocked();
+        float yaw = unlocked ? blockEntity.getInterpolatedYaw(partialTick) : 0.0f;
+        float shaftSpeed = unlocked ? blockEntity.getSpeed() * RotatingInstance.SPEED_MULTIPLIER : 0.0f;
         mount.setIdentityTransform()
                 .translate(visualPos.getX(), visualPos.getY() + 1, visualPos.getZ())
                 .rotateYCentered((float) Math.toRadians(yaw))
                 .setChanged();
 
+        verticalShaft.rotation.identity();
         verticalShaft.rotateToFace(net.minecraft.core.Direction.Axis.Y)
                 .setRotationAxis(net.minecraft.core.Direction.Axis.Y)
-                .setRotationalSpeed(blockEntity.getSpeed() * RotatingInstance.SPEED_MULTIPLIER)
+                .setRotationalSpeed(shaftSpeed)
                 .setRotationOffset(0)
                 .setPosition(visualPos.getX(), visualPos.getY(), visualPos.getZ())
                 .setChanged();
@@ -59,9 +62,10 @@ public class SkyRadarVisual extends AbstractBlockEntityVisual<SkyRadarBlockEntit
         double yawRad = Math.toRadians(yaw);
         float axisX = (float) Math.cos(yawRad);
         float axisZ = (float) -Math.sin(yawRad);
+        horizontalShaft.rotation.identity();
         horizontalShaft.rotateTo(0, 1, 0, axisX, 0, axisZ)
                 .setRotationAxis(axisX, 0, axisZ)
-                .setRotationalSpeed(blockEntity.getSpeed() * RotatingInstance.SPEED_MULTIPLIER)
+                .setRotationalSpeed(shaftSpeed)
                 .setRotationOffset(0)
                 .setPosition(visualPos.getX(), visualPos.getY() + 2, visualPos.getZ())
                 .setChanged();

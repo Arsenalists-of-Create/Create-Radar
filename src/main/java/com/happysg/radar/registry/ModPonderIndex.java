@@ -8,6 +8,7 @@ import com.tterrag.registrate.util.entry.RegistryEntry;
 import net.createmod.ponder.api.registration.PonderPlugin;
 import net.createmod.ponder.api.registration.PonderSceneRegistrationHelper;
 import net.minecraft.resources.ResourceLocation;
+import net.neoforged.fml.common.Mod;
 
 
 public class ModPonderIndex implements PonderPlugin {
@@ -32,6 +33,12 @@ public class ModPonderIndex implements PonderPlugin {
         HELPER.addStoryBoard(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK, "weapon_setup", PonderScenes::weaponSimpleWeaponSetup, ModPonderTags.WEAPON_NETWORK);
         HELPER.addStoryBoard(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK, "weapon_setup", PonderScenes::weaponSimpleWeaponSetup, ModPonderTags.WEAPON_NETWORK);
         HELPER.addStoryBoard(ModBlocks.RADAR_LINK,"weapon_setup", PonderScenes::weaponSimpleWeaponSetup, ModPonderTags.WEAPON_NETWORK);
+
+        HELPER.forComponents(ModBlocks.SKY_RADAR)
+                .addStoryBoard("sky_radar_ponder",PonderScenes::skyRadarSetup)
+                .addStoryBoard("radar_network",PonderScenes::networkSetup,ModPonderTags.RADAR_NETWORK);
+
+
 
 //        HELPER.addStoryBoard(ModBlocks.RWR_BLOCK,"rwr_ponder",PonderScenes::controllerLinking,ModPonderTags.RADAR_COMPONENT);
 
