@@ -39,7 +39,6 @@ import java.util.Set;
 public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
 
     public static final BehaviourType<SkyRadarScanningBehavior> TYPE = new BehaviourType<>();
-    public static final double MIN_OPERATING_Y = RadarConfig.server().skyRadarMinY.get();
     private static final double SKY_SCAN_MAX_Y = 300000.0;
 
     private int trackExpiration = 100;
@@ -144,7 +143,11 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
     }
 
     private boolean isHighEnough() {
-        return scanPos.y >= MIN_OPERATING_Y;
+        return scanPos.y >= getMinimumOperatingY();
+    }
+
+    public static int getMinimumOperatingY() {
+        return RadarConfig.server().skyRadarMinY.get();
     }
 
     private void updateRadarTracks() {

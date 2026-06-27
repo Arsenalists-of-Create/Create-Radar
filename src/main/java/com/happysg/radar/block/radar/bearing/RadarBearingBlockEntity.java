@@ -89,6 +89,11 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
                 ResourceKey<Level> dim = serverLevel.dimension();
                 NetworkData data = NetworkData.get(serverLevel);
+                if (data.isEndpointLinked(dim, worldPosition)) {
+                    lastKnownPos = worldPosition;
+                    setChanged();
+                    return;
+                }
 
                 boolean updated = data.updateRadarPosition(
                         dim,

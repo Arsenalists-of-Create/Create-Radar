@@ -1,6 +1,7 @@
 package com.happysg.radar.block.controller.yaw;
 
 import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.compat.sable.SableLinkPersistence;
 
 import com.happysg.radar.compat.Mods;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
@@ -21,6 +22,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
+import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
 
 import javax.annotation.Nullable;
@@ -79,6 +81,11 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
             if (!lastKnownPos.equals(worldPosition)) {
                 ResourceKey<Level> dim = serverLevel.dimension();
                 WeaponNetworkData data = WeaponNetworkData.get(serverLevel);
+                if (data.getGroupForController(dim, worldPosition) != null) {
+                    lastKnownPos = worldPosition;
+                    setChanged();
+                    return;
+                }
 
                 boolean updated = data.updateWeaponEndpointPosition(dim, lastKnownPos, worldPosition);
                 if (updated) {
@@ -106,9 +113,7 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
         }
 
         if (targetPos == null) {
-            isRunning = false;
-            notifyUpdate();
-            setChanged();
+            returnToInitialOrientation();
             return;
         }
 
@@ -125,6 +130,39 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
         if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
             physHandler.setTarget(mount.phys, targetPos);
         }
+    }
+
+    public void returnToZero() {
+        returnToInitialOrientation();
+    }
+
+    public void returnToInitialOrientation() {
+        targetAngle = getInitialOrientationTargetAngle();
+        isRunning = true;
+        notifyUpdate();
+        setChanged();
+    }
+
+    private double getInitialOrientationTargetAngle() {
+        Mount mount = resolveMount();
+        if (mount == null) {
+            return 0.0;
+        }
+
+        if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()
+                && mount.cbc.getContraption() != null
+                && mount.cbc.getContraption().getContraption() instanceof AbstractMountedCannonContraption cannon) {
+            Direction initial = cannon.initialOrientation();
+            if (initial != null && initial.getAxis().isHorizontal()) {
+                return controllerYawForCardinalDirection(initial);
+            }
+        }
+
+        if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
+            physHandler.maybeUpdateYawZeroFromCannonInitialOrientation();
+        }
+
+        return 0.0;
     }
 
     public boolean atTargetYaw(boolean lag) {
@@ -331,7 +369,9 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
         targetAngle = wrap360(compound.getDouble("TargetAngle"));
         isRunning = compound.getBoolean("IsRunning");
 
-        if (compound.contains("LastKnownPos", Tag.TAG_LONG)) {
+        if (Mods.SABLE.isLoaded() && SableLinkPersistence.isPlacingSchematic()) {
+            lastKnownPos = worldPosition;
+        } else if (compound.contains("LastKnownPos", Tag.TAG_LONG)) {
             lastKnownPos = BlockPos.of(compound.getLong("LastKnownPos"));
         } else {
             lastKnownPos = worldPosition;
@@ -414,6 +454,16 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
 
     static double shortestDelta(double from, double to) {
         return ((to - from + 540.0) % 360.0) - 180.0;
+    }
+
+    private static double controllerYawForCardinalDirection(Direction d) {
+        return switch (d) {
+            case SOUTH -> 0.0;
+            case WEST -> 90.0;
+            case NORTH -> 180.0;
+            case EAST -> 270.0;
+            default -> 0.0;
+        };
     }
 
     enum MountKind {

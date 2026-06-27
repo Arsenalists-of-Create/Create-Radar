@@ -213,6 +213,9 @@ public class DataLinkBlockItem extends BlockItem {
         }
 
         weaponData.addDataLinkToGroup(group, placedPos);
+        if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink) {
+            dataLink.target(use.clickedPos());
+        }
         sendSuccess(use.player());
         clearLinkTag(use.stack());
         return InteractionResult.SUCCESS;
@@ -274,6 +277,9 @@ public class DataLinkBlockItem extends BlockItem {
 
         target.commit(use, serverLevel, filterData, group, filtererPos, commit);
         filterData.addDataLinkToGroup(group, placedPos, use.clickedPos());
+        if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink) {
+            dataLink.target(use.clickedPos());
+        }
 
         sendSuccess(use.player());
         clearLinkTag(use.stack());
@@ -443,7 +449,7 @@ public class DataLinkBlockItem extends BlockItem {
 
         FilterCommit validate(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group) {
             return switch (this) {
-                case MONITOR -> FilterCommit.allowed(data.canAttachMonitor(group, use.clickedPos()));
+                case MONITOR -> FilterCommit.allowed(data.canAttachMonitor(group, normalizedMonitorPos(use)));
                 case RADAR_BEARING -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.BEARING));
                 case RADAR_STATIONARY -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.STATIONARY));
                 case RADAR_SKY -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.SKY));
@@ -464,6 +470,14 @@ public class DataLinkBlockItem extends BlockItem {
             }
 
             return FilterCommit.weapon(data.canAttachWeaponEndpoint(group, use.clickedPos(), weaponMountPos), weaponMountPos);
+        }
+
+        private static BlockPos normalizedMonitorPos(LinkUse use) {
+            if (use.be() instanceof MonitorBlockEntity monitor) {
+                BlockPos controllerPos = monitor.getControllerPos();
+                if (controllerPos != null) return controllerPos;
+            }
+            return use.clickedPos();
         }
 
         void commit(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group, BlockPos filtererPos, FilterCommit commit) {

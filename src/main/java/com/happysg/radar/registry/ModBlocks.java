@@ -19,6 +19,7 @@ import com.happysg.radar.block.radar.receiver.AbstractRadarFrame;
 import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
 
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
+import com.happysg.radar.block.radar.skyradar.SkyRadarSublevelConnectorBlock;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BuilderTransformers;
 import com.simibubi.create.foundation.data.SharedProperties;
@@ -26,6 +27,7 @@ import com.tterrag.registrate.util.entry.BlockEntry;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.MapColor;
 import net.neoforged.neoforge.client.model.generators.ConfiguredModel;
@@ -257,6 +259,17 @@ public class ModBlocks {
                             CreateRadar.asResource("block/sky_radar_mount_item")))
             .build()
             .register();
+
+    public static final BlockEntry<SkyRadarSublevelConnectorBlock> SKY_RADAR_SUBLEVEL_CONNECTOR =
+            REGISTRATE.block("sky_radar_sublevel_connector", SkyRadarSublevelConnectorBlock::new)
+                    .initialProperties(() -> Blocks.BARRIER)
+                    .properties(p -> p.mapColor(MapColor.NONE))
+                    .properties(p -> p.strength(0.0f))
+                    .properties(BlockBehaviour.Properties::noOcclusion)
+                    .properties(BlockBehaviour.Properties::noCollission)
+                    .properties(BlockBehaviour.Properties::noLootTable)
+                    .blockstate((c, p) -> p.simpleBlock(c.get(), p.models().getExistingFile(ResourceLocation.withDefaultNamespace("block/barrier"))))
+                    .register();
 
 
     public static void register() {

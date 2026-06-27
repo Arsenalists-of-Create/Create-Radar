@@ -2,10 +2,11 @@ package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableLinkPersistence;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
-import com.happysg.radar.compat.Mods;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
@@ -25,6 +26,7 @@ import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
+import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -81,8 +83,14 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
 
         if (level instanceof ServerLevel serverLevel) {
             if (!lastKnownPos.equals(worldPosition)) {
-                boolean updated = WeaponNetworkData.get(serverLevel)
-                        .updateWeaponEndpointPosition(serverLevel.dimension(), lastKnownPos, worldPosition);
+                WeaponNetworkData data = WeaponNetworkData.get(serverLevel);
+                if (data.getGroupForController(serverLevel.dimension(), worldPosition) != null) {
+                    lastKnownPos = worldPosition;
+                    setChanged();
+                    return;
+                }
+
+                boolean updated = data.updateWeaponEndpointPosition(serverLevel.dimension(), lastKnownPos, worldPosition);
                 if (updated) {
                     lastKnownPos = worldPosition;
                     setChanged();
@@ -187,12 +195,7 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         }
 
         if (targetPos == null) {
-            isRunning = false;
-            lastTargetPos = null;
-            physHandler.reset();
-
-            notifyUpdate();
-            setChanged();
+            returnToZero();
             return;
         }
 
@@ -209,6 +212,16 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
             physHandler.setTarget(mount.phys, targetPos);
         }
+    }
+
+    public void returnToZero() {
+        targetAngle = 0.0;
+        isRunning = true;
+        lastTargetPos = null;
+        physHandler.reset();
+
+        notifyUpdate();
+        setChanged();
     }
 
     public boolean atTargetPitch(boolean lag) {
@@ -247,6 +260,10 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
             track = null;
             if (firingControl != null) {
                 firingControl.resetTarget();
+            }
+            returnToZero();
+            if (autoyaw != null) {
+                autoyaw.returnToInitialOrientation();
             }
             return;
         }
@@ -368,6 +385,29 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         }
 
         return firingControl.hasLineOfSightTo(track, requireLos);
+    }
+
+    public boolean canConstrainAutoTargeting() {
+        if (!(level instanceof ServerLevel)) {
+            return false;
+        }
+
+        getFiringControl();
+        if (firingControl == null) {
+            return false;
+        }
+
+        Mount mount = resolveMount();
+        if (mount == null) {
+            return false;
+        }
+
+        if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
+            return mount.cbc.getContraption() != null
+                    && mount.cbc.getContraption().getContraption() instanceof AbstractMountedCannonContraption;
+        }
+
+        return getRayStart() != null;
     }
 
     @Nullable
@@ -507,7 +547,9 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         targetAngle = compound.getDouble("TargetAngle");
         isRunning = compound.getBoolean("IsRunning");
 
-        if (compound.contains("LastKnownPos", Tag.TAG_LONG)) {
+        if (Mods.SABLE.isLoaded() && SableLinkPersistence.isPlacingSchematic()) {
+            lastKnownPos = worldPosition;
+        } else if (compound.contains("LastKnownPos", Tag.TAG_LONG)) {
             lastKnownPos = BlockPos.of(compound.getLong("LastKnownPos"));
         } else {
             lastKnownPos = worldPosition;

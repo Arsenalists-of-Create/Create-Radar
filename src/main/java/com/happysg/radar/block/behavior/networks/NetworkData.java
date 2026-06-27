@@ -3,8 +3,12 @@ package com.happysg.radar.block.behavior.networks;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
+import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
+import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
+import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
+import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.registry.ModBlocks;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
@@ -25,11 +29,13 @@ import org.slf4j.Logger;
 
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.function.Function;
 
 public class NetworkData extends SavedData {
 
     public enum RadarKind { BEARING, STATIONARY, SKY, SONAR }
     public enum Mountkind { NORMAL, FIXED, COMPACT}
+    public enum LinkOrigin { DATALINK, CONTACT }
     private static final String DATA_NAME = "network_data";
 
     // radarPos -> filtererKey
@@ -101,6 +107,9 @@ public class NetworkData extends SavedData {
     // endpointPos -> filtererKey
     private final Map<String, String> endpointToFilterer = new HashMap<>();
 
+    // endpointPos -> origin, so contact links can be pruned and datalinks can override them
+    private final Map<String, LinkOrigin> endpointOrigins = new HashMap<>();
+
     // weaponMountPos -> filtererKey (enforces uniqueness)
     private final Map<String, String> weaponMountToFilterer = new HashMap<>();
 
@@ -164,15 +173,18 @@ public class NetworkData extends SavedData {
         // tell loaded nodes they are no longer linked (optional but nice)
         for (BlockPos p : group.monitorEndpoints) {
             notifyNodeDisconnected(level, p);
+            endpointOrigins.remove(posKey(level.dimension(), p));
         }
         for (BlockPos p : group.radarEndpoints.keySet()) {
             notifyNodeDisconnected(level, p);
+            endpointOrigins.remove(posKey(level.dimension(), p));
         }
         //notifyNodeDisconnected(level, group.);
 
         for (BlockPos endpointPos : group.weaponEndpoints) {
             notifyNodeDisconnected(level, endpointPos);
             endpointToFilterer.remove(posKey(level.dimension(), endpointPos));
+            endpointOrigins.remove(posKey(level.dimension(), endpointPos));
         }
 
 
@@ -260,6 +272,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                     BlockPos p = readPos(list.getCompound(mi));
                     group.monitorEndpoints.add(p);
                     data.endpointToFilterer.put(key(dim, p), groupKey);
+                    data.endpointOrigins.put(key(dim, p), LinkOrigin.DATALINK);
                 }
             }
 // LEGACY single-monitor worlds
@@ -267,6 +280,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                 BlockPos p = readPos(g.getCompound("MonitorPos"));
                 group.monitorEndpoints.add(p);
                 data.endpointToFilterer.put(key(dim, p), groupKey);
+                data.endpointOrigins.put(key(dim, p), LinkOrigin.DATALINK);
             }
 
             if (g.contains("Radars", Tag.TAG_LIST)) {
@@ -277,6 +291,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                     RadarKind radarKind = RadarKind.valueOf(radarTag.getString("Kind"));
                     group.radarEndpoints.put(radarPos, radarKind);
                     data.endpointToFilterer.put(key(dim, radarPos), groupKey);
+                    data.endpointOrigins.put(key(dim, radarPos), LinkOrigin.DATALINK);
                 }
                 group.syncPrimaryRadar();
             } else if (g.contains("RadarPos", Tag.TAG_COMPOUND)) {
@@ -285,6 +300,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                 group.radarEndpoints.put(radarPos, radarKind);
                 group.syncPrimaryRadar();
                 data.endpointToFilterer.put(key(dim, radarPos), groupKey);
+                data.endpointOrigins.put(key(dim, radarPos), LinkOrigin.DATALINK);
             }
 
             // weapon endpoints
@@ -293,6 +309,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                 BlockPos ep = readPos(weapons.getCompound(w));
                 group.weaponEndpoints.add(ep);
                 data.endpointToFilterer.put(key(dim, ep), groupKey);
+                data.endpointOrigins.put(key(dim, ep), LinkOrigin.DATALINK);
             }
 
             // used mounts
@@ -312,6 +329,18 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
             }
 
             data.groupsByFilterer.put(groupKey, group);
+        }
+
+        if (root.contains("EndpointOrigins", Tag.TAG_LIST)) {
+            ListTag list = root.getList("EndpointOrigins", Tag.TAG_COMPOUND);
+            for (int i = 0; i < list.size(); i++) {
+                CompoundTag e = list.getCompound(i);
+                String endpoint = e.getString("Endpoint");
+                String originName = e.getString("Origin");
+                if (!endpoint.isEmpty() && !originName.isEmpty()) {
+                    data.endpointOrigins.put(endpoint, LinkOrigin.valueOf(originName));
+                }
+            }
         }
 
         // dataLinkToEndpoint
@@ -396,6 +425,15 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
         root.put("Groups", groupsTag);
 
+        ListTag origins = new ListTag();
+        for (var e : endpointOrigins.entrySet()) {
+            CompoundTag t = new CompoundTag();
+            t.putString("Endpoint", e.getKey());
+            t.putString("Origin", e.getValue().name());
+            origins.add(t);
+        }
+        root.put("EndpointOrigins", origins);
+
         // Persist dataLinkToEndpoint
         ListTag dl2ep = new ListTag();
         for (var e : dataLinkToEndpoint.entrySet()) {
@@ -450,41 +488,51 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         return fk == null ? null : posFromKey(fk);
     }
 
+    public @Nullable LinkOrigin getEndpointOrigin(ResourceKey<Level> dim, BlockPos endpointPos) {
+        return endpointOrigins.get(key(dim, endpointPos));
+    }
+
+    public boolean isEndpointLinked(ResourceKey<Level> dim, BlockPos endpointPos) {
+        return endpointToFilterer.containsKey(key(dim, endpointPos));
+    }
+
     // ------------------------------------------------------------
     // Validation
     // ------------------------------------------------------------
 
     public boolean canAttachMonitor(Group group, BlockPos monitorPos) {
-        String endpointKey = key(group.key.dim(), monitorPos);
-        String existing = endpointToFilterer.get(endpointKey);
-        String myKey = key(group.key.dim(), group.key.filtererPos());
-        return existing == null || existing.equals(myKey);
+        return canClaimEndpoint(group, monitorPos, LinkOrigin.DATALINK);
     }
 
     public boolean canAttachRadar(Group group, BlockPos radarPos, RadarKind kind) {
         RadarKind existingKind = group.radarEndpoints.get(radarPos);
         if (existingKind != null && existingKind != kind) return false;
-        String endpointKey = key(group.key.dim(), radarPos);
-        String existing = endpointToFilterer.get(endpointKey);
-        String myKey = key(group.key.dim(), group.key.filtererPos());
-        return existing == null || existing.equals(myKey);
+        return canClaimEndpoint(group, radarPos, LinkOrigin.DATALINK);
     }
 
     public boolean canAttachWeaponEndpoint(Group group, BlockPos controllerPos, BlockPos weaponMountPos) {
-        String myKey = key(group.key.dim(), group.key.filtererPos());
-
         // controller already owned by other group?
-        String endpointK = key(group.key.dim(), controllerPos);
-        String existingEndpointOwner = endpointToFilterer.get(endpointK);
-        if (existingEndpointOwner != null && !existingEndpointOwner.equals(myKey)) return false;
+        if (!canClaimEndpoint(group, controllerPos, LinkOrigin.DATALINK)) return false;
 
         // mount already owned by other group?
         String mountK = key(group.key.dim(), weaponMountPos);
         String existingMountOwner = weaponMountToFilterer.get(mountK);
-        if (existingMountOwner != null && !existingMountOwner.equals(myKey)) return false;
+        String myKey = key(group.key.dim(), group.key.filtererPos());
+        if (existingMountOwner != null && !existingMountOwner.equals(myKey)) {
+            String endpointK = key(group.key.dim(), controllerPos);
+            if (endpointOrigins.get(endpointK) != LinkOrigin.CONTACT) return false;
+        }
 
         // in-group uniqueness
-        return !group.usedWeaponMounts.contains(weaponMountPos);
+        return !group.usedWeaponMounts.contains(weaponMountPos) || group.weaponEndpoints.contains(controllerPos);
+    }
+
+    private boolean canClaimEndpoint(Group group, BlockPos endpointPos, LinkOrigin newOrigin) {
+        String endpointKey = key(group.key.dim(), endpointPos);
+        String existing = endpointToFilterer.get(endpointKey);
+        String myKey = key(group.key.dim(), group.key.filtererPos());
+        if (existing == null || existing.equals(myKey)) return true;
+        return newOrigin == LinkOrigin.DATALINK && endpointOrigins.get(endpointKey) == LinkOrigin.CONTACT;
     }
 
     // ------------------------------------------------------------
@@ -493,7 +541,6 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
     public void attachMonitor(ServerLevel level, Group group, BlockPos clickedPos) {
         ResourceKey<Level> dim = group.key.dim();
-        String filtererKey = key(dim, group.key.filtererPos());
 
         BlockPos controllerPos = clickedPos;
         if (level != null) {
@@ -504,32 +551,29 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
             }
         }
 
+        if (!claimEndpointForGroup(level, group, controllerPos, LinkOrigin.DATALINK)) return;
         group.monitorEndpoints.add(controllerPos);
-        endpointToFilterer.put(key(dim, controllerPos), filtererKey);
 
         setDirty();
     }
 
 
     public void attachRadar(Group group, BlockPos radarPos, RadarKind kind) {
-        ResourceKey<Level> dim = group.key.dim();
-        String filtererKey = key(dim, group.key.filtererPos());
-
+        if (!claimEndpointForGroup(null, group, radarPos, LinkOrigin.DATALINK)) return;
         group.radarEndpoints.put(radarPos, kind);
         group.syncPrimaryRadar();
-
-        endpointToFilterer.put(key(dim, radarPos), filtererKey);
 
         setDirty();
     }
 
 
     public void attachWeaponEndpoint(Group group, BlockPos controllerPos, BlockPos weaponMountPos) {
+        if (!claimEndpointForGroup(null, group, controllerPos, LinkOrigin.DATALINK)) return;
         group.weaponEndpoints.add(controllerPos);
         group.usedWeaponMounts.add(weaponMountPos);
 
-        String dimKey = group.key.dim().location().toString();
         endpointToFilterer.put(key(group.key.dim(), controllerPos), key(group.key.dim(), group.key.filtererPos()));
+        endpointOrigins.put(key(group.key.dim(), controllerPos), LinkOrigin.DATALINK);
         weaponMountToFilterer.put(key(group.key.dim(), weaponMountPos), key(group.key.dim(), group.key.filtererPos()));
 
         // controller -> mount mapping
@@ -545,6 +589,224 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         dataLinkToEndpoint.put(key(group.key.dim(), dataLinkPos), key(group.key.dim(), endpointPos));
         setDirty();
     }
+
+    public boolean reconcileContactLinks(ServerLevel level, Group group) {
+        if (level == null || group == null || !group.key.dim().equals(level.dimension())) return false;
+
+        Set<BlockPos> reachable = findReachableContactEndpoints(level, group);
+        boolean changed = false;
+
+        for (BlockPos endpoint : snapshotContactEndpoints(group)) {
+            if (!reachable.contains(endpoint)) {
+                removeEndpointFromGroup(level, group, endpoint, true);
+                changed = true;
+            }
+        }
+
+        for (BlockPos endpoint : reachable) {
+            ContactEndpoint contact = classifyContactEndpoint(level, endpoint);
+            if (contact == null) continue;
+
+            String endpointKey = key(group.key.dim(), contact.endpointPos());
+            String owner = endpointToFilterer.get(endpointKey);
+            String myKey = key(group.key.dim(), group.key.filtererPos());
+            if (owner != null && !owner.equals(myKey)) continue;
+
+            if (owner == null) {
+                if (attachContactEndpoint(level, group, contact)) changed = true;
+            }
+        }
+
+        if (changed) setDirty();
+        return changed;
+    }
+
+    private Set<BlockPos> findReachableContactEndpoints(ServerLevel level, Group group) {
+        Set<BlockPos> reachable = new HashSet<>();
+        Set<BlockPos> visited = new HashSet<>();
+        ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+
+        queue.add(group.key.filtererPos());
+        visited.add(group.key.filtererPos());
+
+        for (BlockPos endpoint : allEndpoints(group)) {
+            if (endpointOrigins.get(key(group.key.dim(), endpoint)) == LinkOrigin.DATALINK) {
+                queue.add(endpoint);
+                visited.add(endpoint);
+            }
+        }
+
+        String myKey = key(group.key.dim(), group.key.filtererPos());
+        while (!queue.isEmpty()) {
+            BlockPos current = queue.removeFirst();
+
+            for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+                BlockPos next = current.relative(dir);
+                if (!visited.add(next)) continue;
+
+                ContactEndpoint contact = classifyContactEndpoint(level, next);
+                if (contact == null) continue;
+
+                String endpointKey = key(group.key.dim(), contact.endpointPos());
+                String owner = endpointToFilterer.get(endpointKey);
+                if (owner != null && !owner.equals(myKey)) continue;
+
+                if (reachable.add(contact.endpointPos())) {
+                    queue.add(contact.endpointPos());
+                }
+            }
+        }
+
+        return reachable;
+    }
+
+    private Collection<BlockPos> allEndpoints(Group group) {
+        Set<BlockPos> endpoints = new HashSet<>();
+        endpoints.addAll(group.monitorEndpoints);
+        endpoints.addAll(group.radarEndpoints.keySet());
+        endpoints.addAll(group.weaponEndpoints);
+        return endpoints;
+    }
+
+    private Collection<BlockPos> snapshotContactEndpoints(Group group) {
+        List<BlockPos> endpoints = new ArrayList<>();
+        for (BlockPos endpoint : allEndpoints(group)) {
+            if (endpointOrigins.get(key(group.key.dim(), endpoint)) == LinkOrigin.CONTACT) {
+                endpoints.add(endpoint);
+            }
+        }
+        return endpoints;
+    }
+
+    private boolean attachContactEndpoint(ServerLevel level, Group group, ContactEndpoint endpoint) {
+        if (!claimEndpointForGroup(level, group, endpoint.endpointPos(), LinkOrigin.CONTACT)) return false;
+
+        switch (endpoint.kind()) {
+            case MONITOR -> group.monitorEndpoints.add(endpoint.endpointPos());
+            case RADAR -> {
+                group.radarEndpoints.put(endpoint.endpointPos(), endpoint.radarKind());
+                group.syncPrimaryRadar();
+            }
+            case WEAPON -> {
+                group.weaponEndpoints.add(endpoint.endpointPos());
+                if (endpoint.weaponMountPos() != null) {
+                    group.usedWeaponMounts.add(endpoint.weaponMountPos());
+                    weaponMountToFilterer.put(key(group.key.dim(), endpoint.weaponMountPos()), key(group.key.dim(), group.key.filtererPos()));
+                    controllerToWeaponMount.put(key(group.key.dim(), endpoint.endpointPos()), key(group.key.dim(), endpoint.weaponMountPos()));
+                }
+            }
+        }
+        return true;
+    }
+
+    @Nullable
+    private ContactEndpoint classifyContactEndpoint(ServerLevel level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        BlockEntity be = level.getBlockEntity(pos);
+
+        if (be instanceof MonitorBlockEntity monitor) {
+            BlockPos controllerPos = monitor.getControllerPos();
+            return new ContactEndpoint(ContactKind.MONITOR, controllerPos == null ? pos : controllerPos, null, null);
+        }
+
+        if (state.getBlock() instanceof RadarBearingBlock) {
+            return new ContactEndpoint(ContactKind.RADAR, pos, RadarKind.BEARING, null);
+        }
+        if (state.getBlock() instanceof StationaryRadarBlock) {
+            return new ContactEndpoint(ContactKind.RADAR, pos, RadarKind.STATIONARY, null);
+        }
+        if (state.getBlock() instanceof SkyRadarBlock) {
+            return new ContactEndpoint(ContactKind.RADAR, pos, RadarKind.SKY, null);
+        }
+        if (isSonarBlock(state)) {
+            return new ContactEndpoint(ContactKind.RADAR, pos, RadarKind.SONAR, null);
+        }
+
+        if (be instanceof AutoPitchControllerBlockEntity) {
+            BlockPos mountPos = WeaponNetworkData.get(level).getMountForController(level.dimension(), pos);
+            if (mountPos != null) {
+                return new ContactEndpoint(ContactKind.WEAPON, pos, null, mountPos);
+            }
+        }
+
+        return null;
+    }
+
+    private static boolean isSonarBlock(BlockState state) {
+        Class<?> blockClass = state.getBlock().getClass();
+        Package blockPackage = blockClass.getPackage();
+        return blockPackage != null
+                && blockPackage.getName().contains(".radar.sonar")
+                && blockClass.getSimpleName().contains("Sonar");
+    }
+
+    private boolean claimEndpointForGroup(@Nullable ServerLevel level, Group group, BlockPos endpointPos, LinkOrigin origin) {
+        String endpointKey = key(group.key.dim(), endpointPos);
+        String myKey = key(group.key.dim(), group.key.filtererPos());
+        String existing = endpointToFilterer.get(endpointKey);
+
+        if (existing != null && !existing.equals(myKey) && endpointOrigins.get(endpointKey) != LinkOrigin.CONTACT) {
+            return false;
+        }
+
+        if (existing != null && !existing.equals(myKey)) {
+            Group oldGroup = groupsByFilterer.get(existing);
+            if (oldGroup != null) {
+                removeEndpointFromGroup(level, oldGroup, endpointPos, false);
+            }
+        }
+
+        endpointToFilterer.put(endpointKey, myKey);
+        endpointOrigins.put(endpointKey, origin);
+        return true;
+    }
+
+    private void removeEndpointFromGroup(@Nullable ServerLevel level, Group group, BlockPos endpointPos, boolean notify) {
+        ResourceKey<Level> dim = group.key.dim();
+        String endpointKey = key(dim, endpointPos);
+
+        BlockPos normalized = endpointPos;
+        if (level != null && level.getBlockEntity(endpointPos) instanceof MonitorBlockEntity monitor) {
+            BlockPos controllerPos = monitor.getControllerPos();
+            if (controllerPos != null) normalized = controllerPos;
+        }
+
+        boolean removed = group.monitorEndpoints.remove(normalized) || group.monitorEndpoints.remove(endpointPos);
+        if (removed && notify && level != null && level.getBlockEntity(normalized) instanceof MonitorBlockEntity monitor) {
+            monitor.onNetworkDisconnected();
+        }
+
+        if (group.radarEndpoints.remove(endpointPos) != null || group.radarEndpoints.remove(normalized) != null) {
+            group.syncPrimaryRadar();
+            removed = true;
+        }
+
+        if (group.weaponEndpoints.remove(endpointPos) || group.weaponEndpoints.remove(normalized)) {
+            String mountKey = controllerToWeaponMount.remove(endpointKey);
+            if (mountKey != null) {
+                group.usedWeaponMounts.remove(posFromKey(mountKey));
+                weaponMountToFilterer.remove(mountKey);
+            }
+            removed = true;
+        }
+
+        if (removed) {
+            endpointToFilterer.remove(endpointKey);
+            endpointOrigins.remove(endpointKey);
+            endpointOrigins.remove(key(dim, normalized));
+            cleanupIfEmpty(key(dim, group.key.filtererPos()));
+        }
+    }
+
+    private enum ContactKind { MONITOR, RADAR, WEAPON }
+
+    private record ContactEndpoint(
+            ContactKind kind,
+            BlockPos endpointPos,
+            @Nullable RadarKind radarKind,
+            @Nullable BlockPos weaponMountPos
+    ) {}
+
     public void retargetEndpoint(ResourceKey<Level> dim, BlockPos oldEndpoint, BlockPos newEndpoint) {
         if (oldEndpoint == null || newEndpoint == null || oldEndpoint.equals(newEndpoint))
             return;
@@ -558,6 +820,8 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
 
         endpointToFilterer.put(newK, filtererKey);
+        LinkOrigin origin = endpointOrigins.remove(oldK);
+        if (origin != null) endpointOrigins.put(newK, origin);
 
         Group group = groupsByFilterer.get(filtererKey);
         if (group != null) {
@@ -591,6 +855,155 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
     public BlockPos peekEndpointForDataLink(ResourceKey<Level> dim, BlockPos dataLinkPos) {
         String endpointKey = dataLinkToEndpoint.get(key(dim, dataLinkPos));
         return endpointKey == null ? null : posFromKey(endpointKey);
+    }
+
+    public boolean updateDataLinkPosition(ResourceKey<Level> dim, BlockPos oldPos, BlockPos newPos) {
+        if (oldPos.equals(newPos)) return true;
+
+        String oldKey = key(dim, oldPos);
+        String newKey = key(dim, newPos);
+        String filtererKey = dataLinkToFilterer.remove(oldKey);
+        String endpointKey = dataLinkToEndpoint.remove(oldKey);
+        if (filtererKey == null) return false;
+
+        Group group = groupsByFilterer.get(filtererKey);
+        if (group == null) {
+            dataLinkToFilterer.put(oldKey, filtererKey);
+            if (endpointKey != null) dataLinkToEndpoint.put(oldKey, endpointKey);
+            return false;
+        }
+
+        if (!group.dataLinks.remove(oldPos)) {
+            dataLinkToFilterer.put(oldKey, filtererKey);
+            if (endpointKey != null) dataLinkToEndpoint.put(oldKey, endpointKey);
+            return false;
+        }
+
+        group.dataLinks.add(newPos);
+        dataLinkToFilterer.put(newKey, filtererKey);
+        if (endpointKey != null) dataLinkToEndpoint.put(newKey, endpointKey);
+        setDirty();
+        return true;
+    }
+
+    public CompoundTag writeSchematicSnapshot(Group group, Function<BlockPos, CompoundTag> encoder) {
+        CompoundTag tag = new CompoundTag();
+        tag.put("FiltererPos", encoder.apply(group.key.filtererPos()));
+        tag.putString("SelectedTargetId", group.selectedTargetId == null ? "" : group.selectedTargetId);
+        tag.put("TargetingTag", group.targetingTag.copy());
+        tag.put("IdentificationTag", group.identificationTag.copy());
+        tag.put("DetectionTag", group.detectionTag.copy());
+
+        ListTag monitors = new ListTag();
+        for (BlockPos pos : group.monitorEndpoints) {
+            monitors.add(writeEndpointSnapshot(group, pos, encoder));
+        }
+        tag.put("MonitorEndpoints", monitors);
+
+        ListTag radars = new ListTag();
+        for (Map.Entry<BlockPos, RadarKind> entry : group.radarEndpoints.entrySet()) {
+            CompoundTag radar = writeEndpointSnapshot(group, entry.getKey(), encoder);
+            radar.putString("Kind", entry.getValue().name());
+            radars.add(radar);
+        }
+        tag.put("RadarEndpoints", radars);
+
+        ListTag weapons = new ListTag();
+        for (BlockPos pos : group.weaponEndpoints) {
+            CompoundTag weapon = writeEndpointSnapshot(group, pos, encoder);
+            BlockPos mount = posFromKey(controllerToWeaponMount.get(key(group.key.dim(), pos)));
+            if (mount != null) {
+                weapon.put("MountPos", encoder.apply(mount));
+            }
+            weapons.add(weapon);
+        }
+        tag.put("WeaponEndpoints", weapons);
+
+        ListTag dataLinks = new ListTag();
+        for (BlockPos pos : group.dataLinks) {
+            CompoundTag dataLink = new CompoundTag();
+            dataLink.put("DataLinkPos", encoder.apply(pos));
+            BlockPos endpoint = peekEndpointForDataLink(group.key.dim(), pos);
+            if (endpoint != null) {
+                dataLink.put("EndpointPos", encoder.apply(endpoint));
+            }
+            dataLinks.add(dataLink);
+        }
+        tag.put("DataLinks", dataLinks);
+
+        return tag;
+    }
+
+    private CompoundTag writeEndpointSnapshot(Group group, BlockPos pos, Function<BlockPos, CompoundTag> encoder) {
+        CompoundTag tag = new CompoundTag();
+        tag.put("Pos", encoder.apply(pos));
+        LinkOrigin origin = endpointOrigins.get(key(group.key.dim(), pos));
+        tag.putString("Origin", origin == null ? LinkOrigin.DATALINK.name() : origin.name());
+        return tag;
+    }
+
+    public void restoreSchematicSnapshot(ServerLevel level, CompoundTag tag, Function<CompoundTag, BlockPos> decoder) {
+        ResourceKey<Level> dim = level.dimension();
+        BlockPos filtererPos = decoder.apply(tag.getCompound("FiltererPos"));
+        Group group = getOrCreateGroup(dim, filtererPos);
+
+        group.selectedTargetId = tag.getString("SelectedTargetId").isEmpty() ? null : tag.getString("SelectedTargetId");
+        if (tag.contains("TargetingTag", Tag.TAG_COMPOUND)) group.targetingTag = tag.getCompound("TargetingTag").copy();
+        if (tag.contains("IdentificationTag", Tag.TAG_COMPOUND)) group.identificationTag = tag.getCompound("IdentificationTag").copy();
+        if (tag.contains("DetectionTag", Tag.TAG_COMPOUND)) group.detectionTag = tag.getCompound("DetectionTag").copy();
+
+        ListTag monitors = tag.getList("MonitorEndpoints", Tag.TAG_COMPOUND);
+        for (int i = 0; i < monitors.size(); i++) {
+            CompoundTag entry = monitors.getCompound(i);
+            BlockPos pos = decoder.apply(entry.getCompound("Pos"));
+            if (claimEndpointForGroup(level, group, pos, readOrigin(entry))) {
+                group.monitorEndpoints.add(pos);
+            }
+        }
+
+        ListTag radars = tag.getList("RadarEndpoints", Tag.TAG_COMPOUND);
+        for (int i = 0; i < radars.size(); i++) {
+            CompoundTag entry = radars.getCompound(i);
+            BlockPos pos = decoder.apply(entry.getCompound("Pos"));
+            if (claimEndpointForGroup(level, group, pos, readOrigin(entry))) {
+                RadarKind kind = RadarKind.valueOf(entry.getString("Kind"));
+                group.radarEndpoints.put(pos, kind);
+            }
+        }
+        group.syncPrimaryRadar();
+
+        ListTag weapons = tag.getList("WeaponEndpoints", Tag.TAG_COMPOUND);
+        for (int i = 0; i < weapons.size(); i++) {
+            CompoundTag entry = weapons.getCompound(i);
+            BlockPos pos = decoder.apply(entry.getCompound("Pos"));
+            if (!entry.contains("MountPos", Tag.TAG_COMPOUND)) continue;
+            BlockPos mount = decoder.apply(entry.getCompound("MountPos"));
+            if (!claimEndpointForGroup(level, group, pos, readOrigin(entry))) continue;
+            group.weaponEndpoints.add(pos);
+            group.usedWeaponMounts.add(mount);
+            weaponMountToFilterer.put(key(dim, mount), key(dim, filtererPos));
+            controllerToWeaponMount.put(key(dim, pos), key(dim, mount));
+        }
+
+        ListTag links = tag.getList("DataLinks", Tag.TAG_COMPOUND);
+        for (int i = 0; i < links.size(); i++) {
+            CompoundTag entry = links.getCompound(i);
+            if (!entry.contains("EndpointPos", Tag.TAG_COMPOUND)) continue;
+            BlockPos dataLinkPos = decoder.apply(entry.getCompound("DataLinkPos"));
+            BlockPos endpointPos = decoder.apply(entry.getCompound("EndpointPos"));
+            addDataLinkToGroup(group, dataLinkPos, endpointPos);
+        }
+
+        setDirty();
+    }
+
+    private static LinkOrigin readOrigin(CompoundTag entry) {
+        if (!entry.contains("Origin", Tag.TAG_STRING)) return LinkOrigin.DATALINK;
+        try {
+            return LinkOrigin.valueOf(entry.getString("Origin"));
+        } catch (IllegalArgumentException ignored) {
+            return LinkOrigin.DATALINK;
+        }
     }
 
 
@@ -638,12 +1051,16 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                 // remove indices for both clicked endpoint and controller
                 endpointToFilterer.remove(endpointKey);
                 endpointToFilterer.remove(key(level.dimension(), controllerPos));
+                endpointOrigins.remove(endpointKey);
+                endpointOrigins.remove(key(level.dimension(), controllerPos));
             } else if (group.radarEndpoints.remove(endpointPos) != null) {
                 group.syncPrimaryRadar();
                 endpointToFilterer.remove(endpointKey);
+                endpointOrigins.remove(endpointKey);
 
             } else if (group.weaponEndpoints.remove(endpointPos)) {
                 endpointToFilterer.remove(endpointKey);
+                endpointOrigins.remove(endpointKey);
 
                 // If you use controllerToWeaponMount, free it deterministically
                 String mountKey = controllerToWeaponMount.remove(endpointKey);
@@ -675,11 +1092,18 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
         for (BlockPos mp : group.monitorEndpoints) {
             endpointToFilterer.remove(key(dim, mp));
+            endpointOrigins.remove(key(dim, mp));
         }
 
-        for (BlockPos radarPos : group.radarEndpoints.keySet()) endpointToFilterer.remove(key(dim, radarPos));
+        for (BlockPos radarPos : group.radarEndpoints.keySet()) {
+            endpointToFilterer.remove(key(dim, radarPos));
+            endpointOrigins.remove(key(dim, radarPos));
+        }
 
-        for (BlockPos ep : group.weaponEndpoints) endpointToFilterer.remove(key(dim, ep));
+        for (BlockPos ep : group.weaponEndpoints) {
+            endpointToFilterer.remove(key(dim, ep));
+            endpointOrigins.remove(key(dim, ep));
+        }
         for (BlockPos mp : group.usedWeaponMounts) weaponMountToFilterer.remove(key(dim, mp));
         for (BlockPos dl : group.dataLinks) {
             dataLinkToFilterer.remove(key(dim, dl));
@@ -715,13 +1139,16 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
         if (group.monitorEndpoints.remove(endpointPos)) {
             endpointToFilterer.remove(endpointKey);
+            endpointOrigins.remove(endpointKey);
 
         } else if (group.radarEndpoints.remove(endpointPos) != null) {
             group.syncPrimaryRadar();
             endpointToFilterer.remove(endpointKey);
+            endpointOrigins.remove(endpointKey);
 
         } else if (group.weaponEndpoints.remove(endpointPos)) {
             endpointToFilterer.remove(endpointKey);
+            endpointOrigins.remove(endpointKey);
 
             String mountKey = controllerToWeaponMount.remove(endpointKey);
             if (mountKey != null) {
@@ -732,6 +1159,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
         } else {
             endpointToFilterer.remove(endpointKey);
+            endpointOrigins.remove(endpointKey);
         }
 
         // Remove any datalinks targeting this endpoint
@@ -867,6 +1295,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                         continue;
 
                     endpointToFilterer.remove(posKey(levelDim, mp));
+                    endpointOrigins.remove(posKey(levelDim, mp));
                     it.remove();
                     endpointsRemoved++;
                 }
@@ -881,6 +1310,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                         continue;
 
                     endpointToFilterer.remove(posKey(levelDim, radarPos));
+                    endpointOrigins.remove(posKey(levelDim, radarPos));
                     it.remove();
                     endpointsRemoved++;
                 }
@@ -913,6 +1343,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
                     it.remove();
                     endpointToFilterer.remove(posKey(levelDim, controllerPos));
+                    endpointOrigins.remove(posKey(levelDim, controllerPos));
                     endpointsRemoved++;
 
                     // free its mount if we have a mapping
@@ -1129,6 +1560,8 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         // update endpoint index
         endpointToFilterer.remove(oldEndpointKey);
         endpointToFilterer.put(newEndpointKey, filtererKey);
+        LinkOrigin movedOrigin = endpointOrigins.remove(oldEndpointKey);
+        if (movedOrigin != null) endpointOrigins.put(newEndpointKey, movedOrigin);
 
         // move controller->weaponMount mapping (if present)
         String mountKey = controllerToWeaponMount.remove(oldEndpointKey);
@@ -1225,6 +1658,8 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         // update endpoint index
         endpointToFilterer.remove(oldKey);
         endpointToFilterer.put(newKey, filtererKey);
+        LinkOrigin movedOrigin = endpointOrigins.remove(oldKey);
+        if (movedOrigin != null) endpointOrigins.put(newKey, movedOrigin);
 
         // repoint any datalink->endpoint mapping that referenced the old monitor pos
         if (!dataLinkToEndpoint.isEmpty()) {
@@ -1291,6 +1726,8 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         // update index
         endpointToFilterer.remove(oldKey);
         endpointToFilterer.put(newKey, filtererKey);
+        LinkOrigin movedOrigin = endpointOrigins.remove(oldKey);
+        if (movedOrigin != null) endpointOrigins.put(newKey, movedOrigin);
 
         // only do this if radars can be a datalink endpoint in your system (harmless if not)
         if (!dataLinkToEndpoint.isEmpty()) {

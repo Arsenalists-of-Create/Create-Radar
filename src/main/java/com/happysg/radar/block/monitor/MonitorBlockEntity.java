@@ -138,6 +138,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
                 ResourceKey<Level> dim = serverLevel.dimension();
                 NetworkData data = NetworkData.get(serverLevel);
+                if (data.isEndpointLinked(dim, worldPosition)) {
+                    lastKnownPos = worldPosition;
+                    setChanged();
+                    return;
+                }
 
                 boolean updated = data.updateMonitorPosition(
                         dim,

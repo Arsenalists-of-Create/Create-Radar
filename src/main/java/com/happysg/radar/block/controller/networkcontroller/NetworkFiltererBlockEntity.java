@@ -11,10 +11,15 @@ import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.behavior.SkyRadarScanningBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.create.CreateSchematicLinkPersistence;
+import com.happysg.radar.compat.sable.SableLinkPersistence;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.track.TrackCategory;
+import com.simibubi.create.api.contraption.transformable.TransformableBlockEntity;
+import com.simibubi.create.api.schematic.nbt.PartialSafeNBT;
+import com.simibubi.create.content.contraptions.StructureTransform;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.HolderLookup;
@@ -30,6 +35,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -44,7 +50,7 @@ import org.slf4j.Logger;
 import javax.annotation.Nullable;
 import java.util.*;
 
-public class NetworkFiltererBlockEntity extends BlockEntity {
+public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSafeNBT, TransformableBlockEntity {
     private static final String NBT_INVENTORY = "Inventory";
     private static final String NBT_SLOT_NBT  = "SlotNbt";
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -72,6 +78,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     private List<RadarTrack> cachedTracks = List.of();
     private DetectionConfig detectionCache = DetectionConfig.DEFAULT;
     public @Nullable RadarTrack activeTrackCache;
+    @Nullable
+    private CompoundTag pendingCreateSchematicSnapshot;
 
     private List<AutoPitchControllerBlockEntity> endpointCache = List.of();
     private long endpointCacheUntilTick = -1;
@@ -88,7 +96,17 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         if (level.isClientSide) return;
 
         NetworkData data = NetworkData.get(sl);
+        if (!be.lastKnownPos.equals(pos)) {
+            if (data.updateFiltererPosition(sl.dimension(), be.lastKnownPos, pos)) {
+                be.lastKnownPos = pos;
+                be.setChanged();
+            }
+        }
         NetworkData.Group group = data.getOrCreateGroup(sl.dimension(), pos);
+        if (sl.getGameTime() % 5 == 0 && data.reconcileContactLinks(sl, group)) {
+            be.endpointCacheUntilTick = -1;
+            be.applyFiltersToNetwork();
+        }
 
         String selectedId = data.getSelectedTargetId(group);
 
@@ -121,6 +139,29 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         boolean loaded = SubLevelContainer.getContainer(sl).getSubLevel(shipId) != null;
         vsLoadedCache.put(shipId, loaded);
         return loaded;
+    }
+
+    private boolean isSelectedTrackStale(ServerLevel sl, RadarTrack track) {
+        if (!isVsShipStillLoaded(sl, track)) return true;
+
+        if (!isEntityBackedCategory(track.trackCategory())) return false;
+
+        UUID entityId;
+        try {
+            entityId = UUID.fromString(track.getId());
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+
+        Entity entity = sl.getEntity(entityId);
+        return entity == null || !entity.isAlive();
+    }
+
+    private static boolean isEntityBackedCategory(TrackCategory category) {
+        return switch (category) {
+            case PLAYER, HOSTILE, MOB, ANIMAL, PROJECTILE, ITEM, CONTRAPTION -> true;
+            default -> false;
+        };
     }
 
     private void headlessTick(ServerLevel sl) {
@@ -161,18 +202,22 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
         // resolve current selected track from group.selectedTargetId
         RadarTrack selected = resolveSelectedTrack(group.selectedTargetId);
-        if (selected != null && !isVsShipStillLoaded(sl, selected)) {
-            selectedWasAuto = false;
-
-            applySelectedTarget(sl, data, group, null, false);
-            selected = null;
+        if (selected != null && isSelectedTrackStale(sl, selected)) {
+            if (targeting.autoTarget()) {
+                dropOrReselectAuto(sl, data, group);
+            } else {
+                applySelectedTarget(sl, data, group, null, false);
+            }
+            return;
         }
 
-        // If selection id exists but track isn't present anymore, clear it and stop.
+        // If a selected track disappeared, immediately try the next valid candidate while auto-targeting is enabled.
         if (group.selectedTargetId != null && selected == null) {
-            selectedWasAuto = false;
-
-            applySelectedTarget(sl, data, group, null, false);
+            if (targeting.autoTarget()) {
+                dropOrReselectAuto(sl, data, group);
+            } else {
+                applySelectedTarget(sl, data, group, null, false);
+            }
             return;
         }
 
@@ -180,8 +225,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
 
             if (selectedWasAuto && !cfg.test(selected.trackCategory())) {
-                selectedWasAuto = false;
-                applySelectedTarget(sl, data, group, null, false);
+                if (cfg.autoTarget()) {
+                    dropOrReselectAuto(sl, data, group);
+                } else {
+                    applySelectedTarget(sl, data, group, null, false);
+                }
                 return;
             }
 
@@ -210,9 +258,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
         TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
         boolean requireLos = cfg.lineOfSight();
+        List<AutoPitchControllerBlockEntity> weaponEndpoints = getTargetConstrainedWeaponEndpoints(sl);
 
-        // Only auto-selections should be affected by cannon engagement checks
-        if (selectedWasAuto && !anyCannonCanEngage(sl, selected, requireLos)) {
+        // Only auto-selections should be affected by cannon engagement checks when usable cannons exist.
+        if (selectedWasAuto && !weaponEndpoints.isEmpty() && !anyCannonCanEngage(sl, selected, requireLos)) {
             dropOrReselectAuto(sl, data, group);
             return;
         }
@@ -346,6 +395,21 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             if (pitch.canEngageTrack(track, requireLos)) return true;
         }
         return false;
+    }
+
+    private List<AutoPitchControllerBlockEntity> getTargetConstrainedWeaponEndpoints(ServerLevel sl) {
+        List<AutoPitchControllerBlockEntity> endpoints = getWeaponEndpointsCached(sl);
+        if (endpoints.isEmpty()) {
+            return List.of();
+        }
+
+        List<AutoPitchControllerBlockEntity> constrained = new ArrayList<>();
+        for (AutoPitchControllerBlockEntity pitch : endpoints) {
+            if (pitch.canConstrainAutoTargeting()) {
+                constrained.add(pitch);
+            }
+        }
+        return constrained;
     }
 
 
@@ -564,6 +628,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
 
         candidates.sort(Comparator.comparingDouble(t -> distSqFromFilterer(t.position())));
 
+        List<AutoPitchControllerBlockEntity> weaponEndpoints = getTargetConstrainedWeaponEndpoints(sl);
+        if (weaponEndpoints.isEmpty()) {
+            return candidates.isEmpty() ? null : candidates.get(0);
+        }
+
         // per-cannon gating (range + angle + safezone segment + LOS if enabled)
         for (RadarTrack t : candidates) {
             if (anyCannonCanEngage(sl, t, requireLos)) {
@@ -615,6 +684,26 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         nbt.put(NBT_INVENTORY, inventory.serializeNBT(registries));
         saveSlotNbt(nbt);
         nbt.putLong("LastKnownPos", lastKnownPos.asLong());
+        if (level instanceof ServerLevel serverLevel) {
+            if (Mods.SABLE.isLoaded()) {
+                SableLinkPersistence.writeControllerSnapshot(serverLevel, worldPosition, nbt);
+            } else {
+                CreateSchematicLinkPersistence.writeControllerSnapshot(serverLevel, worldPosition, nbt);
+            }
+        }
+    }
+
+    @Override
+    public void writeSafe(CompoundTag nbt, HolderLookup.Provider registries) {
+        super.saveAdditional(nbt, registries);
+        nbt.put(NBT_INVENTORY, inventory.serializeNBT(registries));
+        saveSlotNbt(nbt);
+
+        if (pendingCreateSchematicSnapshot != null) {
+            CreateSchematicLinkPersistence.putControllerSnapshot(nbt, pendingCreateSchematicSnapshot);
+        } else if (level instanceof ServerLevel serverLevel) {
+            CreateSchematicLinkPersistence.writeControllerSnapshot(serverLevel, worldPosition, nbt);
+        }
     }
 
     @Override
@@ -633,10 +722,28 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             loadLegacySlotTags(nbt);
         }
 
-        if (nbt.contains("LastKnownPos", Tag.TAG_LONG)) {
+        if (Mods.SABLE.isLoaded() && SableLinkPersistence.isPlacingSchematic()) {
+            lastKnownPos = worldPosition;
+        } else if (nbt.contains("LastKnownPos", Tag.TAG_LONG)) {
             lastKnownPos = BlockPos.of(nbt.getLong("LastKnownPos"));
         } else {
             lastKnownPos = worldPosition;
+        }
+
+        pendingCreateSchematicSnapshot = null;
+        boolean sableSnapshot = Mods.SABLE.isLoaded() && SableLinkPersistence.isPlacingSchematic();
+        CompoundTag snapshot = sableSnapshot
+                ? SableLinkPersistence.readControllerSnapshot(nbt)
+                : CreateSchematicLinkPersistence.readControllerSnapshot(nbt);
+        if (snapshot != null && level instanceof ServerLevel serverLevel && NetworkData.get(serverLevel).getGroup(serverLevel.dimension(), worldPosition) == null) {
+            if (sableSnapshot) {
+                SableLinkPersistence.restoreControllerSnapshot(serverLevel, snapshot);
+            } else {
+                CreateSchematicLinkPersistence.restoreControllerSnapshot(serverLevel, worldPosition, snapshot);
+            }
+            lastKnownPos = worldPosition;
+        } else if (snapshot != null && !sableSnapshot) {
+            pendingCreateSchematicSnapshot = snapshot;
         }
 
         for (int i = 0; i < inventory.getSlots(); i++) {
@@ -650,6 +757,16 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         saveAdditional(tag, registries);
         return tag;
     }
+
+    @Override
+    public void transform(BlockEntity blockEntity, StructureTransform transform) {
+        if (pendingCreateSchematicSnapshot == null) return;
+        CompoundTag tag = new CompoundTag();
+        CreateSchematicLinkPersistence.putControllerSnapshot(tag, pendingCreateSchematicSnapshot);
+        CreateSchematicLinkPersistence.transformControllerSnapshot(tag, transform);
+        pendingCreateSchematicSnapshot = CreateSchematicLinkPersistence.readControllerSnapshot(tag);
+    }
+
     @Nullable
     @Override
     public ClientboundBlockEntityDataPacket getUpdatePacket() {

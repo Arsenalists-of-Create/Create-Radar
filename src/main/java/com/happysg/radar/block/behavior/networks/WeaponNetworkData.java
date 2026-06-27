@@ -15,6 +15,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.function.Function;
 
 public class WeaponNetworkData extends SavedData {
 
@@ -255,6 +256,10 @@ public class WeaponNetworkData extends SavedData {
         return mount == null ? null : getGroup(dim, mount);
     }
 
+    public boolean hasDataLink(ResourceKey<Level> dim, BlockPos dataLinkPos) {
+        return dataLinkToMount.containsKey(key(dim, dataLinkPos));
+    }
+
     // -------------------------
     // Mutation helpers
     // -------------------------
@@ -297,6 +302,42 @@ public class WeaponNetworkData extends SavedData {
 
         group.dataLinks.add(dataLinkPos);
         dataLinkToMount.put(key(dim, dataLinkPos), mountKey);
+        setDirty();
+    }
+
+    public CompoundTag writeSchematicSnapshot(Group group, Function<BlockPos, CompoundTag> encoder) {
+        CompoundTag tag = new CompoundTag();
+        tag.put("MountPos", encoder.apply(group.key.mountPos()));
+        if (group.yawPos != null) tag.put("YawPos", encoder.apply(group.yawPos));
+        if (group.pitchPos != null) tag.put("PitchPos", encoder.apply(group.pitchPos));
+        if (group.firingPos != null) tag.put("FiringPos", encoder.apply(group.firingPos));
+        if (group.targetingTag != null) tag.put("TargetingTag", group.targetingTag.copy());
+
+        ListTag links = new ListTag();
+        for (BlockPos dataLink : group.dataLinks) {
+            links.add(encoder.apply(dataLink));
+        }
+        tag.put("DataLinks", links);
+        return tag;
+    }
+
+    public void restoreSchematicSnapshot(ServerLevel level, CompoundTag tag, Function<CompoundTag, BlockPos> decoder) {
+        ResourceKey<Level> dim = level.dimension();
+        BlockPos mountPos = decoder.apply(tag.getCompound("MountPos"));
+        Group group = getOrCreateGroup(dim, mountPos);
+
+        BlockPos yaw = tag.contains("YawPos", Tag.TAG_COMPOUND) ? decoder.apply(tag.getCompound("YawPos")) : null;
+        BlockPos pitch = tag.contains("PitchPos", Tag.TAG_COMPOUND) ? decoder.apply(tag.getCompound("PitchPos")) : null;
+        BlockPos firing = tag.contains("FiringPos", Tag.TAG_COMPOUND) ? decoder.apply(tag.getCompound("FiringPos")) : null;
+        tryMergeIntoGroup(group, yaw, pitch, firing);
+        if (tag.contains("TargetingTag", Tag.TAG_COMPOUND)) {
+            group.targetingTag = tag.getCompound("TargetingTag").copy();
+        }
+
+        ListTag links = tag.getList("DataLinks", Tag.TAG_COMPOUND);
+        for (int i = 0; i < links.size(); i++) {
+            addDataLinkToGroup(group, decoder.apply(links.getCompound(i)));
+        }
         setDirty();
     }
 
@@ -434,6 +475,55 @@ public class WeaponNetworkData extends SavedData {
         // fix the index
         controllerToMount.remove(oldKey);
         controllerToMount.put(newKey, mountKey);
+
+        setDirty();
+        return true;
+    }
+
+    public boolean updateDataLinkPosition(ResourceKey<Level> dim, BlockPos oldPos, BlockPos newPos) {
+        if (oldPos.equals(newPos)) return true;
+
+        String oldKey = key(dim, oldPos);
+        String newKey = key(dim, newPos);
+        String mountKey = dataLinkToMount.remove(oldKey);
+        if (mountKey == null) return false;
+
+        Group group = groupsByMount.get(mountKey);
+        if (group == null || !group.dataLinks.remove(oldPos)) {
+            dataLinkToMount.put(oldKey, mountKey);
+            return false;
+        }
+
+        group.dataLinks.add(newPos);
+        dataLinkToMount.put(newKey, mountKey);
+        setDirty();
+        return true;
+    }
+
+    public boolean updateMountPosition(ResourceKey<Level> dim, BlockPos oldPos, BlockPos newPos) {
+        if (oldPos.equals(newPos)) return true;
+
+        String oldKey = key(dim, oldPos);
+        String newKey = key(dim, newPos);
+        if (groupsByMount.containsKey(newKey)) return false;
+
+        Group oldGroup = groupsByMount.remove(oldKey);
+        if (oldGroup == null) return false;
+
+        Group newGroup = new Group(new MountKey(dim, newPos));
+        newGroup.yawPos = oldGroup.yawPos;
+        newGroup.pitchPos = oldGroup.pitchPos;
+        newGroup.firingPos = oldGroup.firingPos;
+        newGroup.targetingTag = oldGroup.targetingTag;
+        newGroup.dataLinks.addAll(oldGroup.dataLinks);
+        groupsByMount.put(newKey, newGroup);
+
+        if (newGroup.yawPos != null) controllerToMount.put(key(dim, newGroup.yawPos), newKey);
+        if (newGroup.pitchPos != null) controllerToMount.put(key(dim, newGroup.pitchPos), newKey);
+        if (newGroup.firingPos != null) controllerToMount.put(key(dim, newGroup.firingPos), newKey);
+        for (BlockPos dataLink : newGroup.dataLinks) {
+            dataLinkToMount.put(key(dim, dataLink), newKey);
+        }
 
         setDirty();
         return true;

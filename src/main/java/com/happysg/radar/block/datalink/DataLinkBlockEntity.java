@@ -1,6 +1,12 @@
 package com.happysg.radar.block.datalink;
 
+import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableLinkPersistence;
 import com.happysg.radar.registry.AllDataBehaviors;
+import com.simibubi.create.api.contraption.transformable.TransformableBlockEntity;
+import com.simibubi.create.content.contraptions.StructureTransform;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import dev.ryanhcode.sable.companion.SableCompanion;
@@ -14,6 +20,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.joml.Vector3d;
 
@@ -21,7 +28,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.UUID;
 
-public class DataLinkBlockEntity extends SmartBlockEntity {
+public class DataLinkBlockEntity extends SmartBlockEntity implements TransformableBlockEntity {
 
     protected BlockPos targetOffset = BlockPos.ZERO;
     @Nullable
@@ -33,6 +40,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
 
     private CompoundTag sourceConfig;
     boolean ledState = false;
+    private BlockPos lastKnownPos = BlockPos.ZERO;
 
     private BlockPos linkedMonitorPos;
 
@@ -48,7 +56,29 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
     @Override
     public void tick() {
         super.tick();
+        repairSavedDataPosition();
         updateGatheredData();
+    }
+
+    private void repairSavedDataPosition() {
+        if (!(level instanceof ServerLevel serverLevel) || level.getGameTime() % 40 != 0 || lastKnownPos.equals(worldPosition))
+            return;
+
+        NetworkData networkData = NetworkData.get(serverLevel);
+        WeaponNetworkData weaponData = WeaponNetworkData.get(serverLevel);
+        if (networkData.getFiltererForDataLink(serverLevel.dimension(), worldPosition) != null
+                || weaponData.hasDataLink(serverLevel.dimension(), worldPosition)) {
+            lastKnownPos = worldPosition;
+            setChanged();
+            return;
+        }
+
+        boolean radarUpdated = networkData.updateDataLinkPosition(serverLevel.dimension(), lastKnownPos, worldPosition);
+        boolean weaponUpdated = weaponData.updateDataLinkPosition(serverLevel.dimension(), lastKnownPos, worldPosition);
+        if (radarUpdated || weaponUpdated) {
+            lastKnownPos = worldPosition;
+            setChanged();
+        }
     }
 
     public void updateGatheredData() {
@@ -95,6 +125,13 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         if (clientPacket && activeTarget != null)
             tag.putString("TargetType", activeTarget.id.toString());
         tag.putBoolean("LedState", ledState);
+        tag.putLong("LastKnownPos", lastKnownPos.asLong());
+    }
+
+    @Override
+    public void writeSafe(CompoundTag tag, HolderLookup.Provider registries) {
+        super.writeSafe(tag, registries);
+        writeGatheredData(tag);
     }
 
     private void writeGatheredData(CompoundTag tag) {
@@ -117,6 +154,13 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
 
         targetOffset = NbtUtils.readBlockPos(tag, "TargetOffset").orElse(BlockPos.ZERO);
         ledState = tag.getBoolean("LedState");
+        if (Mods.SABLE.isLoaded() && SableLinkPersistence.isPlacingSchematic()) {
+            lastKnownPos = worldPosition;
+        } else if (tag.contains("LastKnownPos", Tag.TAG_LONG)) {
+            lastKnownPos = BlockPos.of(tag.getLong("LastKnownPos"));
+        } else {
+            lastKnownPos = worldPosition;
+        }
 
         linkedShipId = tag.hasUUID("LinkedShipId") ? tag.getUUID("LinkedShipId") : null;
 
@@ -144,6 +188,13 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         }
     }
 
+    @Override
+    public void transform(BlockEntity blockEntity, StructureTransform transform) {
+        targetOffset = transform.applyWithoutOffset(targetOffset);
+        targetOffsetShip = transform.applyWithoutOffset(targetOffsetShip);
+        notifyUpdate();
+    }
+
 
 
     public void target(BlockPos targetPosition) {
@@ -155,7 +206,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity {
         var ship = SableCompanion.INSTANCE.getContaining(sl, worldPosition);
         var targetShip = SableCompanion.INSTANCE.getContaining(sl, targetPosition);
 
-        if (ship != null && targetShip != null && ship.getUniqueId() == targetShip.getUniqueId()) {
+        if (ship != null && targetShip != null && ship.getUniqueId().equals(targetShip.getUniqueId())) {
             linkedShipId = ship.getUniqueId();
 
             BlockPos selfShipPos   = toShipBlockPos(ship, worldPosition);

@@ -37,5 +37,5 @@ submit a pull request on our [GitHub repository](https://github.com/Arsenalists-
 ## License
 
 Create Radar is released under a custom source-available license.
-See [LICENSE](LICENSE).  
+See [LICENSE](LICENSE).
 Enjoy playing with Create Radars!

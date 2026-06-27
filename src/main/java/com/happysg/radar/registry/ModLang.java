@@ -67,6 +67,7 @@ public class ModLang {
 
         REGISTRATE.addRawLang(CreateRadar.MODID + ".radar.dish_count", "Dish Count: %s");
         REGISTRATE.addRawLang(CreateRadar.MODID + ".radar.range", "Range: %s");
+        REGISTRATE.addRawLang(CreateRadar.MODID + ".radar.sky_radar_too_low", "Sky Radar requires Y %s or higher");
 
         REGISTRATE.addRawLang(CreateRadar.MODID + ".item.safe_zone_designator.set", "Monitor Set");
         REGISTRATE.addRawLang(CreateRadar.MODID + ".guided_fuze.linked_monitor", "Linked Monitor: %s");

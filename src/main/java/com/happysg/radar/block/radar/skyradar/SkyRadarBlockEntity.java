@@ -6,7 +6,9 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.behavior.SkyRadarScanningBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlocks;
 import com.simibubi.create.AllSoundEvents;
@@ -48,6 +50,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     private SkyRadarContraptionEntity movedContraption;
     private boolean hasOwnedTarget;
     private float targetPitchDeg = SkyRadarContraptionEntity.PITCH_DEGREES;
+    private boolean autoDisassembledForAltitude;
 
     public SkyRadarBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -72,6 +75,10 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
                 ponderYawDeg = wrap360(ponderYawDeg + ponderYawPerTick);
                 ponderYawTicksRemaining--;
             }
+        }
+
+        if (!level.isClientSide) {
+            updateAltitudeAssemblyState();
         }
 
         if (!level.isClientSide && running) {
@@ -105,6 +112,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     public void remove() {
         if (level != null && !level.isClientSide) {
             disassemble();
+            clearSublevelConnector();
         }
         super.remove();
     }
@@ -119,7 +127,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         scanningBehavior.setFov(RadarConfig.server().skyRadarFOV.get());
         scanningBehavior.setTrackExpiration(100);
         scanningBehavior.setAngle(getGlobalAngle());
-        scanningBehavior.setRunning(running && pos.y >= SkyRadarScanningBehavior.MIN_OPERATING_Y);
+        scanningBehavior.setRunning(running && isAtOperatingAltitude(pos));
     }
 
     @Override
@@ -140,7 +148,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
 
     @Override
     public boolean isRunning() {
-        return running && PhysicsHandler.getWorldVec(this).y >= SkyRadarScanningBehavior.MIN_OPERATING_Y;
+        return running && isAtOperatingAltitude();
     }
     public void setPonderVisualState() {
         this.yawDeg++;
@@ -157,21 +165,43 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
 
 
     public void assemble() {
+        tryAssemble();
+    }
+
+    private boolean tryAssemble() {
         if (level == null || level.isClientSide || !(level.getBlockState(getBlockPos()).getBlock() instanceof SkyRadarBlock)) {
-            return;
+            return false;
         }
+
+        if (!isAtOperatingAltitude()) {
+            updateScanningBehavior();
+            notifyUpdate();
+            return false;
+        }
+
+        clearSublevelConnector();
 
         SkyRadarContraption contraption = createContraption();
         if (contraption == null) {
-            return;
+            return false;
         }
 
+        autoDisassembledForAltitude = false;
         updateContraptionData(contraption);
         notifyUpdate();
+        return true;
     }
 
     public void disassemble() {
+        disassemble(false);
+    }
+
+    private void disassemble(boolean causedByAltitude) {
+        autoDisassembledForAltitude = causedByAltitude;
+
         if (level == null || (!running && movedContraption == null)) {
+            notifyUpdate();
+            setChanged();
             return;
         }
 
@@ -184,9 +214,45 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         dishCount = 0;
         creative = false;
         receiverFacing = Direction.NORTH;
+        refreshSublevelConnector();
         updateScanningBehavior();
         notifyUpdate();
         setChanged();
+    }
+
+    private void placeSublevelConnector() {
+        if (level == null || level.isClientSide || !Mods.SABLE.isLoaded()) {
+            return;
+        }
+        if (!SableUtils.isBlockInShipyard(level, getBlockPos())) {
+            return;
+        }
+
+        BlockPos connectorPos = getSublevelConnectorPos();
+        if (level.getBlockState(connectorPos).isAir()) {
+            level.setBlock(connectorPos, ModBlocks.SKY_RADAR_SUBLEVEL_CONNECTOR.getDefaultState(), 3);
+        }
+    }
+
+    public void refreshSublevelConnector() {
+        if (!running && movedContraption == null) {
+            placeSublevelConnector();
+        }
+    }
+
+    private void clearSublevelConnector() {
+        if (level == null || level.isClientSide) {
+            return;
+        }
+
+        BlockPos connectorPos = getSublevelConnectorPos();
+        if (ModBlocks.SKY_RADAR_SUBLEVEL_CONNECTOR.has(level.getBlockState(connectorPos))) {
+            level.removeBlock(connectorPos, false);
+        }
+    }
+
+    private BlockPos getSublevelConnectorPos() {
+        return getBlockPos().above();
     }
 
     private SkyRadarContraption createContraption() {
@@ -249,6 +315,32 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
             notifyUpdate();
             setChanged();
         }
+    }
+
+    private void updateAltitudeAssemblyState() {
+        if (level == null || level.isClientSide || level.getGameTime() % 5 != 0) {
+            return;
+        }
+
+        if (running && !isAtOperatingAltitude()) {
+            disassemble(true);
+            return;
+        }
+
+        if (!running && autoDisassembledForAltitude && isAtOperatingAltitude()) {
+            tryAssemble();
+            return;
+        }
+
+        refreshSublevelConnector();
+    }
+
+    private boolean isAtOperatingAltitude() {
+        return isAtOperatingAltitude(PhysicsHandler.getWorldVec(this));
+    }
+
+    private static boolean isAtOperatingAltitude(Vec3 pos) {
+        return pos.y >= SkyRadarScanningBehavior.getMinimumOperatingY();
     }
 
     private void clearOwnedTarget() {
@@ -350,6 +442,10 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
         super.addToGoggleTooltip(tooltip, isPlayerSneaking);
         tooltip.add(Component.literal(""));
+        if (!isAtOperatingAltitude()) {
+            tooltip.add(Component.translatable(CreateRadar.MODID + ".radar.sky_radar_too_low",
+                    SkyRadarScanningBehavior.getMinimumOperatingY()));
+        }
         tooltip.add(Component.translatable(CreateRadar.MODID + ".radar.dish_count", dishCount));
         tooltip.add(Component.translatable(CreateRadar.MODID + ".radar.range", getRange()));
         return true;
@@ -400,6 +496,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         running = compound.getBoolean("Running");
         dishCount = compound.getInt("DishCount");
         creative = compound.getBoolean("Creative");
+        autoDisassembledForAltitude = compound.getBoolean("AutoDisassembledForAltitude");
         hasOwnedTarget = compound.getBoolean("HasOwnedTarget");
         if (compound.contains("TargetPitchDeg", Tag.TAG_FLOAT)) {
             targetPitchDeg = compound.getFloat("TargetPitchDeg");
@@ -417,6 +514,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         compound.putBoolean("Running", running);
         compound.putInt("DishCount", dishCount);
         compound.putBoolean("Creative", creative);
+        compound.putBoolean("AutoDisassembledForAltitude", autoDisassembledForAltitude);
         compound.putBoolean("HasOwnedTarget", hasOwnedTarget);
         compound.putFloat("TargetPitchDeg", targetPitchDeg);
         compound.putInt("ReceiverFacing", receiverFacing.get3DDataValue());

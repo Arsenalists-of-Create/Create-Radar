@@ -182,7 +182,7 @@ public class PonderScenes {
         scene.rotateCameraY(180);
         scene.title("sky_radar_ponder", "Using the sky radar");
         scene.configureBasePlate(0, 0, 15);
-        
+        scene.scaleSceneView(0.5f);
         scene.world().showSection(util.select().layer(0), Direction.DOWN);
         scene.idle(20);
         scene.world().showSection(util.select().layer(1), Direction.DOWN);
@@ -244,20 +244,20 @@ public class PonderScenes {
         scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, datalink, new AABB(new BlockPos(10,2,3)).contract(0,0 , 0.5f), 50);
         scene.world().showSection(datalink, Direction.NORTH);
 
-        scene.idle(60);
-        scene.overlay().showText(60)
+        scene.idle(90);
+        scene.overlay().showText(80)
                 .text("The Sky Radar must be above a specific altitude to function properly. By default, this value is y = 96")
                 .pointAt(datalink.getCenter())
                 .attachKeyFrame()
                 .placeNearTarget();
-        scene.idle(70);
+        scene.idle(90);
         scene.special().createBirb(new Vec3(5,1,5), ParrotPose.DancePose::new);
-        scene.overlay().showText(60)
+        scene.overlay().showText(80)
                 .text("Unlike the normal radar, The sky radar can not detect targets below its horizon")
                 .pointAt(new Vec3(5,1,5))
                 .attachKeyFrame()
                 .placeNearTarget();
-        scene.idle(70);
+        scene.idle(90);
         ElementLink<EntityElement> targetMob = scene.world().createEntity(level -> {
             Parrot parrrot = new Parrot(EntityType.PARROT, level);
 
@@ -265,8 +265,8 @@ public class PonderScenes {
             parrrot.setYRot(180.0f);
             parrrot.setYHeadRot(180.0f);
 
-            parrrot.setNoAi(true);          // It stays where you place it
-            parrrot.setInvulnerable(true);  // Prevents accidental removal
+            parrrot.setNoAi(true);
+            parrrot.setInvulnerable(true);
             return parrrot;
         });
         //scene.special().createBirb(new Vec3(1,4,5), ParrotPose.FlappyPose::new);

@@ -1,6 +1,8 @@
 package com.happysg.radar.block.controller.firing;
 
 import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableLinkPersistence;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
@@ -77,6 +79,11 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
 
                 ResourceKey<Level> dim = serverLevel.dimension();
                 WeaponNetworkData data = WeaponNetworkData.get(serverLevel);
+                if (data.getGroupForController(dim, worldPosition) != null) {
+                    lastKnownPos = worldPosition;
+                    setChanged();
+                    return;
+                }
                 boolean updated = data.updateWeaponEndpointPosition(dim, lastKnownPos, worldPosition);
 
                 // only commit the new position if the network accepted it
@@ -196,7 +203,9 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
             }
         }
 
-        if (tag.contains("LastKnownPos", Tag.TAG_LONG)) {
+        if (Mods.SABLE.isLoaded() && SableLinkPersistence.isPlacingSchematic()) {
+            lastKnownPos = worldPosition;
+        } else if (tag.contains("LastKnownPos", Tag.TAG_LONG)) {
             lastKnownPos = BlockPos.of(tag.getLong("LastKnownPos"));
         } else {
             lastKnownPos = worldPosition;
