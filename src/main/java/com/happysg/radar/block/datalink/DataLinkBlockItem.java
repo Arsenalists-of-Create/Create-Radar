@@ -2,7 +2,7 @@ package com.happysg.radar.block.datalink;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.NetworkData;
-import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.firing.FireControllerBlock;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
@@ -173,8 +173,8 @@ public class DataLinkBlockItem extends BlockItem {
             return InteractionResult.FAIL;
         }
 
-        WeaponNetworkData weaponData = WeaponNetworkData.get(serverLevel);
-        BlockPos existingMount = weaponData.getMountForController(serverLevel.dimension(), use.clickedPos());
+        WeaponNetworkRuntime weaponRuntime = WeaponNetworkRuntime.get(serverLevel);
+        BlockPos existingMount = weaponRuntime.getMountForController(use.clickedPos());
         if (existingMount != null) {
             sendError(use.player(), DATA_LINK_CONTROLLER_ALREADY_LINKED);
             clearLinkTag(use.stack());
@@ -189,9 +189,8 @@ public class DataLinkBlockItem extends BlockItem {
             return InteractionResult.FAIL;
         }
 
-        WeaponNetworkData.Group group = weaponData.getOrCreateGroup(serverLevel.dimension(), mountPos);
-        ControllerPositions controllerPositions = controllerType.positions(use.clickedPos());
-        if (!weaponData.canMergeIntoGroup(group, controllerPositions.yaw(), controllerPositions.pitch(), controllerPositions.fire())) {
+        DataLinkBlockEntity.WeaponEndpointType endpointType = controllerType.endpointType();
+        if (!weaponRuntime.canAttachEndpoint(endpointType, use.clickedPos(), mountPos)) {
             sendError(use.player(), DATA_LINK_DUPLICATE_CONTROLLER_TYPE);
             clearLinkTag(use.stack());
             return InteractionResult.FAIL;
@@ -205,16 +204,14 @@ public class DataLinkBlockItem extends BlockItem {
 
         setLinkStyle(use.level(), placedPos, DataLinkBlock.LinkStyle.CONTROLLER);
 
-        boolean merged = weaponData.tryMergeIntoGroup(group, controllerPositions.yaw(), controllerPositions.pitch(), controllerPositions.fire());
-        if (!merged) {
+        if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink) {
+            dataLink.target(mountPos);
+            dataLink.setWeaponEndpointType(endpointType);
+            weaponRuntime.register(dataLink);
+        } else {
             sendError(use.player(), DATA_LINK_COMMIT_FAILED);
             clearLinkTag(use.stack());
             return InteractionResult.SUCCESS;
-        }
-
-        weaponData.addDataLinkToGroup(group, placedPos);
-        if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink) {
-            dataLink.target(use.clickedPos());
         }
         sendSuccess(use.player());
         clearLinkTag(use.stack());
@@ -279,6 +276,7 @@ public class DataLinkBlockItem extends BlockItem {
         filterData.addDataLinkToGroup(group, placedPos, use.clickedPos());
         if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink) {
             dataLink.target(use.clickedPos());
+            dataLink.setFiltererPosition(filtererPos);
         }
 
         sendSuccess(use.player());
@@ -383,8 +381,6 @@ public class DataLinkBlockItem extends BlockItem {
         }
     }
 
-    private record ControllerPositions(@Nullable BlockPos yaw, @Nullable BlockPos pitch, @Nullable BlockPos fire) {}
-
     private enum ControllerType {
         YAW,
         PITCH,
@@ -398,11 +394,11 @@ public class DataLinkBlockItem extends BlockItem {
             return null;
         }
 
-        ControllerPositions positions(BlockPos pos) {
+        DataLinkBlockEntity.WeaponEndpointType endpointType() {
             return switch (this) {
-                case YAW -> new ControllerPositions(pos, null, null);
-                case PITCH -> new ControllerPositions(null, pos, null);
-                case FIRING -> new ControllerPositions(null, null, pos);
+                case YAW -> DataLinkBlockEntity.WeaponEndpointType.YAW;
+                case PITCH -> DataLinkBlockEntity.WeaponEndpointType.PITCH;
+                case FIRING -> DataLinkBlockEntity.WeaponEndpointType.FIRING;
             };
         }
     }
@@ -463,8 +459,7 @@ public class DataLinkBlockItem extends BlockItem {
                 return FilterCommit.denied(DATA_LINK_ONLY_PITCH_ALLOWED);
             }
 
-            WeaponNetworkData weaponData = WeaponNetworkData.get(serverLevel);
-            BlockPos weaponMountPos = weaponData.getMountForController(serverLevel.dimension(), use.clickedPos());
+            BlockPos weaponMountPos = WeaponNetworkRuntime.get(serverLevel).getMountForController(use.clickedPos());
             if (weaponMountPos == null) {
                 return FilterCommit.denied(DATA_LINK_CONTROLLER_NO_WEAPON_GROUP);
             }

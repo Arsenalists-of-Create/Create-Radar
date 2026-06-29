@@ -1,7 +1,8 @@
 package com.happysg.radar.block.datalink;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
-import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
+import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableLinkPersistence;
 import com.happysg.radar.registry.AllDataBehaviors;
@@ -29,6 +30,12 @@ import java.util.List;
 import java.util.UUID;
 
 public class DataLinkBlockEntity extends SmartBlockEntity implements TransformableBlockEntity {
+    public enum WeaponEndpointType {
+        NONE,
+        YAW,
+        PITCH,
+        FIRING
+    }
 
     protected BlockPos targetOffset = BlockPos.ZERO;
     @Nullable
@@ -41,6 +48,13 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     private CompoundTag sourceConfig;
     boolean ledState = false;
     private BlockPos lastKnownPos = BlockPos.ZERO;
+    private WeaponEndpointType weaponEndpointType = WeaponEndpointType.NONE;
+    @Nullable
+    private BlockPos targetWorldPosFallback = null;
+    @Nullable
+    private BlockPos filtererOffset = null;
+    @Nullable
+    private BlockPos filtererWorldPosFallback = null;
 
     private BlockPos linkedMonitorPos;
 
@@ -57,6 +71,8 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     public void tick() {
         super.tick();
         repairSavedDataPosition();
+        refreshWeaponRuntime();
+        restoreWeaponFilterLinkFallback();
         updateGatheredData();
     }
 
@@ -65,17 +81,14 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
             return;
 
         NetworkData networkData = NetworkData.get(serverLevel);
-        WeaponNetworkData weaponData = WeaponNetworkData.get(serverLevel);
-        if (networkData.getFiltererForDataLink(serverLevel.dimension(), worldPosition) != null
-                || weaponData.hasDataLink(serverLevel.dimension(), worldPosition)) {
+        if (networkData.getFiltererForDataLink(serverLevel.dimension(), worldPosition) != null) {
             lastKnownPos = worldPosition;
             setChanged();
             return;
         }
 
         boolean radarUpdated = networkData.updateDataLinkPosition(serverLevel.dimension(), lastKnownPos, worldPosition);
-        boolean weaponUpdated = weaponData.updateDataLinkPosition(serverLevel.dimension(), lastKnownPos, worldPosition);
-        if (radarUpdated || weaponUpdated) {
+        if (radarUpdated) {
             lastKnownPos = worldPosition;
             setChanged();
         }
@@ -126,6 +139,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
             tag.putString("TargetType", activeTarget.id.toString());
         tag.putBoolean("LedState", ledState);
         tag.putLong("LastKnownPos", lastKnownPos.asLong());
+        tag.putString("WeaponEndpointType", weaponEndpointType.name());
     }
 
     @Override
@@ -136,24 +150,43 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
 
     private void writeGatheredData(CompoundTag tag) {
         tag.put("TargetOffset", NbtUtils.writeBlockPos(targetOffset));
+        tag.put("TargetPos", NbtUtils.writeBlockPos(getTargetPosition()));
 
         if (linkedShipId != null)
             tag.putUUID("LinkedShipId", linkedShipId);
         tag.put("TargetOffsetShip", NbtUtils.writeBlockPos(targetOffsetShip));
+        if (filtererOffset != null) {
+            tag.put("FiltererOffset", NbtUtils.writeBlockPos(filtererOffset));
+        }
+        if (filtererWorldPosFallback != null) {
+            tag.put("FiltererPos", NbtUtils.writeBlockPos(filtererWorldPosFallback));
+        }
 
         if (activeSource != null) {
             CompoundTag data = sourceConfig.copy();
             data.putString("Id", activeSource.id.toString());
             tag.put("Source", data);
         }
+        tag.putString("WeaponEndpointType", weaponEndpointType.name());
     }
 
     @Override
     protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
 
-        targetOffset = NbtUtils.readBlockPos(tag, "TargetOffset").orElse(BlockPos.ZERO);
+        targetWorldPosFallback = NbtUtils.readBlockPos(tag, "TargetPos").orElse(null);
+        targetOffset = NbtUtils.readBlockPos(tag, "TargetOffset")
+                .orElseGet(() -> targetWorldPosFallback == null ? BlockPos.ZERO : targetWorldPosFallback.subtract(worldPosition));
         ledState = tag.getBoolean("LedState");
+        if (tag.contains("WeaponEndpointType", Tag.TAG_STRING)) {
+            try {
+                weaponEndpointType = WeaponEndpointType.valueOf(tag.getString("WeaponEndpointType"));
+            } catch (IllegalArgumentException ignored) {
+                weaponEndpointType = WeaponEndpointType.NONE;
+            }
+        } else {
+            weaponEndpointType = WeaponEndpointType.NONE;
+        }
         if (Mods.SABLE.isLoaded() && SableLinkPersistence.isPlacingSchematic()) {
             lastKnownPos = worldPosition;
         } else if (tag.contains("LastKnownPos", Tag.TAG_LONG)) {
@@ -165,6 +198,8 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         linkedShipId = tag.hasUUID("LinkedShipId") ? tag.getUUID("LinkedShipId") : null;
 
         targetOffsetShip = NbtUtils.readBlockPos(tag, "TargetOffsetShip").orElse(BlockPos.ZERO);
+        filtererOffset = NbtUtils.readBlockPos(tag, "FiltererOffset").orElse(null);
+        filtererWorldPosFallback = NbtUtils.readBlockPos(tag, "FiltererPos").orElse(null);
 
         if (clientPacket && tag.contains("TargetType", Tag.TAG_STRING)) {
             activeTarget = AllDataBehaviors.getTarget(ResourceLocation.parse(tag.getString("TargetType")));
@@ -192,7 +227,11 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     public void transform(BlockEntity blockEntity, StructureTransform transform) {
         targetOffset = transform.applyWithoutOffset(targetOffset);
         targetOffsetShip = transform.applyWithoutOffset(targetOffsetShip);
+        if (filtererOffset != null) {
+            filtererOffset = transform.applyWithoutOffset(filtererOffset);
+        }
         notifyUpdate();
+        refreshWeaponRuntime();
     }
 
 
@@ -200,6 +239,8 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     public void target(BlockPos targetPosition) {
         if (!(level instanceof ServerLevel sl)) {
             this.targetOffset = targetPosition.subtract(worldPosition);
+            this.targetWorldPosFallback = targetPosition.immutable();
+            refreshWeaponRuntime();
             return;
         }
 
@@ -215,14 +256,92 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
             targetOffsetShip = targetShipPos.subtract(selfShipPos);
 
             targetOffset = targetPosition.subtract(worldPosition);
+            targetWorldPosFallback = targetPosition.immutable();
             setChanged();
+            refreshWeaponRuntime();
             return;
         }
 
         linkedShipId = null;
         targetOffsetShip = BlockPos.ZERO;
         this.targetOffset = targetPosition.subtract(worldPosition);
+        this.targetWorldPosFallback = targetPosition.immutable();
         setChanged();
+        refreshWeaponRuntime();
+    }
+
+    public WeaponEndpointType getWeaponEndpointType() {
+        return weaponEndpointType;
+    }
+
+    public void setWeaponEndpointType(WeaponEndpointType weaponEndpointType) {
+        this.weaponEndpointType = weaponEndpointType == null ? WeaponEndpointType.NONE : weaponEndpointType;
+        setChanged();
+        refreshWeaponRuntime();
+    }
+
+    public void setFiltererPosition(BlockPos filtererPos) {
+        filtererOffset = filtererPos.subtract(worldPosition);
+        filtererWorldPosFallback = filtererPos.immutable();
+        setChanged();
+    }
+
+    private void refreshWeaponRuntime() {
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel).register(this);
+        }
+    }
+
+    private void restoreWeaponFilterLinkFallback() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!getBlockState().hasProperty(DataLinkBlock.LINK_STYLE)
+                || getBlockState().getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR) {
+            return;
+        }
+        BlockPos filtererPos = resolveFiltererPosition();
+        if (filtererPos == null) {
+            return;
+        }
+
+        NetworkData data = NetworkData.get(serverLevel);
+        BlockPos existingFilterer = data.getFiltererForDataLink(serverLevel.dimension(), worldPosition);
+        if (existingFilterer != null) {
+            return;
+        }
+
+        BlockPos endpointPos = getTargetPosition();
+        BlockPos mountPos = WeaponNetworkRuntime.get(serverLevel).getMountForController(endpointPos);
+        if (mountPos == null) {
+            return;
+        }
+
+        NetworkData.Group group = data.getOrCreateGroup(serverLevel.dimension(), filtererPos);
+        if (!data.canAttachWeaponEndpoint(group, endpointPos, mountPos)) {
+            return;
+        }
+
+        data.attachWeaponEndpoint(group, endpointPos, mountPos);
+        data.addDataLinkToGroup(group, worldPosition, endpointPos);
+    }
+
+    @Nullable
+    private BlockPos resolveFiltererPosition() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+        if (filtererOffset != null) {
+            BlockPos relativeFilterer = worldPosition.offset(filtererOffset);
+            if (serverLevel.getBlockEntity(relativeFilterer) instanceof NetworkFiltererBlockEntity) {
+                return relativeFilterer;
+            }
+        }
+        if (filtererWorldPosFallback != null
+                && serverLevel.getBlockEntity(filtererWorldPosFallback) instanceof NetworkFiltererBlockEntity) {
+            return filtererWorldPosFallback;
+        }
+        return null;
     }
 
     public BlockPos getSourcePosition() {
@@ -256,7 +375,11 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
 
     public BlockPos getTargetPosition() {
         if (!(level instanceof ServerLevel sl) || linkedShipId == null) {
-            return worldPosition.offset(targetOffset);
+            BlockPos relativeTarget = worldPosition.offset(targetOffset);
+            if (targetWorldPosFallback != null && shouldUseWorldTargetFallback(relativeTarget)) {
+                return targetWorldPosFallback;
+            }
+            return relativeTarget;
         }
 
         var ship = SableCompanion.INSTANCE.getContaining(sl, worldPosition);
@@ -271,6 +394,21 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         return toWorldBlockPos(ship, targetShipPos);
     }
 
+    private boolean shouldUseWorldTargetFallback(BlockPos relativeTarget) {
+        if (!(level instanceof ServerLevel serverLevel) || targetWorldPosFallback == null || targetWorldPosFallback.equals(relativeTarget)) {
+            return false;
+        }
+        if (!serverLevel.hasChunkAt(relativeTarget)) {
+            return true;
+        }
+        if (getBlockState().hasProperty(DataLinkBlock.LINK_STYLE)
+                && getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER) {
+            return serverLevel.getBlockEntity(relativeTarget) == null && serverLevel.getBlockEntity(targetWorldPosFallback) != null;
+        }
+        return AllDataBehaviors.targetOf(serverLevel, relativeTarget) == null
+                && AllDataBehaviors.targetOf(serverLevel, targetWorldPosFallback) != null;
+    }
+
     private static BlockPos toShipBlockPos(SubLevelAccess ship, BlockPos worldPos) {
         Vector3d v = ship.logicalPose().transformPositionInverse(
                 new Vector3d(worldPos.getX() + 0.5, worldPos.getY() + 0.5, worldPos.getZ() + 0.5));
@@ -282,4 +420,11 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
                 new Vector3d(shipPos.getX() + 0.5, shipPos.getY() + 0.5, shipPos.getZ() + 0.5));
         return BlockPos.containing(v.x(), v.y(), v.z());
     }
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        refreshWeaponRuntime();
+    }
+
 }

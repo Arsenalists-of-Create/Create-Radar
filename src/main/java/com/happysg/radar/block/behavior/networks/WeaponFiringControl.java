@@ -86,7 +86,7 @@ public class WeaponFiringControl {
     public AutoPitchControllerBlockEntity pitchController;
     public AutoYawControllerBlockEntity yawController;
     public FireControllerBlockEntity fireController;
-    public WeaponNetworkData.WeaponGroupView view;
+    public WeaponNetworkRuntime.WeaponGroupView view;
     public final Level level;
     private RadarTrack activetrack;
     private Entity targetEntity;
@@ -102,17 +102,7 @@ public class WeaponFiringControl {
     private Double cachedSablePitchDeg;
     private Double cachedSableYawDeg;
     private static final int SABLE_SOLVE_INTERVAL = 3;
-    private static final double SABLE_AIM_CHANGE_THRESHOLD = 0.3;
-    private static final int VIS_REFRESH_TICKS = 3;
-    private static final int MAX_POINTS_PER_REFRESH = 10;
-    private static final double ENTITY_INFLATE = 0.0F;
-    private static final double FACE_EPS = 0.01;
     private final Map<Integer, VisCache> visCache;
-    private static final int REACQUIRE_EVERY_TICKS = 10;
-    private static final int MAX_NEW_PROBES_PER_REFRESH = 3;
-    private static final double FRAC_EPS = 1.0E-9;
-    private static final int LOS_SELECTION_TTL_TICKS = 10;
-    private static final int LOS_PREFIRE_TTL_TICKS = 1;
     double maxSimDistanceBlocks;
     private static final double NEW_SOLVER_MIN_CONFIDENCE = 0.05;
     private static final int TARGETING_DEBUG_LOG_INTERVAL_TICKS = 20;
@@ -637,7 +627,12 @@ public class WeaponFiringControl {
 
     public void refreshControllers() {
         if (this.level instanceof ServerLevel serverLevel) {
-            this.view = WeaponNetworkData.get(serverLevel).getWeaponGroupViewFromEndpoint(this.level.dimension(), this.pitchController.getBlockPos());
+            this.view = WeaponNetworkRuntime.get(serverLevel).getWeaponGroupViewFromEndpoint(this.pitchController.getBlockPos());
+            if (this.view == null) {
+                this.yawController = null;
+                this.fireController = null;
+                return;
+            }
             if (this.view.yawPos() != null && this.level.getBlockEntity(this.view.yawPos()) instanceof AutoYawControllerBlockEntity autoyaw) {
                 this.yawController = autoyaw;
             } else {
@@ -813,13 +808,14 @@ public class WeaponFiringControl {
 
                                     boolean lag = !motion.looseAim();
 
-                                    WeaponNetworkData wnd = WeaponNetworkData.get(serverLevel);
-                                    WeaponNetworkData.Group grp = wnd != null && this.pitchController != null ? wnd.getGroupForController(serverLevel.dimension(), this.pitchController.getBlockPos()) : null;
-                                    if (grp != null && !grp.dataLinks.isEmpty()) {
+                                    WeaponNetworkRuntime.WeaponGroupView grp = this.pitchController != null
+                                            ? WeaponNetworkRuntime.get(serverLevel).getWeaponGroupViewFromEndpoint(this.pitchController.getBlockPos())
+                                            : null;
+                                    if (grp != null && !grp.dataLinks().isEmpty()) {
                                         Vec3 cannonOrigin = this.getCannonRayStart();
                                         double best = (double)0.0F;
 
-                                        for(BlockPos dlPos : grp.dataLinks) {
+                                        for(BlockPos dlPos : grp.dataLinks()) {
                                             BlockEntity be = serverLevel.getBlockEntity(dlPos);
                                             if (be instanceof DataLinkBlockEntity dl) {
                                                 BlockPos srcPos = dl.getSourcePosition();
@@ -845,7 +841,6 @@ public class WeaponFiringControl {
                                     CannonLead.LeadSolution lead = null;
                                     TargetingResult targetingResult = null;
                                     boolean forceLegacyLead = (Boolean)RadarConfig.server().forceLegacyCannonLeadSolver.get();
-                                    boolean isBigCannon = CannonUtil.isBigCannon(cannon);
                                     boolean useNewSolver = !forceLegacyLead && (Boolean)RadarConfig.server().useNewTargetingComputer.get() && !CannonUtil.isLaserCannon(cannon);
                                     if (useNewSolver) {
                                         targetingResult = this.pollCompletedAsyncTargetingResult(serverLevel, cannon, targetMotionId, solvePos);
@@ -862,7 +857,7 @@ public class WeaponFiringControl {
 
                                     boolean newSolverOk = targetingResult != null && targetingResult.valid() && targetingResult.hasShot() && targetingResult.confidence() >= motion.minConfidence();
                                     boolean allowLegacyFallback = forceLegacyLead || (Boolean)RadarConfig.server().allowLegacyCannonLeadFallback.get();
-                                    if (!newSolverOk && allowLegacyFallback && !isBigCannon && !CannonUtil.isLaserCannon(cannon) && dist > noLeadDist) {
+                                    if (!newSolverOk && allowLegacyFallback && !CannonUtil.isLaserCannon(cannon) && dist > noLeadDist) {
                                         lead = CannonLead.solveLeadPerTickConstantVelocity(this.cannonMount, cannon, serverLevel, shooterVel, solvePos, targetVel, (Integer)RadarConfig.server().leadFiringDelay.get() + trackingLeadTicks, this.maxSimDistanceBlocks);
                                     }
 
@@ -993,7 +988,7 @@ public class WeaponFiringControl {
         this.stopFireCannon();
     }
 
-    public void setTarget(Vec3 target, TargetingConfig config, RadarTrack track, WeaponNetworkData.WeaponGroupView view) {
+    public void setTarget(Vec3 target, TargetingConfig config, RadarTrack track, WeaponNetworkRuntime.WeaponGroupView view) {
         LOGGER.debug("setTarget() -> new target={} config={} atTick={}", new Object[]{target, config, this.level != null ? this.level.getGameTime() : -1L});
         if (target == null) {
             this.target = null;
@@ -1024,7 +1019,7 @@ public class WeaponFiringControl {
         }
     }
 
-    public void setBinoTarget(@Nullable BlockPos binoTarget, TargetingConfig config, WeaponNetworkData.WeaponGroupView view, boolean reset) {
+    public void setBinoTarget(@Nullable BlockPos binoTarget, TargetingConfig config, WeaponNetworkRuntime.WeaponGroupView view, boolean reset) {
         this.view = view;
         this.targetingConfig = config;
         this.activetrack = null;

@@ -2,7 +2,7 @@ package com.happysg.radar.registry;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
-import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
@@ -214,22 +214,22 @@ public class  ModCommands {
         AutoPitchControllerBlockEntity pitch = be instanceof AutoPitchControllerBlockEntity pitchController ? pitchController : null;
         AutoYawControllerBlockEntity yaw = be instanceof AutoYawControllerBlockEntity yawController ? yawController : null;
 
-        WeaponNetworkData data = WeaponNetworkData.get(level);
-        WeaponNetworkData.Group group = null;
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(level);
+        WeaponNetworkRuntime.WeaponGroupView group = null;
         if (mount != null) {
-            group = data.getGroup(level.dimension(), mount.getBlockPos());
+            group = runtime.getWeaponGroupView(mount.getBlockPos());
         } else if (pitch != null || yaw != null || be instanceof FireControllerBlockEntity) {
-            group = data.getGroupForController(level.dimension(), pos);
+            group = runtime.getWeaponGroupViewFromEndpoint(pos);
         }
 
         if (group != null) {
-            if (mount == null && level.getBlockEntity(group.key.mountPos()) instanceof CannonMountBlockEntity linkedMount) {
+            if (mount == null && level.getBlockEntity(group.mountPos()) instanceof CannonMountBlockEntity linkedMount) {
                 mount = linkedMount;
             }
-            if (pitch == null && group.pitchPos != null && level.getBlockEntity(group.pitchPos) instanceof AutoPitchControllerBlockEntity linkedPitch) {
+            if (pitch == null && group.pitchPos() != null && level.getBlockEntity(group.pitchPos()) instanceof AutoPitchControllerBlockEntity linkedPitch) {
                 pitch = linkedPitch;
             }
-            if (yaw == null && group.yawPos != null && level.getBlockEntity(group.yawPos) instanceof AutoYawControllerBlockEntity linkedYaw) {
+            if (yaw == null && group.yawPos() != null && level.getBlockEntity(group.yawPos()) instanceof AutoYawControllerBlockEntity linkedYaw) {
                 yaw = linkedYaw;
             }
         }
@@ -395,9 +395,9 @@ public class  ModCommands {
 
     private static int dumpLinks(CommandSourceStack source) {
         ServerLevel level = source.getLevel();
-        WeaponNetworkData data = WeaponNetworkData.get(level);
+        var groups = WeaponNetworkRuntime.get(level).getGroups();
 
-        if (data.getGroups().isEmpty()) {
+        if (groups.isEmpty()) {
             source.sendSuccess(
                     () -> Component.literal("No mount link groups found."),
                     false
@@ -410,26 +410,24 @@ public class  ModCommands {
                 false
         );
 
-        for (WeaponNetworkData.Group group : data.getGroups().values()) {
-            WeaponNetworkData.MountKey key = group.key;
-
+        for (WeaponNetworkRuntime.WeaponGroupView group : groups) {
             source.sendSuccess(
                     () -> Component.literal(String.format(
                             "Mount: %s @ %s",
-                            key.dim().location(),
-                            posStr(key.mountPos())
+                            level.dimension().location(),
+                            posStr(group.mountPos())
                     )),
                     false
             );
 
             source.sendSuccess(() ->
-                    Component.literal("  Yaw:    " + optPos(group.yawPos)), false);
+                    Component.literal("  Yaw:    " + optPos(group.yawPos())), false);
             source.sendSuccess(() ->
-                    Component.literal("  Pitch:  " + optPos(group.pitchPos)), false);
+                    Component.literal("  Pitch:  " + optPos(group.pitchPos())), false);
             source.sendSuccess(() ->
-                    Component.literal("  Firing: " + optPos(group.firingPos)), false);
+                    Component.literal("  Firing: " + optPos(group.firingPos())), false);
 
-            if (group.dataLinks.isEmpty()) {
+            if (group.dataLinks().isEmpty()) {
                 source.sendSuccess(
                         () -> Component.literal("  DataLinks: <none>"),
                         false
@@ -439,7 +437,7 @@ public class  ModCommands {
                         () -> Component.literal("  DataLinks:"),
                         false
                 );
-                for (BlockPos p : group.dataLinks) {
+                for (BlockPos p : group.dataLinks()) {
                     source.sendSuccess(
                             () -> Component.literal("    - " + posStr(p)),
                             false
@@ -524,7 +522,7 @@ public class  ModCommands {
         ServerLevel level = source.getLevel();
 
         var n = NetworkData.get(level).validateAllKnownPositions(level, true);
-        var w = WeaponNetworkData.get(level).validateAllKnownPositions(level, true);
+        var weaponGroups = WeaponNetworkRuntime.get(level).getGroups().size();
 
         source.sendSuccess(() -> Component.literal(
                 "Network scrub complete. " +
@@ -532,9 +530,7 @@ public class  ModCommands {
                         ", endpointsRemoved=" + n.endpointsRemoved() +
                         ", mountsRemoved=" + n.mountsRemoved() +
                         ", dataLinksRemoved=" + n.dataLinksRemoved() +
-                        " | WeaponNetworkData: groupsRemoved=" + w.groupsRemoved() +
-                        ", controllersCleared=" + w.controllersCleared() +
-                        ", dataLinksRemoved=" + w.dataLinksRemoved()
+                        " | WeaponNetworkRuntime: loadedGroups=" + weaponGroups
         ), true);
 
         return 1;

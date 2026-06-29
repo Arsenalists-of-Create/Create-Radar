@@ -63,6 +63,9 @@ public class MonitorViewStore {
             entry.remove("centerX");
             entry.remove("centerZ");
             entry.remove("halfSpan");
+            entry.remove("rotationDeg");
+            entry.remove("lockedToSublevel");
+            entry.remove("lockedSublevelId");
             if (entry.size() == 0)
                 views.remove(key);
         } else {
@@ -138,10 +141,22 @@ public class MonitorViewStore {
         if (!view.has("centerX") || !view.has("centerZ") || !view.has("halfSpan"))
             return Optional.empty();
 
+        UUID lockedSublevelId = null;
+        if (view.has("lockedSublevelId")) {
+            try {
+                lockedSublevelId = UUID.fromString(view.get("lockedSublevelId").getAsString());
+            } catch (IllegalArgumentException ignored) {
+                lockedSublevelId = null;
+            }
+        }
+
         return Optional.of(new MonitorProjection.View(
                 view.get("centerX").getAsDouble(),
                 view.get("centerZ").getAsDouble(),
-                Math.max(1f, view.get("halfSpan").getAsFloat())
+                Math.max(1f, view.get("halfSpan").getAsFloat()),
+                view.has("rotationDeg") ? view.get("rotationDeg").getAsFloat() : 0f,
+                view.has("lockedToSublevel") && view.get("lockedToSublevel").getAsBoolean(),
+                lockedSublevelId
         ));
     }
 
@@ -149,6 +164,13 @@ public class MonitorViewStore {
         entry.addProperty("centerX", view.centerX());
         entry.addProperty("centerZ", view.centerZ());
         entry.addProperty("halfSpan", view.halfSpan());
+        entry.addProperty("rotationDeg", view.rotationDeg());
+        entry.addProperty("lockedToSublevel", view.lockedToSublevel());
+        if (view.lockedSublevelId() != null) {
+            entry.addProperty("lockedSublevelId", view.lockedSublevelId().toString());
+        } else {
+            entry.remove("lockedSublevelId");
+        }
     }
 
     private static JsonObject load() {

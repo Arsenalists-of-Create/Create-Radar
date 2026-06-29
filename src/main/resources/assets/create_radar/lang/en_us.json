@@ -185,5 +185,15 @@
   "item.create_radar.radar_safe_zone_designator": "Radar Safe Zone Designator",
   "item.create_radar.target_filter_item": "Targeting Filter",
   "item.create_radar.target_filter_item.tooltip.summary": "Allows you to enable _Autotargeting_, as well as set the targeting behavior. _Line of Sight_ will work outside of autotargeting. Can be placed in the _Network Controller_",
+  "create_radar.monitor.button.autofit": "Auto Fit",
+  "create_radar.monitor.button.autofit.tooltip": "Return to automatic radar framing",
+
+  "create_radar.monitor.button.center": "Center",
+  "create_radar.monitor.button.center.tooltip": "Center the view on this monitor",
+
+  "create_radar.monitor.button.ship_lock": "Ship Lock",
+  "create_radar.monitor.button.ship_lock.tooltip": "Lock the view to this sublevel",
+
+  "create_radar.monitor.ship_lock_unavailable": "Ship lock is unavailable",
   "itemGroup.create_radar.radar": "Create: Radars"
 }

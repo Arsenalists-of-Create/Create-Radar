@@ -85,6 +85,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             float globalAngle,
             float angularSpeed,
             long angleSnapshotTime,
+            float fovDegrees,
             @Nullable net.minecraft.core.Direction direction,
             boolean renderRelativeToMonitor,
             @Nullable String ownedLockedTargetId,
@@ -208,7 +209,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             previousInfos.put(info.pos(), info);
         }
 
-        OwnedLock ownedLock = findOwnedSkyLock(sl, g);
+        OwnedLock ownedLock = findOwnedLock(sl, g);
         for (NetworkData.RadarEndpoint endpoint : g.getRadarEndpoints()) {
             BlockEntity be = sl.getBlockEntity(endpoint.pos());
             if (!(be instanceof IRadar radar)) {
@@ -227,6 +228,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     radar.getGlobalAngle(),
                     getRadarAngularSpeed(radar),
                     sl.getGameTime(),
+                    radar.getFovDegrees(),
                     radar.getradarDirection(),
                     radar.renderRelativeToMonitor(),
                     ownedLock != null && ownedLock.radarPos().equals(endpoint.pos()) ? ownedLock.targetId() : null,
@@ -246,7 +248,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         return 0f;
     }
 
-    private @Nullable OwnedLock findOwnedSkyLock(ServerLevel sl, NetworkData.Group g) {
+    private @Nullable OwnedLock findOwnedLock(ServerLevel sl, NetworkData.Group g) {
         String selectedId = g.selectedTargetId;
         if (selectedId == null || selectedId.isBlank()) {
             return null;
@@ -255,11 +257,13 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         BlockPos closestRadarPos = null;
         RadarTrack closestTrack = null;
         double closestDistance = Double.MAX_VALUE;
-        boolean closestIsSky = false;
 
         for (NetworkData.RadarEndpoint endpoint : g.getRadarEndpoints()) {
             BlockEntity be = sl.getBlockEntity(endpoint.pos());
             if (!(be instanceof IRadar radar) || !radar.isRunning()) {
+                continue;
+            }
+            if (!isLockCapableRadar(radar.getRadarType())) {
                 continue;
             }
 
@@ -274,15 +278,18 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 closestDistance = distance;
                 closestRadarPos = endpoint.pos();
                 closestTrack = track;
-                closestIsSky = "sky".equals(radar.getRadarType());
             }
         }
 
-        if (!closestIsSky || closestRadarPos == null || closestTrack == null) {
+        if (closestRadarPos == null || closestTrack == null) {
             return null;
         }
 
         return new OwnedLock(closestRadarPos, selectedId, closestTrack.position());
+    }
+
+    private static boolean isLockCapableRadar(String radarType) {
+        return "sky".equals(radarType) || "nonspinning".equals(radarType);
     }
 
     private static @Nullable RadarTrack findTrack(IRadar radar, String selectedId) {
@@ -795,6 +802,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.putFloat("GlobalAngle", info.globalAngle());
             tag.putFloat("AngularSpeed", info.angularSpeed());
             tag.putLong("AngleSnapshotTime", info.angleSnapshotTime());
+            tag.putFloat("FovDegrees", info.fovDegrees());
             if (info.direction() != null) tag.putString("Direction", info.direction().getName());
             tag.putBoolean("RenderRelative", info.renderRelativeToMonitor());
             if (info.ownedLockedTargetId() != null && info.ownedLockedTargetPos() != null) {
@@ -827,6 +835,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     tag.getFloat("GlobalAngle"),
                     tag.getFloat("AngularSpeed"),
                     tag.getLong("AngleSnapshotTime"),
+                    tag.contains("FovDegrees", Tag.TAG_FLOAT) ? tag.getFloat("FovDegrees") : 360.0F,
                     direction,
                     tag.getBoolean("RenderRelative"),
                     tag.contains("OwnedLockedTargetId", Tag.TAG_STRING) ? tag.getString("OwnedLockedTargetId") : null,

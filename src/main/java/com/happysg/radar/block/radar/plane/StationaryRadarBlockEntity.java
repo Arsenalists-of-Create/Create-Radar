@@ -109,6 +109,11 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     }
 
     @Override
+    public float getFovDegrees() {
+        return scanningBehavior != null ? scanningBehavior.getFov() : RadarConfig.server().radarFOV.get();
+    }
+
+    @Override
     public Direction getradarDirection() {
         return getBlockState().getValue(StationaryRadarBlock.FACING);
     }

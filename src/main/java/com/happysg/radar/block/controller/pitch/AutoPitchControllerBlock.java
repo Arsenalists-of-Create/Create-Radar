@@ -1,7 +1,6 @@
 package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
-import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
@@ -56,12 +55,6 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
         if (level instanceof ServerLevel sl && state.getBlock() != newState.getBlock() ) {
             breakAttachedDataLinks(level, pos);
             NetworkData.get(sl).onEndpointRemoved(sl, pos);
-            WeaponNetworkData data = WeaponNetworkData.get(sl);
-            var view = data.getWeaponGroupViewFromEndpoint(sl.dimension(),pos);
-            if(view != null){
-                data.removeController(level.dimension(), pos);
-
-            }
         }
         super.onRemove(state, level, pos, newState, isMoving);
 

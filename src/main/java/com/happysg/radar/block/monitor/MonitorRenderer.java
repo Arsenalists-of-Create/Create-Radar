@@ -57,6 +57,8 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     private static final float ALPHA_BACKGROUND = 0.6f;
     private static final float ALPHA_GRID = 0.5f;
     private static final float ALPHA_SWEEP = 0.8f;
+    private static final int PLANE_SWEEP_CYCLE_TICKS = 20;
+    private static final float PLANE_SWEEP_RADIUS_SCALE = 0.81f;
     private static final Logger LOGGER = LogUtils.getLogger();
     // Track scaling factors
     private static final float TRACK_POSITION_SCALE = 0.75f;
@@ -114,9 +116,14 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         for (MonitorBlockEntity.RadarDisplayInfo radarInfo : blockEntity.getRunningRadarInfos()) {
             MonitorProjection.DisplayPoint radarCenter = projection.project(radarInfo.center());
             float scale = projection.displayScale(radarInfo.range());
-           // renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_FILLER, radarCenter, scale);
-            renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_CIRCLE, radarCenter, scale);
             IRadar liveRadar = resolveLiveRadar(blockEntity, radarInfo);
+            if (isPlaneRadar(liveRadar != null ? liveRadar.getRadarType() : radarInfo.type())) {
+                renderPlaneSweepConeBackground(radarInfo, liveRadar, blockEntity, ms, bufferSource, radarCenter, scale, partialTicks);
+                renderPlaneRadarArc(radarInfo, liveRadar, blockEntity, ms, bufferSource, radarCenter, scale, partialTicks);
+            } else {
+                // renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_FILLER, radarCenter, scale);
+                renderBG(blockEntity, ms, bufferSource, MonitorSprite.RADAR_BG_CIRCLE, radarCenter, scale);
+            }
             renderOwnedLockLine(radarInfo, blockEntity, projection, ms, bufferSource);
             renderSweep(radarInfo, liveRadar, blockEntity, ms, bufferSource, radarCenter, scale, partialTicks);
         }
@@ -482,8 +489,13 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
                             MultiBufferSource bufferSource, MonitorProjection.DisplayPoint center, float scale, float partialTicks) {
         if (!radar.running())
             return;
-        if (isOwnedSkyLock(radar, liveRadar))
+        String radarType = liveRadar != null ? liveRadar.getRadarType() : radar.type();
+        if (isOwnedLock(radar, liveRadar))
             return;
+        if (isPlaneRadar(radarType)) {
+            renderPlaneSweepLine(radar, liveRadar, controller, ms, bufferSource, center, scale, partialTicks);
+            return;
+        }
 
         VertexConsumer buffer = bufferSource.getBuffer(ModRenderTypes.polygonOffset(MonitorSprite.RADAR_SWEEP.getTexture()));
         Matrix4f m = ms.last().pose();
@@ -491,7 +503,6 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
 
         float monitorAngle = 0;
-        String radarType = liveRadar != null ? liveRadar.getRadarType() : radar.type();
         boolean renderRelative = liveRadar != null ? liveRadar.renderRelativeToMonitor() : radar.renderRelativeToMonitor();
         Direction liveDirection = liveRadar != null ? liveRadar.getradarDirection() : radar.direction();
         float globalAngle = getRenderGlobalAngle(radar, liveRadar, partialTicks);
@@ -603,14 +614,14 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         };
     }
 
-    private boolean isOwnedSkyLock(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar) {
+    private boolean isOwnedLock(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar) {
         String radarType = liveRadar != null ? liveRadar.getRadarType() : radar.type();
-        return "sky".equals(radarType) && radar.ownedLockedTargetPos() != null;
+        return isLockCapableRadar(radarType) && radar.ownedLockedTargetPos() != null;
     }
 
     private void renderOwnedLockLine(MonitorBlockEntity.RadarDisplayInfo radar, MonitorBlockEntity monitor,
                                      MonitorProjection projection, PoseStack ms, MultiBufferSource bufferSource) {
-        if (!"sky".equals(radar.type()) || radar.ownedLockedTargetPos() == null) {
+        if (!isLockCapableRadar(radar.type()) || radar.ownedLockedTargetPos() == null) {
             return;
         }
 
@@ -638,6 +649,170 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
                 x2 + nx, z2 + nz,
                 x2 - nx, z2 - nz,
                 x1 - nx, z1 - nz);
+    }
+
+    private void renderPlaneRadarArc(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar, MonitorBlockEntity controller,
+                                     PoseStack ms, MultiBufferSource bufferSource, MonitorProjection.DisplayPoint center,
+                                     float scale, float partialTicks) {
+        int size = controller.getSize();
+        float radius = size * scale * 0.5f * PLANE_SWEEP_RADIUS_SCALE;
+        if (radius <= 0.001f) {
+            return;
+        }
+
+        float centerX = 1f - size / 2f + center.xOffset() * size;
+        float centerZ = 1f - size / 2f + center.zOffset() * size;
+        float baseAngle = getPlaneScreenAngle(radar, liveRadar, controller, partialTicks);
+        float fov = getRadarFov(radar, liveRadar);
+        int segments = Math.max(4, (int)Math.ceil(fov / 8.0f));
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
+        float r = color.getRedAsFloat();
+        float g = color.getGreenAsFloat();
+        float b = color.getBlueAsFloat();
+        VertexConsumer buffer = bufferSource.getBuffer(RenderType.lines());
+        Matrix4f m = ms.last().pose();
+        Matrix3f n = ms.last().normal();
+
+        float previousAngle = baseAngle - fov * 0.5f;
+        float previousX = centerX + angleX(previousAngle) * radius;
+        float previousZ = centerZ + angleZ(previousAngle) * radius;
+        for (int i = 1; i <= segments; i++) {
+            float angle = baseAngle - fov * 0.5f + fov * i / segments;
+            float x = centerX + angleX(angle) * radius;
+            float z = centerZ + angleZ(angle) * radius;
+            renderLine(buffer, m, n, previousX, DEPTH_BACKGROUND, previousZ, x, DEPTH_BACKGROUND, z, r, g, b, ALPHA_BACKGROUND);
+            previousX = x;
+            previousZ = z;
+        }
+    }
+
+    private void renderPlaneSweepConeBackground(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar, MonitorBlockEntity controller,
+                                                PoseStack ms, MultiBufferSource bufferSource, MonitorProjection.DisplayPoint center,
+                                                float scale, float partialTicks) {
+        VertexConsumer buffer = bufferSource.getBuffer(ModRenderTypes.polygonOffset(MonitorSprite.RADAR_SWEEP.getTexture()));
+        Matrix4f m = ms.last().pose();
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
+        float angleRad = getPlaneScreenAngle(radar, liveRadar, controller, partialTicks) * (float)Math.PI / 180.0f;
+        float cos = (float)Math.cos(angleRad);
+        float sin = (float)Math.sin(angleRad);
+        float centerX = 0.5f;
+        float centerY = 0.5f;
+        int size = controller.getSize();
+        MonitorProjection.Quad quad = MonitorProjection.scaledQuad(center, size, scale);
+
+        float u0 = centerX + (0 - centerX) * cos - (0 - centerY) * sin;
+        float v0 = centerY + (0 - centerX) * sin + (0 - centerY) * cos;
+        float u1 = centerX + (1 - centerX) * cos - (0 - centerY) * sin;
+        float v1 = centerY + (1 - centerX) * sin + (0 - centerY) * cos;
+        float u2 = centerX + (1 - centerX) * cos - (1 - centerY) * sin;
+        float v2 = centerY + (1 - centerX) * sin + (1 - centerY) * cos;
+        float u3 = centerX + (0 - centerX) * cos - (1 - centerY) * sin;
+        float v3 = centerY + (0 - centerX) * sin + (1 - centerY) * cos;
+
+        float r = color.getRedAsFloat();
+        float g = color.getGreenAsFloat();
+        float b = color.getBlueAsFloat();
+        addSweepVertex(buffer, m, quad.minX(), DEPTH_BACKGROUND, quad.minZ(), r, g, b, ALPHA_BACKGROUND, u0, v0);
+        addSweepVertex(buffer, m, quad.maxX(), DEPTH_BACKGROUND, quad.minZ(), r, g, b, ALPHA_BACKGROUND, u1, v1);
+        addSweepVertex(buffer, m, quad.maxX(), DEPTH_BACKGROUND, quad.maxZ(), r, g, b, ALPHA_BACKGROUND, u2, v2);
+        addSweepVertex(buffer, m, quad.minX(), DEPTH_BACKGROUND, quad.maxZ(), r, g, b, ALPHA_BACKGROUND, u3, v3);
+    }
+
+    private void renderPlaneSweepLine(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar, MonitorBlockEntity controller,
+                                      PoseStack ms, MultiBufferSource bufferSource, MonitorProjection.DisplayPoint center,
+                                      float scale, float partialTicks) {
+        int size = controller.getSize();
+        float radius = size * scale * 0.5f * PLANE_SWEEP_RADIUS_SCALE;
+        if (radius <= 0.001f) {
+            return;
+        }
+
+        float centerX = 1f - size / 2f + center.xOffset() * size;
+        float centerZ = 1f - size / 2f + center.zOffset() * size;
+        float sweepAngle = getPlaneSweepAngle(radar, liveRadar, controller, partialTicks);
+        float endX = centerX + angleX(sweepAngle) * radius;
+        float endZ = centerZ + angleZ(sweepAngle) * radius;
+        renderSolidLine(ms.last().pose(), bufferSource, centerX, centerZ, endX, endZ,
+                Math.max(0.015f, size * 0.01f), ALPHA_SWEEP, DEPTH_SWEEP);
+    }
+
+    private void renderSolidLine(Matrix4f m, MultiBufferSource bufferSource, float x1, float z1, float x2, float z2,
+                                 float halfWidth, float alpha, float depth) {
+        float dx = x2 - x1;
+        float dz = z2 - z1;
+        float length = Mth.sqrt(dx * dx + dz * dz);
+        if (length <= 0.001f) {
+            return;
+        }
+
+        float nx = -dz / length * halfWidth;
+        float nz = dx / length * halfWidth;
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
+        renderSolidVertices(getSolidBuffer(bufferSource), m, color, alpha, depth,
+                x1 + nx, z1 + nz,
+                x2 + nx, z2 + nz,
+                x2 - nx, z2 - nz,
+                x1 - nx, z1 - nz);
+    }
+
+    private float getPlaneSweepAngle(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar,
+                                     MonitorBlockEntity controller, float partialTicks) {
+        float baseAngle = getPlaneScreenAngle(radar, liveRadar, controller, partialTicks);
+        float fov = getRadarFov(radar, liveRadar);
+        float t = 0f;
+        if (controller.getLevel() != null) {
+            t = ((controller.getLevel().getGameTime() % PLANE_SWEEP_CYCLE_TICKS) + partialTicks) / PLANE_SWEEP_CYCLE_TICKS;
+        }
+        float sweep = t < 0.5f ? t * 2.0f : (1.0f - t) * 2.0f;
+        return baseAngle - fov * 0.5f + fov * sweep;
+    }
+
+    private float getPlaneScreenAngle(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar,
+                                      MonitorBlockEntity controller, float partialTicks) {
+        float globalAngle = getRenderGlobalAngle(radar, liveRadar, partialTicks);
+        boolean renderRelative = liveRadar != null ? liveRadar.renderRelativeToMonitor() : radar.renderRelativeToMonitor();
+        Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
+        if (renderRelative && controller.getShip() != null) {
+            return normalizeDegrees(alignGlobalAngleToMonitor(monitorFacing, globalAngle));
+        }
+
+        ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, Direction.NORTH);
+        return normalizeDegrees(switch (cone) {
+            case NORTH -> globalAngle;
+            case DOWN -> 180 + globalAngle;
+            case LEFT -> 90 + globalAngle;
+            case RIGHT -> 270 + globalAngle;
+            default -> globalAngle;
+        });
+    }
+
+    private float getRadarFov(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar) {
+        float fov = liveRadar != null ? liveRadar.getFovDegrees() : radar.fovDegrees();
+        return Mth.clamp(Float.isFinite(fov) ? fov : 360.0f, 1.0f, 360.0f);
+    }
+
+    private static boolean isPlaneRadar(String radarType) {
+        return "nonspinning".equals(radarType);
+    }
+
+    private static boolean isLockCapableRadar(String radarType) {
+        return "sky".equals(radarType) || isPlaneRadar(radarType);
+    }
+
+    private static float normalizeDegrees(float degrees) {
+        degrees %= 360.0f;
+        if (degrees < 0.0f) {
+            degrees += 360.0f;
+        }
+        return degrees;
+    }
+
+    private static float angleX(float degrees) {
+        return (float)Math.sin(Math.toRadians(degrees));
+    }
+
+    private static float angleZ(float degrees) {
+        return (float)-Math.cos(Math.toRadians(degrees));
     }
 
     private void addSweepVertex(VertexConsumer buffer, Matrix4f matrix,

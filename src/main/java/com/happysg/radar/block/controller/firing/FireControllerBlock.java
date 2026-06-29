@@ -2,12 +2,10 @@ package com.happysg.radar.block.controller.firing;
 
 
 
-import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -53,14 +51,8 @@ public class FireControllerBlock extends Block implements EntityBlock {
     }
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        if (level instanceof ServerLevel sl && state.getBlock() != newState.getBlock() ) {
+        if (!level.isClientSide && state.getBlock() != newState.getBlock() ) {
             breakAttachedDataLinks(level, pos);
-            WeaponNetworkData data = WeaponNetworkData.get(sl);
-            var view = data.getWeaponGroupViewFromEndpoint(sl.dimension(),pos);
-            if(view != null){
-                data.removeController(level.dimension(), pos);
-
-            }
         }
         super.onRemove(state, level, pos, newState, isMoving);
 

@@ -19,6 +19,11 @@ public interface IRadar {
 
     String getRadarType();
     Direction getradarDirection();
+
+    default float getFovDegrees() {
+        return 360.0F;
+    }
+
     //todo better name and/or plan to handle different types of radars
     default boolean renderRelativeToMonitor() {
         return true;

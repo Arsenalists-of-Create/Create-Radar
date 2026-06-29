@@ -723,7 +723,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         }
 
         if (be instanceof AutoPitchControllerBlockEntity) {
-            BlockPos mountPos = WeaponNetworkData.get(level).getMountForController(level.dimension(), pos);
+            BlockPos mountPos = WeaponNetworkRuntime.get(level).getMountForController(pos);
             if (mountPos != null) {
                 return new ContactEndpoint(ContactKind.WEAPON, pos, null, mountPos);
             }

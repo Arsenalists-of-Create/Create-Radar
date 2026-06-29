@@ -1,6 +1,6 @@
 package com.happysg.radar.block.controller.yaw;
 
-import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.config.RadarConfig;
 import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollOptionBehaviour;
 import net.minecraft.core.Direction;
@@ -74,8 +74,7 @@ public class PhysBearingYaw {
             return;
         }
 
-        var data = WeaponNetworkData.get(serverLevel);
-        var cannonPos = data.getMountForController(serverLevel.dimension(), controller.getBlockPos());
+        var cannonPos = WeaponNetworkRuntime.get(serverLevel).getMountForController(controller.getBlockPos());
         if (cannonPos == null) {
             return;
         }

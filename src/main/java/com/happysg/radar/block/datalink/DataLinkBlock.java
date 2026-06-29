@@ -1,7 +1,7 @@
 package com.happysg.radar.block.datalink;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
-import com.happysg.radar.block.behavior.networks.WeaponNetworkData;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.AllShapes;
@@ -98,14 +98,10 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
             Direction supportFace = state.getValue(FACING);
 
             NetworkData.get(serverLevel).removeDataLinkAndCleanup(dim, pos, serverLevel);
-            WeaponNetworkData.get(serverLevel).removeDataLinkAndCleanup(dim, pos);
+            WeaponNetworkRuntime.get(serverLevel).unregister(pos);
 
             if (state.getValue(LINK_STYLE) == LinkStyle.RADAR) {
                 NetworkData.get(serverLevel).onEndpointRemoved(serverLevel, pos.relative(supportFace.getOpposite()));
-            }
-
-            if (state.getValue(LINK_STYLE) == LinkStyle.CONTROLLER) {
-                WeaponNetworkData.get(serverLevel).removeController(dim, pos.relative(supportFace.getOpposite()));
             }
         }
 

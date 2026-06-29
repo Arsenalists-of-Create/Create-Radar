@@ -7,6 +7,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 public class MonitorProjection {
     public static final float FIT_SCALE = 0.75f;
@@ -15,14 +17,21 @@ public class MonitorProjection {
     private final Direction monitorFacing;
     private final Vec3 center;
     private final float halfSpan;
+    private final float rotationDeg;
     private final SubLevelAccess ship;
+    private final boolean lockedToSublevel;
+    private final UUID lockedSublevelId;
 
-    private MonitorProjection(MonitorBlockEntity monitor, Direction monitorFacing, Vec3 center, float halfSpan, SubLevelAccess ship) {
+    private MonitorProjection(MonitorBlockEntity monitor, Direction monitorFacing, Vec3 center, float halfSpan, float rotationDeg,
+                              SubLevelAccess ship, boolean lockedToSublevel, UUID lockedSublevelId) {
         this.monitor = monitor;
         this.monitorFacing = monitorFacing;
         this.center = center;
         this.halfSpan = Math.max(1f, halfSpan);
+        this.rotationDeg = normalizeDegrees(rotationDeg);
         this.ship = ship;
+        this.lockedToSublevel = lockedToSublevel;
+        this.lockedSublevelId = lockedSublevelId;
     }
 
     public static MonitorProjection create(MonitorBlockEntity monitor) {
@@ -33,17 +42,25 @@ public class MonitorProjection {
         List<MonitorBlockEntity.RadarDisplayInfo> radars = monitor.getRunningRadarInfos();
         Direction facing = monitor.getBlockState().getValue(MonitorBlock.FACING);
         boolean renderRelative = radars.stream().anyMatch(MonitorBlockEntity.RadarDisplayInfo::renderRelativeToMonitor);
-        SubLevelAccess ship = Mods.SABLE.isLoaded() && renderRelative ? monitor.getShip() : null;
+        SubLevelAccess monitorShip = Mods.SABLE.isLoaded() && (renderRelative || (view != null && view.lockedToSublevel()))
+                ? monitor.getShip()
+                : null;
+        boolean locked = view != null
+                && view.lockedToSublevel()
+                && monitorShip != null
+                && Objects.equals(monitorShip.getUniqueId(), view.lockedSublevelId());
+        SubLevelAccess ship = (renderRelative || locked) ? monitorShip : null;
 
         if (view != null) {
-            return new MonitorProjection(monitor, facing, new Vec3(view.centerX(), 0, view.centerZ()), view.halfSpan(), ship);
+            return new MonitorProjection(monitor, facing, new Vec3(view.centerX(), 0, view.centerZ()), view.halfSpan(),
+                    view.rotationDeg(), ship, locked, locked ? view.lockedSublevelId() : null);
         }
 
         if (radars.isEmpty()) {
             Vec3 fallback = monitor.getRadarCenterPos();
             if (fallback == null) fallback = Vec3.atCenterOf(monitor.getControllerPos());
             Vec3 center = framePosition(monitor, ship, fallback);
-            return new MonitorProjection(monitor, facing, center, Math.max(1f, monitor.getRange()), ship);
+            return new MonitorProjection(monitor, facing, center, Math.max(1f, monitor.getRange()), 0f, ship, false, null);
         }
 
         double minX = Double.POSITIVE_INFINITY;
@@ -62,7 +79,7 @@ public class MonitorProjection {
 
         Vec3 center = new Vec3((minX + maxX) * 0.5, 0, (minZ + maxZ) * 0.5);
         float halfSpan = (float) Math.max(maxX - minX, maxZ - minZ) * 0.5f;
-        return new MonitorProjection(monitor, facing, center, halfSpan, ship);
+        return new MonitorProjection(monitor, facing, center, halfSpan, 0f, ship, false, null);
     }
 
     public DisplayPoint project(Vec3 worldPos) {
@@ -73,9 +90,9 @@ public class MonitorProjection {
     public DisplayPoint projectFramePosition(double frameX, double frameZ) {
         Vec3 p = new Vec3(frameX, 0, frameZ);
         Vec3 rel = p.subtract(center);
-        float xOff = calculateOffset(rel, true) * FIT_SCALE;
-        float zOff = calculateOffset(rel, false) * FIT_SCALE;
-        return new DisplayPoint(xOff, zOff);
+        DisplayPoint unrotated = new DisplayPoint(calculateOffset(rel, true), calculateOffset(rel, false));
+        DisplayPoint rotated = rotateDisplayPoint(unrotated, rotationDeg);
+        return new DisplayPoint(rotated.xOffset() * FIT_SCALE, rotated.zOffset() * FIT_SCALE);
     }
 
     public float displayScale(float worldRadius) {
@@ -87,12 +104,12 @@ public class MonitorProjection {
     }
 
     public View view() {
-        return new View(center.x, center.z, halfSpan);
+        return new View(center.x, center.z, halfSpan, rotationDeg, lockedToSublevel, lockedSublevelId);
     }
 
     public View viewCenteredOn(Vec3 worldPos, float newHalfSpan) {
         Vec3 frameCenter = framePosition(monitor, ship, worldPos);
-        return new View(frameCenter.x, frameCenter.z, Math.max(1f, newHalfSpan));
+        return new View(frameCenter.x, frameCenter.z, Math.max(1f, newHalfSpan), rotationDeg, lockedToSublevel, lockedSublevelId);
     }
 
     public View zoomAround(DisplayPoint anchor, float newHalfSpan) {
@@ -100,13 +117,17 @@ public class MonitorProjection {
         Vec3 frameAnchor = unproject(anchor);
         Vec3 rel = frameVectorFromDisplay(anchor, clampedHalfSpan);
         Vec3 newCenter = frameAnchor.subtract(rel);
-        return new View(newCenter.x, newCenter.z, clampedHalfSpan);
+        return new View(newCenter.x, newCenter.z, clampedHalfSpan, rotationDeg, lockedToSublevel, lockedSublevelId);
     }
 
     public View panByDisplayDelta(float xOffsetDelta, float zOffsetDelta) {
         Vec3 frameDelta = frameVectorFromDisplay(new DisplayPoint(xOffsetDelta, zOffsetDelta), halfSpan);
         Vec3 newCenter = center.subtract(frameDelta);
-        return new View(newCenter.x, newCenter.z, halfSpan);
+        return new View(newCenter.x, newCenter.z, halfSpan, rotationDeg, lockedToSublevel, lockedSublevelId);
+    }
+
+    public View rotateBy(float degrees) {
+        return new View(center.x, center.z, halfSpan, normalizeDegrees(rotationDeg + degrees), lockedToSublevel, lockedSublevelId);
     }
 
     public DisplayPoint displayPointFromUi(double mouseX, double mouseY, int left, int top, int uiSize) {
@@ -120,8 +141,9 @@ public class MonitorProjection {
     }
 
     private Vec3 frameVectorFromDisplay(DisplayPoint point, float span) {
-        double displayX = point.xOffset() / FIT_SCALE * 2f * span;
-        double displayZ = point.zOffset() / FIT_SCALE * 2f * span;
+        DisplayPoint unrotated = rotateDisplayPoint(point, -rotationDeg);
+        double displayX = unrotated.xOffset() / FIT_SCALE * 2f * span;
+        double displayZ = unrotated.zOffset() / FIT_SCALE * 2f * span;
 
         double relX;
         double relZ;
@@ -135,6 +157,23 @@ public class MonitorProjection {
         }
 
         return new Vec3(relX, 0, relZ);
+    }
+
+    private static DisplayPoint rotateDisplayPoint(DisplayPoint point, float degrees) {
+        double rad = Math.toRadians(degrees);
+        double cos = Math.cos(rad);
+        double sin = Math.sin(rad);
+        float x = (float) (point.xOffset() * cos - point.zOffset() * sin);
+        float z = (float) (point.xOffset() * sin + point.zOffset() * cos);
+        return new DisplayPoint(x, z);
+    }
+
+    private static float normalizeDegrees(float degrees) {
+        degrees %= 360.0f;
+        if (degrees < 0.0f) {
+            degrees += 360.0f;
+        }
+        return degrees;
     }
 
     private float calculateOffset(Vec3 relativePos, boolean isXOffset) {
@@ -176,7 +215,19 @@ public class MonitorProjection {
         }
     }
 
-    public record View(double centerX, double centerZ, float halfSpan) {}
+    public record View(double centerX, double centerZ, float halfSpan, float rotationDeg, boolean lockedToSublevel, UUID lockedSublevelId) {
+        public View(double centerX, double centerZ, float halfSpan) {
+            this(centerX, centerZ, halfSpan, 0f, false, null);
+        }
+
+        public View unlocked() {
+            return new View(centerX, centerZ, halfSpan, rotationDeg, false, null);
+        }
+
+        public View withHalfSpan(float newHalfSpan) {
+            return new View(centerX, centerZ, Math.max(1f, newHalfSpan), rotationDeg, lockedToSublevel, lockedSublevelId);
+        }
+    }
 
     public record Quad(float minX, float minZ, float maxX, float maxZ) {}
 

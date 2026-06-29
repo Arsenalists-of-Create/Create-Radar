@@ -348,4 +348,8 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     public float getAngle() {
         return (float) angle;
     }
+
+    public int getFov() {
+        return fov;
+    }
 }
