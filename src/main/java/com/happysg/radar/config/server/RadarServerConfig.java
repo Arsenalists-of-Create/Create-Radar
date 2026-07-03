@@ -18,6 +18,15 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigFloat controllerPhysbearingMaxSpeed = f(25.0F, 2.0F, 25.0F, "controllerPhysbearingMaxSpeed", "Increases the max Rotational speed of phys bearings controlled by Pitch/Yaw controllers");
     public final ConfigInt binoRaycastRange = i(512, 1, 1000, "binocularRange", "The range at which the binocular can acquire a target");
 
+    public final ConfigGroup sableSilhouetteConfig = group(3, "sableSilhouetteConfig", "Configs for Sable radar monitor silhouettes");
+    public final ConfigInt sableSilhouetteMaxScannedBlocks = i(20000, 1, "sableSilhouetteMaxScannedBlocks", "Maximum loaded Sable sublevel blocks inspected while building one radar silhouette");
+    public final ConfigInt sableSilhouetteMaxCollisionBoxes = i(12000, 1, "sableSilhouetteMaxCollisionBoxes", "Maximum collision boxes stored in one Sable radar silhouette");
+    public final ConfigInt sableSilhouetteRebuildDebounceTicks = i(40, 1, "sableSilhouetteRebuildDebounceTicks", "Delay after Sable sublevel block changes before rebuilding a silhouette");
+    public final ConfigInt sableSilhouetteFailureCooldownTicks = i(200, 1, "sableSilhouetteFailureCooldownTicks", "Cooldown before retrying a failed or too-large Sable silhouette scan");
+    public final ConfigInt sableSilhouetteRefreshTicks = i(1200, 20, "sableSilhouetteRefreshTicks", "Conservative refresh interval for visible Sable silhouettes");
+    public final ConfigBool sableSilhouetteUseFallbackBox = b(true, "sableSilhouetteUseFallbackBox", "Use a simple local bounding-box silhouette when detailed scanning is unavailable");
+    public final ConfigBool sableSilhouetteDebugLogging = b(false, "sableSilhouetteDebugLogging", "Log Sable silhouette builds, failures, and revision changes");
+
     public final ConfigGroup radarStats = group(3, "radarStatsConfig", "Configs for radar bearing and radar stats");
     public final ConfigInt maxRadarRange = i(2048, 1, "maxRadarRange", "Maximum range of a Radar Contraption in blocks");
     public final ConfigInt radarYScanRange = i(32, 1, "radarYScanRange", "Maximum vertical scan range of a radar in blocks");

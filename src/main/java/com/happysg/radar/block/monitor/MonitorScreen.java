@@ -9,9 +9,13 @@ import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableSilhouetteClientCache;
+import com.happysg.radar.compat.sable.SableSilhouetteStatus;
+import com.happysg.radar.compat.sable.SubLevelSilhouette;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.networking.packets.SableSilhouetteRequestPacket;
 
 import com.happysg.radar.utils.screenelements.MonitorButton;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -34,9 +38,13 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.companion.ClientSubLevelAccess;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
+import dev.ryanhcode.sable.companion.math.Pose3dc;
 import java.util.Collection;
 import java.util.UUID;
+import org.joml.Vector3d;
 import org.lwjgl.glfw.GLFW;
 
 /**
@@ -75,6 +83,8 @@ public class MonitorScreen extends Screen {
     private static final int TOOLBAR_BUTTON_WIDTH_PX = 72;
     private static final int TOOLBAR_BUTTON_HEIGHT_PX = 22;
     private static final int TOOLBAR_BUTTON_SPACING_PX = 6;
+    private static final int COMPASS_SIZE_PX = 24;
+    private static final int COMPASS_INSET_PX = 36;
 
     private int toolbarLeft;
     private int toolbarWidth;
@@ -194,7 +204,7 @@ public class MonitorScreen extends Screen {
                     renderPlaneRadarArc(gg, monitor, radarInfo, liveRadar, projection, radarCenter, scale, partialTicks);
                 } else {
                     //renderBG(gg, MonitorSprite.RADAR_BG_FILLER, ALPHA_BACKGROUND, radarCenter, scale);
-                    renderBG(gg, MonitorSprite.RADAR_BG_CIRCLE, ALPHA_BACKGROUND, radarCenter, scale, projection.view().rotationDeg());
+                    renderBG(gg, MonitorSprite.RADAR_BG_CIRCLE, ALPHA_BACKGROUND, radarCenter, scale, projection.rotationDeg());
                 }
                 renderOwnedLockLine(gg, monitor, projection, radarInfo);
                 renderSweep(gg, monitor, radarInfo, liveRadar, projection, radarCenter, scale, partialTicks);
@@ -204,6 +214,7 @@ public class MonitorScreen extends Screen {
             gg.disableScissor();
         }
 
+        renderCompass(gg, projection);
         gg.drawCenteredString(font, Component.translatable(CLICK_HINT_KEY), width / 2, top + uiSize + 6, 0xA0A0A0);
         renderPresetStatus(gg);
 
@@ -215,6 +226,35 @@ public class MonitorScreen extends Screen {
             return;
 
         gg.drawCenteredString(font, presetStatus, width / 2, top + uiSize + 18, 0xD0D0D0);
+    }
+
+    private void renderCompass(GuiGraphics gg, MonitorProjection projection) {
+        int size = scaled(COMPASS_SIZE_PX);
+        int centerX = left + scaled(COMPASS_INSET_PX);
+        int centerY = top + scaled(COMPASS_INSET_PX);
+        MonitorProjection.DisplayPoint north = projection.projectTrueNorthVector();
+        float rotationDeg = (float)Math.toDegrees(Math.atan2(north.xOffset(), -north.zOffset()));
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
+
+        RenderSystem.enableBlend();
+        gg.setColor(color.getRedAsFloat(), color.getGreenAsFloat(), color.getBlueAsFloat(), 0.95f);
+        gg.pose().pushPose();
+        gg.pose().translate(centerX, centerY, 0);
+        gg.pose().mulPose(Axis.ZP.rotationDegrees(rotationDeg));
+        gg.blit(
+                CreateRadar.asResource("textures/gui/monitor_arrow.png"),
+                -size / 2,
+                -size / 2,
+                0,
+                0,
+                size,
+                size,
+                size,
+                size
+        );
+        gg.pose().popPose();
+        gg.setColor(1f, 1f, 1f, 1f);
+        RenderSystem.disableBlend();
     }
 
     private void drawPanelBackground(GuiGraphics gg) {
@@ -372,7 +412,7 @@ public class MonitorScreen extends Screen {
                 frameCenter.x,
                 frameCenter.z,
                 projection.halfSpan(),
-                projection.view().rotationDeg(),
+                0f,
                 true,
                 ship.getUniqueId()
         );
@@ -464,7 +504,7 @@ public class MonitorScreen extends Screen {
             float shipYawDeg = (float) Math.toDegrees(getShipYawRad(monitor.getController().getShip()));
             screenAngle += -(shipYawDeg + 180f);
         }
-        screenAngle = normalizeDegrees(screenAngle - projection.view().rotationDeg());
+        screenAngle = normalizeDegrees(screenAngle - projection.rotationDeg());
 
         int drawSize = Math.max(1, Math.round(uiSize * scale));
         int cx = left + Math.round((0.5f + center.xOffset()) * uiSize);
@@ -538,7 +578,7 @@ public class MonitorScreen extends Screen {
 
         int cx = left + Math.round((0.5f + center.xOffset()) * uiSize);
         int cy = top + Math.round((0.5f + center.zOffset()) * uiSize);
-        float baseAngle = getRotatedPlaneScreenAngle(radar, liveRadar, monitor, projection, partialTicks);
+        float baseAngle = getPlaneScreenAngle(radar, liveRadar, projection, partialTicks);
         float fov = getRadarFov(radar, liveRadar);
         int segments = Math.max(4, (int)Math.ceil(fov / 8.0f));
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
@@ -565,7 +605,7 @@ public class MonitorScreen extends Screen {
                                                 IRadar liveRadar, MonitorProjection projection, MonitorProjection.DisplayPoint center,
         float scale, float partialTicks) {
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
-        float screenAngle = getTextureRotatedPlaneScreenAngle(radar, liveRadar, monitor, projection, partialTicks);
+        float screenAngle = getPlaneScreenAngle(radar, liveRadar, projection, partialTicks);
         int drawSize = Math.max(1, Math.round(uiSize * scale));
         int cx = left + Math.round((0.5f + center.xOffset()) * uiSize);
         int cy = top + Math.round((0.5f + center.zOffset()) * uiSize);
@@ -576,7 +616,7 @@ public class MonitorScreen extends Screen {
         gg.setColor(color.getRedAsFloat(), color.getGreenAsFloat(), color.getBlueAsFloat(), ALPHA_BACKGROUND);
         gg.pose().pushPose();
         gg.pose().translate(cx, cy, 0);
-        gg.pose().mulPose(Axis.ZP.rotationDegrees(-screenAngle));
+        gg.pose().mulPose(Axis.ZP.rotationDegrees(screenAngle));
         gg.pose().translate(-cx, -cy, 0);
         gg.blit(MonitorSprite.RADAR_SWEEP.getTexture(), sx, sy, 0, 0, drawSize, drawSize, drawSize, drawSize);
         gg.pose().popPose();
@@ -594,7 +634,7 @@ public class MonitorScreen extends Screen {
 
         float cx = left + (0.5f + center.xOffset()) * uiSize;
         float cy = top + (0.5f + center.zOffset()) * uiSize;
-        float sweepAngle = getRotatedPlaneSweepAngle(radar, liveRadar, monitor, projection, partialTicks);
+        float sweepAngle = getPlaneSweepAngle(radar, liveRadar, monitor, projection, partialTicks);
         float x2 = cx + angleX(sweepAngle) * radius;
         float y2 = cy + angleY(sweepAngle) * radius;
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
@@ -623,8 +663,8 @@ public class MonitorScreen extends Screen {
     }
 
     private float getPlaneSweepAngle(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar,
-                                     MonitorBlockEntity monitor, float partialTicks) {
-        float baseAngle = getPlaneScreenAngle(radar, liveRadar, monitor, partialTicks);
+                                     MonitorBlockEntity monitor, MonitorProjection projection, float partialTicks) {
+        float baseAngle = getPlaneScreenAngle(radar, liveRadar, projection, partialTicks);
         float fov = getRadarFov(radar, liveRadar);
         float t = 0f;
         if (monitor.getLevel() != null) {
@@ -634,38 +674,10 @@ public class MonitorScreen extends Screen {
         return baseAngle - fov * 0.5f + fov * sweep;
     }
 
-    private float getRotatedPlaneSweepAngle(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar,
-                                            MonitorBlockEntity monitor, MonitorProjection projection, float partialTicks) {
-        return normalizeDegrees(getPlaneSweepAngle(radar, liveRadar, monitor, partialTicks) + projection.view().rotationDeg());
-    }
-
-    private float getRotatedPlaneScreenAngle(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar,
-                                             MonitorBlockEntity monitor, MonitorProjection projection, float partialTicks) {
-        return normalizeDegrees(getPlaneScreenAngle(radar, liveRadar, monitor, partialTicks) + projection.view().rotationDeg());
-    }
-
-    private float getTextureRotatedPlaneScreenAngle(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar,
-                                                    MonitorBlockEntity monitor, MonitorProjection projection, float partialTicks) {
-        return normalizeDegrees(getPlaneScreenAngle(radar, liveRadar, monitor, partialTicks) - projection.view().rotationDeg());
-    }
-
     private float getPlaneScreenAngle(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar,
-                                      MonitorBlockEntity monitor, float partialTicks) {
+                                      MonitorProjection projection, float partialTicks) {
         float globalAngle = getRenderGlobalAngle(radar, liveRadar, partialTicks);
-        boolean renderRelative = liveRadar != null ? liveRadar.renderRelativeToMonitor() : radar.renderRelativeToMonitor();
-        Direction monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
-        if (renderRelative && monitor.getController().getShip() != null) {
-            return normalizeDegrees(alignGlobalAngleToMonitor(monitorFacing, globalAngle));
-        }
-
-        MonitorRenderer.ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, Direction.NORTH);
-        return normalizeDegrees(switch (cone) {
-            case NORTH -> globalAngle;
-            case DOWN -> 180 + globalAngle;
-            case LEFT -> 90 + globalAngle;
-            case RIGHT -> 270 + globalAngle;
-            default -> globalAngle;
-        });
+        return projection.projectWorldAngle(globalAngle);
     }
 
     private float getRadarFov(MonitorBlockEntity.RadarDisplayInfo radar, IRadar liveRadar) {
@@ -823,6 +835,7 @@ public class MonitorScreen extends Screen {
             RenderSystem.enableBlend();
             gg.setColor(c.getRedAsFloat(), c.getGreenAsFloat(), c.getBlueAsFloat(), alpha);
             gg.blit(track.getSprite().getTexture(), sx, sy, 0, 0, spriteSize, spriteSize, spriteSize, spriteSize);
+            renderSableSilhouette(gg, track, monitor, projection, alpha, Minecraft.getInstance().getTimer().getGameTimeDeltaPartialTick(true));
 
             if (track.id().equals(hoveredId)) {
                 gg.setColor(1f, 1f, 0f, alpha);
@@ -850,6 +863,131 @@ public class MonitorScreen extends Screen {
             return 1f;
 
         return Mth.clamp(autofitHalfSpan / projection.halfSpan(), 0.35f, 4f);
+    }
+
+    private void renderSableSilhouette(GuiGraphics gg, RadarTrack track, MonitorBlockEntity monitor,
+                                       MonitorProjection projection, float alpha, float partialTicks) {
+        if (!RadarConfig.client().renderSableSilhouettes.get()
+                || !Mods.SABLE.isLoaded()
+                || track.trackCategory() != TrackCategory.SABLE
+                || track.getSilhouetteId() == null
+                || !SableSilhouetteStatus.drawable(track.getSilhouetteStatus())
+                || monitor.getLevel() == null) {
+            return;
+        }
+
+        Vec3 center = monitor.getRadarCenterPos();
+        if (center != null && center.distanceTo(track.position()) > RadarConfig.client().sableSilhouetteMaxRenderDistance.get()) {
+            return;
+        }
+
+        UUID silhouetteId = track.getSilhouetteId();
+        int revision = track.getSilhouetteRevision();
+        SubLevelSilhouette silhouette = SableSilhouetteClientCache.get(silhouetteId, revision);
+        if (silhouette == null) {
+            long gameTime = monitor.getLevel().getGameTime();
+            if (SableSilhouetteClientCache.shouldRequest(silhouetteId, revision, gameTime)) {
+                SableSilhouetteRequestPacket.send(monitor.getControllerPos(), silhouetteId, revision);
+            }
+            if (RadarConfig.client().sableSilhouetteDebugFallbackRectangle.get()) {
+                renderGuiSilhouetteFallbackRectangle(gg, track, projection, alpha);
+            }
+            return;
+        }
+
+        SubLevelAccess subLevel = getClientSubLevel(silhouetteId);
+        if (subLevel == null) {
+            return;
+        }
+
+        long gameTime = monitor.getLevel().getGameTime();
+        Pose3dc pose = subLevel instanceof ClientSubLevelAccess clientSubLevel
+                ? clientSubLevel.renderPose(partialTicks)
+                : subLevel.logicalPose();
+        SubLevelSilhouette.ProjectionSettings projectionSettings = silhouetteProjectionSettings();
+        SubLevelSilhouette.ProjectedSilhouette projected = SableSilhouetteClientCache.getProjected(
+                silhouetteId,
+                revision,
+                gameTime,
+                projectionSettings,
+                () -> {
+                    Vector3d scratch = new Vector3d();
+                    return silhouette.project(
+                            (localX, localY, localZ, destination) -> {
+                                scratch.set(localX, localY, localZ);
+                                Vector3d transformed = pose.transformPosition(scratch);
+                                destination.set(transformed.x(), transformed.y(), transformed.z());
+                            },
+                            projectionSettings
+                    );
+                }
+        );
+        if (projected == null || projected.isEmpty()) {
+            return;
+        }
+
+        Color color = RadarConfig.client().sableSilhouetteDebugOverlay.get()
+                ? new Color(0x00ffff)
+                : new Color(RadarConfig.client().SableColor.get());
+        int a = Mth.clamp((int) (alpha * 0.85f * 255f), 0, 255);
+        int argb = (a << 24) | (color.getRGB() & 0xFFFFFF);
+        int maxSegments = RadarConfig.client().sableSilhouetteMaxRenderedSegments.get();
+        int rendered = 0;
+        int thickness = Math.max(1, Math.round(uiScale));
+        double projectY = track.position().y;
+
+        RenderSystem.enableBlend();
+        for (SubLevelSilhouette.LineSegment segment : projected.boundarySegments()) {
+            if (rendered++ >= maxSegments) {
+                break;
+            }
+            MonitorProjection.DisplayPoint start = projection.project(new Vec3(segment.start().x(), projectY, segment.start().z()));
+            MonitorProjection.DisplayPoint end = projection.project(new Vec3(segment.end().x(), projectY, segment.end().z()));
+            if (start.outside() && end.outside()) {
+                continue;
+            }
+            float x1 = left + (0.5f + start.xOffset()) * uiSize;
+            float y1 = top + (0.5f + start.zOffset()) * uiSize;
+            float x2 = left + (0.5f + end.xOffset()) * uiSize;
+            float y2 = top + (0.5f + end.zOffset()) * uiSize;
+            drawSolidLine(gg, x1, y1, x2, y2, thickness, argb);
+        }
+        RenderSystem.disableBlend();
+    }
+
+    private SubLevelAccess getClientSubLevel(UUID id) {
+        if (Minecraft.getInstance().level == null) {
+            return null;
+        }
+        SubLevelContainer container = SubLevelContainer.getContainer(Minecraft.getInstance().level);
+        return container == null ? null : container.getSubLevel(id);
+    }
+
+    private SubLevelSilhouette.ProjectionSettings silhouetteProjectionSettings() {
+        return new SubLevelSilhouette.ProjectionSettings(
+                RadarConfig.client().sableSilhouetteCellSize.getF(),
+                384,
+                120_000,
+                RadarConfig.client().sableSilhouetteMaxRenderedSegments.get()
+        );
+    }
+
+    private void renderGuiSilhouetteFallbackRectangle(GuiGraphics gg, RadarTrack track, MonitorProjection projection, float alpha) {
+        MonitorProjection.DisplayPoint point = projection.project(track.position());
+        if (point.outside()) {
+            return;
+        }
+        int px = (int) (left + (0.5f + point.xOffset()) * uiSize);
+        int py = (int) (top + (0.5f + point.zOffset()) * uiSize);
+        int half = Math.max(4, Math.round(10 * uiScale));
+        int a = Mth.clamp((int) (alpha * 255f), 0, 255);
+        int argb = (a << 24) | 0xff00ff;
+        RenderSystem.enableBlend();
+        drawSolidLine(gg, px - half, py - half, px + half, py - half, 1, argb);
+        drawSolidLine(gg, px + half, py - half, px + half, py + half, 1, argb);
+        drawSolidLine(gg, px + half, py + half, px - half, py + half, 1, argb);
+        drawSolidLine(gg, px - half, py + half, px - half, py - half, 1, argb);
+        RenderSystem.disableBlend();
     }
 
     private void renderLabel(GuiGraphics gg, String text, int x, int y, float alpha, float scale) {

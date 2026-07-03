@@ -4,6 +4,8 @@ import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorInputHandler;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableSilhouetteClientCache;
+import com.happysg.radar.compat.sable.SableSilhouetteEvents;
 import com.happysg.radar.compat.computercraft.CCCompatRegister;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.datagen.ModDataGenerators;
@@ -33,6 +35,7 @@ import net.minecraft.world.item.CreativeModeTab;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
@@ -83,6 +86,9 @@ public class CreateRadar {
         NeoForge.EVENT_BUS.addListener(CreateRadar::clientTick);
         NeoForge.EVENT_BUS.addListener(CreateRadar::onLoadWorld);
 
+        if (Mods.SABLE.isLoaded())
+            SableSilhouetteEvents.register();
+
         if (Mods.COMPUTERCRAFT.isLoaded())
             CCCompatRegister.registerPeripherals();
     }
@@ -115,7 +121,12 @@ public class CreateRadar {
     public static void clientInit(FMLClientSetupEvent event) {
         PonderIndex.addPlugin(new RadarPonderPlugin());
         NeoForge.EVENT_BUS.addListener(MonitorInputHandler::monitorPlayerHovering);
+        NeoForge.EVENT_BUS.addListener(CreateRadar::clientDisconnect);
 
+    }
+
+    private static void clientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
+        SableSilhouetteClientCache.clear();
     }
 
     public static void registerCapabilities(RegisterCapabilitiesEvent event) {

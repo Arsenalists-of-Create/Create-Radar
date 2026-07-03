@@ -21,7 +21,7 @@ public interface IRadar {
     Direction getradarDirection();
 
     default float getFovDegrees() {
-        return 360.0F;
+        return 90f;
     }
 
     //todo better name and/or plan to handle different types of radars

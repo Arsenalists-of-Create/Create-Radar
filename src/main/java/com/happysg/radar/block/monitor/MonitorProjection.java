@@ -18,6 +18,7 @@ public class MonitorProjection {
     private final Vec3 center;
     private final float halfSpan;
     private final float rotationDeg;
+    private final float storedRotationDeg;
     private final SubLevelAccess ship;
     private final boolean lockedToSublevel;
     private final UUID lockedSublevelId;
@@ -28,10 +29,11 @@ public class MonitorProjection {
         this.monitorFacing = monitorFacing;
         this.center = center;
         this.halfSpan = Math.max(1f, halfSpan);
-        this.rotationDeg = normalizeDegrees(rotationDeg);
         this.ship = ship;
         this.lockedToSublevel = lockedToSublevel;
         this.lockedSublevelId = lockedSublevelId;
+        this.storedRotationDeg = normalizeDegrees(rotationDeg);
+        this.rotationDeg = normalizeDegrees(lockedToSublevel && ship != null ? shipYawDeg(ship) : this.storedRotationDeg);
     }
 
     public static MonitorProjection create(MonitorBlockEntity monitor) {
@@ -104,12 +106,45 @@ public class MonitorProjection {
     }
 
     public View view() {
-        return new View(center.x, center.z, halfSpan, rotationDeg, lockedToSublevel, lockedSublevelId);
+        return new View(center.x, center.z, halfSpan, storedRotationDeg, lockedToSublevel, lockedSublevelId);
+    }
+
+    public float rotationDeg() {
+        return rotationDeg;
+    }
+
+    public DisplayPoint projectFrameVector(double frameX, double frameZ) {
+        Vec3 rel = new Vec3(frameX, 0, frameZ);
+        DisplayPoint unrotated = new DisplayPoint(calculateOffset(rel, true), calculateOffset(rel, false));
+        return rotateDisplayPoint(unrotated, rotationDeg);
+    }
+
+    public DisplayPoint projectTrueNorthVector() {
+        return projectWorldVector(new Vec3(0, 0, -1));
+    }
+
+    public DisplayPoint projectWorldVector(Vec3 worldVector) {
+        Vec3 frameVector = worldVector;
+        if (ship != null) {
+            org.joml.Vector3d frame = ship.logicalPose().transformNormalInverse(new org.joml.Vector3d(worldVector.x, worldVector.y, worldVector.z));
+            frameVector = new Vec3(frame.x(), frame.y(), frame.z());
+        }
+        return projectFrameVector(frameVector.x, frameVector.z);
+    }
+
+    public float projectWorldAngle(float globalAngleDeg) {
+        MonitorProjection.DisplayPoint point = projectWorldVector(worldVectorFromGlobalAngle(globalAngleDeg));
+        return normalizeDegrees((float)Math.toDegrees(Math.atan2(point.xOffset(), -point.zOffset())));
+    }
+
+    private static Vec3 worldVectorFromGlobalAngle(float globalAngleDeg) {
+        double rad = Math.toRadians(globalAngleDeg);
+        return new Vec3(Math.sin(rad), 0, Math.cos(rad));
     }
 
     public View viewCenteredOn(Vec3 worldPos, float newHalfSpan) {
         Vec3 frameCenter = framePosition(monitor, ship, worldPos);
-        return new View(frameCenter.x, frameCenter.z, Math.max(1f, newHalfSpan), rotationDeg, lockedToSublevel, lockedSublevelId);
+        return new View(frameCenter.x, frameCenter.z, Math.max(1f, newHalfSpan), storedRotationDeg, lockedToSublevel, lockedSublevelId);
     }
 
     public View zoomAround(DisplayPoint anchor, float newHalfSpan) {
@@ -117,17 +152,20 @@ public class MonitorProjection {
         Vec3 frameAnchor = unproject(anchor);
         Vec3 rel = frameVectorFromDisplay(anchor, clampedHalfSpan);
         Vec3 newCenter = frameAnchor.subtract(rel);
-        return new View(newCenter.x, newCenter.z, clampedHalfSpan, rotationDeg, lockedToSublevel, lockedSublevelId);
+        return new View(newCenter.x, newCenter.z, clampedHalfSpan, storedRotationDeg, lockedToSublevel, lockedSublevelId);
     }
 
     public View panByDisplayDelta(float xOffsetDelta, float zOffsetDelta) {
         Vec3 frameDelta = frameVectorFromDisplay(new DisplayPoint(xOffsetDelta, zOffsetDelta), halfSpan);
         Vec3 newCenter = center.subtract(frameDelta);
-        return new View(newCenter.x, newCenter.z, halfSpan, rotationDeg, lockedToSublevel, lockedSublevelId);
+        return new View(newCenter.x, newCenter.z, halfSpan, storedRotationDeg, lockedToSublevel, lockedSublevelId);
     }
 
     public View rotateBy(float degrees) {
-        return new View(center.x, center.z, halfSpan, normalizeDegrees(rotationDeg + degrees), lockedToSublevel, lockedSublevelId);
+        if (lockedToSublevel) {
+            return view();
+        }
+        return new View(center.x, center.z, halfSpan, normalizeDegrees(storedRotationDeg + degrees), lockedToSublevel, lockedSublevelId);
     }
 
     public DisplayPoint displayPointFromUi(double mouseX, double mouseY, int left, int top, int uiSize) {
@@ -174,6 +212,11 @@ public class MonitorProjection {
             degrees += 360.0f;
         }
         return degrees;
+    }
+
+    private static float shipYawDeg(SubLevelAccess ship) {
+        org.joml.Vector3d fwd = ship.logicalPose().transformNormal(new org.joml.Vector3d(0, 0, 1));
+        return normalizeDegrees((float) Math.toDegrees(Math.atan2(fwd.x(), -fwd.z())));
     }
 
     private float calculateOffset(Vec3 relativePos, boolean isXOffset) {

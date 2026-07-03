@@ -12,6 +12,7 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
 import com.happysg.radar.compat.vs2.SableUtils;
@@ -438,6 +439,15 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 if (id == null || id.isBlank()) id = track.id();
                 if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
                 merged.merge(id, track, MonitorBlockEntity::newerTrack);
+            }
+        }
+        if (Mods.SABLE.isLoaded() && level instanceof ServerLevel serverLevel) {
+            for (RadarTrack track : merged.values()) {
+                if (track.trackCategory() == TrackCategory.SABLE) {
+                    SableSilhouetteServerCache.attachMetadata(serverLevel, track);
+                } else {
+                    track.clearSilhouette();
+                }
             }
         }
         cachedTracks = List.copyOf(merged.values());

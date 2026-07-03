@@ -67,6 +67,18 @@ public final class NetworkHandler {
                 IDRecordSyncPacket.STREAM_CODEC,
                 IDRecordSyncPacket::handle
         );
+
+        registrar.playToServer(
+                SableSilhouetteRequestPacket.TYPE,
+                SableSilhouetteRequestPacket.STREAM_CODEC,
+                SableSilhouetteRequestPacket::handle
+        );
+
+        registrar.playToClient(
+                SableSilhouetteSyncPacket.TYPE,
+                SableSilhouetteSyncPacket.STREAM_CODEC,
+                SableSilhouetteSyncPacket::handle
+        );
     }
 
     public static void sendToServer(CustomPacketPayload payload) {

@@ -5,9 +5,12 @@ import com.happysg.radar.config.RadarConfig;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.createmod.catnip.theme.Color;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.UUID;
 
 
 public class RadarTrack {
@@ -18,6 +21,9 @@ public class RadarTrack {
     private final TrackCategory trackCategory;
     private final String entityType;
     private final float entityheight;
+    private UUID silhouetteId;
+    private int silhouetteRevision = -1;
+    private byte silhouetteStatus = 0;
 
     private Vec3 vector;
 
@@ -61,7 +67,7 @@ public class RadarTrack {
 
 
     public static RadarTrack deserializeNBT(CompoundTag tag) {
-        return new RadarTrack(tag.getString("id"),
+        RadarTrack track = new RadarTrack(tag.getString("id"),
                 new Vec3(tag.getDouble("x"), tag.getDouble("y"), tag.getDouble("z")),
                 new Vec3(tag.getDouble("vx"), tag.getDouble("vy"), tag.getDouble("vz")),
                 tag.getLong("scannedTime"),
@@ -70,6 +76,16 @@ public class RadarTrack {
                 tag.getFloat("eh")
 
         );
+        if (tag.contains("SilhouetteId", Tag.TAG_STRING)) {
+            try {
+                track.silhouetteId = UUID.fromString(tag.getString("SilhouetteId"));
+                track.silhouetteRevision = tag.getInt("SilhouetteRevision");
+                track.silhouetteStatus = tag.getByte("SilhouetteStatus");
+            } catch (IllegalArgumentException ignored) {
+                track.clearSilhouette();
+            }
+        }
+        return track;
     }
 
 
@@ -86,6 +102,11 @@ public class RadarTrack {
         tag.putInt("Category", trackCategory.ordinal());
         tag.putString("entityType", entityType);
         tag.putFloat("eh", entityheight );
+        if (silhouetteId != null) {
+            tag.putString("SilhouetteId", silhouetteId.toString());
+            tag.putInt("SilhouetteRevision", silhouetteRevision);
+            tag.putByte("SilhouetteStatus", silhouetteStatus);
+        }
 
         return tag;
     }
@@ -138,6 +159,30 @@ public class RadarTrack {
 
     public String getEntityType() {
         return entityType;
+    }
+
+    public UUID getSilhouetteId() {
+        return silhouetteId;
+    }
+
+    public int getSilhouetteRevision() {
+        return silhouetteRevision;
+    }
+
+    public byte getSilhouetteStatus() {
+        return silhouetteStatus;
+    }
+
+    public void setSilhouette(UUID silhouetteId, int silhouetteRevision, byte silhouetteStatus) {
+        this.silhouetteId = silhouetteId;
+        this.silhouetteRevision = silhouetteRevision;
+        this.silhouetteStatus = silhouetteStatus;
+    }
+
+    public void clearSilhouette() {
+        this.silhouetteId = null;
+        this.silhouetteRevision = -1;
+        this.silhouetteStatus = 0;
     }
 
 
