@@ -51,6 +51,7 @@ public class RadarTrack {
             case ANIMAL -> new Color(RadarConfig.client().friendlyColor.get());
             case HOSTILE -> new Color(RadarConfig.client().hostileColor.get());
             case PROJECTILE -> new Color(RadarConfig.client().projectileColor.get());
+            case MISSILE -> new Color(0x8000ff);
             case ITEM-> new Color(RadarConfig.client().itemcolor.get());
             default -> Color.WHITE;
         };
@@ -60,7 +61,7 @@ public class RadarTrack {
         return switch (trackCategory) {
             case SABLE, CONTRAPTION -> MonitorSprite.CONTRAPTION_HITBOX;
             case PLAYER -> MonitorSprite.PLAYER;
-            case PROJECTILE -> MonitorSprite.PROJECTILE;
+            case PROJECTILE, MISSILE -> MonitorSprite.PROJECTILE;
             default -> MonitorSprite.ENTITY_HITBOX;
         };
     }

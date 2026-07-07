@@ -1,6 +1,7 @@
 package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.mojang.logging.LogUtils;
@@ -66,6 +67,7 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
         MonitorMultiBlockHelper.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
         if (!pState.is(pNewState.getBlock()) && pLevel instanceof ServerLevel sl) {
             NetworkData.get(sl).onEndpointRemoved(sl, pPos);
+            ARADData.get(sl).onEndpointRemoved(sl, pPos);
         }
         super.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
     }
@@ -86,6 +88,9 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
         if (RadarConfig.client().useGuiByDefault.get()) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof MonitorBlockEntity monitor) {
+                if (monitor.getController().isAradLinked()) {
+                    return InteractionResult.sidedSuccess(level.isClientSide);
+                }
                 if (level.isClientSide) {
                     openMonitorScreenClient(monitor);
                 }
@@ -97,6 +102,9 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
         if (player.isShiftKeyDown()) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof MonitorBlockEntity monitor && isGuiHotspot(monitor, hit)) {
+                if (monitor.getController().isAradLinked()) {
+                    return InteractionResult.sidedSuccess(level.isClientSide);
+                }
                 // i only open the GUI on the client
                 if (level.isClientSide) {
                     openMonitorScreenClient(monitor);
@@ -213,6 +221,7 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
 
             MonitorBlockEntity controller = anyPiece.isController() ? anyPiece : anyPiece.getController();
             if (controller == null) return;
+            if (controller.isAradLinked()) return;
 
             BlockPos controllerPos = controller.getControllerPos();
             if (controllerPos == null) controllerPos = controller.getBlockPos();

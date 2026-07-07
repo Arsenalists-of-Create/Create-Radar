@@ -9,8 +9,7 @@
       "y": 90
     },
     "facing=north": {
-      "model": "create_radar:block/identification_transponder",
-      "x": 90
+      "model": "create_radar:block/identification_transponder"
     },
     "facing=south": {
       "model": "create_radar:block/identification_transponder",

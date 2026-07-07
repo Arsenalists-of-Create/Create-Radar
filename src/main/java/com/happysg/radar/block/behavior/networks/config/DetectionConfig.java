@@ -87,7 +87,9 @@ public record DetectionConfig(boolean player, boolean sable, boolean contraption
     }
 
     private boolean test(TrackCategory trackCategory) {
-        if (trackCategory == TrackCategory.PLAYER) {
+        if (trackCategory == TrackCategory.MISSILE) {
+            return true;
+        } else if (trackCategory == TrackCategory.PLAYER) {
             return player;
         } else if (Mods.SABLE.isLoaded() && trackCategory == TrackCategory.SABLE) {
             return sable;

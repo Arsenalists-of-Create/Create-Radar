@@ -14,5 +14,21 @@
         "stream": false
       }
     ]
+  },
+  "rwr.sweep": {
+    "sounds": [
+      {
+        "name": "create_radar:sweep",
+        "stream": false
+      }
+    ]
+  },
+  "rwr.engaged": {
+    "sounds": [
+      {
+        "name": "create_radar:engaged",
+        "stream": false
+      }
+    ]
   }
 }

@@ -82,7 +82,7 @@ public class IDBlockScreen extends AbstractSimiScreen {
     }
 
     public boolean isForShip(UUID shipId) {
-        return ship.getUniqueId() == shipId;
+        return ship.getUniqueId().equals(shipId);
     }
 
     public void applyLoadedRecord(String loadedName, String loadedId) {

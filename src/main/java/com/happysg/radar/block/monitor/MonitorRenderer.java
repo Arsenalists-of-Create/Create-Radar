@@ -77,6 +77,15 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     @Override
     protected void renderSafe(MonitorBlockEntity blockEntity, float partialTicks, PoseStack ms, MultiBufferSource bufferSource, int light, int overlay) {
         if(!RadarConfig.client().disableMonitorRendering.get()) {
+            if (blockEntity.isAradLinked()) {
+                if (!blockEntity.isController()) {
+                    return;
+                }
+                super.renderSafe(blockEntity, partialTicks, ms, bufferSource, light, overlay);
+                setupMonitorTransform(ms, blockEntity.getBlockState().getValue(MonitorBlock.FACING));
+                renderAradDisplay(blockEntity, ms, bufferSource);
+                return;
+            }
             if (!blockEntity.isLinked() || !blockEntity.isController()) {
                 return;
             }
@@ -136,6 +145,25 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         }
 
         renderRadarTracks(projection, blockEntity, ms, bufferSource);
+    }
+
+    private void renderAradDisplay(MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource) {
+        MonitorProjection.DisplayPoint center = new MonitorProjection.DisplayPoint(0f, 0f);
+        renderAradCircle(blockEntity, ms, bufferSource, center, 1.0f, DEPTH_BACKGROUND);
+        renderAradCircle(blockEntity, ms, bufferSource, center, 2f / 3f, DEPTH_BACKGROUND + 0.0002f);
+        renderAradCircle(blockEntity, ms, bufferSource, center, 0.25f, DEPTH_BACKGROUND + 0.0004f);
+    }
+
+    private void renderAradCircle(MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource,
+                                  MonitorProjection.DisplayPoint center, float scale, float depth) {
+        int size = blockEntity.getSize();
+        Matrix4f m = ms.last().pose();
+        Matrix3f n = ms.last().normal();
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
+        MonitorProjection.Quad quad = MonitorProjection.scaledQuad(center, size, scale);
+
+        renderVertices(getBuffer(bufferSource, MonitorSprite.RADAR_BG_CIRCLE), m, n, color, ALPHA_BACKGROUND, depth,
+                quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
     }
 
     /**

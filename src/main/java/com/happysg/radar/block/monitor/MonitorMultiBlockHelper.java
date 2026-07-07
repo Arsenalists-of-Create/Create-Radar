@@ -6,7 +6,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
@@ -19,8 +18,10 @@ import static net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING;
 //this is messy but couldn't figure out how to use Create MultiblockHelper
 //todo make better
 public class MonitorMultiBlockHelper {
+    private static boolean forming;
+
     public static void onPlace(BlockState pState, Level pLevel, BlockPos pPos, BlockState pOldState, boolean pIsMoving) {
-        if (pState.getValue(SHAPE) != MonitorBlock.Shape.SINGLE && !pIsMoving)
+        if (forming || pIsMoving)
             return;
 
         Direction originFacing = pState.getValue(FACING);
@@ -34,7 +35,7 @@ public class MonitorMultiBlockHelper {
                     if (pLevel.getBlockEntity(candidate) instanceof MonitorBlockEntity monitor) {
                         int size = getSize(pLevel, candidate);
                         if (size > 1) {
-                            formMulti(pState, pLevel, monitor.getControllerPos(), size);
+                            formMulti(pState, pLevel, candidate.immutable(), size);
                         }
                     }});
     }
@@ -48,25 +49,31 @@ public class MonitorMultiBlockHelper {
     }
 
     static void formMulti(BlockState pState, Level pLevel, BlockPos pPos, int size) {
-        MonitorBlock.Shape shape;
-        for (int i = 0; i < size; i++) {
-            for (int j = 0; j < size; j++) {
-                if (i == 0 && j == 0) shape = MonitorBlock.Shape.LOWER_RIGHT;
-                else if (i == 0 && j == size - 1) shape = MonitorBlock.Shape.LOWER_LEFT;
-                else if (i == size - 1 && j == 0) shape = MonitorBlock.Shape.UPPER_RIGHT;
-                else if (i == size - 1 && j == size - 1) shape = MonitorBlock.Shape.UPPER_LEFT;
-                else if (i == 0) shape = MonitorBlock.Shape.LOWER_CENTER;
-                else if (i == size - 1) shape = MonitorBlock.Shape.UPPER_CENTER;
-                else if (j == 0) shape = MonitorBlock.Shape.MIDDLE_RIGHT;
-                else if (j == size - 1) shape = MonitorBlock.Shape.MIDDLE_LEFT;
-                else shape = MonitorBlock.Shape.CENTER;
+        forming = true;
+        try {
+            MonitorBlock.Shape shape;
+            Direction facing = pLevel.getBlockState(pPos).getValue(FACING);
+            for (int i = 0; i < size; i++) {
+                for (int j = 0; j < size; j++) {
+                    if (i == 0 && j == 0) shape = MonitorBlock.Shape.LOWER_RIGHT;
+                    else if (i == 0 && j == size - 1) shape = MonitorBlock.Shape.LOWER_LEFT;
+                    else if (i == size - 1 && j == 0) shape = MonitorBlock.Shape.UPPER_RIGHT;
+                    else if (i == size - 1 && j == size - 1) shape = MonitorBlock.Shape.UPPER_LEFT;
+                    else if (i == 0) shape = MonitorBlock.Shape.LOWER_CENTER;
+                    else if (i == size - 1) shape = MonitorBlock.Shape.UPPER_CENTER;
+                    else if (j == 0) shape = MonitorBlock.Shape.MIDDLE_RIGHT;
+                    else if (j == size - 1) shape = MonitorBlock.Shape.MIDDLE_LEFT;
+                    else shape = MonitorBlock.Shape.CENTER;
 
-                Direction facing = pLevel.getBlockState(pPos).getValue(FACING);
-                pLevel.setBlockAndUpdate(pPos.above(i).relative(facing.getClockWise(), j), pState.setValue(SHAPE, shape));
-                if (pLevel.getBlockEntity(pPos.above(i).relative(facing.getClockWise(), j)) instanceof MonitorBlockEntity monitor) {
-                    monitor.setControllerPos(pPos, size);
+                    BlockPos pos = pPos.above(i).relative(facing.getClockWise(), j);
+                    pLevel.setBlockAndUpdate(pos, pState.setValue(SHAPE, shape));
+                    if (pLevel.getBlockEntity(pos) instanceof MonitorBlockEntity monitor) {
+                        monitor.setControllerPos(pPos, size);
+                    }
                 }
             }
+        } finally {
+            forming = false;
         }
     }
 
@@ -101,7 +108,8 @@ public class MonitorMultiBlockHelper {
         for (int i = 0; i < RadarConfig.server().monitorMaxSize.get(); i++) {
             AtomicBoolean valid = new AtomicBoolean(true);
             BlockPos.betweenClosed(pPos, pPos.above(i).relative(facing.getClockWise(), i)).forEach(p -> {
-                if (!pLevel.getBlockState(p).is(ModBlocks.MONITOR.get()))
+                BlockState state = pLevel.getBlockState(p);
+                if (!state.is(ModBlocks.MONITOR.get()) || state.getValue(FACING) != facing)
                     valid.set(false);
             });
             if (valid.get())
@@ -111,15 +119,6 @@ public class MonitorMultiBlockHelper {
         }
         if (potentialsize == 1)
             return 1;
-
-        for (int i = 0; i < potentialsize; i++) {
-            for (int j = 0; j < potentialsize; j++) {
-                BlockEntity be = pLevel.getBlockEntity(pPos.above(i).relative(facing.getClockWise(), j));
-                if (!(be instanceof MonitorBlockEntity monitor && monitor.getSize() < potentialsize))
-                    return Math.max(1, Math.min(i, j));
-
-            }
-        }
 
         return potentialsize;
 

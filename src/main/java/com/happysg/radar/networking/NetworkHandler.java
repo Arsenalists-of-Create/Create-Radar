@@ -79,6 +79,18 @@ public final class NetworkHandler {
                 SableSilhouetteSyncPacket.STREAM_CODEC,
                 SableSilhouetteSyncPacket::handle
         );
+
+        registrar.playToClient(
+                RwrLockSoundPacket.TYPE,
+                RwrLockSoundPacket.STREAM_CODEC,
+                RwrLockSoundPacket::handle
+        );
+
+        registrar.playToClient(
+                RwrEngagedSoundPacket.TYPE,
+                RwrEngagedSoundPacket.STREAM_CODEC,
+                RwrEngagedSoundPacket::handle
+        );
     }
 
     public static void sendToServer(CustomPacketPayload payload) {

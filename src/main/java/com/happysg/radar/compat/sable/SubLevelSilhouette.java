@@ -232,36 +232,96 @@ public final class SubLevelSilhouette {
         final ArrayList<LineSegment> result = new ArrayList<>();
 
         for (int z = 0; z < grid.height; z++) {
-            for (int x = 0; x < grid.width; x++) {
-                if (!occupied.get(grid.index(x, z))) {
-                    continue;
+            for (int x = 0; x < grid.width; ) {
+                if (isOccupied(grid, occupied, x, z) && !isOccupied(grid, occupied, x, z - 1)) {
+                    final int startX = x;
+                    do {
+                        x++;
+                    } while (x < grid.width && isOccupied(grid, occupied, x, z) && !isOccupied(grid, occupied, x, z - 1));
+                    addHorizontalBoundary(result, grid, startX, x, z, false);
+                    if (result.size() >= maxSegments) {
+                        return List.copyOf(result);
+                    }
+                } else {
+                    x++;
                 }
+            }
 
-                final double minX = grid.originX + x * grid.cellSize;
-                final double minZ = grid.originZ + z * grid.cellSize;
-                final double maxX = minX + grid.cellSize;
-                final double maxZ = minZ + grid.cellSize;
+            for (int x = 0; x < grid.width; ) {
+                if (isOccupied(grid, occupied, x, z) && !isOccupied(grid, occupied, x, z + 1)) {
+                    final int startX = x;
+                    do {
+                        x++;
+                    } while (x < grid.width && isOccupied(grid, occupied, x, z) && !isOccupied(grid, occupied, x, z + 1));
+                    addHorizontalBoundary(result, grid, startX, x, z + 1, true);
+                    if (result.size() >= maxSegments) {
+                        return List.copyOf(result);
+                    }
+                } else {
+                    x++;
+                }
+            }
+        }
 
-                if (!isOccupied(grid, occupied, x, z - 1)) {
-                    result.add(new LineSegment(new Vec2(minX, minZ), new Vec2(maxX, minZ)));
+        for (int x = 0; x < grid.width; x++) {
+            for (int z = 0; z < grid.height; ) {
+                if (isOccupied(grid, occupied, x, z) && !isOccupied(grid, occupied, x - 1, z)) {
+                    final int startZ = z;
+                    do {
+                        z++;
+                    } while (z < grid.height && isOccupied(grid, occupied, x, z) && !isOccupied(grid, occupied, x - 1, z));
+                    addVerticalBoundary(result, grid, x, startZ, z, true);
+                    if (result.size() >= maxSegments) {
+                        return List.copyOf(result);
+                    }
+                } else {
+                    z++;
                 }
-                if (!isOccupied(grid, occupied, x + 1, z)) {
-                    result.add(new LineSegment(new Vec2(maxX, minZ), new Vec2(maxX, maxZ)));
-                }
-                if (!isOccupied(grid, occupied, x, z + 1)) {
-                    result.add(new LineSegment(new Vec2(maxX, maxZ), new Vec2(minX, maxZ)));
-                }
-                if (!isOccupied(grid, occupied, x - 1, z)) {
-                    result.add(new LineSegment(new Vec2(minX, maxZ), new Vec2(minX, minZ)));
-                }
+            }
 
-                if (result.size() >= maxSegments) {
-                    return List.copyOf(result);
+            for (int z = 0; z < grid.height; ) {
+                if (isOccupied(grid, occupied, x, z) && !isOccupied(grid, occupied, x + 1, z)) {
+                    final int startZ = z;
+                    do {
+                        z++;
+                    } while (z < grid.height && isOccupied(grid, occupied, x, z) && !isOccupied(grid, occupied, x + 1, z));
+                    addVerticalBoundary(result, grid, x + 1, startZ, z, false);
+                    if (result.size() >= maxSegments) {
+                        return List.copyOf(result);
+                    }
+                } else {
+                    z++;
                 }
             }
         }
 
         return List.copyOf(result);
+    }
+
+    private static void addHorizontalBoundary(final List<LineSegment> result, final GridSpec grid,
+                                              final int startX, final int endXExclusive, final int z,
+                                              final boolean reverse) {
+        final double minX = grid.originX + startX * grid.cellSize;
+        final double maxX = grid.originX + endXExclusive * grid.cellSize;
+        final double edgeZ = grid.originZ + z * grid.cellSize;
+        if (reverse) {
+            result.add(new LineSegment(new Vec2(maxX, edgeZ), new Vec2(minX, edgeZ)));
+        } else {
+            result.add(new LineSegment(new Vec2(minX, edgeZ), new Vec2(maxX, edgeZ)));
+        }
+    }
+
+    private static void addVerticalBoundary(final List<LineSegment> result, final GridSpec grid,
+                                            final int x, final int startZ, final int endZExclusive,
+                                            final boolean reverse) {
+        final double edgeX = grid.originX + x * grid.cellSize;
+        final double minZ = grid.originZ + startZ * grid.cellSize;
+        final double maxZ = grid.originZ + endZExclusive * grid.cellSize;
+        if (reverse) {
+            result.add(new LineSegment(new Vec2(edgeX, maxZ), new Vec2(edgeX, minZ)));
+        } else {
+            result.add(new LineSegment(new Vec2(edgeX, minZ), new Vec2(edgeX, maxZ)));
+        }
     }
 
     private static boolean isOccupied(final GridSpec grid, final BitSet occupied, final int x, final int z) {

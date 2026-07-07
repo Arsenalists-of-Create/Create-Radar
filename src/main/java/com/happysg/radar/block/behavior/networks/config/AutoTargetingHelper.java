@@ -124,7 +124,7 @@ public final class AutoTargetingHelper {
     }
 
     private static boolean projectileApproaching(RadarTrack track, Vec3 origin) {
-        if (track.trackCategory() != TrackCategory.PROJECTILE) return true;
+        if (track.trackCategory() != TrackCategory.PROJECTILE && track.trackCategory() != TrackCategory.MISSILE) return true;
 
         Vec3 vel = track.velocity();
         if (vel == null || vel.lengthSqr() == 0) return false;

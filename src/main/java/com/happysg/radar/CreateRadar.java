@@ -1,6 +1,8 @@
 package com.happysg.radar;
 
 import com.happysg.radar.block.controller.id.IDManager;
+import com.happysg.radar.block.arad.rwr.RwrEngagedLoopSoundManager;
+import com.happysg.radar.block.arad.rwr.RwrLockLoopSoundManager;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorInputHandler;
 import com.happysg.radar.compat.Mods;
@@ -127,6 +129,8 @@ public class CreateRadar {
 
     private static void clientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {
         SableSilhouetteClientCache.clear();
+        RwrEngagedLoopSoundManager.clear();
+        RwrLockLoopSoundManager.clear();
     }
 
     public static void registerCapabilities(RegisterCapabilitiesEvent event) {

@@ -159,7 +159,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
     private static boolean isEntityBackedCategory(TrackCategory category) {
         return switch (category) {
-            case PLAYER, HOSTILE, MOB, ANIMAL, PROJECTILE, ITEM, CONTRAPTION -> true;
+            case PLAYER, HOSTILE, MOB, ANIMAL, PROJECTILE, MISSILE, ITEM, CONTRAPTION -> true;
             default -> false;
         };
     }

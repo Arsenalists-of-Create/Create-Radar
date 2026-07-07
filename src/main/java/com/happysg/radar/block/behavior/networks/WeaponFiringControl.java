@@ -533,7 +533,7 @@ public class WeaponFiringControl {
             } else {
                 Vec3 start = this.getCannonRayStart();
                 if (this.level instanceof ServerLevel sl) {
-                    boolean shouldBeEntity = track.trackCategory() == TrackCategory.PLAYER || track.trackCategory() == TrackCategory.HOSTILE || track.trackCategory() == TrackCategory.ANIMAL || track.trackCategory() == TrackCategory.PROJECTILE;
+                    boolean shouldBeEntity = track.trackCategory() == TrackCategory.PLAYER || track.trackCategory() == TrackCategory.HOSTILE || track.trackCategory() == TrackCategory.ANIMAL || track.trackCategory() == TrackCategory.PROJECTILE || track.trackCategory() == TrackCategory.MISSILE;
                     Entity e = null;
 
                     try {

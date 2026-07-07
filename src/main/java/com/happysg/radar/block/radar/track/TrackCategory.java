@@ -22,7 +22,8 @@ public enum TrackCategory {
     PROJECTILE,
     CONTRAPTION,
     ITEM,
-    MISC;
+    MISC,
+    MISSILE;
 
 
     public static TrackCategory get(Entity entity) {
@@ -30,6 +31,7 @@ public enum TrackCategory {
             if (type.is(RadarEntityTypeTags.RADAR_HOSTILE)) return HOSTILE;
             if (type.is(RadarEntityTypeTags.RADAR_ANIMAL)) return ANIMAL;
             if (type.is(RadarEntityTypeTags.RADAR_MOB)) return MOB;
+            if (type.is(RadarEntityTypeTags.RADAR_MISSILE)) return MISSILE;
             if (type.is(RadarEntityTypeTags.RADAR_PROJECTILE)) return PROJECTILE;
             if (type.is(RadarEntityTypeTags.RADAR_ITEM)) return ITEM;
 

@@ -41,6 +41,8 @@
   "create_radar.data_link.invalid_filter_target": "Invalid Filter Target",
   "create_radar.data_link.link_to_monitor": "Link to Monitor Or Cannon Mount",
   "create_radar.data_link.mount_set": "Cannon Mount Selected",
+  "create_radar.data_link.rwr_set": "Radar Warning Receiver Selected",
+  "create_radar.data_link.arad_monitor_conflict": "Monitor already linked to another network",
   "create_radar.data_link.only_pitch_allowed": "Only Pitch Controller Allowed",
   "create_radar.data_link.place_failed": "Placement Failed",
   "create_radar.data_link.select_mount_or_filterer_first": "Select Cannon Mount or Network Controller",

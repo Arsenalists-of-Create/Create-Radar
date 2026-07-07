@@ -5,6 +5,7 @@ import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
+import com.happysg.radar.block.radar.track.RadarEntityTypeTags;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -85,6 +86,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             case SABLE -> scanSable;
             case CONTRAPTION -> scanContraptions;
             case PROJECTILE -> scanProjectiles;
+            case MISSILE -> true;
             case ITEM -> scanItems;
 
             case ANIMAL -> scanAnimals;
@@ -159,29 +161,50 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
         for (SubLevelAccess ship : scannedShips) {
             Vec3 pos = RadarTrackUtil.getPosition(ship);
-            if (isInFovAndRange(pos)) {
+            if (isInRadarCoverage(pos) && isServer) {
+                RadarContactRegistry.markInRange(sl, ship.getUniqueId(), radarSourceId(sl), 40, redstoneSignalFor(pos));
+            }
 
-                UUID key = ship.getUniqueId();
+            if (isInFovAndRange(pos)) {
 
                 radarTracks.compute(ship.getUniqueId().toString(), (id, track) -> {
                     if (track == null) return RadarTrackUtil.getRadarTrack(ship, level);
                     track.updateRadarTrack(ship, level);
                     return track;
                 });
-                if (isServer) {
-                    RadarContactRegistry.markInRange(sl, key, 20);
-                }
             }
         }
     }
 
-    private boolean isInFovAndRange(Vec3 target) {
+    private String radarSourceId(net.minecraft.server.level.ServerLevel level) {
+        return level.dimension().location() + "|" + blockEntity.getBlockPos().asLong();
+    }
+
+    private int redstoneSignalFor(Vec3 target) {
+        if (range <= 0.0) {
+            return 1;
+        }
+
+        double dx = target.x() - scanPos.x();
+        double dz = target.z() - scanPos.z();
+        double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
+        double normalized = Math.max(0.0, Math.min(1.0, horizontalDistance / range));
+        return Math.max(1, Math.min(14, (int) Math.ceil((1.0 - normalized) * 14.0)));
+    }
+
+    private boolean isInRadarCoverage(Vec3 target) {
         double horizontalDistance = Math.sqrt(Math.pow(target.x() - scanPos.x(), 2) + Math.pow(target.z() - scanPos.z(), 2));
         double verticalDistance = Math.abs(target.y() - scanPos.y());
         double yScanRange = RadarConfig.server().radarYScanRange.get();
 
-        if (horizontalDistance > range || verticalDistance > yScanRange)
+        return horizontalDistance <= range && verticalDistance <= yScanRange;
+    }
+
+    private boolean isInFovAndRange(Vec3 target) {
+        if (!isInRadarCoverage(target))
             return false;
+
+        double horizontalDistance = Math.sqrt(Math.pow(target.x() - scanPos.x(), 2) + Math.pow(target.z() - scanPos.z(), 2));
 
         if (horizontalDistance < 2)
             return true;
@@ -197,7 +220,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     private void removeDeadTracks() {
         // entities
         for (Entity entity : scannedEntities) {
-            if (!entity.isAlive())
+            if (!entity.isAlive() || entity instanceof ServerPlayer && !shouldRadarSee(entity))
                 radarTracks.remove(entity.getUUID().toString());
         }
 
@@ -234,6 +257,8 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             if (scanProjectiles)
                 scannedEntities.addAll(level.getEntitiesOfClass(Projectile.class, aabb));
 
+            scannedEntities.addAll(level.getEntitiesOfClass(Entity.class, aabb, RadarScanningBlockBehavior::isMissile));
+
             if (scanItems)
                 scannedEntities.addAll(level.getEntitiesOfClass(ItemEntity.class, aabb));
 
@@ -249,8 +274,16 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             }
         }
     }
+
+    private static boolean isMissile(Entity entity) {
+        return entity.getType().is(RadarEntityTypeTags.RADAR_MISSILE);
+    }
+
     private boolean shouldRadarSee(Entity entity) {
         if(!(entity instanceof ServerPlayer serverPlayer)){
+            return false;
+        }
+        if (serverPlayer.isSpectator()) {
             return false;
         }
         if(Mods.VMOD.isLoaded()) {

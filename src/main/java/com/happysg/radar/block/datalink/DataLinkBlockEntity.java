@@ -2,6 +2,7 @@ package com.happysg.radar.block.datalink;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
+import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableLinkPersistence;
@@ -89,6 +90,13 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
 
         boolean radarUpdated = networkData.updateDataLinkPosition(serverLevel.dimension(), lastKnownPos, worldPosition);
         if (radarUpdated) {
+            lastKnownPos = worldPosition;
+            setChanged();
+            return;
+        }
+
+        boolean aradUpdated = ARADData.get(serverLevel).updateDataLinkPosition(serverLevel.dimension(), lastKnownPos, worldPosition);
+        if (aradUpdated) {
             lastKnownPos = worldPosition;
             setChanged();
         }

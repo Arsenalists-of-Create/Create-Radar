@@ -3,7 +3,6 @@ package com.happysg.radar.compat.cbc;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.mixin.AbstractCannonAccessor;
 import com.happysg.radar.mixin.AutoCannonAccessor;
-import com.happysg.radar.mixin.AutocannonProjectileAccessor;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import net.arsenalists.createenergycannons.content.cannons.magnetic.railgun.MountedEnergyCannonContraption;
@@ -140,11 +139,9 @@ public class CannonUtil {
             }
 
             AbstractCannonProjectile projectile = createAutocannonProjectile(stack, level);
-            if (projectile instanceof AutocannonProjectileAccessor accessor) {
-                BallisticPropertiesComponent props = accessor.getBallisticProperties();
-                if (props != null) {
-                    return props;
-                }
+            BallisticPropertiesComponent props = getProjectileBallistics(projectile);
+            if (props != null) {
+                return props;
             }
         }
 
@@ -304,7 +301,7 @@ public class CannonUtil {
                 return result instanceof BallisticPropertiesComponent bp ? bp : null;
             } catch (NoSuchMethodException ignored) {
                 type = type.getSuperclass();
-            } catch (IllegalAccessException | InvocationTargetException | ClassCastException e) {
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
                 LOGGER.warn("Could not invoke projectile ballistics method for {}", projectile.getClass().getName(), e);
                 return null;
             }

@@ -1,6 +1,8 @@
 package com.happysg.radar.block.datalink;
 
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.firing.FireControllerBlock;
@@ -56,6 +58,7 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String SELECTED_YAW_POS = "SelectedYawPos";
     private static final String SELECTED_PITCH_POS = "SelectedPitchPos";
     private static final String SELECTED_FIRING_POS = "SelectedFiringPos";
+    private static final String SELECTED_RWR_POS = "SelectedRwrPos";
     private static final String SELECTED_POS = "SelectedPos";
 
     private static final String DISPLAY_CLEAR = "display_link.clear";
@@ -69,6 +72,8 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String DATA_LINK_FILTERER_SET = CreateRadar.MODID + ".data_link.filterer_set";
     private static final String DATA_LINK_INVALID_FILTER_TARGET = CreateRadar.MODID + ".data_link.invalid_filter_target";
     private static final String DATA_LINK_MOUNT_SET = CreateRadar.MODID + ".data_link.mount_set";
+    private static final String DATA_LINK_RWR_SET = CreateRadar.MODID + ".data_link.rwr_set";
+    private static final String DATA_LINK_ARAD_MONITOR_CONFLICT = CreateRadar.MODID + ".data_link.arad_monitor_conflict";
     private static final String DATA_LINK_ONLY_PITCH_ALLOWED = CreateRadar.MODID + ".data_link.only_pitch_allowed";
     private static final String DATA_LINK_PLACE_FAILED = CreateRadar.MODID + ".data_link.place_failed";
     private static final String DATA_LINK_SELECT_FIRST = CreateRadar.MODID + ".data_link.select_mount_or_filterer_first";
@@ -120,6 +125,9 @@ public class DataLinkBlockItem extends BlockItem {
         if (controllerType != null && use.tag().contains(SELECTED_MOUNT_POS))
             return completeWeaponLink(use, controllerType);
 
+        if (use.tag().contains(SELECTED_RWR_POS))
+            return completeAradLink(use);
+
         if (use.tag().contains(SELECTED_FILTERER_POS))
             return completeFilterLink(use);
 
@@ -134,6 +142,7 @@ public class DataLinkBlockItem extends BlockItem {
             if (!use.level().isClientSide) {
                 use.tag().put(SELECTED_MOUNT_POS, NbtUtils.writeBlockPos(use.clickedPos()));
                 use.tag().remove(SELECTED_FILTERER_POS);
+                use.tag().remove(SELECTED_RWR_POS);
                 clearControllerSelections(use.tag());
                 setLinkTag(use.stack(), use.tag());
                 use.player().displayClientMessage(Component.translatable(DATA_LINK_MOUNT_SET), true);
@@ -145,9 +154,22 @@ public class DataLinkBlockItem extends BlockItem {
             if (!use.level().isClientSide) {
                 use.tag().put(SELECTED_FILTERER_POS, NbtUtils.writeBlockPos(use.clickedPos()));
                 use.tag().remove(SELECTED_MOUNT_POS);
+                use.tag().remove(SELECTED_RWR_POS);
                 clearControllerSelections(use.tag());
                 setLinkTag(use.stack(), use.tag());
                 use.player().displayClientMessage(Component.translatable(DATA_LINK_FILTERER_SET), true);
+            }
+            return InteractionResult.SUCCESS;
+        }
+
+        if (use.be() instanceof RadarWarningReceiverBlockEntity) {
+            if (!use.level().isClientSide) {
+                use.tag().put(SELECTED_RWR_POS, NbtUtils.writeBlockPos(use.clickedPos()));
+                use.tag().remove(SELECTED_MOUNT_POS);
+                use.tag().remove(SELECTED_FILTERER_POS);
+                clearControllerSelections(use.tag());
+                setLinkTag(use.stack(), use.tag());
+                use.player().displayClientMessage(Component.translatable(DATA_LINK_RWR_SET), true);
             }
             return InteractionResult.SUCCESS;
         }
@@ -213,6 +235,64 @@ public class DataLinkBlockItem extends BlockItem {
             clearLinkTag(use.stack());
             return InteractionResult.SUCCESS;
         }
+        sendSuccess(use.player());
+        clearLinkTag(use.stack());
+        return InteractionResult.SUCCESS;
+    }
+
+    private InteractionResult completeAradLink(LinkUse use) {
+        if (!(use.be() instanceof MonitorBlockEntity monitor)) {
+            if (!use.level().isClientSide) {
+                sendError(use.player(), DATA_LINK_INVALID_FILTER_TARGET);
+                clearLinkTag(use.stack());
+            }
+            return InteractionResult.FAIL;
+        }
+
+        if (use.level().isClientSide)
+            return InteractionResult.SUCCESS;
+
+        if (!(use.level() instanceof ServerLevel serverLevel))
+            return InteractionResult.FAIL;
+
+        BlockPos rwrPos = readSelectedPos(use.tag(), SELECTED_RWR_POS);
+        if (rwrPos == null) {
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        BlockPos monitorPos = monitor.getControllerPos();
+        if (monitorPos == null) monitorPos = use.clickedPos();
+
+        BlockPos placedPos = getPlacementPos(use);
+        double range = RadarConfig.server().radarLinkRange.get();
+        if (!withinRange(use.level(), placedPos, rwrPos, range) || !withinRange(use.level(), placedPos, monitorPos, range)) {
+            sendError(use.player(), DISPLAY_TOO_FAR);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        ARADData aradData = ARADData.get(serverLevel);
+        ARADData.Group group = aradData.getOrCreateGroup(serverLevel.dimension(), rwrPos);
+        if (!aradData.canAttachMonitor(serverLevel, group, monitorPos)) {
+            sendError(use.player(), DATA_LINK_ARAD_MONITOR_CONFLICT);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
+
+        InteractionResult placed = placeAndVerify(use, placedPos);
+        if (placed != null) {
+            clearLinkTag(use.stack());
+            return placed;
+        }
+
+        setLinkStyle(use.level(), placedPos, DataLinkBlock.LinkStyle.RADAR);
+        aradData.attachMonitor(serverLevel, group, monitorPos, ARADData.LinkOrigin.DATALINK);
+        aradData.addDataLinkToGroup(group, placedPos, monitorPos);
+        if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink) {
+            dataLink.target(monitorPos);
+        }
+
         sendSuccess(use.player());
         clearLinkTag(use.stack());
         return InteractionResult.SUCCESS;
@@ -445,13 +525,21 @@ public class DataLinkBlockItem extends BlockItem {
 
         FilterCommit validate(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group) {
             return switch (this) {
-                case MONITOR -> FilterCommit.allowed(data.canAttachMonitor(group, normalizedMonitorPos(use)));
+                case MONITOR -> validateMonitor(use, serverLevel, data, group);
                 case RADAR_BEARING -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.BEARING));
                 case RADAR_STATIONARY -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.STATIONARY));
                 case RADAR_SKY -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.SKY));
                 case RADAR_SONAR -> FilterCommit.allowed(data.canAttachRadar(group, use.clickedPos(), NetworkData.RadarKind.SONAR));
                 case CONTROLLER -> validateController(use, serverLevel, data, group);
             };
+        }
+
+        private static FilterCommit validateMonitor(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group) {
+            BlockPos monitorPos = normalizedMonitorPos(use);
+            if (ARADData.get(serverLevel).isMonitorDatalinked(serverLevel.dimension(), monitorPos)) {
+                return FilterCommit.denied(DATA_LINK_ARAD_MONITOR_CONFLICT);
+            }
+            return FilterCommit.allowed(data.canAttachMonitor(group, monitorPos));
         }
 
         private static FilterCommit validateController(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group) {
@@ -482,6 +570,9 @@ public class DataLinkBlockItem extends BlockItem {
                     BlockEntity mbe = serverLevel.getBlockEntity(use.clickedPos());
                     if (mbe instanceof MonitorBlockEntity monitor) {
                         pos = monitor.getControllerPos();
+                    }
+                    if (ARADData.get(serverLevel).getEndpointOrigin(serverLevel.dimension(), pos) == ARADData.LinkOrigin.CONTACT) {
+                        ARADData.get(serverLevel).removeContactEndpoint(serverLevel, pos);
                     }
                     data.attachMonitor(serverLevel, group, pos);
                 }

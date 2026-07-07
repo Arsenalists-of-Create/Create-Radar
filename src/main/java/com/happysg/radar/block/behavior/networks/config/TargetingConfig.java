@@ -57,7 +57,7 @@ public record TargetingConfig(boolean player, boolean contraption, boolean mob, 
                 case CONTRAPTION -> false;
                 case HOSTILE -> mob;
                 case ANIMAL -> animal;
-                case PROJECTILE -> projectile;
+                case PROJECTILE, MISSILE -> projectile;
                 default -> false;
             };
         }else {
@@ -66,7 +66,7 @@ public record TargetingConfig(boolean player, boolean contraption, boolean mob, 
                 case CONTRAPTION -> contraption;
                 case HOSTILE -> mob;
                 case ANIMAL -> animal;
-                case PROJECTILE -> projectile;
+                case PROJECTILE, MISSILE -> projectile;
                 default -> false;
             };
         }

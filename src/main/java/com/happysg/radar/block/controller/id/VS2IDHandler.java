@@ -42,10 +42,8 @@ public class VS2IDHandler {
     }
 
     public static void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pMovedByPiston) {
-        SubLevelAccess ship = SableUtils.getShipManagingPos(pLevel, pPos);
-        if (ship != null) {
-            // uses ship.getId() internally now
-            IDManager.removeIDRecord(ship);
-        }
+        // Do not clear the saved ship ID record from block lifecycle removal. Sable and vanilla
+        // block updates can transiently replace/remove blocks, which would otherwise erase the
+        // transponder data for the whole sublevel.
     }
 }

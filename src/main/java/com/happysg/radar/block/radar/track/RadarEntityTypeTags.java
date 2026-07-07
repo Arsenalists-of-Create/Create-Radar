@@ -23,6 +23,8 @@ public class RadarEntityTypeTags {
     public static final TagKey<EntityType<?>> RADAR_PROJECTILE =
             TagKey.create(Registries.ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath(CreateRadar.MODID, "radar_projectile"));
 
+    public static final TagKey<EntityType<?>> RADAR_MISSILE =
+            TagKey.create(Registries.ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath(CreateRadar.MODID, "radar_missile"));
 
     public static final TagKey<EntityType<?>> RADAR_ITEM =
             TagKey.create(Registries.ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath(CreateRadar.MODID, "radar_item"));

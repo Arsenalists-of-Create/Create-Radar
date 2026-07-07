@@ -22,6 +22,12 @@ public class ModSounds {
     public static final DeferredHolder<SoundEvent, SoundEvent> RWR_IN_RANGE =
             register("rwr.in_range");
 
+    public static final DeferredHolder<SoundEvent, SoundEvent> RWR_SWEEP =
+            register("rwr.sweep");
+
+    public static final DeferredHolder<SoundEvent, SoundEvent> RWR_ENGAGED =
+            register("rwr.engaged");
+
     public static void register(IEventBus modBus) {
         SOUND_EVENTS.register(modBus);
     }

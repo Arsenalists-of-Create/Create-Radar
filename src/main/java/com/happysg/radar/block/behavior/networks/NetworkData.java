@@ -3,6 +3,7 @@ package com.happysg.radar.block.behavior.networks;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
+import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
@@ -646,6 +647,10 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
                 ContactEndpoint contact = classifyContactEndpoint(level, next);
                 if (contact == null) continue;
+                if (contact.kind() == ContactKind.MONITOR
+                        && ARADData.get(level).isMonitorDatalinked(group.key.dim(), contact.endpointPos())) {
+                    continue;
+                }
 
                 String endpointKey = key(group.key.dim(), contact.endpointPos());
                 String owner = endpointToFilterer.get(endpointKey);
@@ -759,6 +764,26 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         endpointToFilterer.put(endpointKey, myKey);
         endpointOrigins.put(endpointKey, origin);
         return true;
+    }
+
+    public void removeContactEndpoint(ServerLevel level, BlockPos endpointPos) {
+        if (level == null || endpointPos == null) return;
+        ResourceKey<Level> dim = level.dimension();
+        BlockEntity be = level.getBlockEntity(endpointPos);
+        if (be instanceof MonitorBlockEntity monitor) {
+            BlockPos controllerPos = monitor.getControllerPos();
+            if (controllerPos != null) endpointPos = controllerPos;
+        }
+
+        String endpointKey = key(dim, endpointPos);
+        if (endpointOrigins.get(endpointKey) != LinkOrigin.CONTACT) return;
+
+        String filtererKey = endpointToFilterer.get(endpointKey);
+        Group group = groupsByFilterer.get(filtererKey);
+        if (group == null) return;
+
+        removeEndpointFromGroup(level, group, endpointPos, true);
+        setDirty();
     }
 
     private void removeEndpointFromGroup(@Nullable ServerLevel level, Group group, BlockPos endpointPos, boolean notify) {

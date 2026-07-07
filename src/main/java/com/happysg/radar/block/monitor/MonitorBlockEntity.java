@@ -4,6 +4,7 @@ import com.happysg.radar.block.behavior.networks.INetworkNode;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
+import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
@@ -62,6 +63,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     public RadarTrack activetrack;
     boolean reset = false;
     protected BlockPos mountBlock;
+    private boolean aradLinked = false;
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -120,6 +122,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (!level.isClientSide && level instanceof ServerLevel sl) {
             if (level.getGameTime() % 5 == 0) {
                 syncFromNetwork(sl);
+                refreshAradLinkState();
                 updateCacheServerOrClient();
 
                 // keep controller's displayed selection consistent with network
@@ -140,6 +143,17 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
                 ResourceKey<Level> dim = serverLevel.dimension();
                 NetworkData data = NetworkData.get(serverLevel);
+                ARADData aradData = ARADData.get(serverLevel);
+                if (aradData.isMonitorLinked(dim, worldPosition)) {
+                    lastKnownPos = worldPosition;
+                    setChanged();
+                    return;
+                }
+                if (aradData.updateMonitorPosition(dim, lastKnownPos, worldPosition)) {
+                    lastKnownPos = worldPosition;
+                    setChanged();
+                    return;
+                }
                 if (data.isEndpointLinked(dim, worldPosition)) {
                     lastKnownPos = worldPosition;
                     setChanged();
@@ -171,6 +185,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         this.radarCache.clear();
         this.radarInfos = List.of();
         this.controller = null;
+        this.aradLinked = false;
 
 
         //LOGGER.debug("Reset " + controller +" " +radar + radarPos);
@@ -182,6 +197,19 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
     public void onNetworkDisconnected(){
         onDataLinkRemoved();
+    }
+
+    public void refreshAradLinkState() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        boolean linked = ARADData.get(serverLevel).isMonitorLinked(serverLevel.dimension(), getControllerPos());
+        if (aradLinked == linked) {
+            return;
+        }
+        aradLinked = linked;
+        setChanged();
+        sendData();
     }
 
 
@@ -457,7 +485,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
     }
     public boolean isLinked() {
-        return !radarInfos.isEmpty() || getRadarCenterPos() != null;
+        return aradLinked || !radarInfos.isEmpty() || getRadarCenterPos() != null;
+    }
+
+    public boolean isAradLinked() {
+        return aradLinked;
     }
 
     private static RadarTrack newerTrack(RadarTrack first, RadarTrack second) {
@@ -725,6 +757,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 ? tag.getString("SelectedEntity")
                 : null;
 
+        aradLinked = tag.getBoolean("AradLinked");
+
         hoveredEntity = tag.contains("HoveredEntity", Tag.TAG_STRING)
                 ? tag.getString("HoveredEntity")
                 : null;
@@ -772,6 +806,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         if (selectedEntity != null) tag.putString("SelectedEntity", selectedEntity);
         if (hoveredEntity != null) tag.putString("HoveredEntity", hoveredEntity);
+        tag.putBoolean("AradLinked", aradLinked);
 
         tag.putInt("Size", radius);
 
