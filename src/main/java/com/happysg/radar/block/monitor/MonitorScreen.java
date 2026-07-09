@@ -64,6 +64,7 @@ public class MonitorScreen extends Screen {
     private static final String PRESET_EMPTY_KEY = MONITOR_I18N_PREFIX + "preset_empty";
 
     private static final float ALPHA_BACKGROUND = 0.6f;
+    private static final float ARAD_RING_ALPHA = 0.45f;
     private static final float ALPHA_GRID = 0.1f;
     private static final float ALPHA_SWEEP = 0.8f;
     private static final int PLANE_SWEEP_CYCLE_TICKS = 20;
@@ -85,6 +86,11 @@ public class MonitorScreen extends Screen {
     private static final int TOOLBAR_BUTTON_SPACING_PX = 6;
     private static final int COMPASS_SIZE_PX = 24;
     private static final int COMPASS_INSET_PX = 36;
+    private static final float ARAD_OUTER_RING_RADIUS = 0.40625f;
+    private static final float ARAD_MIDDLE_RING_RADIUS = 0.27083334f;
+    private static final float ARAD_INNER_RING_RADIUS = 0.1015625f;
+    private static final int ARAD_CONTACT_TEXTURE_SIZE = 32;
+    private static final float ARAD_PRIMARY_THREAT_SCALE = 0.75f;
 
     private int toolbarLeft;
     private int toolbarWidth;
@@ -178,6 +184,18 @@ public class MonitorScreen extends Screen {
 
         if (!monitor.isLinked() || !monitor.isController()) {
             gg.drawCenteredString(font, Component.translatable(NOT_LINKED_CONTROLLER_KEY), width / 2, height / 2 - 4, 0xFFFFFF);
+            super.render(gg, mouseX, mouseY, partialTicks);
+            return;
+        }
+
+        if (monitor.isAradLinked()) {
+            int clipMargin = Math.round(GRID_MARGIN_PX * uiScale);
+            gg.enableScissor(left + clipMargin, top + clipMargin, left + uiSize - clipMargin, top + uiSize - clipMargin);
+            try {
+                renderAradDisplay(gg, monitor);
+            } finally {
+                gg.disableScissor();
+            }
             super.render(gg, mouseX, mouseY, partialTicks);
             return;
         }
@@ -351,6 +369,96 @@ public class MonitorScreen extends Screen {
         gg.pose().popPose();
         gg.setColor(1f, 1f, 1f, 1f);
         RenderSystem.disableBlend();
+    }
+
+    private void renderAradDisplay(GuiGraphics gg, MonitorBlockEntity monitor) {
+        MonitorProjection.DisplayPoint center = new MonitorProjection.DisplayPoint(0f, 0f);
+        renderBG(gg, MonitorSprite.RADAR_BG_CIRCLE, ARAD_RING_ALPHA, center, 1.0f);
+        renderBG(gg, MonitorSprite.RADAR_BG_CIRCLE, ARAD_RING_ALPHA, center, 2f / 3f);
+        renderBG(gg, MonitorSprite.RADAR_BG_CIRCLE, ARAD_RING_ALPHA, center, 0.25f);
+        renderAradContacts(gg, monitor);
+    }
+
+    private void renderAradContacts(GuiGraphics gg, MonitorBlockEntity monitor) {
+        int spriteSize = Math.max(16, Math.round(84 * uiScale));
+        RenderSystem.enableBlend();
+        for (MonitorBlockEntity.RwrDisplayInfo contact : monitor.getRwrInfos()) {
+            Color color = aradContactColor(contact);
+            gg.setColor(color.getRedAsFloat(), color.getGreenAsFloat(), color.getBlueAsFloat(), 1.0f);
+            float radius = contact.exactLocked()
+                    ? ARAD_INNER_RING_RADIUS
+                    : contact.withinRadarRange() ? ARAD_MIDDLE_RING_RADIUS : ARAD_OUTER_RING_RADIUS;
+            radius += contact.radiusOffset();
+            MonitorProjection.DisplayPoint point = aradPoint(contact.bearingDegrees(), monitorForwardBearing(monitor), radius);
+            int px = Math.round(left + (0.5f + point.xOffset()) * uiSize);
+            int py = Math.round(top + (0.5f + point.zOffset()) * uiSize);
+            int sx = px - spriteSize / 2;
+            int sy = py - spriteSize / 2;
+            gg.blit(spriteFor(contact).getTexture(), sx, sy, spriteSize, spriteSize,
+                    0, 0, ARAD_CONTACT_TEXTURE_SIZE, ARAD_CONTACT_TEXTURE_SIZE,
+                    ARAD_CONTACT_TEXTURE_SIZE, ARAD_CONTACT_TEXTURE_SIZE);
+            if (hasThreatOverlay(contact)) {
+                int threatSize = Math.max(12, Math.round(spriteSize * ARAD_PRIMARY_THREAT_SCALE));
+                int tx = px - threatSize / 2;
+                int ty = py - threatSize / 2;
+                gg.blit(MonitorSprite.RWR_PRIMARY_THREAT.getTexture(), tx, ty, threatSize, threatSize,
+                        0, 0, ARAD_CONTACT_TEXTURE_SIZE, ARAD_CONTACT_TEXTURE_SIZE,
+                        ARAD_CONTACT_TEXTURE_SIZE, ARAD_CONTACT_TEXTURE_SIZE);
+            }
+        }
+        gg.setColor(1f, 1f, 1f, 1f);
+        RenderSystem.disableBlend();
+    }
+
+    private static Color aradContactColor(MonitorBlockEntity.RwrDisplayInfo contact) {
+        if (contact.exactLocked()) {
+            return new Color(0xff0000);
+        }
+        if (contact.friendly()) {
+            return new Color(0x3399ff);
+        }
+        return new Color(RadarConfig.client().groundRadarColor.get());
+    }
+
+    private static boolean hasThreatOverlay(MonitorBlockEntity.RwrDisplayInfo contact) {
+        return contact.exactLocked() || (contact.primaryThreat() && !contact.friendly());
+    }
+
+    private static MonitorProjection.DisplayPoint aradPoint(float bearingDegrees, float forwardBearingDegrees, float radius) {
+        double radians = Math.toRadians(bearingDegrees - forwardBearingDegrees + 180.0f);
+        return new MonitorProjection.DisplayPoint(
+                (float) (-Math.sin(radians) * radius),
+                (float) (-Math.cos(radians) * radius)
+        );
+    }
+
+    private static float monitorForwardBearing(MonitorBlockEntity monitor) {
+        Direction monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
+        Vec3 forward = new Vec3(monitorFacing.getStepX(), monitorFacing.getStepY(), monitorFacing.getStepZ());
+
+        if (monitor.getShip() != null) {
+            forward = PhysicsHandler.getWorldVecDirectionTransform(forward, monitor);
+        }
+
+        double horizontalLengthSqr = forward.x * forward.x + forward.z * forward.z;
+        if (horizontalLengthSqr < 1.0E-6) {
+            return 0.0f;
+        }
+
+        double angle = Math.toDegrees(Math.atan2(forward.x, forward.z));
+        angle %= 360.0;
+        if (angle < 0.0) {
+            angle += 360.0;
+        }
+        return (float) angle;
+    }
+
+    private static MonitorSprite spriteFor(MonitorBlockEntity.RwrDisplayInfo contact) {
+        return switch (contact.radarType()) {
+            case SKY -> MonitorSprite.SKY_RADAR_SYMBOL;
+            case AIRBORNE -> MonitorSprite.PLANE_RADAR_SYMBOL;
+            case GROUND -> MonitorSprite.RADAR_SYMBOL;
+        };
     }
 
     private MonitorProjection currentProjection(MonitorBlockEntity monitor) {

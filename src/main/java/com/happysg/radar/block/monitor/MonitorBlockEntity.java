@@ -5,6 +5,9 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.arad.rwr.RadarType;
+import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
+import com.happysg.radar.block.arad.rwr.RwrRadarContact;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
@@ -58,6 +61,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     protected @Nullable IRadar radar;
     protected final Map<BlockPos, IRadar> radarCache = new HashMap<>();
     protected List<RadarDisplayInfo> radarInfos = List.of();
+    protected List<RwrDisplayInfo> rwrInfos = List.of();
+    private final Map<String, Integer> rwrLockHoldTicks = new HashMap<>();
+    private final Map<String, RwrBearingNoiseState> rwrBearingNoise = new HashMap<>();
     protected String hoveredEntity;
     public String selectedEntity;
     public RadarTrack activetrack;
@@ -95,6 +101,46 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             @Nullable Vec3 ownedLockedTargetPos
     ) {}
 
+    public record RwrDisplayInfo(
+            String sourceId,
+            RadarType radarType,
+            float bearingDegrees,
+            float radiusOffset,
+            boolean withinRadarRange,
+            boolean exactLocked,
+            boolean primaryThreat,
+            boolean friendly
+    ) {}
+
+    private record PendingRwrDisplayInfo(
+            String sourceId,
+            RadarType radarType,
+            float trueBearingDegrees,
+            float displayBearingDegrees,
+            int ring,
+            boolean withinRadarRange,
+            boolean exactLocked,
+            boolean primaryThreat,
+            boolean friendly
+    ) {}
+
+    private static final class RwrBearingNoiseState {
+        private float currentOffset;
+        private float targetOffset;
+        private long lastUpdateTick;
+        private long nextRetargetTick;
+        private int retargetCounter;
+    }
+
+    private static final int RWR_LOCK_HOLD_TICKS = 20;
+    private static final float RWR_STACK_RADIUS_STEP = 0.028f;
+    private static final int RWR_BEARING_RETARGET_TICKS = 100;
+    private static final float RWR_BEARING_EASE_DEGREES_PER_TICK = 0.04f;
+    private static final float RWR_EXACT_LOCK_BEARING_ERROR_DEGREES = 5.0f;
+    private static final float RWR_OUTER_BEARING_ERROR_DEGREES = 25.0f;
+    private static final float RWR_MIDDLE_WEAK_BEARING_ERROR_DEGREES = 12.0f;
+    private static final float RWR_MIDDLE_STRONG_BEARING_ERROR_DEGREES = 6.0f;
+
     @Override
     public void initialize() {
         super.initialize();
@@ -123,6 +169,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             if (level.getGameTime() % 5 == 0) {
                 syncFromNetwork(sl);
                 refreshAradLinkState();
+                syncFromArad(sl);
                 updateCacheServerOrClient();
 
                 // keep controller's displayed selection consistent with network
@@ -184,6 +231,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         this.radar = null;
         this.radarCache.clear();
         this.radarInfos = List.of();
+        this.rwrInfos = List.of();
         this.controller = null;
         this.aradLinked = false;
 
@@ -210,6 +258,219 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         aradLinked = linked;
         setChanged();
         sendData();
+    }
+
+    private void syncFromArad(ServerLevel sl) {
+        if (!aradLinked) {
+            rwrInfos = List.of();
+            rwrLockHoldTicks.clear();
+            rwrBearingNoise.clear();
+            return;
+        }
+
+        BlockPos rwrPos = ARADData.get(sl).getRwrForMonitor(sl.dimension(), getControllerPos());
+        if (rwrPos == null || !(sl.getBlockEntity(rwrPos) instanceof RadarWarningReceiverBlockEntity rwr)) {
+            rwrInfos = List.of();
+            rwrLockHoldTicks.clear();
+            rwrBearingNoise.clear();
+            return;
+        }
+
+        List<PendingRwrDisplayInfo> pendingInfos = new ArrayList<>();
+        List<RwrRadarContact> contacts = rwr.getRadarContacts(sl);
+        String primaryThreatSource = primaryThreatSource(contacts);
+        Set<String> liveSources = new HashSet<>();
+        long gameTime = sl.getGameTime();
+        for (RwrRadarContact contact : contacts) {
+            liveSources.add(contact.sourceId());
+            boolean exactLocked = stabilizeRwrLock(contact);
+            int ring = rwrRing(contact.withinRadarRange(), exactLocked);
+            float displayBearingDegrees = fuzzedRwrBearing(contact, exactLocked, gameTime);
+            pendingInfos.add(new PendingRwrDisplayInfo(
+                    contact.sourceId(),
+                    contact.radarType(),
+                    contact.bearingDegrees(),
+                    displayBearingDegrees,
+                    ring,
+                    contact.withinRadarRange(),
+                    exactLocked,
+                    Objects.equals(contact.sourceId(), primaryThreatSource),
+                    contact.friendly()
+            ));
+        }
+        rwrLockHoldTicks.keySet().removeIf(source -> !liveSources.contains(source));
+        rwrBearingNoise.keySet().removeIf(source -> !liveSources.contains(source));
+        rwrInfos = spreadOverlappingRwrInfos(pendingInfos);
+    }
+
+    private float fuzzedRwrBearing(RwrRadarContact contact, boolean exactLocked, long gameTime) {
+        String sourceId = contact.sourceId();
+        if (sourceId == null || sourceId.isBlank()) {
+            return contact.bearingDegrees();
+        }
+
+        float maxError = rwrBearingMaxError(contact, exactLocked);
+        RwrBearingNoiseState state = rwrBearingNoise.computeIfAbsent(sourceId, ignored -> {
+            RwrBearingNoiseState newState = new RwrBearingNoiseState();
+            newState.lastUpdateTick = gameTime;
+            newState.nextRetargetTick = gameTime;
+            newState.targetOffset = deterministicRwrTargetOffset(sourceId, newState.retargetCounter++, maxError);
+            newState.currentOffset = newState.targetOffset;
+            return newState;
+        });
+
+        state.currentOffset = clamp(state.currentOffset, -maxError, maxError);
+        state.targetOffset = clamp(state.targetOffset, -maxError, maxError);
+
+        if (gameTime >= state.nextRetargetTick) {
+            state.targetOffset = deterministicRwrTargetOffset(sourceId, state.retargetCounter++, maxError);
+            state.nextRetargetTick = gameTime + RWR_BEARING_RETARGET_TICKS;
+        }
+
+        long elapsedTicks = Math.max(0L, gameTime - state.lastUpdateTick);
+        state.lastUpdateTick = gameTime;
+        float maxStep = RWR_BEARING_EASE_DEGREES_PER_TICK * elapsedTicks;
+        state.currentOffset = approach(state.currentOffset, state.targetOffset, maxStep);
+        state.currentOffset = clamp(state.currentOffset, -maxError, maxError);
+
+        return wrapDegrees360(contact.bearingDegrees() + state.currentOffset);
+    }
+
+    private static float rwrBearingMaxError(RwrRadarContact contact, boolean exactLocked) {
+        if (exactLocked) {
+            return RWR_EXACT_LOCK_BEARING_ERROR_DEGREES;
+        }
+        if (!contact.withinRadarRange()) {
+            return RWR_OUTER_BEARING_ERROR_DEGREES;
+        }
+        float signal = clamp(contact.signalStrength(), 1.0f, 14.0f);
+        float signalScale = (signal - 1.0f) / 13.0f;
+        return clamp(
+                RWR_MIDDLE_WEAK_BEARING_ERROR_DEGREES
+                        - signalScale * (RWR_MIDDLE_WEAK_BEARING_ERROR_DEGREES - RWR_MIDDLE_STRONG_BEARING_ERROR_DEGREES),
+                RWR_MIDDLE_STRONG_BEARING_ERROR_DEGREES,
+                RWR_MIDDLE_WEAK_BEARING_ERROR_DEGREES
+        );
+    }
+
+    private static float deterministicRwrTargetOffset(String sourceId, int retargetCounter, float maxError) {
+        if (maxError <= 0.0f) {
+            return 0.0f;
+        }
+        long seed = 0x9E3779B97F4A7C15L;
+        seed ^= sourceId.hashCode();
+        seed = Long.rotateLeft(seed, 27) * 0x94D049BB133111EBL;
+        seed ^= retargetCounter * 0xBF58476D1CE4E5B9L;
+        Random random = new Random(seed);
+        return (random.nextFloat() * 2.0f - 1.0f) * maxError;
+    }
+
+    private static float approach(float current, float target, float maxStep) {
+        if (current < target) {
+            return Math.min(target, current + maxStep);
+        }
+        if (current > target) {
+            return Math.max(target, current - maxStep);
+        }
+        return current;
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static @Nullable String primaryThreatSource(List<RwrRadarContact> contacts) {
+        String primarySource = null;
+        float strongestSignal = Float.NEGATIVE_INFINITY;
+
+        for (RwrRadarContact contact : contacts) {
+            if (!contact.withinRadarRange()) {
+                continue;
+            }
+            if (contact.friendly() && !contact.exactLocked()) {
+                continue;
+            }
+            if (primarySource == null || contact.signalStrength() > strongestSignal) {
+                primarySource = contact.sourceId();
+                strongestSignal = contact.signalStrength();
+            }
+        }
+
+        return primarySource;
+    }
+
+    private boolean stabilizeRwrLock(RwrRadarContact contact) {
+        String sourceId = contact.sourceId();
+        if (sourceId == null || sourceId.isBlank()) {
+            return contact.exactLocked();
+        }
+
+        if (contact.exactLocked()) {
+            rwrLockHoldTicks.put(sourceId, RWR_LOCK_HOLD_TICKS);
+            return true;
+        }
+
+        int holdTicks = rwrLockHoldTicks.getOrDefault(sourceId, 0);
+        if (holdTicks <= 0) {
+            rwrLockHoldTicks.remove(sourceId);
+            return false;
+        }
+
+        holdTicks = Math.max(0, holdTicks - 5);
+        if (holdTicks == 0) {
+            rwrLockHoldTicks.remove(sourceId);
+            return false;
+        }
+
+        rwrLockHoldTicks.put(sourceId, holdTicks);
+        return true;
+    }
+
+    private static List<RwrDisplayInfo> spreadOverlappingRwrInfos(List<PendingRwrDisplayInfo> pendingInfos) {
+        Map<String, Integer> groupSizes = new HashMap<>();
+        Map<String, Integer> groupIndexes = new HashMap<>();
+
+        for (PendingRwrDisplayInfo info : pendingInfos) {
+            groupSizes.merge(rwrStackKey(info), 1, Integer::sum);
+        }
+
+        List<RwrDisplayInfo> infos = new ArrayList<>();
+        for (PendingRwrDisplayInfo info : pendingInfos) {
+            String key = rwrStackKey(info);
+            int count = groupSizes.getOrDefault(key, 1);
+            int index = groupIndexes.merge(key, 1, Integer::sum) - 1;
+            float radiusOffset = count <= 1 ? 0.0f : (index - (count - 1) * 0.5f) * RWR_STACK_RADIUS_STEP;
+            infos.add(new RwrDisplayInfo(
+                    info.sourceId(),
+                    info.radarType(),
+                    info.displayBearingDegrees(),
+                    radiusOffset,
+                    info.withinRadarRange(),
+                    info.exactLocked(),
+                    info.primaryThreat(),
+                    info.friendly()
+            ));
+        }
+        return List.copyOf(infos);
+    }
+
+    private static String rwrStackKey(PendingRwrDisplayInfo info) {
+        return info.ring() + ":" + Math.round(wrapDegrees360(info.trueBearingDegrees()) * 100.0f);
+    }
+
+    private static int rwrRing(boolean withinRadarRange, boolean exactLocked) {
+        if (exactLocked) {
+            return 0;
+        }
+        return withinRadarRange ? 1 : 2;
+    }
+
+    private static float wrapDegrees360(float angle) {
+        angle %= 360.0f;
+        if (angle < 0.0f) {
+            angle += 360.0f;
+        }
+        return angle;
     }
 
 
@@ -492,6 +753,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         return aradLinked;
     }
 
+    public List<RwrDisplayInfo> getRwrInfos() {
+        return rwrInfos;
+    }
+
     private static RadarTrack newerTrack(RadarTrack first, RadarTrack second) {
         return second.scannedTime() >= first.scannedTime() ? second : first;
     }
@@ -753,6 +1018,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             radarCache.clear();
         }
 
+        if (clientPacket && tag.contains("RwrContacts", Tag.TAG_LIST)) {
+            rwrInfos = readRwrInfos(tag.getList("RwrContacts", Tag.TAG_COMPOUND));
+        }
+
         selectedEntity = tag.contains("SelectedEntity", Tag.TAG_STRING)
                 ? tag.getString("SelectedEntity")
                 : null;
@@ -817,6 +1086,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 tag.put("radarPos", NbtUtils.writeBlockPos(radarPos));
 
             tag.put("Radars", writeRadarInfos());
+            tag.put("RwrContacts", writeRwrInfos());
 
             tag.put("Filter", filter.toTag());
             tag.put("tracks", RadarTrackUtil.serializeNBTList(cachedTracks));
@@ -887,6 +1157,47 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     tag.contains("OwnedTargetX", Tag.TAG_DOUBLE)
                             ? new Vec3(tag.getDouble("OwnedTargetX"), tag.getDouble("OwnedTargetY"), tag.getDouble("OwnedTargetZ"))
                             : null
+            ));
+        }
+        return List.copyOf(infos);
+    }
+
+    private ListTag writeRwrInfos() {
+        ListTag list = new ListTag();
+        for (RwrDisplayInfo info : rwrInfos) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("SourceId", info.sourceId() == null ? "" : info.sourceId());
+            tag.putString("RadarType", info.radarType().name());
+            tag.putFloat("BearingDegrees", info.bearingDegrees());
+            tag.putFloat("RadiusOffset", info.radiusOffset());
+            tag.putBoolean("WithinRadarRange", info.withinRadarRange());
+            tag.putBoolean("ExactLocked", info.exactLocked());
+            tag.putBoolean("PrimaryThreat", info.primaryThreat());
+            tag.putBoolean("Friendly", info.friendly());
+            list.add(tag);
+        }
+        return list;
+    }
+
+    private List<RwrDisplayInfo> readRwrInfos(ListTag list) {
+        List<RwrDisplayInfo> infos = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag tag = list.getCompound(i);
+            RadarType radarType;
+            try {
+                radarType = RadarType.valueOf(tag.getString("RadarType"));
+            } catch (IllegalArgumentException ignored) {
+                radarType = RadarType.GROUND;
+            }
+            infos.add(new RwrDisplayInfo(
+                    tag.getString("SourceId"),
+                    radarType,
+                    tag.getFloat("BearingDegrees"),
+                    tag.getFloat("RadiusOffset"),
+                    tag.getBoolean("WithinRadarRange"),
+                    tag.getBoolean("ExactLocked"),
+                    tag.getBoolean("PrimaryThreat"),
+                    tag.getBoolean("Friendly")
             ));
         }
         return List.copyOf(infos);

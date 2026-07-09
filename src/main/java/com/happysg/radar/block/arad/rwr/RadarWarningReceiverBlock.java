@@ -65,5 +65,4 @@ public class RadarWarningReceiverBlock extends Block implements IBE<RadarWarning
     public BlockEntityType<? extends RadarWarningReceiverBlockEntity> getBlockEntityType() {
         return ModBlockEntityTypes.RWR_BE.get();
     }
-
 }

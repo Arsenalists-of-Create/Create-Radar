@@ -2,11 +2,15 @@ package com.happysg.radar.block.radar.bearing;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.arad.aradnetworks.JamRegistry;
+import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.arad.jammer.FakeRadarTrackFactory;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
+import com.happysg.radar.block.arad.rwr.RadarType;
+import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
+import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -36,6 +40,7 @@ import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar {
     private BlockPos lastKnownPos = BlockPos.ZERO;
@@ -45,6 +50,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     private RadarScanningBlockBehavior scanningBehavior;
     private Collection<RadarTrack> networkFilteredTracks = List.of();
     private long lastFilterTick = -1;
+    private UUID emitterId = UUID.randomUUID();
 
 
     public RadarBearingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
@@ -133,6 +139,11 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     @Override
+    public float getSweepAngularSpeedDegreesPerTick() {
+        return getAngularSpeed();
+    }
+
+    @Override
     public void assemble() {
         if (!(level.getBlockState(getBlockPos()).getBlock() instanceof RadarBearingBlock))
             return;
@@ -154,6 +165,8 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     public void disassemble() {
         super.disassemble();
+        running = false;
+        scanningBehavior.setRunning(false);
         updateContraptionData();
     }
 
@@ -213,6 +226,9 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(compound, registries, clientPacket);
+        if (compound.hasUUID("EmitterId")) {
+            emitterId = compound.getUUID("EmitterId");
+        }
         dishCount = compound.getInt("dishCount");
         creative = compound.getBoolean("creative");
         if (compound.contains("receiverFacing"))
@@ -222,6 +238,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     public void write(CompoundTag compound,HolderLookup.Provider registries, boolean clientPacket) {
         super.write(compound,registries, clientPacket);
+        compound.putUUID("EmitterId", emitterId);
         compound.putInt("dishCount", dishCount);
         compound.putBoolean("creative", creative);
         if (receiverFacing != null)
@@ -263,6 +280,12 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
             }
             return real;
     }
+
+    @Override
+    public boolean isRunning() {
+        return running && movedContraption != null;
+    }
+
     @Nullable
     private NetworkData.Group getNetworkGroup() {
         if (level == null || level.isClientSide) return null;
@@ -301,6 +324,32 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     public String getRadarType(){
         return "spinning";
     }
+
+    @Override
+    public UUID getEmitterId() {
+        return emitterId;
+    }
+
+    @Override
+    public RadarType getRadarTypeEnum() {
+        return RadarType.GROUND;
+    }
+
+    @Override
+    public RwrContactEvaluation evaluateRwrContact(ServerLevel level, RwrTargetReference receiver, RwrTargetReference target) {
+        boolean emitting = isRunning();
+        if (!emitting || scanningBehavior == null) {
+            return RwrContactEvaluation.notEmitting();
+        }
+
+        boolean detectable = scanningBehavior.canDetectRwrReceiver(receiver, level);
+        boolean lockCapable = scanningBehavior.canLockRwrTarget(target, level);
+        // Exact locks are explicit RWR runtime state; monitor/network selection is intentionally ignored here.
+        boolean locked = RadarContactRegistry.isExactLockedOn(level, getEmitterId(), target);
+        float signalStrength = detectable ? scanningBehavior.signalStrengthForRwrReceiver(receiver, level) : 0.0F;
+        return new RwrContactEvaluation(emitting, detectable, lockCapable, locked, signalStrength);
+    }
+
     @Override
     public boolean renderRelativeToMonitor(){
         if(!Mods.SABLE.isLoaded()) return false;

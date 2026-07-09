@@ -3,6 +3,7 @@ package com.happysg.radar.block.radar.behavior;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 
+import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.RadarEntityTypeTags;
@@ -20,8 +21,10 @@ import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
@@ -37,6 +40,7 @@ import java.util.function.Predicate;
 public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
     public static final BehaviourType<RadarScanningBlockBehavior> TYPE = new BehaviourType<>();
+    private static final double RWR_PASSIVE_RANGE_MULTIPLIER = 1.5;
 
     private int trackExpiration = 100;
     private int fov = RadarConfig.server().radarFOV.get();
@@ -161,7 +165,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
         for (SubLevelAccess ship : scannedShips) {
             Vec3 pos = RadarTrackUtil.getPosition(ship);
-            if (isInRadarCoverage(pos) && isServer) {
+            if (isInPassiveRwrCoverage(pos) && isServer) {
                 RadarContactRegistry.markInRange(sl, ship.getUniqueId(), radarSourceId(sl), 40, redstoneSignalFor(pos));
             }
 
@@ -181,40 +185,133 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     private int redstoneSignalFor(Vec3 target) {
+        return redstoneSignalFor(target, scanPos);
+    }
+
+    private int redstoneSignalFor(Vec3 target, Vec3 radarPos) {
         if (range <= 0.0) {
             return 1;
         }
 
-        double dx = target.x() - scanPos.x();
-        double dz = target.z() - scanPos.z();
+        double dx = target.x() - radarPos.x();
+        double dz = target.z() - radarPos.z();
         double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
         double normalized = Math.max(0.0, Math.min(1.0, horizontalDistance / range));
         return Math.max(1, Math.min(14, (int) Math.ceil((1.0 - normalized) * 14.0)));
     }
 
     private boolean isInRadarCoverage(Vec3 target) {
-        double horizontalDistance = Math.sqrt(Math.pow(target.x() - scanPos.x(), 2) + Math.pow(target.z() - scanPos.z(), 2));
-        double verticalDistance = Math.abs(target.y() - scanPos.y());
+        return isInRadarCoverage(target, scanPos);
+    }
+
+    private boolean isInRadarCoverage(Vec3 target, Vec3 radarPos) {
+        double horizontalDistance = Math.sqrt(Math.pow(target.x() - radarPos.x(), 2) + Math.pow(target.z() - radarPos.z(), 2));
+        double verticalDistance = Math.abs(target.y() - radarPos.y());
         double yScanRange = RadarConfig.server().radarYScanRange.get();
 
         return horizontalDistance <= range && verticalDistance <= yScanRange;
     }
 
+    private boolean isInPassiveRwrCoverage(Vec3 target) {
+        return isInPassiveRwrCoverage(target, scanPos);
+    }
+
+    private boolean isInPassiveRwrCoverage(Vec3 target, Vec3 radarPos) {
+        double horizontalDistance = Math.sqrt(Math.pow(target.x() - radarPos.x(), 2) + Math.pow(target.z() - radarPos.z(), 2));
+        double verticalDistance = Math.abs(target.y() - radarPos.y());
+        double yScanRange = RadarConfig.server().radarYScanRange.get();
+
+        return horizontalDistance <= range * RWR_PASSIVE_RANGE_MULTIPLIER && verticalDistance <= yScanRange;
+    }
+
     private boolean isInFovAndRange(Vec3 target) {
-        if (!isInRadarCoverage(target))
+        return isInFovAndRange(target, scanPos);
+    }
+
+    private boolean isInFovAndRange(Vec3 target, Vec3 radarPos) {
+        if (!isInRadarCoverage(target, radarPos))
             return false;
 
-        double horizontalDistance = Math.sqrt(Math.pow(target.x() - scanPos.x(), 2) + Math.pow(target.z() - scanPos.z(), 2));
+        double horizontalDistance = Math.sqrt(Math.pow(target.x() - radarPos.x(), 2) + Math.pow(target.z() - radarPos.z(), 2));
 
         if (horizontalDistance < 2)
             return true;
 
-        double angleToEntity = Math.toDegrees(Math.atan2(target.x() - scanPos.x(), target.z() - scanPos.z()));
+        double angleToEntity = Math.toDegrees(Math.atan2(target.x() - radarPos.x(), target.z() - radarPos.z()));
         angleToEntity = (angleToEntity + 360) % 360;
         double angleDiff = Math.abs(angleToEntity - angle);
         if (angleDiff > 180) angleDiff = 360 - angleDiff;
 
         return angleDiff <= fov / 2.0;
+    }
+
+    public boolean canDetectRwrReceiver(RwrTargetReference receiver, ServerLevel level) {
+        Optional<Vec3> pos = receiver.resolvePosition(level);
+        if (pos.isEmpty()) {
+            return false;
+        }
+        Vec3 radarPos = PhysicsHandler.getWorldVec(bearingEntity);
+        return isInPassiveRwrCoverage(pos.get(), radarPos);
+    }
+
+    public boolean canLockRwrTarget(RwrTargetReference target, ServerLevel level) {
+        if (!target.isLiveLockTarget(level)) {
+            return false;
+        }
+        Optional<Vec3> pos = target.resolvePosition(level);
+        if (pos.isEmpty()) {
+            return false;
+        }
+        if (!canScanTarget(target, level)) {
+            return false;
+        }
+        Vec3 radarPos = PhysicsHandler.getWorldVec(bearingEntity);
+        // Lock capability reuses the scanner's real FOV/range test, not a separate distance approximation.
+        return isInFovAndRange(pos.get(), radarPos);
+    }
+
+    public float signalStrengthForRwrReceiver(RwrTargetReference receiver, ServerLevel level) {
+        Optional<Vec3> pos = receiver.resolvePosition(level);
+        if (pos.isEmpty()) {
+            return 0.0F;
+        }
+        Vec3 radarPos = PhysicsHandler.getWorldVec(bearingEntity);
+        return isInPassiveRwrCoverage(pos.get(), radarPos) ? redstoneSignalFor(pos.get(), radarPos) : 0.0F;
+    }
+
+    private boolean canScanTarget(RwrTargetReference target, ServerLevel level) {
+        if (target.kind() == RwrTargetReference.Kind.SABLE_SHIP) {
+            return Mods.SABLE.isLoaded() && scanSable && target.resolveSableShip(level) != null;
+        }
+
+        Entity entity = target.resolveEntity(level);
+        if (entity == null || !entity.isAlive()) {
+            return false;
+        }
+        if (isMissile(entity)) {
+            return true;
+        }
+        if (entity instanceof Player) {
+            return scanPlayers && shouldRadarSee(entity);
+        }
+        if (entity instanceof Projectile) {
+            return scanProjectiles;
+        }
+        if (entity instanceof ItemEntity) {
+            return scanItems;
+        }
+        if (entity instanceof AbstractContraptionEntity) {
+            return scanContraptions;
+        }
+        if (entity instanceof Animal) {
+            return scanAnimals;
+        }
+        if (entity instanceof Mob) {
+            return scanMobs;
+        }
+
+        TrackCategory category = TrackCategory.get(entity);
+        return allowCategory(category);
     }
 
     private void removeDeadTracks() {

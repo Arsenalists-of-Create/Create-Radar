@@ -3,8 +3,12 @@ package com.happysg.radar.block.radar.skyradar;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.behavior.SkyRadarScanningBehavior;
+import com.happysg.radar.block.arad.rwr.RadarType;
+import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
+import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -35,6 +39,7 @@ import net.minecraft.world.phys.Vec3;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, IControlContraption {
     private static final float SKY_RADAR_ROTATION_SCALE = 0.125f;
@@ -51,6 +56,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     private boolean hasOwnedTarget;
     private float targetPitchDeg = SkyRadarContraptionEntity.PITCH_DEGREES;
     private boolean autoDisassembledForAltitude;
+    private UUID emitterId = UUID.randomUUID();
 
     public SkyRadarBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -477,6 +483,11 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     }
 
     @Override
+    public float getSweepAngularSpeedDegreesPerTick() {
+        return getEffectiveAngularSpeed();
+    }
+
+    @Override
     public void setSpeed(float speed) {
         super.setSpeed(Mth.clamp(speed, -getMaxSkyRadarRpm(), getMaxSkyRadarRpm()));
     }
@@ -488,6 +499,9 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     @Override
     protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(compound, registries, clientPacket);
+        if (compound.hasUUID("EmitterId")) {
+            emitterId = compound.getUUID("EmitterId");
+        }
         if (compound.contains("YawDeg", Tag.TAG_FLOAT)) {
             yawDeg = wrap360(compound.getFloat("YawDeg"));
             prevYawDeg = yawDeg;
@@ -509,6 +523,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     @Override
     protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(compound, registries, clientPacket);
+        compound.putUUID("EmitterId", emitterId);
         compound.putFloat("YawDeg", wrap360(yawDeg));
         compound.putBoolean("ManualYawOverride", manualYawOverride);
         compound.putBoolean("Running", running);
@@ -563,6 +578,31 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     @Override
     public String getRadarType() {
         return "sky";
+    }
+
+    @Override
+    public UUID getEmitterId() {
+        return emitterId;
+    }
+
+    @Override
+    public RadarType getRadarTypeEnum() {
+        return RadarType.SKY;
+    }
+
+    @Override
+    public RwrContactEvaluation evaluateRwrContact(ServerLevel level, RwrTargetReference receiver, RwrTargetReference target) {
+        boolean emitting = isRunning();
+        if (!emitting || scanningBehavior == null) {
+            return RwrContactEvaluation.notEmitting();
+        }
+
+        boolean detectable = scanningBehavior.canDetectRwrReceiver(receiver, level);
+        boolean lockCapable = scanningBehavior.canLockRwrTarget(target, level);
+        // Exact locks are explicit RWR runtime state; monitor/network selection and owned aim are intentionally ignored here.
+        boolean locked = RadarContactRegistry.isExactLockedOn(level, getEmitterId(), target);
+        float signalStrength = detectable ? scanningBehavior.signalStrengthForRwrReceiver(receiver, level) : 0.0F;
+        return new RwrContactEvaluation(emitting, detectable, lockCapable, locked, signalStrength);
     }
 
     @Override

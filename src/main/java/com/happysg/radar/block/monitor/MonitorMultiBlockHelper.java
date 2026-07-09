@@ -7,7 +7,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -25,19 +24,29 @@ public class MonitorMultiBlockHelper {
             return;
 
         Direction originFacing = pState.getValue(FACING);
+        BlockPos bestController = null;
+        int bestSize = 1;
+        int maxSize = RadarConfig.server().monitorMaxSize.get();
+        BlockPos min = pPos.offset(-maxSize, -maxSize, -maxSize);
+        BlockPos max = pPos.offset(maxSize, maxSize, maxSize);
 
-        BlockPos.betweenClosedStream(new AABB(pPos).inflate(RadarConfig.server().monitorMaxSize.get()))
-                .forEach(candidate -> {
-                    BlockState candState = pLevel.getBlockState(candidate);
-                    if (!candState.is(ModBlocks.MONITOR.get())) return;
-                    if (candState.getValue(FACING) != originFacing) return;
+        for (BlockPos candidate : BlockPos.betweenClosed(min, max)) {
+            BlockState candState = pLevel.getBlockState(candidate);
+            if (!candState.is(ModBlocks.MONITOR.get())) continue;
+            if (candState.getValue(FACING) != originFacing) continue;
 
-                    if (pLevel.getBlockEntity(candidate) instanceof MonitorBlockEntity monitor) {
-                        int size = getSize(pLevel, candidate);
-                        if (size > 1) {
-                            formMulti(pState, pLevel, candidate.immutable(), size);
-                        }
-                    }});
+            int size = getSize(pLevel, candidate);
+            if (size <= bestSize) continue;
+            if (!contains(candidate, originFacing, size, pPos)) continue;
+            if (overlapsSameSizeOrLargerMulti(pLevel, candidate, originFacing, size)) continue;
+
+            bestController = candidate.immutable();
+            bestSize = size;
+        }
+
+        if (bestController != null) {
+            formMulti(pState, pLevel, bestController, bestSize);
+        }
     }
 
     public static void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pIsMoving) {
@@ -128,6 +137,32 @@ public class MonitorMultiBlockHelper {
         if (!pLevel.getBlockState(pos).is(ModBlocks.MONITOR.get()))
             return false;
         return getSize(pLevel, pos) > 1;
+    }
+
+    private static boolean contains(BlockPos controller, Direction facing, int size, BlockPos pos) {
+        Direction right = facing.getClockWise();
+        int upOffset = pos.getY() - controller.getY();
+        int rightOffset = (pos.getX() - controller.getX()) * right.getStepX()
+                + (pos.getZ() - controller.getZ()) * right.getStepZ();
+
+        return upOffset >= 0 && upOffset < size
+                && rightOffset >= 0 && rightOffset < size
+                && pos.equals(controller.above(upOffset).relative(right, rightOffset));
+    }
+
+    private static boolean overlapsSameSizeOrLargerMulti(Level level, BlockPos controller, Direction facing, int size) {
+        Direction right = facing.getClockWise();
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                BlockPos pos = controller.above(i).relative(right, j);
+                if (!(level.getBlockEntity(pos) instanceof MonitorBlockEntity monitor)) continue;
+                if (monitor.getSize() >= size && !monitor.getControllerPos().equals(controller)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
 

@@ -18,7 +18,7 @@ public class RwrEngagedLoopSound extends AbstractTickableSoundInstance {
         this.rwrPos = rwrPos;
         this.looping = true;
         this.delay = 0;
-        this.volume = 1.0f;
+        this.volume = 2.0f;
         this.pitch = 1.0f;
         updatePosition(soundPos);
     }

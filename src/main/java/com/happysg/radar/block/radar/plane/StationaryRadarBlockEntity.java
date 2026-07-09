@@ -1,7 +1,11 @@
 package com.happysg.radar.block.radar.plane;
 
+import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
+import com.happysg.radar.block.arad.rwr.RadarType;
+import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
+import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -10,6 +14,9 @@ import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -18,9 +25,11 @@ import dev.ryanhcode.sable.companion.SubLevelAccess;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 
 public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRadar {
     private RadarScanningBlockBehavior scanningBehavior;
+    private UUID emitterId = UUID.randomUUID();
 
 
     public StationaryRadarBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
@@ -106,6 +115,45 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     public String getRadarType(){
         return "nonspinning";
+    }
+
+    @Override
+    public UUID getEmitterId() {
+        return emitterId;
+    }
+
+    @Override
+    public RadarType getRadarTypeEnum() {
+        return RadarType.AIRBORNE;
+    }
+
+    @Override
+    public RwrContactEvaluation evaluateRwrContact(ServerLevel level, RwrTargetReference receiver, RwrTargetReference target) {
+        boolean emitting = isRunning();
+        if (!emitting || scanningBehavior == null) {
+            return RwrContactEvaluation.notEmitting();
+        }
+
+        boolean detectable = scanningBehavior.canDetectRwrReceiver(receiver, level);
+        boolean lockCapable = scanningBehavior.canLockRwrTarget(target, level);
+        // Exact locks are explicit RWR runtime state; monitor/network selection is intentionally ignored here.
+        boolean locked = RadarContactRegistry.isExactLockedOn(level, getEmitterId(), target);
+        float signalStrength = detectable ? scanningBehavior.signalStrengthForRwrReceiver(receiver, level) : 0.0F;
+        return new RwrContactEvaluation(emitting, detectable, lockCapable, locked, signalStrength);
+    }
+
+    @Override
+    protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
+        super.read(compound, registries, clientPacket);
+        if (compound.hasUUID("EmitterId")) {
+            emitterId = compound.getUUID("EmitterId");
+        }
+    }
+
+    @Override
+    protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
+        super.write(compound, registries, clientPacket);
+        compound.putUUID("EmitterId", emitterId);
     }
 
     @Override

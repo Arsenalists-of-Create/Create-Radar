@@ -59,7 +59,7 @@ public class ShipListScreen extends AbstractSimiScreen {
         int y = guiTop;
 
         // 1) instantiate your edit box
-        shipEntry = new SimpleEditBox(font, x + 60, y + 29, 93, 10, null);
+        shipEntry = new SimpleEditBox(font, x + 60, y + 29, 93, 10, Component.translatable(MODID + ".ship_list.enter_code"));
         shipEntry.setBordered(false);
         shipEntry.setTooltip(Tooltip.create(Component.translatable(MODID + ".ship_list.enter_code")));
         shipEntry.setAllowedCharacters(c -> "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_".indexOf(c) != -1);

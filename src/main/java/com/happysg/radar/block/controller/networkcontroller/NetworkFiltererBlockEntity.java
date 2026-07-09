@@ -10,6 +10,8 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.behavior.SkyRadarScanningBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
+import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.create.CreateSchematicLinkPersistence;
 import com.happysg.radar.compat.sable.SableLinkPersistence;
@@ -110,10 +112,20 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         String selectedId = data.getSelectedTargetId(group);
 
-        if (Mods.SABLE.isLoaded() && selectedId != null && (sl.getGameTime() % 10 == 0)) {
-            UUID shipId = UUID.fromString(selectedId);
-            SubLevelAccess ship = SubLevelContainer.getContainer(level).getSubLevel(shipId);
-            if (ship != null) RadarContactRegistry.markLocked(sl, shipId, 10);
+        if (Mods.SABLE.isLoaded() && selectedId != null) {
+            Optional<UUID> selectedShipId = parseUuid(selectedId);
+            if (selectedShipId.isPresent()) {
+                SubLevelContainer container = SubLevelContainer.getContainer(level);
+                SubLevelAccess ship = container == null ? null : container.getSubLevel(selectedShipId.get());
+                if (ship != null) {
+                    if (sl.getGameTime() % 10 == 0) {
+                        RadarContactRegistry.markLocked(sl, selectedShipId.get(), 10);
+                    }
+                    if (sl.getGameTime() % 5 == 0) {
+                        be.markExactLocksForSelectedShip(sl, group, selectedShipId.get());
+                    }
+                }
+            }
         }
 
         if (sl.getGameTime() % 5 != 0) return;
@@ -303,6 +315,27 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return radars;
     }
 
+    private void markExactLocksForSelectedShip(ServerLevel sl, NetworkData.Group group, UUID shipId) {
+        RwrTargetReference target = RwrTargetReference.sableShip(shipId);
+        IRadar strongestRadar = null;
+        float strongestSignal = 0.0F;
+
+        for (IRadar radar : getRunningRadars(sl, group)) {
+            RwrContactEvaluation evaluation = radar.evaluateRwrContact(sl, target, target);
+            if (!evaluation.emitting() || !evaluation.lockCapable()) {
+                continue;
+            }
+            if (strongestRadar == null || evaluation.signalStrength() > strongestSignal) {
+                strongestRadar = radar;
+                strongestSignal = evaluation.signalStrength();
+            }
+        }
+
+        if (strongestRadar != null) {
+            RadarContactRegistry.markExactLocked(sl, strongestRadar.getEmitterId(), target, 10);
+        }
+    }
+
     private static RadarTrack newerTrack(RadarTrack first, RadarTrack second) {
         return second.scannedTime() >= first.scannedTime() ? second : first;
     }
@@ -329,6 +362,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             if (selectedId.equals(t.getId())) return t;
         }
         return null;
+    }
+
+    private static Optional<UUID> parseUuid(String id) {
+        try {
+            return Optional.of(UUID.fromString(id));
+        } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
+        }
     }
 
     private void applySelectedTarget(ServerLevel sl, NetworkData data, NetworkData.Group group,

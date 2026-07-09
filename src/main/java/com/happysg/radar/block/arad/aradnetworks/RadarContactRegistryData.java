@@ -102,6 +102,25 @@ public class RadarContactRegistryData extends SavedData {
         return new HashSet<>(e.inRangeSources.keySet());
     }
 
+    public void removeInRangeSource(UUID shipId, String sourceId) {
+        Entry e = entries.get(shipId);
+        if (e == null || sourceId == null) {
+            return;
+        }
+
+        boolean removed = e.inRangeSources.remove(sourceId) != null;
+        e.inRangeSignals.remove(sourceId);
+
+        if (!removed) {
+            return;
+        }
+
+        if (e.inRangeSources.isEmpty() && e.lockedTtl <= 0 && e.engagedTtl <= 0) {
+            entries.remove(shipId);
+        }
+        setDirty();
+    }
+
     public int getInRangeSourceCount(UUID shipId) {
         Entry e = entries.get(shipId);
         return e == null ? 0 : e.inRangeSources.size();
