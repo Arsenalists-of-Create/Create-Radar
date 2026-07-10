@@ -16,10 +16,12 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.fml.common.Mod;
+import org.valkyrienskies.core.impl.shadow.Co;
 
 public class AutoTargetScreen extends AbstractSimiScreen  {
     private static final String KEY = "TargetBools";
-    private static final int COUNT = 7;
+    private static final int COUNT = 8;
 
     boolean player =true;
     boolean contraption=true;
@@ -27,7 +29,7 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
     boolean animal=true;
     boolean projectile=true;
     boolean autoTarget= true;
-    boolean artilleryMode = true;
+    boolean artilleryMode = false;
     boolean lineofSight = true;
     //  boolean[] bools = new boolean[]{player,contraption,mob,animal,projectile,autoTarget,lineofSight};
 
@@ -43,6 +45,8 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
     protected Indicator projectileIndicator;
     protected IconButton autoTargetButton;
     protected Indicator autoTargetIndicator;
+    protected IconButton artilleryButton;
+    protected Indicator artilleryIndicator;
     protected IconButton autoFireButton;
     protected IconButton lineofSightButton;
     protected Indicator lineofSightIndicator;
@@ -153,9 +157,20 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
         addRenderableWidget(lineofSightButton);
         addRenderableWidget(lineofSightIndicator);
 
-        autoTargetButton = new IconButton(guiLeft + 170, guiTop + 42, ModGuiTextures.AUTO_TARGET);
+        artilleryButton = new IconButton(guiLeft +142, guiTop+ 43, ModGuiTextures.ARTILLERY);
+        artilleryButton.setToolTip(Component.translatable(CreateRadar.MODID+".radar_button.artillery"));
+        artilleryIndicator = new Indicator(guiLeft+ 142, guiTop +36,Component.empty());
+        artilleryIndicator.state = artilleryMode ? Indicator.State.GREEN : Indicator.State.RED;
+        artilleryButton.withCallback((x,y) -> {
+            artilleryMode = !artilleryMode;
+            artilleryIndicator.state = artilleryMode ? Indicator.State.GREEN : Indicator.State.RED;
+        });
+        addRenderableWidget(artilleryButton);
+        addRenderableWidget(artilleryIndicator);
+
+        autoTargetButton = new IconButton(guiLeft + 190, guiTop + 42, ModGuiTextures.AUTO_TARGET);
         autoTargetButton.setToolTip(Component.translatable(CreateRadar.MODID + ".radar_button.auto_target"));
-        autoTargetIndicator = new Indicator(guiLeft + 170, guiTop + 35, Component.empty());
+        autoTargetIndicator = new Indicator(guiLeft + 190, guiTop + 35, Component.empty());
         autoTargetIndicator.state = autoTarget ? Indicator.State.GREEN : Indicator.State.RED;
         autoTargetButton.withCallback((x, y) -> {
             autoTarget = !autoTarget;
@@ -164,7 +179,7 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
         addRenderableWidget(autoTargetButton);
         addRenderableWidget(autoTargetIndicator);
 
-        confirmButton = new IconButton(guiLeft+191,guiTop+83, AllIcons.I_CONFIRM);
+        confirmButton = new IconButton(guiLeft+211,guiTop+83, AllIcons.I_CONFIRM);
         confirmButton.withCallback(this::onClose);
         addRenderableWidget(confirmButton);
 
@@ -183,6 +198,9 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
                 projectile = arr[4];
                 lineofSight = arr[5];
                 autoTarget  = arr[6];
+                if (arr.length > 7) {
+                    artilleryMode = arr[7];
+                }
             }
         }
     }
@@ -203,6 +221,7 @@ public class AutoTargetScreen extends AbstractSimiScreen  {
         flags[4] = projectile;
         flags[5] = lineofSight;
         flags[6] = autoTarget;
+        flags[7] = artilleryMode;
         BoolNBThelper.saveBooleansAsBytes(stack,flags, KEY);
         BoolListPacket.send(true, flags, KEY);
 

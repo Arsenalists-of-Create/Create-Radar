@@ -14,6 +14,8 @@ import java.util.UUID;
 
 
 public class RadarTrack {
+    public static final int FRIENDLY_RADAR_COLOR = 0x3399ff;
+
     private final String id;
     private Vec3 position;
     private Vec3 velocity;
@@ -24,6 +26,7 @@ public class RadarTrack {
     private UUID silhouetteId;
     private int silhouetteRevision = -1;
     private byte silhouetteStatus = 0;
+    private boolean friendly;
 
     private Vec3 vector;
 
@@ -43,9 +46,19 @@ public class RadarTrack {
                 TrackCategory.get(entity), entity.getType().toString(), entity.getBbHeight());
     }
 
+    public RadarTrack copy() {
+        RadarTrack copy = new RadarTrack(id, position, velocity, scannedTime, trackCategory, entityType, entityheight);
+        copy.silhouetteId = silhouetteId;
+        copy.silhouetteRevision = silhouetteRevision;
+        copy.silhouetteStatus = silhouetteStatus;
+        copy.friendly = friendly;
+        copy.vector = vector;
+        return copy;
+    }
+
     public Color getColor() {
         return switch (trackCategory) {
-            case SABLE -> new Color(RadarConfig.client().SableColor.get());
+            case SABLE -> friendly ? new Color(FRIENDLY_RADAR_COLOR) : new Color(RadarConfig.client().SableColor.get());
             case CONTRAPTION -> new Color(RadarConfig.client().contraptionColor.get());
             case PLAYER -> new Color(RadarConfig.client().playerColor.get());
             case ANIMAL -> new Color(RadarConfig.client().friendlyColor.get());
@@ -77,6 +90,7 @@ public class RadarTrack {
                 tag.getFloat("eh")
 
         );
+        track.friendly = tag.getBoolean("Friendly");
         if (tag.contains("SilhouetteId", Tag.TAG_STRING)) {
             try {
                 track.silhouetteId = UUID.fromString(tag.getString("SilhouetteId"));
@@ -103,6 +117,7 @@ public class RadarTrack {
         tag.putInt("Category", trackCategory.ordinal());
         tag.putString("entityType", entityType);
         tag.putFloat("eh", entityheight );
+        tag.putBoolean("Friendly", friendly);
         if (silhouetteId != null) {
             tag.putString("SilhouetteId", silhouetteId.toString());
             tag.putInt("SilhouetteRevision", silhouetteRevision);
@@ -174,6 +189,14 @@ public class RadarTrack {
         return silhouetteStatus;
     }
 
+    public boolean isFriendly() {
+        return friendly;
+    }
+
+    public void setFriendly(boolean friendly) {
+        this.friendly = friendly;
+    }
+
     public void setSilhouette(UUID silhouetteId, int silhouetteRevision, byte silhouetteStatus) {
         this.silhouetteId = silhouetteId;
         this.silhouetteRevision = silhouetteRevision;
@@ -206,5 +229,8 @@ public class RadarTrack {
     }
     public String entityType() {
         return getEntityType();
+    }
+    public boolean friendly() {
+        return isFriendly();
     }
 }

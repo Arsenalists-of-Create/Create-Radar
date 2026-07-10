@@ -16,7 +16,8 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 public record BoolListPacket(boolean mainHand, boolean[] flags, String key) implements CustomPacketPayload {
-    private static final int EXPECTED_FLAG_COUNT = 7;
+    private static final int DETECTION_FLAG_COUNT = 7;
+    private static final int TARGETING_FLAG_COUNT = 8;
 
     public static final Type<BoolListPacket> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(CreateRadar.MODID, "bool_list")
@@ -60,7 +61,7 @@ public record BoolListPacket(boolean mainHand, boolean[] flags, String key) impl
                 return;
             }
 
-            if (packet.flags == null || packet.flags.length != EXPECTED_FLAG_COUNT) {
+            if (packet.flags == null || packet.flags.length != expectedFlagCount(packet.key)) {
                 return;
             }
 
@@ -101,6 +102,7 @@ public record BoolListPacket(boolean mainHand, boolean[] flags, String key) impl
                 tgt.putBoolean("projectile", packet.flags[4]);
                 tgt.putBoolean("lineSight", packet.flags[5]);
                 tgt.putBoolean("autoTarget", packet.flags[6]);
+                tgt.putBoolean("preferHighArc", packet.flags[7]);
 
                 root.putByteArray(packet.key, toByteArray(packet.flags));
                 filters.put("targeting", tgt);
@@ -116,6 +118,16 @@ public record BoolListPacket(boolean mainHand, boolean[] flags, String key) impl
 
     public static void send(boolean mainHand, boolean[] flags, String key) {
         PacketDistributor.sendToServer(new BoolListPacket(mainHand, flags, key));
+    }
+
+    private static int expectedFlagCount(String key) {
+        if ("detectBools".equals(key)) {
+            return DETECTION_FLAG_COUNT;
+        }
+        if ("TargetBools".equals(key)) {
+            return TARGETING_FLAG_COUNT;
+        }
+        return -1;
     }
 
     private static byte[] toByteArray(boolean[] flags) {

@@ -27,6 +27,10 @@ public final class TargetingSolverSelfTest {
       results.add(checkBigCannonHighLowRoots());
       results.add(checkBigCannonUnreachable());
       results.add(checkTrustedAccelerationPrediction());
+      results.add(checkLongRangeStationarySolve());
+      results.add(checkLongRangeMovingSolve());
+      results.add(checkLongRangeCbcStyleSolve());
+      results.add(checkProjectileSimulatorLongCap());
       results.add(new Result("obstructed_trajectory", true, "requires a real Level.clip context; covered by ObstructionChecker integration"));
       return List.copyOf(results);
    }
@@ -201,6 +205,46 @@ public final class TargetingSolverSelfTest {
       Vec3 lowTrust = predictor.predictPosition(snapshot, (double)10.0F, 0.25);
       boolean passed = fullTrust.x > lowTrust.x && lowTrust.x > (double)10.0F;
       return new Result("trusted_acceleration_prediction", passed, "full=" + fullTrust + " low=" + lowTrust);
+   }
+
+   private static Result checkLongRangeStationarySolve() {
+      TargetingResult result = solveLongRange(new Vec3(8000.0, 0.0, 0.0), Vec3.ZERO, 40.0, 0.0, 0.0, false, 260);
+      boolean passed = result.valid() && result.hasShot() && result.missDistance() <= 5.0;
+      return new Result("long_range_stationary_8km", passed, result.debugString());
+   }
+
+   private static Result checkLongRangeMovingSolve() {
+      TargetingResult result = solveLongRange(new Vec3(8000.0, 0.0, 0.0), new Vec3(0.0, 0.0, 0.05), 40.0, 0.0, 0.0, false, 280);
+      boolean passed = result.valid() && result.hasShot() && result.missDistance() <= 5.0;
+      return new Result("long_range_steady_velocity_8km", passed, result.debugString());
+   }
+
+   private static Result checkLongRangeCbcStyleSolve() {
+      TargetingResult result = solveLongRange(new Vec3(8000.0, 0.0, 0.0), Vec3.ZERO, 80.0, -0.01, 0.0, true, 220);
+      boolean passed = result.valid() && result.hasShot() && result.missDistance() <= 5.0;
+      return new Result("long_range_cbc_style_8km", passed, result.debugString());
+   }
+
+   private static Result checkProjectileSimulatorLongCap() {
+      ProjectileSimulator simulator = new ProjectileSimulator();
+      ProjectileSimulator.SimulationResult result = simulator.simulate(Vec3.ZERO, new Vec3(1.0, 0.0, 0.0), Vec3.ZERO, 1.0, 0.0, 0.0, 1500);
+      boolean passed = result.ticks() == 1500 && result.samples().size() == 1501;
+      return new Result("projectile_simulator_long_cap", passed, "ticks=" + result.ticks() + " samples=" + result.samples().size());
+   }
+
+   private static TargetingResult solveLongRange(Vec3 targetPosition, Vec3 targetVelocity, double speed, double gravity, double drag, boolean cbcPhysics, int maxTicks) {
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(targetPosition)
+              .targetVelocity(targetVelocity)
+              .projectileSpeed(speed)
+              .gravity(gravity)
+              .drag(drag)
+              .cbcPhysics(cbcPhysics)
+              .maxFlightTicks(maxTicks)
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
+      return TargetingComputer.createDefault().solve(snapshot);
    }
 
    private static boolean close(Vec3 actual, Vec3 expected) {

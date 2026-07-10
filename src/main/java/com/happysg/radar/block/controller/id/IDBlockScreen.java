@@ -12,6 +12,7 @@ import com.simibubi.create.foundation.gui.widget.IconButton;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 import java.util.UUID;
 
@@ -39,21 +40,22 @@ public class IDBlockScreen extends AbstractSimiScreen {
         int y = guiTop;
         loadFromClientCache();
 
-        nameField = new EditBox(font, x + 70, y + 25, 100, 18, Component.translatable(CreateRadar.MODID + ".id_block.name_input"));
+
+        nameField = new EditBox(font, x + 70, y + 30, 100, 18, Component.translatable(CreateRadar.MODID + ".id_block.name_input"));
         nameField.setBordered(false);
         nameField.setValue(name);
         nameField.setMaxLength(20);
         nameField.setResponder(s -> name = s);
         addRenderableWidget(nameField);
 
-        idField = new EditBox(font, x + 85, y + 48, 100, 18, Component.translatable(CreateRadar.MODID + ".id_block.id_input"));
+        idField = new EditBox(font, x + 85, y + 53, 100, 18, Component.translatable(CreateRadar.MODID + ".id_block.id_input"));
         idField.setBordered(false);
         idField.setValue(id);
         idField.setMaxLength(10);
         idField.setResponder(s -> id = s);
         addRenderableWidget(idField);
 
-        IconButton confirmButton = new IconButton(x + BACKGROUND.width - 33, y + BACKGROUND.height - 23, AllIcons.I_CONFIRM);
+        IconButton confirmButton = new IconButton(x + BACKGROUND.width - 33, y + BACKGROUND.height - 24, AllIcons.I_CONFIRM);
         confirmButton.withCallback(this::onClose);
         addRenderableWidget(confirmButton);
 
@@ -65,6 +67,8 @@ public class IDBlockScreen extends AbstractSimiScreen {
         int x = guiLeft;
         int y = guiTop;
         BACKGROUND.render(graphics, x, y);
+        MutableComponent header = Component.translatable(CreateRadar.MODID + ".id_block.title");
+        graphics.drawString(font, header, x + BACKGROUND.width / 2 - font.width(header) / 2, y + 4, 0, false);
     }
 
     @Override

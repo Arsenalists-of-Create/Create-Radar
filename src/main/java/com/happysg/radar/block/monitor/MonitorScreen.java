@@ -1036,7 +1036,7 @@ public class MonitorScreen extends Screen {
 
         Color color = RadarConfig.client().sableSilhouetteDebugOverlay.get()
                 ? new Color(0x00ffff)
-                : new Color(RadarConfig.client().SableColor.get());
+                : sableTrackColor(track);
         int a = Mth.clamp((int) (alpha * 0.85f * 255f), 0, 255);
         int argb = (a << 24) | (color.getRGB() & 0xFFFFFF);
         int maxSegments = RadarConfig.client().sableSilhouetteMaxRenderedSegments.get();
@@ -1069,6 +1069,12 @@ public class MonitorScreen extends Screen {
         }
         SubLevelContainer container = SubLevelContainer.getContainer(Minecraft.getInstance().level);
         return container == null ? null : container.getSubLevel(id);
+    }
+
+    private static Color sableTrackColor(RadarTrack track) {
+        return track.isFriendly()
+                ? new Color(RadarTrack.FRIENDLY_RADAR_COLOR)
+                : new Color(RadarConfig.client().SableColor.get());
     }
 
     private SubLevelSilhouette.ProjectionSettings silhouetteProjectionSettings() {

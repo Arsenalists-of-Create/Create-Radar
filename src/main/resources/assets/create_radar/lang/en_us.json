@@ -159,7 +159,7 @@
   "create_radar.radar_button.projectile": "Projectile",
   "create_radar.radar_button.ship": "Sable Sublevel",
   "create_radar.radar_button.vs2": "Sable Sublevel",
-
+  "create_radar.id_block.title": "Identification Transponder",
   "create_radar.ship_list.enter_code": "Enter Identification Code",
   "create_radar.ship_list.title": "Sublevel Filtering",
   "create_radar.target_filter.title": "Targeting Filter",

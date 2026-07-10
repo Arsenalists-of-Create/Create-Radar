@@ -3,11 +3,13 @@ package com.happysg.radar.block.monitor;
 import com.happysg.radar.block.behavior.networks.INetworkNode;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
+import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
 import com.happysg.radar.block.arad.rwr.RwrRadarContact;
+import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
@@ -727,14 +729,17 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 String id = track.getId();
                 if (id == null || id.isBlank()) id = track.id();
                 if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
-                merged.merge(id, track, MonitorBlockEntity::newerTrack);
+                merged.merge(id, track.copy(), MonitorBlockEntity::newerTrack);
             }
         }
         if (Mods.SABLE.isLoaded() && level instanceof ServerLevel serverLevel) {
+            String networkSecret = monitorNetworkSecret(serverLevel);
             for (RadarTrack track : merged.values()) {
                 if (track.trackCategory() == TrackCategory.SABLE) {
+                    track.setFriendly(isFriendlySublevel(track, networkSecret));
                     SableSilhouetteServerCache.attachMetadata(serverLevel, track);
                 } else {
+                    track.setFriendly(false);
                     track.clearSilhouette();
                 }
             }
@@ -759,6 +764,31 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     private static RadarTrack newerTrack(RadarTrack first, RadarTrack second) {
         return second.scannedTime() >= first.scannedTime() ? second : first;
+    }
+
+    private String monitorNetworkSecret(ServerLevel level) {
+        NetworkData.Group group = getNetworkGroup(level);
+        if (group == null) {
+            return "";
+        }
+        return normalizeSecret(IdentificationConfig.fromTag(group.identificationTag).label());
+    }
+
+    private static boolean isFriendlySublevel(RadarTrack track, String networkSecret) {
+        if (networkSecret.isBlank() || !"Sable:ship".equals(track.entityType())) {
+            return false;
+        }
+
+        try {
+            IDManager.IDRecord record = IDManager.getIDRecordByShipId(UUID.fromString(track.id()));
+            return record != null && networkSecret.equals(normalizeSecret(record.secretID()));
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    private static String normalizeSecret(String secret) {
+        return secret == null ? "" : secret.trim().toLowerCase(Locale.ROOT);
     }
 
     @Nullable

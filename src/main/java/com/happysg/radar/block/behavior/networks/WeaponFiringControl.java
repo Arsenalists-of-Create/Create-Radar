@@ -45,8 +45,12 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
@@ -106,11 +110,14 @@ public class WeaponFiringControl {
     double maxSimDistanceBlocks;
     private static final double NEW_SOLVER_MIN_CONFIDENCE = 0.05;
     private static final int TARGETING_DEBUG_LOG_INTERVAL_TICKS = 20;
-    private static final int MAX_NEW_SOLVER_FLIGHT_TICKS = 500;
+    private static final int MAX_NEW_SOLVER_FLIGHT_TICKS = 2400;
     private static final double CLOSE_TARGET_SOLVE_EVERY_TICK_BLOCKS = 64.0;
     private static final double EXTREME_TARGET_SPEED_MULTIPLIER = 2.0;
     private static final int ASYNC_TARGETING_RESULT_TTL_TICKS = 4;
-    private static final ExecutorService TARGETING_EXECUTOR = Executors.newSingleThreadExecutor(new TargetingThreadFactory());
+    private static final int TARGETING_EXECUTOR_CORE_THREADS = 1;
+    private static final int TARGETING_EXECUTOR_MAX_THREADS = Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() - 1));
+    private static final int TARGETING_EXECUTOR_QUEUE_CAPACITY = 64;
+    private static final ExecutorService TARGETING_EXECUTOR = createTargetingExecutor();
     private final TargetingComputer targetingComputer;
     private final TargetingComputer asyncTargetingComputer;
     private final ProjectileSimulator validationProjectileSimulator;
@@ -168,14 +175,13 @@ public class WeaponFiringControl {
         this.aimStableTicks = 0;
         this.targetShipId = null;
         this.lastAimPoint = null;
-        this.lastAimPoint = null;
         this.cachedSableAngles = null;
         this.cachedSableAimTarget = null;
         this.cachedSableSolveTick = -1L;
         this.cachedSablePitchDeg = null;
         this.cachedSableYawDeg = null;
         this.visCache = new HashMap<>();
-        this.maxSimDistanceBlocks = (double)4096.0F;
+        this.maxSimDistanceBlocks = (double)8192.0F;
         this.targetingComputer = TargetingComputer.createDefault();
         this.asyncTargetingComputer = new TargetingComputer(null, new ProjectileSimulator(), null, null);
         this.validationProjectileSimulator = new ProjectileSimulator();
@@ -858,7 +864,7 @@ public class WeaponFiringControl {
                                     boolean newSolverOk = targetingResult != null && targetingResult.valid() && targetingResult.hasShot() && targetingResult.confidence() >= motion.minConfidence();
                                     boolean allowLegacyFallback = forceLegacyLead || (Boolean)RadarConfig.server().allowLegacyCannonLeadFallback.get();
                                     if (!newSolverOk && allowLegacyFallback && !CannonUtil.isLaserCannon(cannon) && dist > noLeadDist) {
-                                        lead = CannonLead.solveLeadPerTickConstantVelocity(this.cannonMount, cannon, serverLevel, shooterVel, solvePos, targetVel, (Integer)RadarConfig.server().leadFiringDelay.get() + trackingLeadTicks, this.maxSimDistanceBlocks);
+                                        lead = CannonLead.solveLeadPerTickConstantVelocity(this.cannonMount, cannon, serverLevel, shooterVel, solvePos, targetVel, (Integer)RadarConfig.server().leadFiringDelay.get() + trackingLeadTicks, this.maxSimDistanceBlocks, this.targetingConfig.preferHighArc());
                                     }
 
                                     boolean hasLeadSolution = lead != null && lead.aimPoint != null;
@@ -903,7 +909,7 @@ public class WeaponFiringControl {
                                         desiredYaw = this.calculateControllerYaw(origin, offsetAim);
                                         List<Double> pitchRoots = CannonTargeting.calculatePitch(this.cannonMount, origin, offsetAim, serverLevel);
                                         if (pitchRoots != null && !pitchRoots.isEmpty()) {
-                                            desiredPitch = pitchRoots.get(0);
+                                            desiredPitch = selectPitchRoot(pitchRoots, this.targetingConfig.preferHighArc());
                                         }
                                     }
 
@@ -1147,8 +1153,14 @@ public class WeaponFiringControl {
             return;
         }
 
-        this.pendingTargetingRequest = request;
-        this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, this.asyncTargetingComputer.solve(request.snapshot())), TARGETING_EXECUTOR);
+        try {
+            this.pendingTargetingRequest = request;
+            this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, this.asyncTargetingComputer.solve(request.snapshot())), TARGETING_EXECUTOR);
+        } catch (RejectedExecutionException rejected) {
+            this.pendingTargetingRequest = null;
+            this.pendingTargetingFuture = null;
+            LOGGER.debug("WFC TargetingComputer async solve queue is full; skipping request for mount={} target={}", request.mountPos(), request.targetId());
+        }
     }
 
     @Nullable
@@ -1210,7 +1222,7 @@ public class WeaponFiringControl {
             }
         }
 
-        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).quadraticDrag(ballistics != null && ballistics.isQuadraticDrag()).cbcPhysics(cbcPhysics).dragDensity(dragDensity).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
+        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).quadraticDrag(ballistics != null && ballistics.isQuadraticDrag()).cbcPhysics(cbcPhysics).dragDensity(dragDensity).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed, muzzleWorldPos, delayedTargetPos)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).preferHighArc(this.targetingConfig.preferHighArc()).build();
         return new AsyncTargetingRequest(this.cannonMount.getBlockPos().immutable(), targetMotionId, targetWorldPos, serverLevel.getGameTime(), snapshot);
     }
 
@@ -1340,7 +1352,7 @@ public class WeaponFiringControl {
                             targetAabb = targetAabb.move(delayedTargetPos.subtract(targetWorldPos));
                         }
 
-                        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).quadraticDrag(ballistics != null && ballistics.isQuadraticDrag()).cbcPhysics(cbcPhysics).dragDensity(dragDensity).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).build();
+                        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).quadraticDrag(ballistics != null && ballistics.isQuadraticDrag()).cbcPhysics(cbcPhysics).dragDensity(dragDensity).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed, muzzleWorldPos, delayedTargetPos)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.yawController != null ? this.yawController.getTargetAngle() - (double)270.0F : null).preferredPitchDeg(this.pitchController != null ? this.pitchController.getTargetAngle() : null).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).preferHighArc(this.targetingConfig.preferHighArc()).build();
                         result = this.targetingComputer.solve(snapshot);
                         if (result == null || !result.valid() || !result.hasShot()) {
                             break;
@@ -1792,10 +1804,16 @@ public class WeaponFiringControl {
         return !(angleDeg <= (double)0.0F) && !(stepDegPerTick <= 1.0E-6) ? angleDeg / stepDegPerTick : (double)0.0F;
     }
 
-    private int computeNewSolverMaxFlightTicks(double projectileSpeed) {
+    private int computeNewSolverMaxFlightTicks(double projectileSpeed, @Nullable Vec3 muzzlePos, @Nullable Vec3 targetPos) {
         double speed = Math.max(1.0E-6, projectileSpeed);
-        int ticks = (int)Math.ceil(Math.max((double)1.0F, this.maxSimDistanceBlocks) / speed) + 40;
+        double targetDistance = muzzlePos != null && targetPos != null ? muzzlePos.distanceTo(targetPos) : 0.0;
+        double solveDistance = Math.max(Math.max((double)1.0F, this.maxSimDistanceBlocks), targetDistance);
+        int ticks = (int)Math.ceil(solveDistance / speed) + 80;
         return Math.max(40, Math.min(MAX_NEW_SOLVER_FLIGHT_TICKS, ticks));
+    }
+
+    private static double selectPitchRoot(List<Double> pitchRoots, boolean preferHighArc) {
+        return preferHighArc && pitchRoots.size() > 1 ? pitchRoots.get(pitchRoots.size() - 1) : pitchRoots.get(0);
     }
 
     private static Vec3 predictTarget(Vec3 pos, Vec3 vel, Vec3 accel, double ticks) {
@@ -1932,9 +1950,24 @@ public class WeaponFiringControl {
     private static record AsyncTargetingResult(AsyncTargetingRequest request, @Nullable TargetingResult result) {
     }
 
+    private static ExecutorService createTargetingExecutor() {
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                TARGETING_EXECUTOR_CORE_THREADS,
+                TARGETING_EXECUTOR_MAX_THREADS,
+                10L,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(TARGETING_EXECUTOR_QUEUE_CAPACITY),
+                new TargetingThreadFactory()
+        );
+        executor.allowCoreThreadTimeOut(false);
+        return executor;
+    }
+
     private static final class TargetingThreadFactory implements ThreadFactory {
+        private final AtomicInteger threadIndex = new AtomicInteger();
+
         public Thread newThread(Runnable runnable) {
-            Thread thread = new Thread(runnable, "CreateRadar-Targeting");
+            Thread thread = new Thread(runnable, "CreateRadar-Targeting-" + this.threadIndex.incrementAndGet());
             thread.setDaemon(true);
             return thread;
         }

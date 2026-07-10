@@ -523,7 +523,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
 
         Color lineColor = RadarConfig.client().sableSilhouetteDebugOverlay.get()
                 ? new Color(0x00ffff)
-                : new Color(RadarConfig.client().SableColor.get());
+                : sableTrackColor(track);
         float r = lineColor.getRedAsFloat();
         float g = lineColor.getGreenAsFloat();
         float b = lineColor.getBlueAsFloat();
@@ -553,6 +553,12 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         }
         SubLevelContainer container = SubLevelContainer.getContainer(Minecraft.getInstance().level);
         return container == null ? null : container.getSubLevel(id);
+    }
+
+    private static Color sableTrackColor(RadarTrack track) {
+        return track.isFriendly()
+                ? new Color(RadarTrack.FRIENDLY_RADAR_COLOR)
+                : new Color(RadarConfig.client().SableColor.get());
     }
 
     private SubLevelSilhouette.ProjectionSettings silhouetteProjectionSettings() {

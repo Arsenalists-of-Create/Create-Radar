@@ -168,6 +168,27 @@ public class CannonLead {
             int fireDelayTicks,
             double maxSimDistanceBlocks
     ) {
+        return solveLeadPerTickWithAcceleration(
+                mount, cannon, level, shooterVelPerTick, shooterAccelPerTick2, targetPosNow, targetVelPerTick,
+                targetAccelPerTick2, fireDelayTicks, maxSimDistanceBlocks, false);
+    }
+
+    public static LeadSolution solveLeadPerTickWithAcceleration(
+            CannonMountBlockEntity mount,
+            AbstractMountedCannonContraption cannon,
+            ServerLevel level,
+
+            Vec3 shooterVelPerTick,
+            Vec3 shooterAccelPerTick2,
+
+            Vec3 targetPosNow,
+            Vec3 targetVelPerTick,
+            Vec3 targetAccelPerTick2,
+
+            int fireDelayTicks,
+            double maxSimDistanceBlocks,
+            boolean preferHighArc
+    ) {
         if (mount == null || cannon == null || level == null) return null;
         if (targetPosNow == null || targetVelPerTick == null || targetAccelPerTick2 == null) return null;
         if (shooterVelPerTick == null || shooterAccelPerTick2 == null) return null;
@@ -237,7 +258,7 @@ public class CannonLead {
             // CBC pitch solution for predicted intercept point
             List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, aimPoint, level);
             if (pitchRoots != null && !pitchRoots.isEmpty()) {
-                pitchRad = Math.toRadians(pitchRoots.get(0));
+                pitchRad = Math.toRadians(selectPitchRoot(pitchRoots, preferHighArc));
             }
 
             Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
@@ -291,6 +312,24 @@ public class CannonLead {
 
             int fireDelayTicks,
             double maxSimDistanceBlocks
+    ) {
+        return solveLeadPerTickConstantVelocity(
+                mount, cannon, level, shooterVelPerTick, targetPosNow, targetVelPerTick,
+                fireDelayTicks, maxSimDistanceBlocks, false);
+    }
+
+    public static LeadSolution solveLeadPerTickConstantVelocity(
+            CannonMountBlockEntity mount,
+            AbstractMountedCannonContraption cannon,
+            ServerLevel level,
+
+            Vec3 shooterVelPerTick,
+            Vec3 targetPosNow,
+            Vec3 targetVelPerTick,
+
+            int fireDelayTicks,
+            double maxSimDistanceBlocks,
+            boolean preferHighArc
     ) {
 
 
@@ -354,7 +393,7 @@ public class CannonLead {
             // CBC ballistic pitch solve for the predicted intercept point
             List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, aimPoint, level);
             if (pitchRoots != null && !pitchRoots.isEmpty()) {
-                pitchRad = Math.toRadians(pitchRoots.get(0));
+                pitchRad = Math.toRadians(selectPitchRoot(pitchRoots, preferHighArc));
             }
 
             Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
@@ -411,6 +450,10 @@ public class CannonLead {
         if (ticks < 60) ticks = 60;
         if (ticks > HARD_MAX_TICKS) ticks = HARD_MAX_TICKS;
         return ticks;
+    }
+
+    private static double selectPitchRoot(List<Double> pitchRoots, boolean preferHighArc) {
+        return preferHighArc && pitchRoots.size() > 1 ? pitchRoots.get(pitchRoots.size() - 1) : pitchRoots.get(0);
     }
 
     private static Vec3 getStableOrigin(CannonMountBlockEntity mount, ServerLevel level) {

@@ -5,9 +5,9 @@ import com.happysg.radar.compat.Mods;
 import net.minecraft.nbt.CompoundTag;
 
 public record TargetingConfig(boolean player, boolean contraption, boolean mob, boolean animal, boolean projectile,
-                              boolean autoTarget, boolean autoFire, boolean lineOfSight) {
+                              boolean autoTarget, boolean autoFire, boolean lineOfSight, boolean preferHighArc) {
 
-    public static final TargetingConfig DEFAULT = new TargetingConfig(false, false, true, true, false, false, true, false);
+    public static final TargetingConfig DEFAULT = new TargetingConfig(false, false, true, true, false, false, true, false, false);
 
     public CompoundTag toTag() {
         CompoundTag tag = new CompoundTag();
@@ -19,6 +19,7 @@ public record TargetingConfig(boolean player, boolean contraption, boolean mob, 
         tag.putBoolean("autoTarget", autoTarget);
         tag.putBoolean("autoFire", autoFire);
         tag.putBoolean("lineSight",lineOfSight);
+        tag.putBoolean("preferHighArc", preferHighArc);
         return tag;
     }
 
@@ -45,7 +46,8 @@ public record TargetingConfig(boolean player, boolean contraption, boolean mob, 
                 targeting.getBoolean("projectile"),
                 targeting.getBoolean("autoTarget"),
                 targeting.getBoolean("autoFire"),
-                targeting.getBoolean("lineSight")
+                targeting.getBoolean("lineSight"),
+                targeting.getBoolean("preferHighArc")
         );
     }
 

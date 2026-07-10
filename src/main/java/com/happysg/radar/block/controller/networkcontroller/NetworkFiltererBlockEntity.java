@@ -946,7 +946,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         boolean projectile  = inner.contains("projectile", Tag.TAG_BYTE) ? inner.getBoolean("projectile") : TargetingConfig.DEFAULT.projectile();
         boolean autoTarget  = inner.contains("autoTarget", Tag.TAG_BYTE) ? inner.getBoolean("autoTarget") : TargetingConfig.DEFAULT.autoTarget();
         boolean los         = inner.contains("lineSight", Tag.TAG_BYTE) ? inner.getBoolean("lineSight") : TargetingConfig.DEFAULT.lineOfSight();
-        return new TargetingConfig(player, contraption, mob, animal, projectile, autoTarget, true, los);
+        boolean preferHighArc = inner.contains("preferHighArc", Tag.TAG_BYTE) ? inner.getBoolean("preferHighArc") : TargetingConfig.DEFAULT.preferHighArc();
+        return new TargetingConfig(player, contraption, mob, animal, projectile, autoTarget, true, los, preferHighArc);
     }
 
     @Nullable

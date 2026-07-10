@@ -9,6 +9,7 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.targeting.Trajectory;
+import com.happysg.radar.targeting.TargetingSolverSelfTest;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -114,7 +115,7 @@ public class  ModCommands {
         dispatcher.register(
                 Commands.literal("radar")
                         .then(Commands.literal("debug")
-                                .requires(src -> src.hasPermission(2))
+                            .requires(src -> src.hasPermission(2))
                                 .then(Commands.literal("cannon_solver")
                                         .executes(ctx -> cannonSolverDebug(ctx.getSource(), false, 160))
                                         .then(Commands.literal("arc")
@@ -123,6 +124,15 @@ public class  ModCommands {
                                                         .executes(ctx -> cannonSolverDebug(ctx.getSource(), true, IntegerArgumentType.getInteger(ctx, "ticks")))
                                                 )
                                         )
+                                )
+                        )
+        );
+        dispatcher.register(
+                Commands.literal("radar")
+                        .then(Commands.literal("debug")
+                                .requires(src -> src.hasPermission(2))
+                                .then(Commands.literal("targeting_selftest")
+                                        .executes(ctx -> targetingSelfTest(ctx.getSource()))
                                 )
                         )
         );
@@ -157,6 +167,33 @@ public class  ModCommands {
         );
 
 
+    }
+
+    private static int targetingSelfTest(CommandSourceStack source) {
+        List<TargetingSolverSelfTest.Result> results = TargetingSolverSelfTest.runBasicInterceptChecks();
+        int failed = 0;
+        for (TargetingSolverSelfTest.Result result : results) {
+            if (!result.passed()) {
+                failed++;
+            }
+
+            ChatFormatting color = result.passed() ? ChatFormatting.GREEN : ChatFormatting.RED;
+            source.sendSuccess(
+                    () -> Component.literal((result.passed() ? "PASS " : "FAIL ") + result.name() + ": " + result.detail())
+                            .withStyle(color),
+                    false
+            );
+        }
+
+        int total = results.size();
+        int passed = total - failed;
+        ChatFormatting summaryColor = failed == 0 ? ChatFormatting.GREEN : ChatFormatting.RED;
+        source.sendSuccess(
+                () -> Component.literal("Targeting self-test: " + passed + "/" + total + " passed")
+                        .withStyle(summaryColor),
+                true
+        );
+        return failed == 0 ? 1 : 0;
     }
 
     private static int cannonSolverDebug(CommandSourceStack source, boolean drawArc, int arcTicks) throws CommandSyntaxException {

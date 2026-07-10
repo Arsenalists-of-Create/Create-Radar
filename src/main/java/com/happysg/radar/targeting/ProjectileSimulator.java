@@ -8,6 +8,8 @@ import net.minecraft.world.phys.Vec3;
 import rbasamoyai.createbigcannons.munitions.config.FluidDragHandler;
 
 public class ProjectileSimulator {
+   private static final int MAX_SIMULATION_TICKS = 4096;
+
    public SimulationResult simulate(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, ProjectileModel model, int maxTicks) {
       return model == null ? ProjectileSimulator.SimulationResult.empty(startPosition) : this.simulate(startPosition, aimDirection, inheritedVelocity, model, maxTicks, null);
    }
@@ -53,7 +55,7 @@ public class ProjectileSimulator {
             Vec3 direction = aimDirection.normalize();
             Vec3 position = startPosition;
             Vec3 velocity = inheritedVelocity.add(direction.scale(muzzleSpeed));
-            int ticks = Math.max(0, Math.min(1000, maxTicks));
+            int ticks = Math.max(0, Math.min(MAX_SIMULATION_TICKS, maxTicks));
             List<Trajectory.Sample> samples = new ArrayList<>(ticks + 1);
 
             for(int tick = 0; tick <= ticks; ++tick) {

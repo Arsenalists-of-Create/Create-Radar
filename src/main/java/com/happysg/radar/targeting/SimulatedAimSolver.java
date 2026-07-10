@@ -22,6 +22,13 @@ public class SimulatedAimSolver implements AimSolver {
    private static final double CONFIDENCE_SCORE_WEIGHT = (double)0.5F;
    private static final double REJECT_SCORE = (double)1000000.0F;
    private static final int OBSTRUCTION_SHORTLIST_SIZE = 16;
+   private static final int REFINEMENT_SHORTLIST_SIZE = 6;
+   private static final int MAX_REFINEMENT_ITERATIONS = 28;
+   private static final double MIN_REFINEMENT_STEP_DEG = 0.001;
+   private static final double MAX_REFINEMENT_STEP_DEG = 0.25;
+   private static final double REFINEMENT_TARGET_BLOCKS = 0.25;
+   private static final double LONG_RANGE_ACCEPTANCE_DISTANCE_BLOCKS = 8000.0;
+   private static final double LONG_RANGE_ACCEPTANCE_MISS_BLOCKS = 5.0;
    private static final int FRACTIONAL_DISTANCE_REFINEMENT_STEPS = 9;
    private final ProjectileSimulator projectileSimulator;
    private final TargetPredictor targetPredictor;
@@ -61,10 +68,37 @@ public class SimulatedAimSolver implements AimSolver {
             if (best == null) {
                return TargetingResult.noShot("no simulated candidate");
             } else {
+               RefinementSummary refinement = this.refineShortlist(snapshot, projectileModel, shortlist);
+               if (refinement.best() != null) {
+                  best = refinement.best();
+               }
+
                best = this.chooseObstructionCheckedBest(snapshot, projectileModel, obstructionChecker, shortlist);
+               Candidate highArcBest = null;
+               RefinementSummary highArcRefinement = new RefinementSummary(null, 0, 0.0);
+               boolean selectedHighArc = false;
+               if (snapshot.preferHighArc()) {
+                  List<Candidate> highArcShortlist = this.searchHighArcCandidates(snapshot, projectileModel, initial);
+                  highArcRefinement = this.refineShortlist(snapshot, projectileModel, highArcShortlist);
+                  highArcBest = this.chooseObstructionCheckedBest(snapshot, projectileModel, obstructionChecker, highArcShortlist);
+                  if (highArcBest != null && highArcBest.pitchDeg >= highArcPitchFloor(initial.pitchDeg) && isAcceptableShot(snapshot, highArcBest)) {
+                     best = highArcBest;
+                     selectedHighArc = true;
+                  }
+               }
+
                List<String> debug = new ArrayList<>();
                debug.add("solver=simulated_moving_v3");
                debug.add("initialInterceptTicks=" + initial.interceptTicks);
+               debug.add("preferHighArc=" + snapshot.preferHighArc());
+               debug.add("selectedHighArc=" + selectedHighArc);
+               debug.add("range=" + snapshot.muzzlePosition().distanceTo(snapshot.targetPosition()));
+               debug.add("refinementIterations=" + refinement.iterations());
+               debug.add("refinementFinalStepDeg=" + refinement.finalStepDeg());
+               if (snapshot.preferHighArc()) {
+                  debug.add("highArcCandidate=" + (highArcBest != null));
+                  debug.add("highArcRefinementIterations=" + highArcRefinement.iterations());
+               }
                debug.add("bestTick=" + best.flightTick);
                debug.add("bestTime=" + best.flightTime);
                debug.add("miss=" + best.missDistance);
@@ -174,6 +208,113 @@ public class SimulatedAimSolver implements AimSolver {
       }
 
       return best;
+   }
+
+   private List<Candidate> searchHighArcCandidates(TargetingSnapshot snapshot, ProjectileModel projectileModel, InitialGuess initial) {
+      List<Candidate> shortlist = new ArrayList<>(17);
+      Candidate best = null;
+      double highArcFloor = highArcPitchFloor(initial.pitchDeg);
+
+      for(SearchPass pass : searchPasses()) {
+         double centerYaw = best == null ? initial.yawDeg : best.yawDeg;
+         double centerPitch = best == null ? Math.max(45.0, initial.pitchDeg + 25.0) : best.pitchDeg;
+
+         for(double yawOffset = -pass.yawRange; yawOffset <= pass.yawRange + 1.0E-9; yawOffset += pass.step) {
+            for(double pitchOffset = -pass.pitchDownRange; pitchOffset <= pass.pitchUpRange + 1.0E-9; pitchOffset += pass.step) {
+               double yaw = TargetingMath.wrap180(centerYaw + yawOffset);
+               double pitch = clampPitch(centerPitch + pitchOffset);
+               if (pitch < highArcFloor) {
+                  continue;
+               }
+
+               Candidate candidate = this.evaluate(snapshot, projectileModel, yaw, pitch, ObstructionResult.clearPath());
+               addToShortlist(shortlist, candidate);
+               if (best == null || score(snapshot, candidate) < score(snapshot, best)) {
+                  best = candidate;
+               }
+            }
+         }
+      }
+
+      return shortlist;
+   }
+
+   private static double highArcPitchFloor(double initialPitchDeg) {
+      return Math.max(20.0, Math.min(80.0, initialPitchDeg + 10.0));
+   }
+
+   private RefinementSummary refineShortlist(TargetingSnapshot snapshot, ProjectileModel projectileModel, List<Candidate> shortlist) {
+      if (shortlist.isEmpty()) {
+         return new RefinementSummary(null, 0, 0.0);
+      }
+
+      shortlist.sort(Comparator.comparingDouble(Candidate::score));
+      List<Candidate> refined = new ArrayList<>(Math.min(REFINEMENT_SHORTLIST_SIZE, shortlist.size()));
+      Candidate best = null;
+      int totalIterations = 0;
+      double finalStepDeg = 0.0;
+
+      int count = Math.min(REFINEMENT_SHORTLIST_SIZE, shortlist.size());
+      for (int i = 0; i < count; ++i) {
+         RefinementResult result = this.refineCandidate(snapshot, projectileModel, shortlist.get(i));
+         totalIterations += result.iterations();
+         finalStepDeg = Math.max(finalStepDeg, result.finalStepDeg());
+         refined.add(result.candidate());
+         if (best == null || score(snapshot, result.candidate()) < score(snapshot, best)) {
+            best = result.candidate();
+         }
+      }
+
+      shortlist.clear();
+      for (Candidate candidate : refined) {
+         addToShortlist(shortlist, candidate);
+      }
+
+      return new RefinementSummary(best, totalIterations, finalStepDeg);
+   }
+
+   private RefinementResult refineCandidate(TargetingSnapshot snapshot, ProjectileModel projectileModel, Candidate seed) {
+      double range = Math.max(1.0, snapshot.muzzlePosition().distanceTo(seed.predictedTargetPosition));
+      double targetStep = refinementTargetStepDeg(range);
+      double step = Math.max(targetStep, Math.min(MAX_REFINEMENT_STEP_DEG, angularStepForBlocks(range, 4.0)));
+      Candidate best = seed;
+      int iterations = 0;
+
+      while (step > targetStep && iterations < MAX_REFINEMENT_ITERATIONS) {
+         Candidate iterationBest = best;
+         for (int yawIndex = -1; yawIndex <= 1; ++yawIndex) {
+            for (int pitchIndex = -1; pitchIndex <= 1; ++pitchIndex) {
+               if (yawIndex == 0 && pitchIndex == 0) {
+                  continue;
+               }
+
+               double yaw = TargetingMath.wrap180(best.yawDeg + (double)yawIndex * step);
+               double pitch = clampPitch(best.pitchDeg + (double)pitchIndex * step);
+               Candidate candidate = this.evaluate(snapshot, projectileModel, yaw, pitch, ObstructionResult.clearPath());
+               if (score(snapshot, candidate) < score(snapshot, iterationBest)) {
+                  iterationBest = candidate;
+               }
+            }
+         }
+
+         ++iterations;
+         if (iterationBest != best) {
+            best = iterationBest;
+         } else {
+            step *= 0.5;
+         }
+      }
+
+      return new RefinementResult(best, iterations, step);
+   }
+
+   private static double refinementTargetStepDeg(double rangeBlocks) {
+      return Math.max(MIN_REFINEMENT_STEP_DEG, angularStepForBlocks(rangeBlocks, REFINEMENT_TARGET_BLOCKS));
+   }
+
+   private static double angularStepForBlocks(double rangeBlocks, double blocks) {
+      double range = Math.max(1.0, rangeBlocks);
+      return Math.toDegrees(Math.atan(Math.max(0.001, blocks) / range));
    }
 
    private ClosestApproach closestApproachOnSegment(TargetingSnapshot snapshot, Trajectory.Sample from, Trajectory.Sample to) {
@@ -298,7 +439,14 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private static double acceptableMissDistance(TargetingSnapshot snapshot) {
-      return directTargetHitTolerance(snapshot);
+      double directTolerance = directTargetHitTolerance(snapshot);
+      double range = snapshot == null ? 0.0 : snapshot.muzzlePosition().distanceTo(snapshot.targetPosition());
+      if (!Double.isFinite(range) || range <= 0.0) {
+         return directTolerance;
+      }
+
+      double longRangeTolerance = LONG_RANGE_ACCEPTANCE_MISS_BLOCKS * range / LONG_RANGE_ACCEPTANCE_DISTANCE_BLOCKS;
+      return Math.max(directTolerance, Math.min(LONG_RANGE_ACCEPTANCE_MISS_BLOCKS, longRangeTolerance));
    }
 
    private static double obstructionPenalty(TargetingSnapshot snapshot, Candidate candidate) {
@@ -341,7 +489,7 @@ public class SimulatedAimSolver implements AimSolver {
          Vec3 targetAtBlock = predictTargetPosition(snapshot, blockedTick);
          AABB targetBoxAtBlock = predictTargetAabb(snapshot, blockedTick);
          double distance = distanceToTarget(candidate.obstruction.blockedPosition(), targetAtBlock, targetBoxAtBlock);
-         return distance <= directTargetHitTolerance(snapshot);
+         return distance <= acceptableMissDistance(snapshot);
       } else {
          return false;
       }
@@ -445,5 +593,11 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private static record Candidate(double yawDeg, double pitchDeg, int flightTick, double flightTime, double missDistance, Vec3 predictedTargetPosition, Vec3 closestProjectilePosition, ProjectileSimulator.SimulationResult trajectory, ObstructionResult obstruction, double confidence, double score) {
+   }
+
+   private static record RefinementResult(Candidate candidate, int iterations, double finalStepDeg) {
+   }
+
+   private static record RefinementSummary(Candidate best, int iterations, double finalStepDeg) {
    }
 }
