@@ -2,6 +2,7 @@ package com.happysg.radar.block.arad.aradnetworks;
 
 import com.happysg.radar.block.arad.rwr.RwrTargetKey;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
+import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
@@ -15,6 +16,7 @@ import java.util.UUID;
 
 public final class RadarContactRegistry {
     private static final Map<ResourceKey<Level>, Map<ExactLockKey, Integer>> EXACT_LOCKS_BY_DIMENSION = new HashMap<>();
+    private static final Map<ResourceKey<Level>, Map<SourceEngagementKey, Integer>> SOURCE_ENGAGEMENTS_BY_DIMENSION = new HashMap<>();
 
     private RadarContactRegistry() {}
 
@@ -38,6 +40,18 @@ public final class RadarContactRegistry {
         RadarContactRegistryData.get(level).markEngaged(shipId, ttlTicks);
     }
 
+    public static void markEngaged(ServerLevel level, UUID shipId, String sourceId, int ttlTicks) {
+        markEngaged(level, shipId, ttlTicks);
+        if (sourceId == null || sourceId.isBlank()) {
+            return;
+        }
+
+        ttlTicks = ttlTicks <= 0 ? RadarContactRegistryData.DEFAULT_ENGAGED_TTL : ttlTicks;
+        SOURCE_ENGAGEMENTS_BY_DIMENSION
+                .computeIfAbsent(level.dimension(), ignored -> new HashMap<>())
+                .merge(new SourceEngagementKey(shipId, sourceId), ttlTicks, Math::max);
+    }
+
     public static boolean isInRange(ServerLevel level, UUID shipId) {
         return RadarContactRegistryData.get(level).isInRange(shipId);
     }
@@ -48,6 +62,19 @@ public final class RadarContactRegistry {
 
     public static boolean isEngaged(ServerLevel level, UUID shipId) {
         return RadarContactRegistryData.get(level).isEngaged(shipId);
+    }
+
+    public static boolean isSourceEngaged(ServerLevel level, UUID shipId, String sourceId) {
+        if (sourceId == null || sourceId.isBlank()) {
+            return false;
+        }
+        Map<SourceEngagementKey, Integer> engagements = SOURCE_ENGAGEMENTS_BY_DIMENSION.get(level.dimension());
+        return engagements != null
+                && engagements.getOrDefault(new SourceEngagementKey(shipId, sourceId), 0) > 0;
+    }
+
+    public static String radarSourceId(ServerLevel level, BlockPos radarPos) {
+        return level.dimension().location() + "|" + radarPos.asLong();
     }
 
     public static Set<String> getInRangeSources(ServerLevel level, UUID shipId) {
@@ -112,6 +139,7 @@ public final class RadarContactRegistry {
     public static void tickDecay(ServerLevel level) {
         RadarContactRegistryData.get(level).tickDecay();
         tickExactLockDecay(level);
+        tickSourceEngagementDecay(level);
     }
 
     private static void tickExactLockDecay(ServerLevel level) {
@@ -136,6 +164,31 @@ public final class RadarContactRegistry {
         }
     }
 
+    private static void tickSourceEngagementDecay(ServerLevel level) {
+        Map<SourceEngagementKey, Integer> engagements = SOURCE_ENGAGEMENTS_BY_DIMENSION.get(level.dimension());
+        if (engagements == null) {
+            return;
+        }
+
+        Iterator<Map.Entry<SourceEngagementKey, Integer>> it = engagements.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<SourceEngagementKey, Integer> entry = it.next();
+            int ttl = entry.getValue() - 1;
+            if (ttl <= 0) {
+                it.remove();
+            } else {
+                entry.setValue(ttl);
+            }
+        }
+
+        if (engagements.isEmpty()) {
+            SOURCE_ENGAGEMENTS_BY_DIMENSION.remove(level.dimension());
+        }
+    }
+
     private record ExactLockKey(UUID emitterId, RwrTargetKey targetKey) {
+    }
+
+    private record SourceEngagementKey(UUID shipId, String sourceId) {
     }
 }

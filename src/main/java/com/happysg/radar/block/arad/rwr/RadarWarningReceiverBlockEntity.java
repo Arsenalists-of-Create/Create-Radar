@@ -83,6 +83,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         private boolean lockCapable = false;
         private boolean withinRadarRange = false;
         private boolean exactLocked = false;
+        private boolean engaged = false;
         private boolean friendly = false;
 
         private ContactAccumulator(String sourceId, IRadar radar, Vec3 displayReceiverPos, Vec3 radarWorldPos) {
@@ -92,11 +93,13 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
             this.bearingDegrees = bearingDegrees(displayReceiverPos, radarWorldPos);
         }
 
-        private void accept(RwrContactEvaluation evaluation, boolean withinRadarRange, boolean friendly, Vec3 receiverPosition) {
+        private void accept(RwrContactEvaluation evaluation, boolean withinRadarRange, boolean engaged,
+                            boolean friendly, Vec3 receiverPosition) {
             signalStrength = Math.max(signalStrength, evaluation.signalStrength());
             lockCapable |= evaluation.lockCapable();
             this.withinRadarRange |= withinRadarRange;
             exactLocked |= evaluation.lockedOnExactTarget();
+            this.engaged |= engaged;
             this.friendly |= friendly;
             receiverPositions.add(receiverPosition);
         }
@@ -112,6 +115,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
                             lockCapable,
                             withinRadarRange,
                             exactLocked,
+                            engaged,
                             friendly
                     ),
                     List.copyOf(receiverPositions)
@@ -337,10 +341,11 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
 
                 Vec3 radarWorldPos = PhysicsHandler.getWorldVec(level, radar.getWorldPos());
                 boolean withinRadarRange = horizontalDistanceSqr(receiver.position(), radarWorldPos) <= radar.getRange() * radar.getRange();
+                boolean engaged = RadarContactRegistry.isSourceEngaged(level, receiver.shipId(), sourceId);
                 boolean friendly = isFriendlyRadar(level, radarPos.get(), receiverSecrets);
                 contactsBySource
                         .computeIfAbsent(sourceId, ignored -> new ContactAccumulator(sourceId, radar, displayReceiverPos, radarWorldPos))
-                        .accept(evaluation, withinRadarRange, friendly, receiver.position());
+                        .accept(evaluation, withinRadarRange, engaged, friendly, receiver.position());
             }
         }
 
@@ -412,6 +417,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
                         contact.lockCapable(),
                         contact.withinRadarRange(),
                         exactLocked,
+                        contact.engaged(),
                         contact.friendly()
                 ),
                 aggregated.receiverPositions()

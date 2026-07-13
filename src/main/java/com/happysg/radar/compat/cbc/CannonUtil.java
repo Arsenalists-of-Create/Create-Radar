@@ -48,10 +48,12 @@ import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 
 public class CannonUtil {
     private static final Logger LOGGER = LogUtils.getLogger();
+    private static final AtomicBoolean CBC_AT_BIG_CANNON_LINKAGE_WARNING_LOGGED = new AtomicBoolean();
     private static final BallisticPropertiesComponent AC_FALLBACK = new BallisticPropertiesComponent(-0.025, 0.01, false, 0, 0, 0, 0);
     private static final BallisticPropertiesComponent BIG_CANNON_LAST_RESORT_FALLBACK = new BallisticPropertiesComponent(-0.05, 0.0, false, 0, 0, 0, 0);
 
@@ -193,6 +195,8 @@ public class CannonUtil {
             return new BigCannonShotState(0.0F, fallback, null, null, null, CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon), 0, 0.0F, 0.0F, "missing_cannon_geometry");
         }
 
+        CBCATCompat.BigCannonPhysicsResult cbcAtPhysics = resolveCBCATBigCannonPhysics(cannon, level);
+
         float speed = 0.0F;
         float propellantPower = 0.0F;
         float projectileAddedPower = 0.0F;
@@ -218,7 +222,8 @@ public class CannonUtil {
                     LOGGER.warn("Big cannon projectile assembly was interrupted by air at {}; using partial speed={} and HE shell fallback", currentPos, speed);
                     return new BigCannonShotState(speed, fallback, null, null, currentPos, CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon), propellantCharges, propellantPower, projectileAddedPower, "projectile_air_gap");
                 }
-            } else if (block instanceof BigCannonPropellantBlock propellantBlock) {
+            } else if (block instanceof BigCannonPropellantBlock propellantBlock
+                    && !(block instanceof ProjectileBlock<?>)) {
                 float chargePower = Math.max(0.0F, propellantBlock.getChargePower(containedBlockInfo));
                 speed += chargePower;
                 propellantPower += chargePower;
@@ -226,15 +231,18 @@ public class CannonUtil {
             } else if (block instanceof ProjectileBlock<?> projectileBlock) {
                 projectileStarted = true;
                 AbstractBigCannonProjectile projectile = projectileBlock.getProjectile(level, Collections.singletonList(containedBlockInfo));
-                if (projectile != null) {
-                    projectileAddedPower = projectile.addedChargePower();
+                AbstractBigCannonProjectile resolvedProjectile = projectile != null
+                        ? projectile
+                        : (cbcAtPhysics != null ? cbcAtPhysics.projectile() : null);
+                if (resolvedProjectile != null) {
+                    projectileAddedPower = resolvedProjectile.addedChargePower();
                     speed += projectileAddedPower;
                 }
-                BallisticPropertiesComponent ballistics = getProjectileBallistics(projectile);
+                BallisticPropertiesComponent ballistics = getProjectileBallistics(resolvedProjectile);
                 if (ballistics == null) {
                     LOGGER.warn(
                             "Could not read big cannon projectile ballistics for {}; using HE shell fallback {}",
-                            projectile == null ? "null" : projectile.getClass().getName(),
+                            resolvedProjectile == null ? "null" : resolvedProjectile.getClass().getName(),
                             fallback
                     );
                     ballistics = fallback;
@@ -244,16 +252,16 @@ public class CannonUtil {
                 }
                 BlockPos muzzleExit = CBCMuzzleUtil.getMuzzleExitLocal(cannon);
                 BigCannonShotState state = new BigCannonShotState(
-                        speed,
+                        effectiveBigCannonSpeed(speed, cbcAtPhysics),
                         ballistics,
-                        projectile == null ? null : projectile.getClass().getName(),
+                        resolvedProjectile == null ? null : resolvedProjectile.getClass().getName(),
                         currentPos.immutable(),
                         muzzleExit,
                         CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon),
                         propellantCharges,
                         propellantPower,
                         projectileAddedPower,
-                        "loaded_projectile"
+                        bigCannonReason("loaded_projectile", cbcAtPhysics)
                 );
                 LOGGER.debug("Resolved big cannon shot state: speed={} projectile={} projectileLocal={} muzzleExit={} muzzleOffset={} gravity={} drag={} quadratic={}",
                         state.speed(), state.projectileClass(), state.projectileLocalPos(), state.muzzleExitLocalPos(), state.muzzleForwardOffset(),
@@ -266,8 +274,62 @@ public class CannonUtil {
         }
 
         BlockPos muzzleExit = CBCMuzzleUtil.getMuzzleExitLocal(cannon);
-        LOGGER.warn("No loaded big cannon projectile found during ordered resolve; speed={} muzzleExit={} using HE shell fallback {}", speed, muzzleExit, fallback);
+        if (cbcAtPhysics != null && cbcAtPhysics.projectile() != null) {
+            AbstractBigCannonProjectile projectile = cbcAtPhysics.projectile();
+            BallisticPropertiesComponent ballistics = getProjectileBallistics(projectile);
+            if (ballistics == null) {
+                LOGGER.warn(
+                        "Could not read CBC:AT big cannon cartridge ballistics for {}; using HE shell fallback {}",
+                        projectile.getClass().getName(),
+                        fallback
+                );
+                ballistics = fallback;
+            }
+
+            BigCannonShotState state = new BigCannonShotState(
+                    cbcAtPhysics.speed(),
+                    ballistics,
+                    projectile.getClass().getName(),
+                    cbcAtPhysics.projectileLocalPos(),
+                    muzzleExit,
+                    CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon),
+                    propellantCharges,
+                    propellantPower,
+                    cbcAtPhysics.projectileAddedPower(),
+                    bigCannonReason("loaded_cbc_at_cartridge", cbcAtPhysics)
+            );
+            LOGGER.debug("Resolved CBC:AT big cannon cartridge shot state: speed={} projectile={} projectileLocal={} muzzleExit={} muzzleOffset={} gravity={} drag={} quadratic={}",
+                    state.speed(), state.projectileClass(), state.projectileLocalPos(), state.muzzleExitLocalPos(), state.muzzleForwardOffset(),
+                    state.ballistics().gravity(), state.ballistics().drag(), state.ballistics().isQuadraticDrag());
+            return state;
+        }
+
+        LOGGER.warn("No loaded big cannon projectile found during ordered resolve; speed={} muzzleExit={} using HE shell fallback {}",
+                speed, muzzleExit, fallback);
         return new BigCannonShotState(speed, fallback, null, null, muzzleExit, CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon), propellantCharges, propellantPower, projectileAddedPower, "no_loaded_projectile");
+    }
+
+    private static float effectiveBigCannonSpeed(float cbcSpeed, @Nullable CBCATCompat.BigCannonPhysicsResult cbcAtPhysics) {
+        return cbcAtPhysics == null ? cbcSpeed : cbcAtPhysics.speed();
+    }
+
+    @Nullable
+    private static CBCATCompat.BigCannonPhysicsResult resolveCBCATBigCannonPhysics(AbstractMountedCannonContraption cannon, Level level) {
+        if (!Mods.CBC_AT.isLoaded() || !isBigCannon(cannon)) {
+            return null;
+        }
+        try {
+            return CBCATCompat.resolveBigCannonPhysics(cannon, level);
+        } catch (Throwable throwable) {
+            if (CBC_AT_BIG_CANNON_LINKAGE_WARNING_LOGGED.compareAndSet(false, true)) {
+                LOGGER.warn("Could not load CBC:AT big cannon physics compatibility; falling back to CBC charge power", throwable);
+            }
+            return null;
+        }
+    }
+
+    private static String bigCannonReason(String reason, @Nullable CBCATCompat.BigCannonPhysicsResult cbcAtPhysics) {
+        return cbcAtPhysics == null ? reason : reason + "_cbc_at_physics";
     }
 
     public static BallisticPropertiesComponent getBigCannonFallbackBallistics() {

@@ -178,8 +178,12 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         int size = blockEntity.getSize();
         Matrix4f m = ms.last().pose();
         Matrix3f n = ms.last().normal();
+        long gameTime = blockEntity.getLevel() == null ? 0L : blockEntity.getLevel().getGameTime();
 
         for (MonitorBlockEntity.RwrDisplayInfo contact : blockEntity.getRwrInfos()) {
+            if (!MonitorBlockEntity.shouldRenderRwrContact(contact, gameTime)) {
+                continue;
+            }
             Color color = aradContactColor(contact);
             float radius = contact.exactLocked()
                     ? ARAD_INNER_RING_RADIUS

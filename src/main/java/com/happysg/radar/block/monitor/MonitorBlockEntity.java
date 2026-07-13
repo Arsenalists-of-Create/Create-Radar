@@ -111,6 +111,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             boolean withinRadarRange,
             boolean exactLocked,
             boolean primaryThreat,
+            boolean engaged,
             boolean friendly
     ) {}
 
@@ -123,6 +124,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             boolean withinRadarRange,
             boolean exactLocked,
             boolean primaryThreat,
+            boolean engaged,
             boolean friendly
     ) {}
 
@@ -135,6 +137,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     private static final int RWR_LOCK_HOLD_TICKS = 20;
+    private static final int RWR_ENGAGEMENT_FLASH_TICKS = 10;
     private static final float RWR_STACK_RADIUS_STEP = 0.028f;
     private static final int RWR_BEARING_RETARGET_TICKS = 100;
     private static final float RWR_BEARING_EASE_DEGREES_PER_TICK = 0.04f;
@@ -142,6 +145,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     private static final float RWR_OUTER_BEARING_ERROR_DEGREES = 25.0f;
     private static final float RWR_MIDDLE_WEAK_BEARING_ERROR_DEGREES = 12.0f;
     private static final float RWR_MIDDLE_STRONG_BEARING_ERROR_DEGREES = 6.0f;
+
+    public static boolean shouldRenderRwrContact(RwrDisplayInfo contact, long gameTime) {
+        return !contact.engaged() || (gameTime / RWR_ENGAGEMENT_FLASH_TICKS & 1L) == 0L;
+    }
 
     @Override
     public void initialize() {
@@ -297,6 +304,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     contact.withinRadarRange(),
                     exactLocked,
                     Objects.equals(contact.sourceId(), primaryThreatSource),
+                    contact.engaged(),
                     contact.friendly()
             ));
         }
@@ -450,6 +458,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     info.withinRadarRange(),
                     info.exactLocked(),
                     info.primaryThreat(),
+                    info.engaged(),
                     info.friendly()
             ));
         }
@@ -1203,6 +1212,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.putBoolean("WithinRadarRange", info.withinRadarRange());
             tag.putBoolean("ExactLocked", info.exactLocked());
             tag.putBoolean("PrimaryThreat", info.primaryThreat());
+            tag.putBoolean("Engaged", info.engaged());
             tag.putBoolean("Friendly", info.friendly());
             list.add(tag);
         }
@@ -1227,6 +1237,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     tag.getBoolean("WithinRadarRange"),
                     tag.getBoolean("ExactLocked"),
                     tag.getBoolean("PrimaryThreat"),
+                    tag.getBoolean("Engaged"),
                     tag.getBoolean("Friendly")
             ));
         }

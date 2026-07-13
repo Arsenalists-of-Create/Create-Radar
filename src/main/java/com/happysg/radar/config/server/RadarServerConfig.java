@@ -18,6 +18,16 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigFloat controllerPhysbearingMaxSpeed = f(25.0F, 2.0F, 25.0F, "controllerPhysbearingMaxSpeed", "Increases the max Rotational speed of phys bearings controlled by Pitch/Yaw controllers");
     public final ConfigInt binoRaycastRange = i(512, 1, 1000, "binocularRange", "The range at which the binocular can acquire a target");
 
+    public final ConfigGroup chaffConfig = group(2, "chaffConfig", "Firework chaff lock-breaking behavior");
+    public final ConfigBool chaffEnabled = b(true, "enabled", "Allow fireworks to temporarily break radar locks");
+    public final ConfigFloat chaffRadius = f(8.0F, 0.0F, 64.0F, "radius", "Maximum firework detonation distance from a selected target in blocks");
+    public final ConfigInt chaffVolleyWindowTicks = i(40, 1, 1200, "volleyWindowTicks", "Quiet time before nearby firework chaff starts a new probability volley");
+    public final ConfigFloat chaffMinChance = f(0.10F, 0.0F, 1.0F, "minChance", "Lock-break chance for one small firework star");
+    public final ConfigFloat chaffMaxSingleChance = f(0.60F, 0.0F, 1.0F, "maxSingleChance", "Lock-break chance for a maximum-strength firework");
+    public final ConfigFloat chaffMaxVolleyChance = f(0.75F, 0.0F, 1.0F, "maxVolleyChance", "Absolute combined lock-break chance cap for one firework volley");
+    public final ConfigInt chaffMinDurationTicks = i(10, 1, 1200, "minDurationTicks", "Lock-break duration for one small firework star");
+    public final ConfigInt chaffMaxDurationTicks = i(100, 1, 1200, "maxDurationTicks", "Maximum lock-break duration for a maximum-strength firework");
+
     public final ConfigGroup sableSilhouetteConfig = group(3, "sableSilhouetteConfig", "Configs for Sable radar monitor silhouettes");
     public final ConfigInt sableSilhouetteMaxScannedBlocks = i(20000, 1, "sableSilhouetteMaxScannedBlocks", "Maximum loaded Sable sublevel blocks inspected while building one radar silhouette");
     public final ConfigInt sableSilhouetteMaxCollisionBoxes = i(12000, 1, "sableSilhouetteMaxCollisionBoxes", "Maximum collision boxes stored in one Sable radar silhouette");

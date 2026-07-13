@@ -93,6 +93,8 @@
   "create_radar.monitor.preset_loaded": "Loaded view %s",
   "create_radar.monitor.preset_empty": "No saved view %s",
   "create_radar.network_filter.filter_removed": "Filter Removed From Network!",
+  "create_radar.network_filter.compass_bound": "Compass bound to selected track!",
+  "create_radar.network_filter.compass_no_target": "No track is selected!",
   "create_radar.network_filter.invalid": "Invalid Item!",
   "create_radar.network_filter.invalid_block": "Not a Network Block",
   "create_radar.network_filter.success": "Successfully Added Filter to Network!",

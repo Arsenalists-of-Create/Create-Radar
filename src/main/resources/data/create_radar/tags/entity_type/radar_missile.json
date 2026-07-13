@@ -1,4 +1,9 @@
 {
   "replace": false,
-  "values": []
+  "values": [
+    {
+      "id": "create_kaboom:missile",
+      "required": false
+    }
+  ]
 }

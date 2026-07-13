@@ -69,6 +69,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private long suppressAutoUntilTick = 0L;
     private static final int MANUAL_CLEAR_COOLDOWN_TICKS = 20;
 
+    private @Nullable String chaffSuppressedTargetId;
+    private long chaffSuppressedUntilTick;
+
     private long vsLoadedCacheUntilTick = -1;
     private final Map<UUID, Boolean> vsLoadedCache = new HashMap<>();
 
@@ -111,8 +114,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
 
         String selectedId = data.getSelectedTargetId(group);
+        boolean chaffEnded = be.updateChaffState(sl.getGameTime(), selectedId);
 
-        if (Mods.SABLE.isLoaded() && selectedId != null) {
+        if (Mods.SABLE.isLoaded() && selectedId != null && !be.isChaffSuppressed(selectedId)) {
             Optional<UUID> selectedShipId = parseUuid(selectedId);
             if (selectedShipId.isPresent()) {
                 SubLevelContainer container = SubLevelContainer.getContainer(level);
@@ -128,7 +132,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             }
         }
 
-        if (sl.getGameTime() % 5 != 0) return;
+        if (!chaffEnded && sl.getGameTime() % 5 != 0) return;
         be.headlessTick(sl);
     }
 
@@ -214,6 +218,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         // resolve current selected track from group.selectedTargetId
         RadarTrack selected = resolveSelectedTrack(group.selectedTargetId);
+        if (isChaffSuppressed(group.selectedTargetId)) {
+            activeTrackCache = null;
+            return;
+        }
+
         if (selected != null && isSelectedTrackStale(sl, selected)) {
             if (targeting.autoTarget()) {
                 dropOrReselectAuto(sl, data, group);
@@ -315,8 +324,54 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return radars;
     }
 
+    public @Nullable String getCommandGuidanceRadarSourceId(ServerLevel sl, UUID shipId) {
+        NetworkData.Group group = NetworkData.get(sl).getGroup(sl.dimension(), worldPosition);
+        if (group == null) {
+            return null;
+        }
+
+        if (isChaffSuppressed(shipId.toString())) {
+            return null;
+        }
+
+        RwrTargetReference target = RwrTargetReference.sableShip(shipId);
+        IRadar strongestRadar = null;
+        float strongestSignal = Float.NEGATIVE_INFINITY;
+        String targetId = shipId.toString();
+        for (IRadar radar : getRunningRadars(sl, group)) {
+            boolean tracksTarget = radar.getTracks().stream()
+                    .anyMatch(track -> track != null && targetId.equals(track.getId()));
+            if (!tracksTarget) {
+                continue;
+            }
+
+            RwrContactEvaluation evaluation = radar.evaluateRwrContact(sl, target, target);
+            if (!evaluation.emitting() || !evaluation.detectableByReceiver()) {
+                continue;
+            }
+            if (strongestRadar == null || evaluation.signalStrength() > strongestSignal) {
+                strongestRadar = radar;
+                strongestSignal = evaluation.signalStrength();
+            }
+        }
+
+        if (strongestRadar == null) {
+            strongestRadar = findStrongestLockingRadar(sl, group, target);
+        }
+        return strongestRadar == null
+                ? null
+                : RadarContactRegistry.radarSourceId(sl, strongestRadar.getWorldPos());
+    }
+
     private void markExactLocksForSelectedShip(ServerLevel sl, NetworkData.Group group, UUID shipId) {
         RwrTargetReference target = RwrTargetReference.sableShip(shipId);
+        IRadar strongestRadar = findStrongestLockingRadar(sl, group, target);
+        if (strongestRadar != null) {
+            RadarContactRegistry.markExactLocked(sl, strongestRadar.getEmitterId(), target, 10);
+        }
+    }
+
+    private IRadar findStrongestLockingRadar(ServerLevel sl, NetworkData.Group group, RwrTargetReference target) {
         IRadar strongestRadar = null;
         float strongestSignal = 0.0F;
 
@@ -330,10 +385,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 strongestSignal = evaluation.signalStrength();
             }
         }
-
-        if (strongestRadar != null) {
-            RadarContactRegistry.markExactLocked(sl, strongestRadar.getEmitterId(), target, 10);
-        }
+        return strongestRadar;
     }
 
     private static RadarTrack newerTrack(RadarTrack first, RadarTrack second) {
@@ -375,22 +427,33 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private void applySelectedTarget(ServerLevel sl, NetworkData data, NetworkData.Group group,
                                      @Nullable RadarTrack track, boolean wasAuto) {
         String prev = data.getSelectedTargetId(group);
+        String next = track == null ? null : track.getId();
+
+        if (chaffSuppressedTargetId != null && !Objects.equals(chaffSuppressedTargetId, next)) {
+            clearChaffState();
+        }
 
         this.selectedWasAuto = wasAuto;
 
-        data.setSelectedTargetId(group, track == null ? null : track.getId());
+        data.setSelectedTargetId(group, next);
 
         if (Mods.SABLE.isLoaded()) {
             if (prev != null && track == null)
                 RadarContactRegistry.unLock(sl, UUID.fromString(prev));
 
-            if (track != null && track.trackCategory() == TrackCategory.SABLE)
+            if (track != null && track.trackCategory() == TrackCategory.SABLE && !isChaffSuppressed(next))
                 RadarContactRegistry.markLocked(sl, UUID.fromString(track.getId()), 10);
         }
 
-        activeTrackCache = track;
-        pushToEndpoints(track);
-        markPushedTrack(track);
+        if (isChaffSuppressed(next)) {
+            activeTrackCache = null;
+            clearChaffEndpoints(sl);
+            markPushedTrack(null);
+        } else {
+            activeTrackCache = track;
+            pushToEndpoints(track);
+            markPushedTrack(track);
+        }
 
         data.setDirty();
     }
@@ -462,6 +525,92 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
             pitch.setAndAcquireTrack(track, cfg);
             pitch.setSafeZones(safeZones);
+        }
+    }
+
+    public @Nullable RadarTrack getSelectedTrackForChaff(@Nullable String selectedId) {
+        if (selectedId == null) {
+            return null;
+        }
+        if (activeTrackCache != null && selectedId.equals(activeTrackCache.getId())) {
+            return activeTrackCache;
+        }
+        return resolveSelectedTrack(selectedId);
+    }
+
+    public boolean isChaffSuppressed(@Nullable String targetId) {
+        return level != null
+                && targetId != null
+                && targetId.equals(chaffSuppressedTargetId)
+                && level.getGameTime() < chaffSuppressedUntilTick;
+    }
+
+    public boolean beginChaffSuppression(String targetId, long untilTick) {
+        if (!(level instanceof ServerLevel sl) || targetId == null || targetId.isBlank()) {
+            return false;
+        }
+
+        NetworkData.Group group = NetworkData.get(sl).getGroup(sl.dimension(), worldPosition);
+        if (group == null || !targetId.equals(group.selectedTargetId) || untilTick <= sl.getGameTime()) {
+            return false;
+        }
+
+        boolean alreadySuppressed = isChaffSuppressed(targetId);
+        if (alreadySuppressed && untilTick <= chaffSuppressedUntilTick) {
+            return false;
+        }
+
+        RadarTrack selected = getSelectedTrackForChaff(targetId);
+        chaffSuppressedTargetId = targetId;
+        chaffSuppressedUntilTick = Math.max(chaffSuppressedUntilTick, untilTick);
+        activeTrackCache = null;
+        clearChaffEndpoints(sl);
+        markPushedTrack(null);
+
+        if (selected != null && selected.trackCategory() == TrackCategory.SABLE) {
+            clearExactLocksForSelectedShip(sl, group, targetId);
+        }
+        return true;
+    }
+
+    private boolean updateChaffState(long now, @Nullable String selectedId) {
+        if (chaffSuppressedTargetId == null) {
+            return false;
+        }
+        if (!Objects.equals(chaffSuppressedTargetId, selectedId) || now >= chaffSuppressedUntilTick) {
+            clearChaffState();
+            return true;
+        }
+        return false;
+    }
+
+    private void clearChaffState() {
+        chaffSuppressedTargetId = null;
+        chaffSuppressedUntilTick = 0L;
+    }
+
+    private void clearChaffEndpoints(ServerLevel sl) {
+        TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
+        for (AutoPitchControllerBlockEntity pitch : getWeaponEndpointsCached(sl)) {
+            pitch.setAndAcquireTrack(null, cfg);
+            pitch.setSafeZones(safeZones);
+        }
+    }
+
+    private void clearExactLocksForSelectedShip(ServerLevel sl, NetworkData.Group group, String targetId) {
+        UUID shipId;
+        try {
+            shipId = UUID.fromString(targetId);
+        } catch (IllegalArgumentException ignored) {
+            return;
+        }
+
+        RwrTargetReference target = RwrTargetReference.sableShip(shipId);
+        for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
+            IRadar radar = resolveRadar(sl, endpoint.pos());
+            if (radar != null) {
+                RadarContactRegistry.clearExactLocked(sl, radar.getEmitterId(), target);
+            }
         }
     }
 

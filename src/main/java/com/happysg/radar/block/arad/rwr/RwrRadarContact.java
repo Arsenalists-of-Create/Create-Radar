@@ -11,6 +11,7 @@ public record RwrRadarContact(
         boolean lockCapable,
         boolean withinRadarRange,
         boolean exactLocked,
+        boolean engaged,
         boolean friendly
 ) {
 }

@@ -381,8 +381,12 @@ public class MonitorScreen extends Screen {
 
     private void renderAradContacts(GuiGraphics gg, MonitorBlockEntity monitor) {
         int spriteSize = Math.max(16, Math.round(84 * uiScale));
+        long gameTime = monitor.getLevel() == null ? 0L : monitor.getLevel().getGameTime();
         RenderSystem.enableBlend();
         for (MonitorBlockEntity.RwrDisplayInfo contact : monitor.getRwrInfos()) {
+            if (!MonitorBlockEntity.shouldRenderRwrContact(contact, gameTime)) {
+                continue;
+            }
             Color color = aradContactColor(contact);
             gg.setColor(color.getRedAsFloat(), color.getGreenAsFloat(), color.getBlueAsFloat(), 1.0f);
             float radius = contact.exactLocked()
