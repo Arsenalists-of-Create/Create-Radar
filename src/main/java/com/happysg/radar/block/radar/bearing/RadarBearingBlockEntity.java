@@ -124,7 +124,9 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     public float getAngularSpeed() {
-        if (!RadarConfig.server().gearRadarBearingSpeed.get())
+        boolean gearBearingSpeed = !RadarConfig.isServerConfigLoaded()
+                || RadarConfig.server().gearRadarBearingSpeed.get();
+        if (!gearBearingSpeed)
             return super.getAngularSpeed();
 
         float speed = convertToAngular(getSpeed());

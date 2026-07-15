@@ -24,6 +24,10 @@ public class ObstructionChecker {
       this.enabled = enabled;
    }
 
+   boolean isEnabled() {
+      return this.enabled;
+   }
+
    public ObstructionResult check(Level level, ProjectileSimulator.SimulationResult trajectory) {
       return this.check(level, trajectory, Integer.MAX_VALUE);
    }

@@ -9,9 +9,13 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 
 import javax.annotation.Nullable;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 
 public final class CreateSchematicLinkPersistence {
     private static final String SNAPSHOT_KEY = "CreateRadarNetworkSnapshot";
+    private static final String COPY_MARKER = "SchematicCopy";
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private CreateSchematicLinkPersistence() {
     }
@@ -39,7 +43,22 @@ public final class CreateSchematicLinkPersistence {
     }
 
     public static void restoreControllerSnapshot(ServerLevel level, BlockPos controllerPos, CompoundTag snapshot) {
-        NetworkData.get(level).restoreSchematicSnapshot(level, snapshot, tag -> readRelativePos(controllerPos, tag));
+        NetworkData.RestorationReport report = NetworkData.get(level).restoreSchematicSnapshot(
+                level, controllerPos, snapshot, tag -> readRelativePos(controllerPos, tag), restorationMode(snapshot));
+        if (report.hasWarnings()) {
+            LOGGER.warn("Restored weapon network schematic at {} with {} entries restored and {} skipped",
+                    controllerPos, report.restored(), report.skipped());
+        }
+    }
+
+    public static void markSchematicCopy(CompoundTag snapshot) {
+        snapshot.putBoolean(COPY_MARKER, true);
+    }
+
+    public static NetworkData.RestorationMode restorationMode(CompoundTag snapshot) {
+        return snapshot.getBoolean(COPY_MARKER)
+                ? NetworkData.RestorationMode.SCHEMATIC_COPY
+                : NetworkData.RestorationMode.WORLD_RECOVERY;
     }
 
     public static void transformControllerSnapshot(CompoundTag tag, StructureTransform transform) {
@@ -49,6 +68,7 @@ public final class CreateSchematicLinkPersistence {
         }
 
         transformSnapshotPositions(snapshot, transform);
+        markSchematicCopy(snapshot);
         putControllerSnapshot(tag, snapshot);
     }
 
@@ -58,18 +78,12 @@ public final class CreateSchematicLinkPersistence {
         tag.putInt("X", relative.getX());
         tag.putInt("Y", relative.getY());
         tag.putInt("Z", relative.getZ());
-        tag.put("WorldPos", writeAbsolutePos(pos));
         return tag;
     }
 
     private static BlockPos readRelativePos(BlockPos origin, CompoundTag tag) {
-        if (isPositionTag(tag)) {
-            return origin.offset(tag.getInt("X"), tag.getInt("Y"), tag.getInt("Z"));
-        }
-        if (tag.contains("WorldPos", Tag.TAG_COMPOUND)) {
-            return readPos(tag.getCompound("WorldPos"));
-        }
-        return origin;
+        if (!isPositionTag(tag)) return null;
+        return origin.offset(tag.getInt("X"), tag.getInt("Y"), tag.getInt("Z"));
     }
 
     private static void transformSnapshotPositions(CompoundTag tag, StructureTransform transform) {
@@ -118,9 +132,4 @@ public final class CreateSchematicLinkPersistence {
         tag.putInt("Z", pos.getZ());
     }
 
-    private static CompoundTag writeAbsolutePos(BlockPos pos) {
-        CompoundTag tag = new CompoundTag();
-        writePos(tag, pos);
-        return tag;
-    }
 }

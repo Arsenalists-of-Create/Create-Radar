@@ -88,6 +88,17 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
             return;
         }
 
+        if (!serverLevel.isLoaded(lastKnownPos)
+                || serverLevel.getBlockEntity(lastKnownPos) instanceof DataLinkBlockEntity
+                || serverLevel.getBlockState(lastKnownPos).getBlock() == getBlockState().getBlock()) {
+            // The old location is either still a real source or cannot be verified. Treat
+            // this block as a copy and rebuild only from its local fallback/snapshot data.
+            lastKnownPos = worldPosition;
+            restoreWeaponFilterLinkFallback();
+            setChanged();
+            return;
+        }
+
         boolean radarUpdated = networkData.updateDataLinkPosition(serverLevel.dimension(), lastKnownPos, worldPosition);
         if (radarUpdated) {
             lastKnownPos = worldPosition;
@@ -160,8 +171,11 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         tag.put("TargetOffset", NbtUtils.writeBlockPos(targetOffset));
         tag.put("TargetPos", NbtUtils.writeBlockPos(getTargetPosition()));
 
-        if (linkedShipId != null)
-            tag.putUUID("LinkedShipId", linkedShipId);
+        UUID serializedShipId = Mods.SABLE.isLoaded()
+                ? SableLinkPersistence.remapShipId(linkedShipId)
+                : linkedShipId;
+        if (serializedShipId != null)
+            tag.putUUID("LinkedShipId", serializedShipId);
         tag.put("TargetOffsetShip", NbtUtils.writeBlockPos(targetOffsetShip));
         if (filtererOffset != null) {
             tag.put("FiltererOffset", NbtUtils.writeBlockPos(filtererOffset));
@@ -203,7 +217,10 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
             lastKnownPos = worldPosition;
         }
 
-        linkedShipId = tag.hasUUID("LinkedShipId") ? tag.getUUID("LinkedShipId") : null;
+        UUID serializedShipId = tag.hasUUID("LinkedShipId") ? tag.getUUID("LinkedShipId") : null;
+        linkedShipId = Mods.SABLE.isLoaded()
+                ? SableLinkPersistence.remapShipId(serializedShipId)
+                : serializedShipId;
 
         targetOffsetShip = NbtUtils.readBlockPos(tag, "TargetOffsetShip").orElse(BlockPos.ZERO);
         filtererOffset = NbtUtils.readBlockPos(tag, "FiltererOffset").orElse(null);

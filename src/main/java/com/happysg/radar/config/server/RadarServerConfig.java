@@ -9,7 +9,6 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigInt targetLoosenAmount = i(15, 0, 180, "targetLoosenAmount", "increases the tolerance used to determine if cannons are pointing at the target (degrees)");
     public final ConfigBool useNewTargetingComputer = b(true, "useNewTargetingComputer", "Use the new simulated targeting computer as the primary CBC auto aiming path");
     public final ConfigBool forceLegacyCannonLeadSolver = b(false, "forceLegacyCannonLeadSolver", "Force CBC auto aiming to use the legacy lead solver instead of the new targeting computer");
-    public final ConfigBool allowLegacyCannonLeadFallback = b(true, "allowLegacyCannonLeadFallback", "Allow the legacy lead solver when the new targeting computer cannot produce a usable shot");
     public final ConfigFloat sprintJumpMinHorizontalSpeed = f(0.16F, 0.0F, "sprintJumpMinHorizontalSpeed", "Minimum horizontal target speed in blocks per tick for sprint-jump movement to count as erratic");
     public final ConfigFloat sprintJumpVerticalSpeedThreshold = f(0.12F, 0.0F, "sprintJumpVerticalSpeedThreshold", "Minimum upward target speed in blocks per tick for sprint-jump movement to count as erratic");
     public final ConfigInt erraticTargetStableTicks = i(1, 0, 20, "erraticTargetStableTicks", "Required stable aim ticks when target motion is erratic");
@@ -22,11 +21,11 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigBool chaffEnabled = b(true, "enabled", "Allow fireworks to temporarily break radar locks");
     public final ConfigFloat chaffRadius = f(8.0F, 0.0F, 64.0F, "radius", "Maximum firework detonation distance from a selected target in blocks");
     public final ConfigInt chaffVolleyWindowTicks = i(40, 1, 1200, "volleyWindowTicks", "Quiet time before nearby firework chaff starts a new probability volley");
-    public final ConfigFloat chaffMinChance = f(0.10F, 0.0F, 1.0F, "minChance", "Lock-break chance for one small firework star");
+    public final ConfigFloat chaffMinChance = f(0.20F, 0.0F, 1.0F, "minChance", "Lock-break chance for one small firework star");
     public final ConfigFloat chaffMaxSingleChance = f(0.60F, 0.0F, 1.0F, "maxSingleChance", "Lock-break chance for a maximum-strength firework");
     public final ConfigFloat chaffMaxVolleyChance = f(0.75F, 0.0F, 1.0F, "maxVolleyChance", "Absolute combined lock-break chance cap for one firework volley");
     public final ConfigInt chaffMinDurationTicks = i(10, 1, 1200, "minDurationTicks", "Lock-break duration for one small firework star");
-    public final ConfigInt chaffMaxDurationTicks = i(100, 1, 1200, "maxDurationTicks", "Maximum lock-break duration for a maximum-strength firework");
+    public final ConfigInt chaffMaxDurationTicks = i(70, 1, 1200, "maxDurationTicks", "Maximum lock-break duration for one firework (3.5 seconds by default)");
 
     public final ConfigGroup sableSilhouetteConfig = group(3, "sableSilhouetteConfig", "Configs for Sable radar monitor silhouettes");
     public final ConfigInt sableSilhouetteMaxScannedBlocks = i(20000, 1, "sableSilhouetteMaxScannedBlocks", "Maximum loaded Sable sublevel blocks inspected while building one radar silhouette");

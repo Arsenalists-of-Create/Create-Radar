@@ -7,6 +7,8 @@ import net.minecraft.world.item.component.Fireworks;
 public record ChaffProfile(int weight, double chance, int durationTicks) {
     private static final int MIN_WEIGHT = 1;
     private static final int MAX_WEIGHT = 14;
+    private static final int SMALL_STAR_WEIGHT = 1;
+    private static final int LARGE_STAR_WEIGHT = 2;
 
     public static ChaffProfile from(Fireworks fireworks, ChaffSettings settings) {
         if (fireworks == null || fireworks.explosions().isEmpty()) {
@@ -15,7 +17,9 @@ public record ChaffProfile(int weight, double chance, int durationTicks) {
 
         int weight = 0;
         for (FireworkExplosion explosion : fireworks.explosions()) {
-            weight += explosion.shape() == FireworkExplosion.Shape.LARGE_BALL ? 2 : 1;
+            weight += explosion.shape() == FireworkExplosion.Shape.LARGE_BALL
+                    ? LARGE_STAR_WEIGHT
+                    : SMALL_STAR_WEIGHT;
             if (weight >= MAX_WEIGHT) {
                 weight = MAX_WEIGHT;
                 break;

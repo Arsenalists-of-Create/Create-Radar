@@ -13,6 +13,7 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -28,6 +29,7 @@ import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -100,6 +102,7 @@ public final class ChaffManager {
 
         NetworkData networkData = NetworkData.get(level);
         Set<String> successfullySuppressedTargets = new HashSet<>();
+        ChaffRollSummary rollSummary = new ChaffRollSummary();
         long now = level.getGameTime();
 
         for (NetworkData.Group group : networkData.getGroups().values()) {
@@ -123,50 +126,127 @@ public final class ChaffManager {
                 continue;
             }
 
-            VolleyKey key = new VolleyKey(controllerPos, selectedTrack.getId());
-            Map<VolleyKey, VolleyState> dimensionVolleys = VOLLEYS.computeIfAbsent(level.dimension(), ignored -> new HashMap<>());
-            VolleyState volley = dimensionVolleys.get(key);
-            if (volley == null || now - volley.lastTick > settings.volleyWindowTicks()) {
-                volley = new VolleyState(now, now, 0.0D, level.random.nextDouble(), 0, false);
-                dimensionVolleys.put(key, volley);
-            }
-
-            volley.lastTick = now;
-            if (!volley.succeeded) {
-                double combined = 1.0D - (1.0D - volley.combinedChance) * (1.0D - profile.chance());
-                volley.combinedChance = Math.min(settings.maxVolleyChance(), combined);
-                if (volley.threshold < volley.combinedChance) {
-                    volley.succeeded = true;
-                    volley.strongestDurationTicks = profile.durationTicks();
-                    long untilTick = Math.min(volley.firstTick + settings.maxDurationTicks(), now + profile.durationTicks());
-                    if (controller.beginChaffSuppression(selectedTrack.getId(), untilTick)) {
-                        successfullySuppressedTargets.add(selectedTrack.getId());
-                    }
-                }
-            } else if (profile.durationTicks() > volley.strongestDurationTicks) {
-                volley.strongestDurationTicks = profile.durationTicks();
-                long untilTick = Math.min(volley.firstTick + settings.maxDurationTicks(), now + profile.durationTicks());
-                if (controller.beginChaffSuppression(selectedTrack.getId(), untilTick)) {
-                    successfullySuppressedTargets.add(selectedTrack.getId());
-                }
+            long untilTick = applyToVolley(level, "controller:" + controllerPos.asLong(),
+                    selectedTrack.getId(), profile, settings, now);
+            if (untilTick > now && controller.beginChaffSuppression(selectedTrack.getId(), untilTick)) {
+                successfullySuppressedTargets.add(selectedTrack.getId());
+                rollSummary.recordSaved(selectedTrack.getId(), untilTick - now);
             }
         }
+
+        applyToRegisteredEntityLocks(level, rocket.position(), launch, profile, settings, now, rollSummary);
 
         for (String targetId : successfullySuppressedTargets) {
             clearCoarseRwrLockIfFullySuppressed(level, networkData, targetId);
         }
+
+        printRollToChat(level, fireworks, profile, rollSummary);
+    }
+
+    private static void applyToRegisteredEntityLocks(ServerLevel level, Vec3 explosionPosition,
+                                                     LaunchContext launch, ChaffProfile profile,
+                                                     ChaffSettings settings, long now,
+                                                     ChaffRollSummary rollSummary) {
+        for (Entity entity : level.getAllEntities()) {
+            ChaffLockAdapter<Entity> adapter = ChaffLockRegistry.find(entity);
+            if (adapter == null || !entity.isAlive()) {
+                continue;
+            }
+
+            String targetId = adapter.getTargetId(entity);
+            if (targetId == null || targetId.isBlank()) {
+                continue;
+            }
+
+            boolean launchedFromTarget = launch.sourceTargetIds().contains(targetId);
+            if (!launchedFromTarget && !isNearTarget(level, explosionPosition, targetId, settings.radius())) {
+                continue;
+            }
+
+            long untilTick = applyToVolley(level, "entity:" + entity.getUUID(), targetId,
+                    profile, settings, now);
+            if (untilTick > now) {
+                adapter.applySuppression(entity, targetId, untilTick);
+                rollSummary.recordSaved(targetId, untilTick - now);
+            }
+        }
+    }
+
+    private static void printRollToChat(ServerLevel level, Fireworks fireworks, ChaffProfile profile,
+                                        ChaffRollSummary summary) {
+        int starCount = fireworks.explosions().size();
+        String chance = String.format(Locale.ROOT, "%.1f%%", profile.chance() * 100.0D);
+        String duration = summary.succeeded()
+                ? String.format(Locale.ROOT, "%.2fs (%d ticks)",
+                summary.durationTicks() / 20.0D, summary.durationTicks())
+                : "n/a";
+        Component message = Component.literal(String.format(Locale.ROOT,
+                "[Chaff] stars=%d, size=%d | chance=%s | %s | entities saved=%d | duration=%s",
+                starCount, profile.weight(), chance, summary.succeeded() ? "SUCCESS" : "FAIL",
+                summary.savedCount(), duration));
+        level.players().forEach(player -> player.sendSystemMessage(message));
+    }
+
+    private static long applyToVolley(ServerLevel level, String sourceId, String targetId,
+                                      ChaffProfile profile, ChaffSettings settings, long now) {
+        VolleyKey key = new VolleyKey(sourceId, targetId);
+        Map<VolleyKey, VolleyState> dimensionVolleys = VOLLEYS.computeIfAbsent(
+                level.dimension(), ignored -> new HashMap<>());
+        VolleyState volley = dimensionVolleys.get(key);
+        if (volley == null || now - volley.lastTick > settings.volleyWindowTicks()) {
+            volley = new VolleyState(now, 0.0D, level.random.nextDouble(), 0, false);
+            dimensionVolleys.put(key, volley);
+        }
+
+        volley.lastTick = now;
+        if (!volley.succeeded) {
+            double rollChance = diminishedRollChance(
+                    profile.chance(), volley.combinedChance, settings.maxVolleyChance());
+            double combined = 1.0D - (1.0D - volley.combinedChance) * (1.0D - rollChance);
+            volley.combinedChance = Math.min(settings.maxVolleyChance(), combined);
+            if (volley.threshold < volley.combinedChance) {
+                volley.succeeded = true;
+                volley.strongestDurationTicks = profile.durationTicks();
+                return now + Math.min(settings.maxDurationTicks(), profile.durationTicks());
+            }
+        } else if (profile.durationTicks() > volley.strongestDurationTicks) {
+            volley.strongestDurationTicks = profile.durationTicks();
+            return now + Math.min(settings.maxDurationTicks(), profile.durationTicks());
+        }
+        return -1L;
+    }
+
+    /**
+     * Reduces each follow-up roll in proportion to how much of the volley cap has
+     * already been used. The first roll receives the firework's full profile chance.
+     */
+    static double diminishedRollChance(double profileChance, double combinedChance, double volleyCap) {
+        if (profileChance <= 0.0D || volleyCap <= 0.0D || combinedChance >= volleyCap) {
+            return 0.0D;
+        }
+        double remainingCapFraction = 1.0D - combinedChance / volleyCap;
+        return Math.min(1.0D, profileChance) * remainingCapFraction;
     }
 
     private static boolean isNearTarget(ServerLevel level, Vec3 explosionPos, RadarTrack track, double radius) {
-        AABB bounds = resolveTargetBounds(level, track);
+        AABB bounds = resolveTargetBounds(level, track.getId(), track.position());
+        return isNearBounds(explosionPos, bounds, radius);
+    }
+
+    private static boolean isNearTarget(ServerLevel level, Vec3 explosionPos, String targetId, double radius) {
+        AABB bounds = resolveTargetBounds(level, targetId, null);
+        return bounds != null && isNearBounds(explosionPos, bounds, radius);
+    }
+
+    private static boolean isNearBounds(Vec3 explosionPos, AABB bounds, double radius) {
         double x = Math.max(bounds.minX, Math.min(explosionPos.x, bounds.maxX));
         double y = Math.max(bounds.minY, Math.min(explosionPos.y, bounds.maxY));
         double z = Math.max(bounds.minZ, Math.min(explosionPos.z, bounds.maxZ));
         return explosionPos.distanceToSqr(x, y, z) <= radius * radius;
     }
 
-    private static AABB resolveTargetBounds(ServerLevel level, RadarTrack track) {
-        UUID targetUuid = parseUuid(track.getId());
+    private static AABB resolveTargetBounds(ServerLevel level, String targetId, Vec3 fallbackPosition) {
+        UUID targetUuid = parseUuid(targetId);
         if (targetUuid != null) {
             if (Mods.SABLE.isLoaded()) {
                 SubLevelContainer container = SubLevelContainer.getContainer(level);
@@ -183,7 +263,7 @@ public final class ChaffManager {
             }
         }
 
-        return new AABB(track.position(), track.position());
+        return fallbackPosition == null ? null : new AABB(fallbackPosition, fallbackPosition);
     }
 
     private static AABB toAabb(SubLevelAccess subLevel) {
@@ -269,20 +349,40 @@ public final class ChaffManager {
     private record LaunchContext(Set<String> sourceTargetIds, long createdTick) {
     }
 
-    private record VolleyKey(BlockPos controllerPos, String targetId) {
+    private record VolleyKey(String sourceId, String targetId) {
+    }
+
+    private static final class ChaffRollSummary {
+        private final Set<String> savedTargetIds = new HashSet<>();
+        private long durationTicks;
+
+        private void recordSaved(String targetId, long durationTicks) {
+            savedTargetIds.add(targetId);
+            this.durationTicks = Math.max(this.durationTicks, durationTicks);
+        }
+
+        private boolean succeeded() {
+            return !savedTargetIds.isEmpty();
+        }
+
+        private int savedCount() {
+            return savedTargetIds.size();
+        }
+
+        private long durationTicks() {
+            return durationTicks;
+        }
     }
 
     private static final class VolleyState {
-        private final long firstTick;
         private long lastTick;
         private double combinedChance;
         private final double threshold;
         private int strongestDurationTicks;
         private boolean succeeded;
 
-        private VolleyState(long firstTick, long lastTick, double combinedChance, double threshold,
+        private VolleyState(long lastTick, double combinedChance, double threshold,
                             int strongestDurationTicks, boolean succeeded) {
-            this.firstTick = firstTick;
             this.lastTick = lastTick;
             this.combinedChance = combinedChance;
             this.threshold = threshold;

@@ -87,10 +87,15 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         private boolean friendly = false;
 
         private ContactAccumulator(String sourceId, IRadar radar, Vec3 displayReceiverPos, Vec3 radarWorldPos) {
+            this(sourceId, radar.getWorldPos(), radar.getRadarTypeEnum(),
+                    bearingDegrees(displayReceiverPos, radarWorldPos));
+        }
+
+        private ContactAccumulator(String sourceId, BlockPos radarPos, RadarType radarType, float bearingDegrees) {
             this.sourceId = sourceId;
-            this.radarPos = radar.getWorldPos().immutable();
-            this.radarType = radar.getRadarTypeEnum();
-            this.bearingDegrees = bearingDegrees(displayReceiverPos, radarWorldPos);
+            this.radarPos = radarPos.immutable();
+            this.radarType = radarType;
+            this.bearingDegrees = bearingDegrees;
         }
 
         private void accept(RwrContactEvaluation evaluation, boolean withinRadarRange, boolean engaged,
@@ -179,7 +184,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         List<AggregatedRwrContact> alertContacts = alertContacts(contacts);
         Set<String> alertSources = sourceIds(alertContacts);
         boolean inRange = !alertContacts.isEmpty();
-        boolean engaged = inRange && isAnyEngaged(sl, receiverChain);
+        boolean engaged = inRange && (isAnyEngaged(sl, receiverChain) || hasEngagedContact(alertContacts));
         boolean locked = inRange && (isAnyLocked(sl, receiverChain) || hasExactLockedContact(alertContacts));
         //if (locked) LogUtils.getLogger().warn("locked");
         if (inRange) {
@@ -347,6 +352,22 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
                         .computeIfAbsent(sourceId, ignored -> new ContactAccumulator(sourceId, radar, displayReceiverPos, radarWorldPos))
                         .accept(evaluation, withinRadarRange, engaged, friendly, receiver.position());
             }
+
+            for (RwrRadarContact contact : ExternalRwrEmitterRegistry.contactsFor(
+                    level, receiver.shipId(), receiver.reference(), displayReceiverPos)) {
+                RwrContactEvaluation evaluation = new RwrContactEvaluation(
+                        true,
+                        true,
+                        contact.lockCapable(),
+                        contact.exactLocked(),
+                        contact.signalStrength()
+                );
+                contactsBySource
+                        .computeIfAbsent(contact.sourceId(), ignored -> new ContactAccumulator(
+                                contact.sourceId(), contact.radarPos(), contact.radarType(), contact.bearingDegrees()))
+                        .accept(evaluation, contact.withinRadarRange(), contact.engaged(),
+                                contact.friendly(), receiver.position());
+            }
         }
 
         List<AggregatedRwrContact> contacts = new ArrayList<>();
@@ -375,8 +396,12 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
             liveSources.add(sourceId);
 
             boolean exactLocked = contact.contact().exactLocked();
+            boolean externalSource = level instanceof ServerLevel serverLevel
+                    && ExternalRwrEmitterRegistry.isActiveSource(serverLevel, sourceId);
             if (exactLocked) {
                 exactLockHoldTicks.put(sourceId, EXACT_LOCK_HOLD_TICKS);
+            } else if (externalSource) {
+                exactLockHoldTicks.remove(sourceId);
             } else {
                 int holdTicks = exactLockHoldTicks.getOrDefault(sourceId, 0);
                 if (holdTicks > 0) {
@@ -443,6 +468,15 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
     private static boolean hasExactLockedContact(List<AggregatedRwrContact> contacts) {
         for (AggregatedRwrContact contact : contacts) {
             if (contact.contact().exactLocked()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasEngagedContact(List<AggregatedRwrContact> contacts) {
+        for (AggregatedRwrContact contact : contacts) {
+            if (contact.contact().engaged()) {
                 return true;
             }
         }

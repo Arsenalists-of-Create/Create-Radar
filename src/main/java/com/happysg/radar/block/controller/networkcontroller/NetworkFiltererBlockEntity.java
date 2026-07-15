@@ -10,6 +10,7 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.behavior.SkyRadarScanningBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.compat.Mods;
@@ -53,6 +54,9 @@ import javax.annotation.Nullable;
 import java.util.*;
 
 public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSafeNBT, TransformableBlockEntity {
+
+    public record ChaffSuppression(String targetId, long untilTick) {
+    }
     private static final String NBT_INVENTORY = "Inventory";
     private static final String NBT_SLOT_NBT  = "SlotNbt";
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -83,6 +87,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private List<RadarTrack> cachedTracks = List.of();
     private DetectionConfig detectionCache = DetectionConfig.DEFAULT;
     public @Nullable RadarTrack activeTrackCache;
+    private long compassTrackValidationTick = Long.MIN_VALUE;
+    private @Nullable String compassTrackValidationId;
+    private @Nullable RadarTrack compassTrackValidationResult;
     @Nullable
     private CompoundTag pendingCreateSchematicSnapshot;
 
@@ -102,8 +109,18 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         NetworkData data = NetworkData.get(sl);
         if (!be.lastKnownPos.equals(pos)) {
-            if (data.updateFiltererPosition(sl.dimension(), be.lastKnownPos, pos)) {
+            if (data.getGroup(sl.dimension(), pos) != null) {
                 be.lastKnownPos = pos;
+                be.setChanged();
+            } else if (sl.isLoaded(be.lastKnownPos)
+                    && !(sl.getBlockEntity(be.lastKnownPos) instanceof NetworkFiltererBlockEntity)
+                    && sl.getBlockState(be.lastKnownPos).getBlock() != state.getBlock()
+                    && data.updateFiltererPosition(sl.dimension(), be.lastKnownPos, pos)) {
+                be.lastKnownPos = pos;
+                be.setChanged();
+            } else {
+                be.lastKnownPos = pos;
+                be.applyFiltersToNetwork();
                 be.setChanged();
             }
         }
@@ -538,11 +555,90 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return resolveSelectedTrack(selectedId);
     }
 
+    /**
+     * Resolves the selected radar contact to its backing entity or Sable sublevel.
+     * The network selection and the live radar track are both validated before a
+     * target position is returned, so consumers cannot retain an expired lock.
+     */
+    public @Nullable Vec3 resolveLiveSelectedTargetPosition() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+
+        RadarTrack track = resolveLiveSelectedTrackForCompass(serverLevel);
+        if (track == null) {
+            return null;
+        }
+
+        UUID targetId = parseUuid(track.getId()).orElse(null);
+        if (targetId == null) {
+            return null;
+        }
+
+        if (track.trackCategory() == TrackCategory.SABLE) {
+            if (!Mods.SABLE.isLoaded()) {
+                return null;
+            }
+
+            SubLevelContainer container = SubLevelContainer.getContainer(serverLevel);
+            SubLevelAccess subLevel = container == null ? null : container.getSubLevel(targetId);
+            return subLevel == null ? null : RadarTrackUtil.getPosition(subLevel);
+        }
+
+        Entity entity = serverLevel.getEntity(targetId);
+        return entity == null || !entity.isAlive() ? null : entity.position();
+    }
+
+    private @Nullable RadarTrack resolveLiveSelectedTrackForCompass(ServerLevel serverLevel) {
+        NetworkData data = NetworkData.get(serverLevel);
+        NetworkData.Group group = data.getGroup(serverLevel.dimension(), worldPosition);
+        if (group == null) {
+            return null;
+        }
+
+        String selectedId = data.getSelectedTargetId(group);
+        RadarTrack active = activeTrackCache;
+        if (selectedId == null
+                || active == null
+                || !selectedId.equals(active.getId())
+                || isChaffSuppressed(selectedId)) {
+            return null;
+        }
+
+        long gameTime = serverLevel.getGameTime();
+        if (compassTrackValidationTick == gameTime
+                && Objects.equals(compassTrackValidationId, selectedId)) {
+            return compassTrackValidationResult;
+        }
+
+        RadarTrack liveTrack = null;
+        for (IRadar radar : getRunningRadars(serverLevel, group)) {
+            for (RadarTrack track : radar.getTracks()) {
+                if (track == null || !selectedId.equals(track.getId())) {
+                    continue;
+                }
+                liveTrack = liveTrack == null ? track : newerTrack(liveTrack, track);
+            }
+        }
+
+        compassTrackValidationTick = gameTime;
+        compassTrackValidationId = selectedId;
+        compassTrackValidationResult = liveTrack;
+        return liveTrack;
+    }
+
     public boolean isChaffSuppressed(@Nullable String targetId) {
         return level != null
                 && targetId != null
                 && targetId.equals(chaffSuppressedTargetId)
                 && level.getGameTime() < chaffSuppressedUntilTick;
+    }
+
+    public @Nullable ChaffSuppression getActiveChaffSuppression() {
+        if (!isChaffSuppressed(chaffSuppressedTargetId)) {
+            return null;
+        }
+        return new ChaffSuppression(chaffSuppressedTargetId, chaffSuppressedUntilTick);
     }
 
     public boolean beginChaffSuppression(String targetId, long untilTick) {
@@ -890,9 +986,15 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         saveSlotNbt(nbt);
 
         if (pendingCreateSchematicSnapshot != null) {
+            CreateSchematicLinkPersistence.markSchematicCopy(pendingCreateSchematicSnapshot);
             CreateSchematicLinkPersistence.putControllerSnapshot(nbt, pendingCreateSchematicSnapshot);
         } else if (level instanceof ServerLevel serverLevel) {
             CreateSchematicLinkPersistence.writeControllerSnapshot(serverLevel, worldPosition, nbt);
+            CompoundTag snapshot = CreateSchematicLinkPersistence.readControllerSnapshot(nbt);
+            if (snapshot != null) {
+                CreateSchematicLinkPersistence.markSchematicCopy(snapshot);
+                CreateSchematicLinkPersistence.putControllerSnapshot(nbt, snapshot);
+            }
         }
     }
 
@@ -925,15 +1027,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         CompoundTag snapshot = sableSnapshot
                 ? SableLinkPersistence.readControllerSnapshot(nbt)
                 : CreateSchematicLinkPersistence.readControllerSnapshot(nbt);
-        if (snapshot != null && level instanceof ServerLevel serverLevel && NetworkData.get(serverLevel).getGroup(serverLevel.dimension(), worldPosition) == null) {
-            if (sableSnapshot) {
-                SableLinkPersistence.restoreControllerSnapshot(serverLevel, snapshot);
-            } else {
-                CreateSchematicLinkPersistence.restoreControllerSnapshot(serverLevel, worldPosition, snapshot);
-            }
-            lastKnownPos = worldPosition;
-        } else if (snapshot != null && !sableSnapshot) {
+        if (snapshot != null) {
+            if (sableSnapshot) CreateSchematicLinkPersistence.markSchematicCopy(snapshot);
             pendingCreateSchematicSnapshot = snapshot;
+            lastKnownPos = worldPosition;
         }
 
         for (int i = 0; i < inventory.getSlots(); i++) {
@@ -978,6 +1075,19 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         for (int i = 0; i < inventory.getSlots(); i++) updateSlotNbtFromInventory(i);
 
         if (level instanceof ServerLevel sl) {
+            if (pendingCreateSchematicSnapshot != null) {
+                CompoundTag snapshot = pendingCreateSchematicSnapshot;
+                pendingCreateSchematicSnapshot = null;
+                if (NetworkData.get(sl).getGroup(sl.dimension(), worldPosition) == null) {
+                    if (Mods.SABLE.isLoaded()) {
+                        SableLinkPersistence.restoreControllerSnapshot(sl, worldPosition, snapshot);
+                    } else {
+                        CreateSchematicLinkPersistence.restoreControllerSnapshot(sl, worldPosition, snapshot);
+                    }
+                    lastKnownPos = worldPosition;
+                    setChanged();
+                }
+            }
             applyFiltersToNetwork();
         }
     }

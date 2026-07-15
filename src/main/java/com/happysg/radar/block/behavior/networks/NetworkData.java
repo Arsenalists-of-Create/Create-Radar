@@ -34,6 +34,12 @@ import java.util.function.Function;
 
 public class NetworkData extends SavedData {
 
+    public static final int SCHEMATIC_SNAPSHOT_VERSION = 1;
+    public enum RestorationMode { SCHEMATIC_COPY, WORLD_RECOVERY }
+    public record RestorationReport(int restored, int skipped) {
+        public boolean hasWarnings() { return skipped > 0; }
+    }
+
     public enum RadarKind { BEARING, STATIONARY, SKY, SONAR }
     public enum Mountkind { NORMAL, FIXED, COMPACT}
     public enum LinkOrigin { DATALINK, CONTACT }
@@ -913,6 +919,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
     public CompoundTag writeSchematicSnapshot(Group group, Function<BlockPos, CompoundTag> encoder) {
         CompoundTag tag = new CompoundTag();
+        tag.putInt("SchemaVersion", SCHEMATIC_SNAPSHOT_VERSION);
         tag.put("FiltererPos", encoder.apply(group.key.filtererPos()));
         tag.putString("SelectedTargetId", group.selectedTargetId == null ? "" : group.selectedTargetId);
         tag.put("TargetingTag", group.targetingTag.copy());
@@ -967,32 +974,61 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         return tag;
     }
 
-    public void restoreSchematicSnapshot(ServerLevel level, CompoundTag tag, Function<CompoundTag, BlockPos> decoder) {
+    public RestorationReport restoreSchematicSnapshot(ServerLevel level, BlockPos controllerPos, CompoundTag tag,
+                                                       Function<CompoundTag, BlockPos> decoder,
+                                                       RestorationMode mode) {
         ResourceKey<Level> dim = level.dimension();
-        BlockPos filtererPos = decoder.apply(tag.getCompound("FiltererPos"));
-        Group group = getOrCreateGroup(dim, filtererPos);
+        int skipped = 0;
+        if (tag.getAllKeys().contains("SchemaVersion")
+                && (!tag.contains("SchemaVersion", Tag.TAG_INT)
+                || tag.getInt("SchemaVersion") != SCHEMATIC_SNAPSHOT_VERSION)) {
+            return new RestorationReport(0, 1);
+        }
+        BlockPos filtererPos = decodeSnapshotPos(tag, "FiltererPos", decoder);
+        if (filtererPos == null || !filtererPos.equals(controllerPos)) {
+            return new RestorationReport(0, 1);
+        }
 
-        group.selectedTargetId = tag.getString("SelectedTargetId").isEmpty() ? null : tag.getString("SelectedTargetId");
+        Group group = getOrCreateGroup(dim, controllerPos);
+        group.selectedTargetId = mode == RestorationMode.SCHEMATIC_COPY
+                ? null
+                : (tag.getString("SelectedTargetId").isEmpty() ? null : tag.getString("SelectedTargetId"));
         if (tag.contains("TargetingTag", Tag.TAG_COMPOUND)) group.targetingTag = tag.getCompound("TargetingTag").copy();
         if (tag.contains("IdentificationTag", Tag.TAG_COMPOUND)) group.identificationTag = tag.getCompound("IdentificationTag").copy();
         if (tag.contains("DetectionTag", Tag.TAG_COMPOUND)) group.detectionTag = tag.getCompound("DetectionTag").copy();
 
+        int restored = 0;
+        String groupKey = key(dim, controllerPos);
+
         ListTag monitors = tag.getList("MonitorEndpoints", Tag.TAG_COMPOUND);
         for (int i = 0; i < monitors.size(); i++) {
             CompoundTag entry = monitors.getCompound(i);
-            BlockPos pos = decoder.apply(entry.getCompound("Pos"));
-            if (claimEndpointForGroup(level, group, pos, readOrigin(entry))) {
+            BlockPos pos = decodeSnapshotPos(entry, "Pos", decoder);
+            LinkOrigin origin = readSnapshotOrigin(entry);
+            if (pos == null || origin == null || ownedByOther(endpointToFilterer, key(dim, pos), groupKey)) {
+                skipped++;
+            } else if (claimEndpointForGroup(level, group, pos, origin)) {
                 group.monitorEndpoints.add(pos);
+                restored++;
+            } else {
+                skipped++;
             }
         }
 
         ListTag radars = tag.getList("RadarEndpoints", Tag.TAG_COMPOUND);
         for (int i = 0; i < radars.size(); i++) {
             CompoundTag entry = radars.getCompound(i);
-            BlockPos pos = decoder.apply(entry.getCompound("Pos"));
-            if (claimEndpointForGroup(level, group, pos, readOrigin(entry))) {
-                RadarKind kind = RadarKind.valueOf(entry.getString("Kind"));
+            BlockPos pos = decodeSnapshotPos(entry, "Pos", decoder);
+            LinkOrigin origin = readSnapshotOrigin(entry);
+            RadarKind kind = readSnapshotRadarKind(entry);
+            if (pos == null || origin == null || kind == null
+                    || ownedByOther(endpointToFilterer, key(dim, pos), groupKey)) {
+                skipped++;
+            } else if (claimEndpointForGroup(level, group, pos, origin)) {
                 group.radarEndpoints.put(pos, kind);
+                restored++;
+            } else {
+                skipped++;
             }
         }
         group.syncPrimaryRadar();
@@ -1000,34 +1036,85 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         ListTag weapons = tag.getList("WeaponEndpoints", Tag.TAG_COMPOUND);
         for (int i = 0; i < weapons.size(); i++) {
             CompoundTag entry = weapons.getCompound(i);
-            BlockPos pos = decoder.apply(entry.getCompound("Pos"));
-            if (!entry.contains("MountPos", Tag.TAG_COMPOUND)) continue;
-            BlockPos mount = decoder.apply(entry.getCompound("MountPos"));
-            if (!claimEndpointForGroup(level, group, pos, readOrigin(entry))) continue;
+            BlockPos pos = decodeSnapshotPos(entry, "Pos", decoder);
+            BlockPos mount = decodeSnapshotPos(entry, "MountPos", decoder);
+            LinkOrigin origin = readSnapshotOrigin(entry);
+            String existingMount = pos == null ? null : controllerToWeaponMount.get(key(dim, pos));
+            if (pos == null || mount == null || origin == null
+                    || ownedByOther(endpointToFilterer, key(dim, pos), groupKey)
+                    || ownedByOther(weaponMountToFilterer, key(dim, mount), groupKey)
+                    || (existingMount != null && !existingMount.equals(key(dim, mount)))
+                    || !claimEndpointForGroup(level, group, pos, origin)) {
+                skipped++;
+                continue;
+            }
             group.weaponEndpoints.add(pos);
             group.usedWeaponMounts.add(mount);
-            weaponMountToFilterer.put(key(dim, mount), key(dim, filtererPos));
+            weaponMountToFilterer.put(key(dim, mount), groupKey);
             controllerToWeaponMount.put(key(dim, pos), key(dim, mount));
+            restored++;
         }
 
         ListTag links = tag.getList("DataLinks", Tag.TAG_COMPOUND);
         for (int i = 0; i < links.size(); i++) {
             CompoundTag entry = links.getCompound(i);
-            if (!entry.contains("EndpointPos", Tag.TAG_COMPOUND)) continue;
-            BlockPos dataLinkPos = decoder.apply(entry.getCompound("DataLinkPos"));
-            BlockPos endpointPos = decoder.apply(entry.getCompound("EndpointPos"));
+            BlockPos dataLinkPos = decodeSnapshotPos(entry, "DataLinkPos", decoder);
+            BlockPos endpointPos = decodeSnapshotPos(entry, "EndpointPos", decoder);
+            String existingEndpoint = dataLinkPos == null ? null : dataLinkToEndpoint.get(key(dim, dataLinkPos));
+            if (dataLinkPos == null || endpointPos == null
+                    || ownedByOther(dataLinkToFilterer, key(dim, dataLinkPos), groupKey)
+                    || ownedByOther(endpointToFilterer, key(dim, endpointPos), groupKey)) {
+                skipped++;
+                continue;
+            }
+            if (existingEndpoint != null && !existingEndpoint.equals(key(dim, endpointPos))) {
+                skipped++;
+                continue;
+            }
             addDataLinkToGroup(group, dataLinkPos, endpointPos);
+            restored++;
         }
 
         setDirty();
+        return new RestorationReport(restored, skipped);
     }
 
-    private static LinkOrigin readOrigin(CompoundTag entry) {
+    @Nullable
+    private static BlockPos decodeSnapshotPos(CompoundTag parent, String key,
+                                              Function<CompoundTag, BlockPos> decoder) {
+        if (!parent.contains(key, Tag.TAG_COMPOUND)) return null;
+        CompoundTag encoded = parent.getCompound(key);
+        if (!encoded.contains("X", Tag.TAG_INT) || !encoded.contains("Y", Tag.TAG_INT)
+                || !encoded.contains("Z", Tag.TAG_INT)) return null;
+        try {
+            return decoder.apply(encoded);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean ownedByOther(Map<String, String> ownership, String objectKey, String groupKey) {
+        String owner = ownership.get(objectKey);
+        return owner != null && !owner.equals(groupKey);
+    }
+
+    @Nullable
+    private static LinkOrigin readSnapshotOrigin(CompoundTag entry) {
         if (!entry.contains("Origin", Tag.TAG_STRING)) return LinkOrigin.DATALINK;
         try {
             return LinkOrigin.valueOf(entry.getString("Origin"));
         } catch (IllegalArgumentException ignored) {
-            return LinkOrigin.DATALINK;
+            return null;
+        }
+    }
+
+    @Nullable
+    private static RadarKind readSnapshotRadarKind(CompoundTag entry) {
+        if (!entry.contains("Kind", Tag.TAG_STRING)) return null;
+        try {
+            return RadarKind.valueOf(entry.getString("Kind"));
+        } catch (IllegalArgumentException ignored) {
+            return null;
         }
     }
 

@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.networkcontroller;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.item.RadarCompassLink;
 import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.registry.ModBlocks;
@@ -12,8 +13,6 @@ import com.simibubi.create.foundation.block.WrenchableDirectionalBlock;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.GlobalPos;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
@@ -26,7 +25,6 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.component.LodestoneTracker;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
@@ -42,9 +40,6 @@ import net.neoforged.neoforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import org.jetbrains.annotations.Nullable;
-
-import java.util.Optional;
-
 
 public class NetworkFiltererBlock extends WrenchableDirectionalBlock implements IBE<NetworkFiltererBlockEntity> {
 
@@ -199,28 +194,13 @@ public class NetworkFiltererBlock extends WrenchableDirectionalBlock implements 
         }
 
         if (held.is(Items.COMPASS)) {
-            if (netFC.activeTrackCache == null) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID + ".network_filter.compass_no_target")
-                                .withStyle(ChatFormatting.RED),
-                        true
-                );
-                return ItemInteractionResult.FAIL;
-            }
-
-            BlockPos targetPos = BlockPos.containing(netFC.activeTrackCache.position());
-            LodestoneTracker tracker = new LodestoneTracker(
-                    Optional.of(GlobalPos.of(world.dimension(), targetPos)),
-                    false
-            );
-
             boolean bindHeldCompass = !player.hasInfiniteMaterials() && held.getCount() == 1;
             if (bindHeldCompass) {
-                held.set(DataComponents.LODESTONE_TRACKER, tracker);
+                RadarCompassLink.bind(held, (ServerLevel) world, pos);
             } else {
                 ItemStack boundCompass = held.transmuteCopy(Items.COMPASS, 1);
                 held.consume(1, player);
-                boundCompass.set(DataComponents.LODESTONE_TRACKER, tracker);
+                RadarCompassLink.bind(boundCompass, (ServerLevel) world, pos);
                 if (!player.getInventory().add(boundCompass)) {
                     player.drop(boundCompass, false);
                 }

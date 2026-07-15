@@ -3,12 +3,29 @@ package com.happysg.radar.targeting;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
 public final class TargetingSolverSelfTest {
    private static final double EPS = 1.0E-6;
 
    private TargetingSolverSelfTest() {
+   }
+
+   public static void main(String[] args) {
+      List<Result> results = runBasicInterceptChecks();
+      boolean failed = false;
+      for(Result result : results) {
+         String detail = result.detail();
+         if (detail != null && detail.length() > 300) {
+            detail = detail.substring(0, 300) + "...";
+         }
+         System.out.println((result.passed() ? "PASS " : "FAIL ") + result.name() + ": " + detail);
+         failed |= !result.passed();
+      }
+      if (failed) {
+         throw new IllegalStateException("One or more targeting solver checks failed");
+      }
    }
 
    public static List<Result> runBasicInterceptChecks() {
@@ -31,7 +48,14 @@ public final class TargetingSolverSelfTest {
       results.add(checkLongRangeMovingSolve());
       results.add(checkLongRangeCbcStyleSolve());
       results.add(checkProjectileSimulatorLongCap());
-      results.add(new Result("obstructed_trajectory", true, "requires a real Level.clip context; covered by ObstructionChecker integration"));
+      results.add(checkWarmStartSolve());
+      results.add(checkHighArcWithinLimits());
+      results.add(checkHighArcLimitFallback());
+      results.add(checkHighArcObstructionFallback());
+      results.add(checkNeitherArcWithinLimits());
+      results.add(checkWarmStartOutsideLimits());
+      results.add(checkPitchConstraintIntersections());
+      results.add(checkRotatedMountPitchConstraint());
       return List.copyOf(results);
    }
 
@@ -116,7 +140,7 @@ public final class TargetingSolverSelfTest {
    }
 
    private static Result checkBigCannonHighLowRoots() {
-      List<Double> roots = CannonTargeting.calculateSimulatedPitchRoots(Vec3.ZERO, new Vec3(80.0, 0.0, 0.0), 8.0, -0.05, 0.01, 4);
+      List<Double> roots = CannonTargeting.calculateSimulatedPitchRoots(Vec3.ZERO, new Vec3(40.0, 0.0, 0.0), 4.0, -0.2, 0.0, 2);
       boolean passed = roots.size() >= 2 && roots.get(0) < roots.get(1);
       return new Result("big_cannon_high_low_roots", passed, "roots=" + roots);
    }
@@ -232,6 +256,188 @@ public final class TargetingSolverSelfTest {
       return new Result("projectile_simulator_long_cap", passed, "ticks=" + result.ticks() + " samples=" + result.samples().size());
    }
 
+   private static Result checkWarmStartSolve() {
+      TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
+      TargetingSnapshot coldSnapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(new Vec3(300.0, 10.0, 25.0))
+              .targetVelocity(new Vec3(0.0, 0.0, 0.08))
+              .projectileSpeed(12.0)
+              .gravity(-0.05)
+              .drag(0.002)
+              .maxFlightTicks(400)
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
+      TargetingResult cold = computer.solve(coldSnapshot);
+      if (!cold.valid() || !cold.hasShot()) {
+         return new Result("warm_start_tracking", false, "cold solve failed: " + cold.debugString());
+      }
+
+      TargetingSnapshot warmSnapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(new Vec3(300.0, 10.0, 25.08))
+              .targetVelocity(new Vec3(0.0, 0.0, 0.08))
+              .projectileSpeed(12.0)
+              .gravity(-0.05)
+              .drag(0.002)
+              .maxFlightTicks(400)
+              .preferredYawDeg(cold.desiredYawDeg())
+              .preferredPitchDeg(cold.desiredPitchDeg())
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
+      TargetingResult warm = computer.solve(warmSnapshot);
+      boolean usedWarmPath = warm.debugInfo().stream().anyMatch(line -> line.equals("path=warm"));
+      int evaluations = debugInt(warm, "candidateEvaluations=");
+      boolean passed = warm.valid() && warm.hasShot() && usedWarmPath && evaluations > 0 && evaluations <= 81;
+      return new Result("warm_start_tracking", passed, "evaluations=" + evaluations + " " + warm.debugString());
+   }
+
+   private static Result checkHighArcWithinLimits() {
+      TargetingResult result = solveArtillery(PitchConstraint.unconstrained(), ObstructionChecker.NONE, null);
+      boolean passed = result.valid()
+              && result.hasShot()
+              && result.desiredPitchDeg() > 45.0
+              && "high".equals(debugValue(result, "selectedArc="));
+      return new Result("artillery_high_arc_within_limits", passed, result.debugString());
+   }
+
+   private static Result checkHighArcLimitFallback() {
+      TargetingResult result = solveArtillery(PitchConstraint.world(-10.0, 45.0), ObstructionChecker.NONE, null);
+      String fallback = debugValue(result, "arcFallbackReason=");
+      boolean passed = result.valid()
+              && result.hasShot()
+              && result.desiredPitchDeg() >= -10.0
+              && result.desiredPitchDeg() <= 45.0
+              && "low".equals(debugValue(result, "selectedArc="))
+              && fallback != null
+              && fallback.startsWith("high_arc_");
+      return new Result("artillery_high_arc_limit_fallback", passed, result.debugString());
+   }
+
+   private static Result checkHighArcObstructionFallback() {
+      ObstructionChecker checker = new ObstructionChecker() {
+         @Override
+         public ObstructionResult check(net.minecraft.world.level.Level level, ProjectileSimulator.SimulationResult trajectory, int maxTick) {
+            List<Trajectory.Sample> samples = trajectory == null ? List.of() : trajectory.trajectory().samples();
+            if (samples.size() >= 2) {
+               Vec3 step = samples.get(1).position().subtract(samples.get(0).position());
+               double launchPitch = Math.toDegrees(Math.atan2(step.y, Math.hypot(step.x, step.z)));
+               if (launchPitch > 17.0) {
+                  return ObstructionResult.blocked(1, new Vec3(0.0, 1000.0, 0.0), BlockPos.ZERO);
+               }
+            }
+            return ObstructionResult.clearPath();
+         }
+      };
+      TargetingResult result = solveArtillery(PitchConstraint.unconstrained(), checker, null);
+      boolean passed = result.valid()
+              && result.hasShot()
+              && result.desiredPitchDeg() < 45.0
+              && "low".equals(debugValue(result, "selectedArc="))
+              && "high_arc_obstructed".equals(debugValue(result, "arcFallbackReason="));
+      return new Result("artillery_high_arc_obstruction_fallback", passed, result.debugString());
+   }
+
+   private static Result checkNeitherArcWithinLimits() {
+      TargetingResult result = solveArtillery(PitchConstraint.world(30.0, 45.0), ObstructionChecker.NONE, null);
+      boolean passed = result.valid()
+              && !result.hasShot()
+              && "none".equals(debugValue(result, "selectedArc="));
+      return new Result("artillery_neither_arc_within_limits", passed, result.debugString());
+   }
+
+   private static Result checkWarmStartOutsideLimits() {
+      TargetingResult result = solveArtillery(PitchConstraint.world(-10.0, 45.0), ObstructionChecker.NONE, 75.0);
+      int rejections = debugInt(result, "pitchConstraintRejections=");
+      boolean passed = result.valid()
+              && result.hasShot()
+              && result.desiredPitchDeg() <= 45.0
+              && "cold".equals(debugValue(result, "path="))
+              && rejections > 0;
+      return new Result("warm_start_outside_pitch_limits", passed, "rejections=" + rejections + " " + result.debugString());
+   }
+
+   private static Result checkPitchConstraintIntersections() {
+      PitchConstraint controllerNarrower = PitchConstraint.intersect(-10.0, 20.0, -30.0, 50.0);
+      PitchConstraint cannonNarrower = PitchConstraint.intersect(-30.0, 50.0, -10.0, 20.0);
+      boolean passed = close(controllerNarrower.minPitchDeg(), -10.0)
+              && close(controllerNarrower.maxPitchDeg(), 20.0)
+              && close(cannonNarrower.minPitchDeg(), -10.0)
+              && close(cannonNarrower.maxPitchDeg(), 20.0);
+      return new Result("effective_pitch_limit_intersections", passed,
+              "controllerNarrower=" + controllerNarrower.summary() + " cannonNarrower=" + cannonNarrower.summary());
+   }
+
+   private static Result checkRotatedMountPitchConstraint() {
+      Vec3 right = new Vec3(0.0, 1.0, 0.0);
+      Vec3 up = new Vec3(-1.0, 0.0, 0.0);
+      Vec3 forward = new Vec3(0.0, 0.0, 1.0);
+      PitchConstraint constraint = PitchConstraint.intersect(-25.0, 25.0, -40.0, 40.0, right, up, forward);
+
+      Vec3 validLocal = TargetingMath.directionFromYawPitch(30.0, 20.0);
+      Vec3 validWorld = fromMountDirection(validLocal, right, up, forward);
+      TargetingMath.YawPitch recovered = constraint.mountYawPitch(validWorld);
+      Vec3 invalidLocal = TargetingMath.directionFromYawPitch(30.0, 30.0);
+      Vec3 invalidWorld = fromMountDirection(invalidLocal, right, up, forward);
+      boolean passed = constraint.allows(validWorld)
+              && !constraint.allows(invalidWorld)
+              && close(recovered.yawDeg(), 30.0)
+              && close(recovered.pitchDeg(), 20.0);
+      return new Result("rotated_mount_pitch_frame", passed,
+              "recoveredYaw=" + recovered.yawDeg() + " recoveredPitch=" + recovered.pitchDeg() + " " + constraint.summary());
+   }
+
+   private static TargetingResult solveArtillery(PitchConstraint constraint, ObstructionChecker checker, Double preferredPitchDeg) {
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(new Vec3(40.0, 0.0, 0.0))
+              .projectileSpeed(4.0)
+              .gravity(-0.2)
+              .drag(0.0)
+              .cbcPhysics(true)
+              .maxFlightTicks(120)
+              .preferredYawDeg(preferredPitchDeg == null ? null : 0.0)
+              .preferredPitchDeg(preferredPitchDeg)
+              .pitchConstraint(constraint)
+              .preferHighArc(true)
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
+      TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), checker);
+      return computer.solve(snapshot);
+   }
+
+   private static Vec3 fromMountDirection(Vec3 localDirection, Vec3 right, Vec3 up, Vec3 forward) {
+      return right.scale(localDirection.x)
+              .add(up.scale(localDirection.y))
+              .add(forward.scale(localDirection.z));
+   }
+
+   private static String debugValue(TargetingResult result, String prefix) {
+      if (result != null) {
+         for(String line : result.debugInfo()) {
+            if (line.startsWith(prefix)) {
+               return line.substring(prefix.length());
+            }
+         }
+      }
+      return null;
+   }
+
+   private static int debugInt(TargetingResult result, String prefix) {
+      if (result != null) {
+         for(String line : result.debugInfo()) {
+            if (line.startsWith(prefix)) {
+               try {
+                  return Integer.parseInt(line.substring(prefix.length()));
+               } catch (NumberFormatException ignored) {
+                  return -1;
+               }
+            }
+         }
+      }
+      return -1;
+   }
+
    private static TargetingResult solveLongRange(Vec3 targetPosition, Vec3 targetVelocity, double speed, double gravity, double drag, boolean cbcPhysics, int maxTicks) {
       TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
               .muzzlePosition(Vec3.ZERO)
@@ -249,6 +455,10 @@ public final class TargetingSolverSelfTest {
 
    private static boolean close(Vec3 actual, Vec3 expected) {
       return actual.distanceToSqr(expected) <= EPS * EPS;
+   }
+
+   private static boolean close(double actual, double expected) {
+      return Math.abs(actual - expected) <= EPS;
    }
 
    private static boolean finite(Vec3 vec) {

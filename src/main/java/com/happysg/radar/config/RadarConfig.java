@@ -35,6 +35,12 @@ public class RadarConfig {
         return server;
     }
 
+    public static boolean isServerConfigLoaded() {
+        return server != null
+                && server.specification != null
+                && server.specification.isLoaded();
+    }
+
     public static ConfigBase byType(ModConfig.Type type) {
         return CONFIGS.get(type);
     }

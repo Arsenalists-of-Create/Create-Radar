@@ -34,6 +34,16 @@ public final class WeaponNetworkRuntime {
         return BY_LEVEL.computeIfAbsent(level, WeaponNetworkRuntime::new);
     }
 
+    public static void clear(ServerLevel level) {
+        WeaponNetworkRuntime runtime = BY_LEVEL.remove(level);
+        if (runtime != null) {
+            runtime.linksByDataLink.clear();
+            runtime.controllerToMount.clear();
+            runtime.endpointToMount.clear();
+            runtime.groupsByMount.clear();
+        }
+    }
+
     public void register(DataLinkBlockEntity dataLink) {
         if (!(dataLink.getLevel() instanceof ServerLevel)) {
             return;
@@ -137,6 +147,9 @@ public final class WeaponNetworkRuntime {
 
     private void pruneStaleLinks() {
         for (BlockPos dataLinkPos : new HashSet<>(linksByDataLink.keySet())) {
+            if (!level.isLoaded(dataLinkPos)) {
+                continue;
+            }
             BlockEntity be = level.getBlockEntity(dataLinkPos);
             if (!(be instanceof DataLinkBlockEntity)) {
                 unregister(dataLinkPos);

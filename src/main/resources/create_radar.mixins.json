@@ -14,11 +14,13 @@
     "CBCATFuzedHeavyAutocannonProjectileMixin",
     "CBCATMountedHeavyAutocannonContraptionMixin",
     "CBCATMountedTwinAutocannonContraptionMixin",
+    "CompassItemMixin",
     "FlakAutocannonProjectileMixin",
     "FireworkRocketEntityMixin",
     "FuzedBigCannonProjectileMixin",
     "MountedAutocannonContraptionMixin",
-    "MountedBigCannonContraptionMixin"
+    "MountedBigCannonContraptionMixin",
+    "SimulatedCompassNavigationTargetMixin"
   ],
   "injectors": {
     "defaultRequire": 1

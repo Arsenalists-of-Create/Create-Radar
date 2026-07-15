@@ -214,6 +214,13 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+tasks.register('targetingSolverSelfTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs deterministic targeting solver regression checks.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.happysg.radar.targeting.TargetingSolverSelfTest'
+}
+
 idea {
     module {
         downloadSources = true

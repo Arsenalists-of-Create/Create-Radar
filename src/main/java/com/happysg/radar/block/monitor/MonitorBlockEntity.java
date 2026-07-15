@@ -8,6 +8,7 @@ import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
+import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
 import com.happysg.radar.block.arad.rwr.RwrRadarContact;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
@@ -418,6 +419,12 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (contact.exactLocked()) {
             rwrLockHoldTicks.put(sourceId, RWR_LOCK_HOLD_TICKS);
             return true;
+        }
+
+        if (level instanceof ServerLevel serverLevel
+                && ExternalRwrEmitterRegistry.isActiveSource(serverLevel, sourceId)) {
+            rwrLockHoldTicks.remove(sourceId);
+            return false;
         }
 
         int holdTicks = rwrLockHoldTicks.getOrDefault(sourceId, 0);

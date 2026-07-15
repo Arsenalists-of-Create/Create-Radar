@@ -6,6 +6,7 @@ import com.mojang.logging.LogUtils;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import java.util.ArrayList;
+import java.util.concurrent.CancellationException;
 import java.util.Comparator;
 import java.util.List;
 import javax.annotation.Nullable;
@@ -29,7 +30,11 @@ public class SimulatedAimSolver implements AimSolver {
    private static final double REFINEMENT_TARGET_BLOCKS = 0.25;
    private static final double LONG_RANGE_ACCEPTANCE_DISTANCE_BLOCKS = 8000.0;
    private static final double LONG_RANGE_ACCEPTANCE_MISS_BLOCKS = 5.0;
+   private static final double MIN_ACCEPTABLE_CONFIDENCE = 0.05;
    private static final int FRACTIONAL_DISTANCE_REFINEMENT_STEPS = 9;
+   private static final int HORIZON_MARGIN_TICKS = 80;
+   private static final int HORIZON_EDGE_TICKS = 16;
+   private static final int WARM_REFINEMENT_ITERATIONS = 10;
    private final ProjectileSimulator projectileSimulator;
    private final TargetPredictor targetPredictor;
 
@@ -39,96 +44,213 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    public TargetingResult solve(TargetingSnapshot snapshot, ProjectileModel projectileModel, ObstructionChecker obstructionChecker) {
-      if (snapshot != null && projectileModel != null && snapshot.isValid()) {
-         Vec3 toTarget = snapshot.targetPosition().subtract(snapshot.muzzlePosition());
-         if (toTarget.lengthSqr() < 1.0E-8) {
-            return TargetingResult.noShot("target too close");
-         } else {
-            InitialGuess initial = this.initialGuess(snapshot, projectileModel);
-            Candidate best = null;
-            List<Candidate> shortlist = new ArrayList<>(17);
+      if (snapshot == null || projectileModel == null || !snapshot.isValid()) {
+         return TargetingResult.invalid("invalid snapshot");
+      }
 
-            for(SearchPass pass : searchPasses()) {
-               double centerYaw = best == null ? initial.yawDeg : best.yawDeg;
-               double centerPitch = best == null ? initial.pitchDeg : best.pitchDeg;
+      if (!snapshot.pitchConstraint().hasReachablePitch()) {
+         return TargetingResult.noShot("no reachable pitch", List.of(
+                 "solver=simulated_moving_v4",
+                 "pitchConstraint=" + snapshot.pitchConstraint().summary(),
+                 "selectedArc=none",
+                 "arcFallbackReason=empty_pitch_intersection"
+         ));
+      }
 
-               for(double yawOffset = -pass.yawRange; yawOffset <= pass.yawRange + 1.0E-9; yawOffset += pass.step) {
-                  for(double pitchOffset = -pass.pitchDownRange; pitchOffset <= pass.pitchUpRange + 1.0E-9; pitchOffset += pass.step) {
-                     double yaw = TargetingMath.wrap180(centerYaw + yawOffset);
-                     double pitch = clampPitch(centerPitch + pitchOffset);
-                     Candidate candidate = this.evaluate(snapshot, projectileModel, yaw, pitch, ObstructionResult.clearPath());
-                     addToShortlist(shortlist, candidate);
-                     if (best == null || score(snapshot, candidate) < score(snapshot, best)) {
-                        best = candidate;
-                     }
-                  }
-               }
+      Vec3 toTarget = snapshot.targetPosition().subtract(snapshot.muzzlePosition());
+      if (toTarget.lengthSqr() < 1.0E-8) {
+         return TargetingResult.noShot("target too close");
+      }
+
+      long startedNanos = System.nanoTime();
+      SolveStats stats = new SolveStats();
+      InitialGuess initial = this.initialGuess(snapshot, projectileModel);
+      int maxHorizon = snapshot.maxFlightTicks();
+      int horizon = initialHorizon(snapshot, initial.interceptTicks);
+
+      if (snapshot.preferredYawDeg() != null && snapshot.preferredPitchDeg() != null) {
+         EvaluationContext warmContext = new EvaluationContext(snapshot, projectileModel, horizon, stats);
+         Candidate warmSeed = this.evaluate(warmContext, snapshot.preferredYawDeg(), snapshot.preferredPitchDeg(), ObstructionResult.clearPath());
+         if (warmSeed != null) {
+            RefinementResult warmRefinement = this.refineCandidate(warmContext, warmSeed, WARM_REFINEMENT_ITERATIONS);
+            Candidate warm = this.applyObstruction(snapshot, projectileModel, obstructionChecker, warmRefinement.candidate());
+            boolean warmHighArc = warm.pitchDeg >= highArcPitchFloor(initial.pitchDeg);
+            boolean correctArc = !snapshot.preferHighArc() || warmHighArc;
+            if (correctArc && isAcceptableShot(snapshot, warm) && !nearHorizon(warm, horizon)) {
+               stats.warmStart = true;
+               return this.buildResult(snapshot, projectileModel, initial, warm, warmRefinement.iterations(), warmRefinement.finalStepDeg(), warmHighArc ? "high" : "low", "none", stats, startedNanos);
             }
+         }
+      }
 
-            if (best == null) {
-               return TargetingResult.noShot("no simulated candidate");
+      Candidate best = null;
+      RefinementSummary refinement = new RefinementSummary(null, 0, 0.0);
+      String selectedArc = "none";
+      String fallbackReason = snapshot.preferHighArc() ? "high_arc_unavailable" : "not_requested";
+      while(true) {
+         EvaluationContext context = new EvaluationContext(snapshot, projectileModel, horizon, stats);
+         List<Candidate> shortlist = this.searchCandidates(context, initial);
+         RefinementSummary lowRefinement = this.refineShortlist(context, shortlist);
+         Candidate lowBest = this.chooseObstructionCheckedBest(context, obstructionChecker, shortlist);
+         boolean lowAcceptable = lowBest != null && isAcceptableShot(snapshot, lowBest);
+
+         best = lowBest;
+         refinement = lowRefinement;
+         selectedArc = lowAcceptable ? "low" : "none";
+         fallbackReason = snapshot.preferHighArc() ? "high_arc_unavailable" : "not_requested";
+
+         if (snapshot.preferHighArc()) {
+            int rejectedBeforeHighSearch = stats.pitchConstraintRejections;
+            List<Candidate> highArcShortlist = this.searchHighArcCandidates(context, initial);
+            RefinementSummary highArcRefinement = this.refineShortlist(context, highArcShortlist);
+            Candidate highArcBest = this.chooseObstructionCheckedBest(context, obstructionChecker, highArcShortlist);
+            if (highArcBest != null && highArcBest.pitchDeg >= highArcPitchFloor(initial.pitchDeg) && isAcceptableShot(snapshot, highArcBest)) {
+               best = highArcBest;
+               refinement = highArcRefinement;
+               selectedArc = "high";
+               fallbackReason = "none";
             } else {
-               RefinementSummary refinement = this.refineShortlist(snapshot, projectileModel, shortlist);
-               if (refinement.best() != null) {
-                  best = refinement.best();
-               }
-
-               best = this.chooseObstructionCheckedBest(snapshot, projectileModel, obstructionChecker, shortlist);
-               Candidate highArcBest = null;
-               RefinementSummary highArcRefinement = new RefinementSummary(null, 0, 0.0);
-               boolean selectedHighArc = false;
-               if (snapshot.preferHighArc()) {
-                  List<Candidate> highArcShortlist = this.searchHighArcCandidates(snapshot, projectileModel, initial);
-                  highArcRefinement = this.refineShortlist(snapshot, projectileModel, highArcShortlist);
-                  highArcBest = this.chooseObstructionCheckedBest(snapshot, projectileModel, obstructionChecker, highArcShortlist);
-                  if (highArcBest != null && highArcBest.pitchDeg >= highArcPitchFloor(initial.pitchDeg) && isAcceptableShot(snapshot, highArcBest)) {
-                     best = highArcBest;
-                     selectedHighArc = true;
-                  }
-               }
-
-               List<String> debug = new ArrayList<>();
-               debug.add("solver=simulated_moving_v3");
-               debug.add("initialInterceptTicks=" + initial.interceptTicks);
-               debug.add("preferHighArc=" + snapshot.preferHighArc());
-               debug.add("selectedHighArc=" + selectedHighArc);
-               debug.add("range=" + snapshot.muzzlePosition().distanceTo(snapshot.targetPosition()));
-               debug.add("refinementIterations=" + refinement.iterations());
-               debug.add("refinementFinalStepDeg=" + refinement.finalStepDeg());
-               if (snapshot.preferHighArc()) {
-                  debug.add("highArcCandidate=" + (highArcBest != null));
-                  debug.add("highArcRefinementIterations=" + highArcRefinement.iterations());
-               }
-               debug.add("bestTick=" + best.flightTick);
-               debug.add("bestTime=" + best.flightTime);
-               debug.add("miss=" + best.missDistance);
-               debug.add("score=" + best.score);
-               debug.add("confidence=" + best.confidence);
-               debug.add("motionClass=" + snapshot.targetMotionClass());
-               debug.add("obstruction=" + (best.obstruction.blocked() ? "blocked" : "clear"));
-               if (best.obstruction.blocked()) {
-                  debug.add("blockedTick=" + best.obstruction.blockedTick());
-                  debug.add("blockedBlock=" + String.valueOf(best.obstruction.blockPosition()));
-                  debug.add("blockedDistanceToTarget=" + distanceFromObstructionToTarget(best));
-                  debug.add("blockedTargetSublevel=" + isObstructionInTargetSublevel(snapshot, best));
-               }
-
-               if (RadarConfig.DEBUG_BEAMS) {
-                  LOGGER.debug("TargetingComputer simulated solve yaw={} pitch={} tick={} miss={} score={} confidence={} obstruction={}", new Object[]{best.yawDeg, best.pitchDeg, best.flightTick, best.missDistance, best.score, best.confidence, best.obstruction.blocked() ? "blocked" : "clear"});
-               }
-
-               AimSolution solution = new AimSolution(best.yawDeg, best.pitchDeg, TargetingMath.directionFromYawPitch(best.yawDeg, best.pitchDeg), best.predictedTargetPosition, best.flightTick, best.missDistance);
-               TargetingDebugInfo debugData = debugInfo(snapshot, best);
-               if (!isAcceptableShot(snapshot, best)) {
-                  return TargetingResult.noShot(best.obstruction.blocked() ? "obstructed" : "low quality shot", debug, debugData);
-               } else {
-                  return TargetingResult.shot(solution, best.confidence, debug, debugData);
+               fallbackReason = highArcFailureReason(highArcShortlist, highArcBest, stats.pitchConstraintRejections > rejectedBeforeHighSearch);
+               if (lowAcceptable) {
+                  best = lowBest;
+                  refinement = lowRefinement;
+                  selectedArc = "low";
+               } else if (betterDiagnosticCandidate(snapshot, highArcBest, best) == highArcBest) {
+                  best = highArcBest;
+                  refinement = highArcRefinement;
+                  selectedArc = "none";
                }
             }
          }
-      } else {
-         return TargetingResult.invalid("invalid snapshot");
+
+         if (best == null) {
+            return this.noCandidateResult(snapshot, fallbackReason, stats, startedNanos);
+         }
+         if (horizon >= maxHorizon || isAcceptableShot(snapshot, best) && !nearHorizon(best, horizon)) {
+            break;
+         }
+
+         int expanded = Math.min(maxHorizon, Math.max(horizon + HORIZON_MARGIN_TICKS, horizon * 2));
+         if (expanded == horizon) {
+            break;
+         }
+         horizon = expanded;
+         ++stats.horizonExpansions;
       }
+
+      return this.buildResult(snapshot, projectileModel, initial, best, refinement.iterations(), refinement.finalStepDeg(), selectedArc, fallbackReason, stats, startedNanos);
+   }
+
+   private List<Candidate> searchCandidates(EvaluationContext context, InitialGuess initial) {
+      Candidate best = null;
+      List<Candidate> shortlist = new ArrayList<>(17);
+      for(SearchPass pass : searchPasses()) {
+         double centerYaw = best == null ? initial.yawDeg : best.yawDeg;
+         double centerPitch = best == null ? initial.pitchDeg : best.pitchDeg;
+         for(double yawOffset = -pass.yawRange; yawOffset <= pass.yawRange + 1.0E-9; yawOffset += pass.step) {
+            for(double pitchOffset = -pass.pitchDownRange; pitchOffset <= pass.pitchUpRange + 1.0E-9; pitchOffset += pass.step) {
+               Candidate candidate = this.evaluate(context, TargetingMath.wrap180(centerYaw + yawOffset), clampPitch(centerPitch + pitchOffset), ObstructionResult.clearPath());
+               if (candidate == null) {
+                  continue;
+               }
+               addToShortlist(shortlist, candidate);
+               if (best == null || candidate.score < best.score) {
+                  best = candidate;
+               }
+            }
+         }
+      }
+      return shortlist;
+   }
+
+   private TargetingResult buildResult(TargetingSnapshot snapshot, ProjectileModel projectileModel, InitialGuess initial, Candidate candidate, int refinementIterations, double finalStepDeg, String selectedArc, String fallbackReason, SolveStats stats, long startedNanos) {
+      Candidate best = this.materializeTrajectory(snapshot, projectileModel, candidate);
+      long elapsedMicros = (System.nanoTime() - startedNanos) / 1_000L;
+      List<String> debug = new ArrayList<>();
+      debug.add("solver=simulated_moving_v4");
+      debug.add("path=" + (stats.warmStart ? "warm" : "cold"));
+      debug.add("initialInterceptTicks=" + initial.interceptTicks);
+      debug.add("preferHighArc=" + snapshot.preferHighArc());
+      debug.add("selectedHighArc=" + "high".equals(selectedArc));
+      debug.add("selectedArc=" + selectedArc);
+      debug.add("arcFallbackReason=" + fallbackReason);
+      debug.add("pitchConstraint=" + snapshot.pitchConstraint().summary());
+      debug.add("pitchConstraintRejections=" + stats.pitchConstraintRejections);
+      debug.add("range=" + snapshot.muzzlePosition().distanceTo(snapshot.targetPosition()));
+      debug.add("candidateEvaluations=" + stats.candidateEvaluations);
+      debug.add("simulatedTicks=" + stats.simulatedTicks);
+      debug.add("horizonExpansions=" + stats.horizonExpansions);
+      debug.add("solveMicros=" + elapsedMicros);
+      debug.add("refinementIterations=" + refinementIterations);
+      debug.add("refinementFinalStepDeg=" + finalStepDeg);
+      debug.add("bestTick=" + best.flightTick);
+      debug.add("bestTime=" + best.flightTime);
+      debug.add("miss=" + best.missDistance);
+      debug.add("score=" + best.score);
+      debug.add("confidence=" + best.confidence);
+      debug.add("motionClass=" + snapshot.targetMotionClass());
+      debug.add("obstruction=" + (best.obstruction.blocked() ? "blocked" : "clear"));
+      if (best.obstruction.blocked()) {
+         debug.add("blockedTick=" + best.obstruction.blockedTick());
+         debug.add("blockedBlock=" + String.valueOf(best.obstruction.blockPosition()));
+         debug.add("blockedDistanceToTarget=" + distanceFromObstructionToTarget(best));
+         debug.add("blockedTargetSublevel=" + isObstructionInTargetSublevel(snapshot, best));
+      }
+
+      if (RadarConfig.DEBUG_BEAMS) {
+         LOGGER.debug("TargetingComputer simulated solve yaw={} pitch={} tick={} miss={} score={} confidence={} candidates={} ticks={} micros={} obstruction={}", best.yawDeg, best.pitchDeg, best.flightTick, best.missDistance, best.score, best.confidence, stats.candidateEvaluations, stats.simulatedTicks, elapsedMicros, best.obstruction.blocked() ? "blocked" : "clear");
+      }
+
+      AimSolution solution = new AimSolution(best.yawDeg, best.pitchDeg, TargetingMath.directionFromYawPitch(best.yawDeg, best.pitchDeg), best.predictedTargetPosition, best.flightTick, best.missDistance);
+      TargetingDebugInfo debugData = debugInfo(snapshot, best);
+      return !isAcceptableShot(snapshot, best)
+              ? TargetingResult.noShot(best.obstruction.blocked() ? "obstructed" : "low quality shot", debug, debugData)
+              : TargetingResult.shot(solution, best.confidence, debug, debugData);
+   }
+
+   private TargetingResult noCandidateResult(TargetingSnapshot snapshot, String fallbackReason, SolveStats stats, long startedNanos) {
+      long elapsedMicros = (System.nanoTime() - startedNanos) / 1_000L;
+      return TargetingResult.noShot("no reachable simulated candidate", List.of(
+              "solver=simulated_moving_v4",
+              "preferHighArc=" + snapshot.preferHighArc(),
+              "selectedArc=none",
+              "arcFallbackReason=" + fallbackReason,
+              "pitchConstraint=" + snapshot.pitchConstraint().summary(),
+              "pitchConstraintRejections=" + stats.pitchConstraintRejections,
+              "candidateEvaluations=" + stats.candidateEvaluations,
+              "solveMicros=" + elapsedMicros
+      ));
+   }
+
+   private static String highArcFailureReason(List<Candidate> highArcCandidates, @Nullable Candidate highArcBest, boolean rejectedByPitchConstraint) {
+      if (highArcCandidates.isEmpty()) {
+         return rejectedByPitchConstraint ? "high_arc_outside_pitch_limits" : "high_arc_unavailable";
+      }
+      if (highArcBest != null && highArcBest.obstruction.blocked()) {
+         return "high_arc_obstructed";
+      }
+      return "high_arc_below_quality";
+   }
+
+   @Nullable
+   private static Candidate betterDiagnosticCandidate(TargetingSnapshot snapshot, @Nullable Candidate first, @Nullable Candidate second) {
+      if (first == null) {
+         return second;
+      }
+      if (second == null) {
+         return first;
+      }
+      return score(snapshot, first) < score(snapshot, second) ? first : second;
+   }
+
+   private static int initialHorizon(TargetingSnapshot snapshot, double interceptTicks) {
+      double fallback = snapshot.muzzlePosition().distanceTo(snapshot.targetPosition()) / Math.max(1.0E-6, snapshot.projectileSpeed());
+      double base = Double.isFinite(interceptTicks) && interceptTicks > 0.0 ? interceptTicks : fallback;
+      return Math.max(1, Math.min(snapshot.maxFlightTicks(), Math.max(40, (int)Math.ceil(base) + HORIZON_MARGIN_TICKS)));
+   }
+
+   private static boolean nearHorizon(Candidate candidate, int horizon) {
+      return candidate != null && candidate.flightTime >= Math.max(0, horizon - HORIZON_EDGE_TICKS);
    }
 
    private InitialGuess initialGuess(TargetingSnapshot snapshot, ProjectileModel projectileModel) {
@@ -159,32 +281,130 @@ public class SimulatedAimSolver implements AimSolver {
       }
    }
 
-   private Candidate evaluate(TargetingSnapshot snapshot, ProjectileModel projectileModel, double yawDeg, double pitchDeg, ObstructionResult obstruction) {
+   @Nullable
+   private Candidate evaluate(EvaluationContext context, double yawDeg, double pitchDeg, ObstructionResult obstruction) {
+      TargetingSnapshot snapshot = context.snapshot;
+      ProjectileModel model = context.projectileModel;
       Vec3 direction = TargetingMath.directionFromYawPitch(yawDeg, pitchDeg);
-      ProjectileSimulator.SimulationResult trajectory = this.projectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), projectileModel, snapshot.maxFlightTicks(), snapshot.level());
-      double bestMiss = Double.POSITIVE_INFINITY;
-      int bestTick = 0;
-      double bestTime = (double)0.0F;
-      Vec3 bestTargetPos = snapshot.targetPosition();
-      Vec3 bestProjectilePos = snapshot.muzzlePosition();
+      if (!snapshot.pitchConstraint().allows(direction)) {
+         ++context.stats.pitchConstraintRejections;
+         return null;
+      }
+      Vec3 inherited = snapshot.inheritedVelocity();
+      double px = snapshot.muzzlePosition().x;
+      double py = snapshot.muzzlePosition().y;
+      double pz = snapshot.muzzlePosition().z;
+      double vx = inherited.x + direction.x * model.muzzleSpeed();
+      double vy = inherited.y + direction.y * model.muzzleSpeed();
+      double vz = inherited.z + direction.z * model.muzzleSpeed();
 
-      List<Trajectory.Sample> samples = trajectory.trajectory().samples();
-      for(int i = 0; i < samples.size(); ++i) {
-         Trajectory.Sample sample = samples.get(i);
-         ClosestApproach closest = i + 1 < samples.size() ? this.closestApproachOnSegment(snapshot, sample, samples.get(i + 1)) : this.closestApproachAt(snapshot, (double)sample.tick(), sample.position());
-         if (closest.missDistance < bestMiss) {
-            bestMiss = closest.missDistance;
-            bestTick = (int)Math.max((double)0.0F, Math.round(closest.tick));
-            bestTime = closest.tick;
-            bestTargetPos = closest.targetPosition;
-            bestProjectilePos = closest.projectilePosition;
+      double bestMissSqr = distanceToTargetSqr(context, 0.0, px, py, pz);
+      double bestTime = 0.0;
+      double bestPx = px;
+      double bestPy = py;
+      double bestPz = pz;
+      double bestFromX = px;
+      double bestFromY = py;
+      double bestFromZ = pz;
+      double bestToX = px;
+      double bestToY = py;
+      double bestToZ = pz;
+      int bestSegmentTick = 0;
+
+      ++context.stats.candidateEvaluations;
+      for(int tick = 0; tick < context.horizonTicks; ++tick) {
+         if ((tick & 31) == 0 && Thread.currentThread().isInterrupted()) {
+            throw new CancellationException("targeting solve superseded");
          }
+
+         double nextPx;
+         double nextPy;
+         double nextPz;
+         if (model.cbcPhysics()) {
+            double speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+            double dragForce = 0.0;
+            if (speed > 1.0E-8 && model.drag() > 0.0) {
+               double density = Math.max(0.0, model.dragDensity());
+               if (snapshot.level() != null) {
+                  density += rbasamoyai.createbigcannons.munitions.config.FluidDragHandler.getFluidDrag(snapshot.level().getFluidState(BlockPos.containing(px, py, pz)));
+               }
+               dragForce = model.drag() * density * speed;
+               if (model.quadraticDrag()) {
+                  dragForce *= speed;
+               }
+               dragForce = Math.min(dragForce, speed);
+            }
+            double scale = speed > 1.0E-8 ? dragForce / speed : 0.0;
+            double ax = -vx * scale;
+            double ay = model.gravity() - vy * scale;
+            double az = -vz * scale;
+            nextPx = px + vx + ax * 0.5;
+            nextPy = py + vy + ay * 0.5;
+            nextPz = pz + vz + az * 0.5;
+            vx += ax;
+            vy += ay;
+            vz += az;
+         } else {
+            nextPx = px + vx;
+            nextPy = py + vy;
+            nextPz = pz + vz;
+            double speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+            double dragForce = model.drag() * speed;
+            if (model.quadraticDrag()) {
+               dragForce *= speed;
+            }
+            dragForce = Math.min(dragForce, speed);
+            if (dragForce > 0.0 && speed > 1.0E-8) {
+               double scale = 1.0 - dragForce / speed;
+               vx *= scale;
+               vy *= scale;
+               vz *= scale;
+            }
+            vy += model.gravity();
+         }
+
+         double segmentTime = closestLinearSegmentTime(context, tick, px, py, pz, nextPx, nextPy, nextPz);
+         double alpha = segmentTime - tick;
+         double samplePx = px + (nextPx - px) * alpha;
+         double samplePy = py + (nextPy - py) * alpha;
+         double samplePz = pz + (nextPz - pz) * alpha;
+         double missSqr = distanceToTargetSqr(context, segmentTime, samplePx, samplePy, samplePz);
+         if (missSqr < bestMissSqr) {
+            bestMissSqr = missSqr;
+            bestTime = segmentTime;
+            bestPx = samplePx;
+            bestPy = samplePy;
+            bestPz = samplePz;
+            bestFromX = px;
+            bestFromY = py;
+            bestFromZ = pz;
+            bestToX = nextPx;
+            bestToY = nextPy;
+            bestToZ = nextPz;
+            bestSegmentTick = tick;
+         }
+
+         px = nextPx;
+         py = nextPy;
+         pz = nextPz;
+      }
+      context.stats.simulatedTicks += context.horizonTicks;
+
+      ClosestApproach refined = this.refineClosestSegment(context, bestSegmentTick, bestFromX, bestFromY, bestFromZ, bestToX, bestToY, bestToZ);
+      if (refined.missDistance * refined.missDistance <= bestMissSqr + 1.0E-12) {
+         bestTime = refined.tick;
+         bestMissSqr = refined.missDistance * refined.missDistance;
+         bestPx = refined.projectilePosition.x;
+         bestPy = refined.projectilePosition.y;
+         bestPz = refined.projectilePosition.z;
       }
 
-      Candidate candidate = new Candidate(yawDeg, pitchDeg, bestTick, bestTime, bestMiss, bestTargetPos, bestProjectilePos, trajectory, obstruction, (double)0.0F, (double)0.0F);
+      Vec3 bestTargetPos = this.predictTargetPositionTrusted(snapshot, bestTime);
+      Vec3 bestProjectilePos = new Vec3(bestPx, bestPy, bestPz);
+      Candidate candidate = new Candidate(yawDeg, pitchDeg, (int)Math.max(0.0, Math.round(bestTime)), bestTime, Math.sqrt(Math.max(0.0, bestMissSqr)), bestTargetPos, bestProjectilePos, null, obstruction, 0.0, 0.0);
       double confidence = this.confidence(snapshot, candidate);
       double score = score(snapshot, candidate, confidence);
-      return new Candidate(yawDeg, pitchDeg, bestTick, bestTime, bestMiss, bestTargetPos, bestProjectilePos, trajectory, obstruction, confidence, score);
+      return new Candidate(candidate.yawDeg, candidate.pitchDeg, candidate.flightTick, candidate.flightTime, candidate.missDistance, candidate.predictedTargetPosition, candidate.closestProjectilePosition, candidate.trajectory, candidate.obstruction, confidence, score);
    }
 
    private static void addToShortlist(List<Candidate> shortlist, Candidate candidate) {
@@ -196,13 +416,20 @@ public class SimulatedAimSolver implements AimSolver {
 
    }
 
-   private Candidate chooseObstructionCheckedBest(TargetingSnapshot snapshot, ProjectileModel projectileModel, ObstructionChecker obstructionChecker, List<Candidate> shortlist) {
-      Candidate best = null;
+   private Candidate chooseObstructionCheckedBest(EvaluationContext context, ObstructionChecker obstructionChecker, List<Candidate> shortlist) {
+      if (shortlist.isEmpty()) {
+         return null;
+      }
+      if (obstructionChecker == null || !obstructionChecker.isEnabled()) {
+         return shortlist.stream().min(Comparator.comparingDouble(Candidate::score)).orElse(null);
+      }
 
+      Candidate best = null;
       for(Candidate candidate : shortlist) {
-         ObstructionResult obstruction = obstructionChecker == null ? ObstructionResult.clearPath() : obstructionChecker.check(snapshot.level(), candidate.trajectory, candidate.flightTick);
-         Candidate checked = this.evaluate(snapshot, projectileModel, candidate.yawDeg, candidate.pitchDeg, obstruction);
-         if (best == null || score(snapshot, checked) < score(snapshot, best)) {
+         Candidate materialized = this.materializeTrajectory(context.snapshot, context.projectileModel, candidate);
+         ObstructionResult obstruction = obstructionChecker.check(context.snapshot.level(), materialized.trajectory, materialized.flightTick);
+         Candidate checked = this.withObstruction(context.snapshot, materialized, obstruction);
+         if (best == null || score(context.snapshot, checked) < score(context.snapshot, best)) {
             best = checked;
          }
       }
@@ -210,7 +437,16 @@ public class SimulatedAimSolver implements AimSolver {
       return best;
    }
 
-   private List<Candidate> searchHighArcCandidates(TargetingSnapshot snapshot, ProjectileModel projectileModel, InitialGuess initial) {
+   private Candidate applyObstruction(TargetingSnapshot snapshot, ProjectileModel model, ObstructionChecker checker, Candidate candidate) {
+      if (checker == null || !checker.isEnabled()) {
+         return candidate;
+      }
+      Candidate materialized = this.materializeTrajectory(snapshot, model, candidate);
+      ObstructionResult obstruction = checker.check(snapshot.level(), materialized.trajectory, materialized.flightTick);
+      return this.withObstruction(snapshot, materialized, obstruction);
+   }
+
+   private List<Candidate> searchHighArcCandidates(EvaluationContext context, InitialGuess initial) {
       List<Candidate> shortlist = new ArrayList<>(17);
       Candidate best = null;
       double highArcFloor = highArcPitchFloor(initial.pitchDeg);
@@ -227,9 +463,12 @@ public class SimulatedAimSolver implements AimSolver {
                   continue;
                }
 
-               Candidate candidate = this.evaluate(snapshot, projectileModel, yaw, pitch, ObstructionResult.clearPath());
+               Candidate candidate = this.evaluate(context, yaw, pitch, ObstructionResult.clearPath());
+               if (candidate == null) {
+                  continue;
+               }
                addToShortlist(shortlist, candidate);
-               if (best == null || score(snapshot, candidate) < score(snapshot, best)) {
+               if (best == null || score(context.snapshot, candidate) < score(context.snapshot, best)) {
                   best = candidate;
                }
             }
@@ -243,7 +482,7 @@ public class SimulatedAimSolver implements AimSolver {
       return Math.max(20.0, Math.min(80.0, initialPitchDeg + 10.0));
    }
 
-   private RefinementSummary refineShortlist(TargetingSnapshot snapshot, ProjectileModel projectileModel, List<Candidate> shortlist) {
+   private RefinementSummary refineShortlist(EvaluationContext context, List<Candidate> shortlist) {
       if (shortlist.isEmpty()) {
          return new RefinementSummary(null, 0, 0.0);
       }
@@ -256,11 +495,11 @@ public class SimulatedAimSolver implements AimSolver {
 
       int count = Math.min(REFINEMENT_SHORTLIST_SIZE, shortlist.size());
       for (int i = 0; i < count; ++i) {
-         RefinementResult result = this.refineCandidate(snapshot, projectileModel, shortlist.get(i));
+         RefinementResult result = this.refineCandidate(context, shortlist.get(i), MAX_REFINEMENT_ITERATIONS);
          totalIterations += result.iterations();
          finalStepDeg = Math.max(finalStepDeg, result.finalStepDeg());
          refined.add(result.candidate());
-         if (best == null || score(snapshot, result.candidate()) < score(snapshot, best)) {
+         if (best == null || score(context.snapshot, result.candidate()) < score(context.snapshot, best)) {
             best = result.candidate();
          }
       }
@@ -273,14 +512,15 @@ public class SimulatedAimSolver implements AimSolver {
       return new RefinementSummary(best, totalIterations, finalStepDeg);
    }
 
-   private RefinementResult refineCandidate(TargetingSnapshot snapshot, ProjectileModel projectileModel, Candidate seed) {
+   private RefinementResult refineCandidate(EvaluationContext context, Candidate seed, int maxIterations) {
+      TargetingSnapshot snapshot = context.snapshot;
       double range = Math.max(1.0, snapshot.muzzlePosition().distanceTo(seed.predictedTargetPosition));
       double targetStep = refinementTargetStepDeg(range);
       double step = Math.max(targetStep, Math.min(MAX_REFINEMENT_STEP_DEG, angularStepForBlocks(range, 4.0)));
       Candidate best = seed;
       int iterations = 0;
 
-      while (step > targetStep && iterations < MAX_REFINEMENT_ITERATIONS) {
+      while (step > targetStep && iterations < maxIterations) {
          Candidate iterationBest = best;
          for (int yawIndex = -1; yawIndex <= 1; ++yawIndex) {
             for (int pitchIndex = -1; pitchIndex <= 1; ++pitchIndex) {
@@ -290,8 +530,8 @@ public class SimulatedAimSolver implements AimSolver {
 
                double yaw = TargetingMath.wrap180(best.yawDeg + (double)yawIndex * step);
                double pitch = clampPitch(best.pitchDeg + (double)pitchIndex * step);
-               Candidate candidate = this.evaluate(snapshot, projectileModel, yaw, pitch, ObstructionResult.clearPath());
-               if (score(snapshot, candidate) < score(snapshot, iterationBest)) {
+               Candidate candidate = this.evaluate(context, yaw, pitch, ObstructionResult.clearPath());
+               if (candidate != null && score(snapshot, candidate) < score(snapshot, iterationBest)) {
                   iterationBest = candidate;
                }
             }
@@ -317,45 +557,91 @@ public class SimulatedAimSolver implements AimSolver {
       return Math.toDegrees(Math.atan(Math.max(0.001, blocks) / range));
    }
 
-   private ClosestApproach closestApproachOnSegment(TargetingSnapshot snapshot, Trajectory.Sample from, Trajectory.Sample to) {
-      double startTick = (double)from.tick();
-      double endTick = (double)to.tick();
-      if (!(endTick > startTick)) {
-         return this.closestApproachAt(snapshot, startTick, from.position());
+   private Candidate materializeTrajectory(TargetingSnapshot snapshot, ProjectileModel model, Candidate candidate) {
+      if (candidate == null || candidate.trajectory != null) {
+         return candidate;
       }
+      Vec3 direction = TargetingMath.directionFromYawPitch(candidate.yawDeg, candidate.pitchDeg);
+      int materializedTicks = Math.max(1, Math.min(snapshot.maxFlightTicks(), candidate.flightTick + 1));
+      ProjectileSimulator.SimulationResult trajectory = this.projectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), model, materializedTicks, snapshot.level());
+      return new Candidate(candidate.yawDeg, candidate.pitchDeg, candidate.flightTick, candidate.flightTime, candidate.missDistance, candidate.predictedTargetPosition, candidate.closestProjectilePosition, trajectory, candidate.obstruction, candidate.confidence, candidate.score);
+   }
 
+   private Candidate withObstruction(TargetingSnapshot snapshot, Candidate candidate, ObstructionResult obstruction) {
+      Candidate unscored = new Candidate(candidate.yawDeg, candidate.pitchDeg, candidate.flightTick, candidate.flightTime, candidate.missDistance, candidate.predictedTargetPosition, candidate.closestProjectilePosition, candidate.trajectory, obstruction, 0.0, 0.0);
+      double confidence = this.confidence(snapshot, unscored);
+      return new Candidate(unscored.yawDeg, unscored.pitchDeg, unscored.flightTick, unscored.flightTime, unscored.missDistance, unscored.predictedTargetPosition, unscored.closestProjectilePosition, unscored.trajectory, obstruction, confidence, score(snapshot, unscored, confidence));
+   }
+
+   private ClosestApproach refineClosestSegment(EvaluationContext context, int startTick, double fromX, double fromY, double fromZ, double toX, double toY, double toZ) {
+      TargetingSnapshot snapshot = context.snapshot;
       double left = startTick;
-      double right = endTick;
+      double right = startTick + 1.0;
       for(int i = 0; i < FRACTIONAL_DISTANCE_REFINEMENT_STEPS; ++i) {
-         double m1 = left + (right - left) / (double)3.0F;
-         double m2 = right - (right - left) / (double)3.0F;
-         double d1 = this.closestApproachAt(snapshot, m1, interpolate(from.position(), to.position(), (m1 - startTick) / (endTick - startTick))).missDistance;
-         double d2 = this.closestApproachAt(snapshot, m2, interpolate(from.position(), to.position(), (m2 - startTick) / (endTick - startTick))).missDistance;
+         double m1 = left + (right - left) / 3.0;
+         double m2 = right - (right - left) / 3.0;
+         double a1 = m1 - startTick;
+         double a2 = m2 - startTick;
+         double d1 = distanceToTargetSqr(context, m1, fromX + (toX - fromX) * a1, fromY + (toY - fromY) * a1, fromZ + (toZ - fromZ) * a1);
+         double d2 = distanceToTargetSqr(context, m2, fromX + (toX - fromX) * a2, fromY + (toY - fromY) * a2, fromZ + (toZ - fromZ) * a2);
          if (d1 <= d2) {
             right = m2;
          } else {
             left = m1;
          }
       }
-
-      double tick = (left + right) * (double)0.5F;
-      double alpha = (tick - startTick) / (endTick - startTick);
-      return this.closestApproachAt(snapshot, tick, interpolate(from.position(), to.position(), alpha));
+      double tick = (left + right) * 0.5;
+      double alpha = tick - startTick;
+      Vec3 projectile = new Vec3(fromX + (toX - fromX) * alpha, fromY + (toY - fromY) * alpha, fromZ + (toZ - fromZ) * alpha);
+      Vec3 target = this.predictTargetPositionTrusted(snapshot, tick);
+      return new ClosestApproach(tick, Math.sqrt(distanceToTargetSqr(context, tick, projectile.x, projectile.y, projectile.z)), target, projectile);
    }
 
-   private ClosestApproach closestApproachAt(TargetingSnapshot snapshot, double tick, Vec3 projectilePosition) {
-      Vec3 predictedTarget = this.predictTargetPositionTrusted(snapshot, tick);
-      AABB predictedBox = this.predictTargetAabbTrusted(snapshot, tick);
-      return new ClosestApproach(tick, distanceToTarget(projectilePosition, predictedTarget, predictedBox), predictedTarget, projectilePosition);
+   private static double closestLinearSegmentTime(EvaluationContext context, int tick, double fromX, double fromY, double fromZ, double toX, double toY, double toZ) {
+      double bestAlpha = closestLinearAlpha(context, tick, fromX, fromY, fromZ, toX, toY, toZ, false);
+      double bestDistance = distanceToTargetSqr(context, tick + bestAlpha, fromX + (toX - fromX) * bestAlpha, fromY + (toY - fromY) * bestAlpha, fromZ + (toZ - fromZ) * bestAlpha);
+      if (context.hasAabb) {
+         double upperAlpha = closestLinearAlpha(context, tick, fromX, fromY, fromZ, toX, toY, toZ, true);
+         double upperDistance = distanceToTargetSqr(context, tick + upperAlpha, fromX + (toX - fromX) * upperAlpha, fromY + (toY - fromY) * upperAlpha, fromZ + (toZ - fromZ) * upperAlpha);
+         if (upperDistance < bestDistance) {
+            bestAlpha = upperAlpha;
+         }
+      }
+      return tick + bestAlpha;
+   }
+
+   private static double closestLinearAlpha(EvaluationContext context, int tick, double fromX, double fromY, double fromZ, double toX, double toY, double toZ, boolean upper) {
+      double nextTick = tick + 1.0;
+      double target0X = context.targetX(tick);
+      double target0Y = context.targetY(tick, upper);
+      double target0Z = context.targetZ(tick);
+      double target1X = context.targetX(nextTick);
+      double target1Y = context.targetY(nextTick, upper);
+      double target1Z = context.targetZ(nextTick);
+      double rx = fromX - target0X;
+      double ry = fromY - target0Y;
+      double rz = fromZ - target0Z;
+      double dx = (toX - fromX) - (target1X - target0X);
+      double dy = (toY - fromY) - (target1Y - target0Y);
+      double dz = (toZ - fromZ) - (target1Z - target0Z);
+      double denominator = dx * dx + dy * dy + dz * dz;
+      return denominator <= 1.0E-12 ? 0.0 : Math.max(0.0, Math.min(1.0, -(rx * dx + ry * dy + rz * dz) / denominator));
+   }
+
+   private static double distanceToTargetSqr(EvaluationContext context, double tick, double px, double py, double pz) {
+      double dx = px - context.targetX(tick);
+      double dy = py - context.targetY(tick, false);
+      double dz = pz - context.targetZ(tick);
+      double best = dx * dx + dy * dy + dz * dz;
+      if (context.hasAabb) {
+         dy = py - context.targetY(tick, true);
+         best = Math.min(best, dx * dx + dy * dy + dz * dz);
+      }
+      return best;
    }
 
    private Vec3 predictTargetPositionTrusted(TargetingSnapshot snapshot, double tick) {
       return this.targetPredictor.predictPosition(snapshot, tick, accelerationTrust(snapshot));
-   }
-
-   @Nullable
-   private AABB predictTargetAabbTrusted(TargetingSnapshot snapshot, double tick) {
-      return this.targetPredictor.predictAabb(snapshot, tick, accelerationTrust(snapshot));
    }
 
    private static double distanceToTarget(Vec3 projectilePosition, Vec3 targetPosition, @Nullable AABB targetAabb) {
@@ -366,11 +652,6 @@ public class SimulatedAimSolver implements AimSolver {
       Vec3 center = targetAabb.getCenter();
       Vec3 upperCenter = new Vec3(center.x, targetAabb.minY + targetAabb.getYsize() * 0.75, center.z);
       return Math.min(projectilePosition.distanceTo(center), projectilePosition.distanceTo(upperCenter));
-   }
-
-   private static Vec3 interpolate(Vec3 from, Vec3 to, double alpha) {
-      double safeAlpha = Double.isFinite(alpha) ? Math.max((double)0.0F, Math.min((double)1.0F, alpha)) : (double)0.0F;
-      return from.add(to.subtract(from).scale(safeAlpha));
    }
 
    private static double clampPitch(double pitchDeg) {
@@ -422,7 +703,7 @@ public class SimulatedAimSolver implements AimSolver {
 
    private static boolean isAcceptableShot(TargetingSnapshot snapshot, Candidate candidate) {
       if (Double.isFinite(candidate.score) && !(candidate.score >= (double)500000.0F)) {
-         if (candidate.missDistance > acceptableMissDistance(snapshot)) {
+         if (candidate.confidence < MIN_ACCEPTABLE_CONFIDENCE || candidate.missDistance > acceptableMissDistance(snapshot)) {
             return false;
          } else if (!candidate.obstruction.blocked()) {
             return true;
@@ -470,7 +751,7 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private static boolean isObstructionInTargetSublevel(TargetingSnapshot snapshot, Candidate candidate) {
-      if (!Mods.SABLE.isLoaded() || snapshot.targetSublevelId() == null || !candidate.obstruction.blocked()) {
+      if (snapshot.targetSublevelId() == null || !candidate.obstruction.blocked() || !Mods.SABLE.isLoaded()) {
          return false;
       }
 
@@ -592,12 +873,71 @@ public class SimulatedAimSolver implements AimSolver {
    private static record ClosestApproach(double tick, double missDistance, Vec3 targetPosition, Vec3 projectilePosition) {
    }
 
-   private static record Candidate(double yawDeg, double pitchDeg, int flightTick, double flightTime, double missDistance, Vec3 predictedTargetPosition, Vec3 closestProjectilePosition, ProjectileSimulator.SimulationResult trajectory, ObstructionResult obstruction, double confidence, double score) {
+   private static record Candidate(double yawDeg, double pitchDeg, int flightTick, double flightTime, double missDistance, Vec3 predictedTargetPosition, Vec3 closestProjectilePosition, @Nullable ProjectileSimulator.SimulationResult trajectory, ObstructionResult obstruction, double confidence, double score) {
    }
 
    private static record RefinementResult(Candidate candidate, int iterations, double finalStepDeg) {
    }
 
    private static record RefinementSummary(Candidate best, int iterations, double finalStepDeg) {
+   }
+
+   private static final class SolveStats {
+      int candidateEvaluations;
+      long simulatedTicks;
+      int horizonExpansions;
+      int pitchConstraintRejections;
+      boolean warmStart;
+   }
+
+   private static final class EvaluationContext {
+      final TargetingSnapshot snapshot;
+      final ProjectileModel projectileModel;
+      final int horizonTicks;
+      final SolveStats stats;
+      final boolean hasAabb;
+      final double targetBaseX;
+      final double targetCenterY;
+      final double targetUpperY;
+      final double targetBaseZ;
+      final double velocityX;
+      final double velocityY;
+      final double velocityZ;
+      final double accelerationX;
+      final double accelerationY;
+      final double accelerationZ;
+
+      EvaluationContext(TargetingSnapshot snapshot, ProjectileModel projectileModel, int horizonTicks, SolveStats stats) {
+         this.snapshot = snapshot;
+         this.projectileModel = projectileModel;
+         this.horizonTicks = horizonTicks;
+         this.stats = stats;
+         AABB box = snapshot.targetAabb();
+         this.hasAabb = box != null;
+         this.targetBaseX = box == null ? snapshot.targetPosition().x : (box.minX + box.maxX) * 0.5;
+         this.targetCenterY = box == null ? snapshot.targetPosition().y : (box.minY + box.maxY) * 0.5;
+         this.targetUpperY = box == null ? this.targetCenterY : box.minY + box.getYsize() * 0.75;
+         this.targetBaseZ = box == null ? snapshot.targetPosition().z : (box.minZ + box.maxZ) * 0.5;
+         this.velocityX = snapshot.targetVelocity().x;
+         this.velocityY = snapshot.targetVelocity().y;
+         this.velocityZ = snapshot.targetVelocity().z;
+         Vec3 acceleration = clampAcceleration(finiteOrZero(snapshot.targetAcceleration()));
+         double trust = accelerationTrust(snapshot);
+         this.accelerationX = acceleration.x * trust;
+         this.accelerationY = acceleration.y * trust;
+         this.accelerationZ = acceleration.z * trust;
+      }
+
+      double targetX(double tick) {
+         return this.targetBaseX + this.velocityX * tick + this.accelerationX * 0.5 * tick * tick;
+      }
+
+      double targetY(double tick, boolean upper) {
+         return (upper ? this.targetUpperY : this.targetCenterY) + this.velocityY * tick + this.accelerationY * 0.5 * tick * tick;
+      }
+
+      double targetZ(double tick) {
+         return this.targetBaseZ + this.velocityZ * tick + this.accelerationZ * 0.5 * tick * tick;
+      }
    }
 }

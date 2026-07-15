@@ -26,3 +26,5 @@ forge*changelog.txt
 /run-data/
 /.agents/
 /.codex/
+/logs/debug.log
+/logs/latest.log
