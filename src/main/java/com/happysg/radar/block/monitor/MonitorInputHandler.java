@@ -11,7 +11,11 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 
+import javax.annotation.Nullable;
+
 public class MonitorInputHandler {
+    private static @Nullable MonitorBlockEntity lastHoveredAradMonitor;
+    private static @Nullable Level lastHoveredAradLevel;
 
     static Vec3 adjustRelativeVectorForFacing(Vec3 relative, Direction monitorFacing) {
         return switch (monitorFacing) {
@@ -68,34 +72,98 @@ public class MonitorInputHandler {
         return bestTrack;
     }
 
+    public static @Nullable MonitorBlockEntity.RwrDisplayInfo findRwrContact(
+            Level level,
+            BlockHitResult hit,
+            MonitorBlockEntity controller
+    ) {
+        MonitorProjection.DisplayPoint hitPoint = AradMonitorGeometry.hitPoint(level, controller, hit);
+        if (hitPoint == null) {
+            return null;
+        }
+
+        long gameTime = level.getGameTime();
+        double bestDistanceSqr = AradMonitorGeometry.PICK_RADIUS * AradMonitorGeometry.PICK_RADIUS;
+        MonitorBlockEntity.RwrDisplayInfo bestContact = null;
+        for (MonitorBlockEntity.RwrDisplayInfo contact : controller.getRwrInfos()) {
+            if (!MonitorBlockEntity.shouldRenderRwrContact(contact, gameTime)) {
+                continue;
+            }
+            MonitorProjection.DisplayPoint point = AradMonitorGeometry.point(controller, contact);
+            double dx = point.xOffset() - hitPoint.xOffset();
+            double dz = point.zOffset() - hitPoint.zOffset();
+            double distanceSqr = dx * dx + dz * dz;
+            if (distanceSqr < bestDistanceSqr) {
+                bestDistanceSqr = distanceSqr;
+                bestContact = contact;
+            }
+        }
+        return bestContact;
+    }
+
     public static void monitorPlayerHovering(PlayerTickEvent.Post event) {
 
         Player player = event.getEntity();
         Level level = player.level();
         if (!level.isClientSide())
             return;
-        Vec3 hit = player.pick(5, 0.0F, false).getLocation();
-        if (player.pick(5, 0.0F, false) instanceof BlockHitResult result) {
+        if (lastHoveredAradLevel != level) {
+            lastHoveredAradMonitor = null;
+            lastHoveredAradLevel = level;
+        }
+        var picked = player.pick(5, 0.0F, false);
+        Vec3 hit = picked.getLocation();
+        MonitorBlockEntity hoveredAradMonitor = null;
+        String hoveredAradSource = null;
+        if (picked instanceof BlockHitResult result) {
             if (level.getBlockEntity(result.getBlockPos()) instanceof MonitorBlockEntity be && level.getBlockEntity(be.getControllerPos()) instanceof MonitorBlockEntity monitor) {
-                RadarTrack track = findTrack(level, hit, monitor);
-                String oldHovered = monitor.hoveredEntity;
-                String newHovered = (track != null) ? track.id() : null;
+                if (monitor.isAradLinked()) {
+                    MonitorBlockEntity.RwrDisplayInfo contact = findRwrContact(level, result, monitor);
+                    hoveredAradMonitor = monitor;
+                    hoveredAradSource = contact == null ? null : contact.sourceId();
+                } else {
+                    RadarTrack track = findTrack(level, hit, monitor);
+                    String oldHovered = monitor.hoveredEntity;
+                    String newHovered = (track != null) ? track.id() : null;
 
-                if ((oldHovered == null && newHovered != null) ||
-                        (oldHovered != null && !oldHovered.equals(newHovered))) {
+                    if ((oldHovered == null && newHovered != null) ||
+                            (oldHovered != null && !oldHovered.equals(newHovered))) {
 
-                    monitor.hoveredEntity = newHovered;
-                    monitor.notifyUpdate();
+                        monitor.hoveredEntity = newHovered;
+                        monitor.notifyUpdate();
+                    }
                 }
-
             }
         }
+
+        if (lastHoveredAradMonitor != null && lastHoveredAradMonitor != hoveredAradMonitor) {
+            lastHoveredAradMonitor.setHoveredRwrSource(null);
+        }
+        if (hoveredAradMonitor != null) {
+            hoveredAradMonitor.setHoveredRwrSource(hoveredAradSource);
+        }
+        lastHoveredAradMonitor = hoveredAradMonitor;
 
     }
 
     public static InteractionResult onUse(MonitorBlockEntity be, Player pPlayer, InteractionHand pHand, BlockHitResult pHit, Direction facing) {
-        if (!be.getController().isLinked())
+        MonitorBlockEntity controller = be.getController();
+        if (!controller.isLinked())
             return InteractionResult.FAIL;
+
+        if (controller.isAradLinked()) {
+            if (controller.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                if (pPlayer.isShiftKeyDown()) {
+                    ARADTargetDesignationHandler.clearFromPlayer(serverLevel, controller);
+                } else {
+                    MonitorBlockEntity.RwrDisplayInfo contact = findRwrContact(serverLevel, pHit, controller);
+                    if (contact != null) {
+                        ARADTargetDesignationHandler.assign(serverLevel, controller, contact.sourceId());
+                    }
+                }
+            }
+            return InteractionResult.SUCCESS;
+        }
 
 
         if (pPlayer.isShiftKeyDown()) {

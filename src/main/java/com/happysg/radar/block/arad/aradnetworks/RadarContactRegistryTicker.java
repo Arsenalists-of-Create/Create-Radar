@@ -1,6 +1,7 @@
 package com.happysg.radar.block.arad.aradnetworks;
 
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.api.arad.ARADTargeting;
 import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -16,6 +17,7 @@ public final class RadarContactRegistryTicker {
     @SubscribeEvent
     public static void onLevelTick(LevelTickEvent.Post event) {
         if (event.getLevel() instanceof ServerLevel sl) {
+            ARADTargeting.tickNativeRadars(sl);
             RadarContactRegistry.tickDecay(sl);
             ExternalRwrEmitterRegistry.tickDecay(sl);
         }
@@ -24,6 +26,7 @@ public final class RadarContactRegistryTicker {
     @SubscribeEvent
     public static void onLevelUnload(LevelEvent.Unload event) {
         if (event.getLevel() instanceof ServerLevel sl) {
+            ARADTargeting.clearNativeRadars(sl);
             ExternalRwrEmitterRegistry.clear(sl);
         }
     }

@@ -1,6 +1,7 @@
 package com.happysg.radar.block.radar.plane;
 
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
+import com.happysg.radar.api.arad.ARADTargeting;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.arad.rwr.RadarType;
@@ -55,6 +56,9 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
         super.tick();
         if (level == null) {
             return;
+        }
+        if (level instanceof ServerLevel serverLevel) {
+            ARADTargeting.heartbeatNativeRadar(serverLevel, this);
         }
 
         scanningBehavior.setRunning(true);

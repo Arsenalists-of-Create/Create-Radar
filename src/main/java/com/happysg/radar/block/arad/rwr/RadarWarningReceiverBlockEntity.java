@@ -282,6 +282,26 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         return List.copyOf(contacts);
     }
 
+    /**
+     * Resolves a native Create Radar emitter without relying on the RWR contact list. This deliberately
+     * remains valid after an emitter moves outside passive RWR coverage, but rejects stopped, removed,
+     * cross-dimension, and external emitters.
+     */
+    public Optional<IRadar> resolveNativeRadar(ServerLevel level, String sourceId) {
+        Optional<BlockPos> radarPos = parseRadarSource(level, sourceId);
+        if (radarPos.isEmpty()) {
+            return Optional.empty();
+        }
+        BlockEntity blockEntity = level.getBlockEntity(radarPos.get());
+        if (!(blockEntity instanceof IRadar radar) || !radar.isRunning()) {
+            return Optional.empty();
+        }
+        if (!RadarContactRegistry.radarSourceId(level, radar.getWorldPos()).equals(sourceId)) {
+            return Optional.empty();
+        }
+        return Optional.of(radar);
+    }
+
     private List<ReceiverTarget> resolveReceiverChain(ServerLevel level, SubLevelAccess containingShip) {
         SubLevelContainer container = SubLevelContainer.getContainer(level);
         if (container == null) {

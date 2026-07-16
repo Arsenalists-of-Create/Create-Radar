@@ -1,6 +1,7 @@
 package com.happysg.radar.block.radar.bearing;
 
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.api.arad.ARADTargeting;
 import com.happysg.radar.block.arad.aradnetworks.JamRegistry;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.arad.jammer.FakeRadarTrackFactory;
@@ -72,6 +73,10 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     public void tick() {
         super.tick();
+
+        if (level instanceof ServerLevel serverLevel) {
+            ARADTargeting.heartbeatNativeRadar(serverLevel, this);
+        }
 
         if (running) {
             scanningBehavior.setRange(getRange());

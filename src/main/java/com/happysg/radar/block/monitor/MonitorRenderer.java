@@ -68,12 +68,6 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     private static final float ALPHA_SWEEP = 0.8f;
     private static final int PLANE_SWEEP_CYCLE_TICKS = 20;
     private static final float PLANE_SWEEP_RADIUS_SCALE = 0.81f;
-    private static final float ARAD_OUTER_RING_RADIUS = 0.40625f;
-    private static final float ARAD_MIDDLE_RING_RADIUS = 0.27083334f;
-    private static final float ARAD_INNER_RING_RADIUS = 0.1015625f;
-    private static final float ARAD_CONTACT_SCALE = 0.18f;
-    private static final float ARAD_PRIMARY_THREAT_SCALE = 0.135f;
-    private static final float SINGLE_BLOCK_MONITOR_RENDER_SCALE = 0.9f;
     private static final Logger LOGGER = LogUtils.getLogger();
     // Track scaling factors
     private static final float TRACK_POSITION_SCALE = 0.75f;
@@ -133,7 +127,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             return;
         }
         ms.translate(0.5, 0.0, 0.5);
-        ms.scale(SINGLE_BLOCK_MONITOR_RENDER_SCALE, 1.0f, SINGLE_BLOCK_MONITOR_RENDER_SCALE);
+        ms.scale(AradMonitorGeometry.SINGLE_BLOCK_RENDER_SCALE, 1.0f, AradMonitorGeometry.SINGLE_BLOCK_RENDER_SCALE);
         ms.translate(-0.5, 0.0, -0.5);
     }
 
@@ -185,19 +179,26 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
                 continue;
             }
             Color color = aradContactColor(contact);
-            float radius = contact.exactLocked()
-                    ? ARAD_INNER_RING_RADIUS
-                    : contact.withinRadarRange() ? ARAD_MIDDLE_RING_RADIUS : ARAD_OUTER_RING_RADIUS;
-            radius += contact.radiusOffset();
-            MonitorProjection.DisplayPoint point = aradPoint(contact.bearingDegrees(), monitorForwardBearing(blockEntity), radius);
-            MonitorProjection.Quad quad = centeredAradContactQuad(point, size);
+            MonitorProjection.DisplayPoint point = AradMonitorGeometry.point(blockEntity, contact);
+            MonitorProjection.Quad quad = AradMonitorGeometry.contactQuad(point, size);
             renderVertices(getBuffer(bufferSource, spriteFor(contact)), m, n, color, 1.0f, DEPTH_ARAD_CONTACT,
                     quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
             if (hasThreatOverlay(contact)) {
-                MonitorProjection.Quad threatQuad = centeredAradContactQuad(point, size, ARAD_PRIMARY_THREAT_SCALE);
+                MonitorProjection.Quad threatQuad = AradMonitorGeometry.threatQuad(point, size);
                 renderVertices(getBuffer(bufferSource, MonitorSprite.RWR_PRIMARY_THREAT), m, n, color, 1.0f,
                         DEPTH_ARAD_CONTACT + DEPTH_TRACK_INCREMENT,
                         threatQuad.minX(), threatQuad.minZ(), threatQuad.maxX(), threatQuad.maxZ());
+            }
+            MonitorProjection.Quad selectionQuad = AradMonitorGeometry.selectionQuad(point, size);
+            if (contact.sourceId().equals(blockEntity.getHoveredRwrSource())) {
+                renderVertices(getBuffer(bufferSource, MonitorSprite.TARGET_HOVERED),
+                        m, n, new Color(255, 255, 0), 1.0f, DEPTH_ARAD_CONTACT - DEPTH_TRACK_INCREMENT,
+                        selectionQuad.minX(), selectionQuad.minZ(), selectionQuad.maxX(), selectionQuad.maxZ());
+            }
+            if (contact.sourceId().equals(blockEntity.getSelectedRwrSource())) {
+                renderVertices(getBuffer(bufferSource, MonitorSprite.TARGET_SELECTED),
+                        m, n, new Color(255, 0, 0), 1.0f, DEPTH_ARAD_CONTACT - DEPTH_TRACK_INCREMENT * 2,
+                        selectionQuad.minX(), selectionQuad.minZ(), selectionQuad.maxX(), selectionQuad.maxZ());
             }
         }
     }
@@ -214,46 +215,6 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
 
     private static boolean hasThreatOverlay(MonitorBlockEntity.RwrDisplayInfo contact) {
         return contact.exactLocked() || (contact.primaryThreat() && !contact.friendly());
-    }
-
-    private static MonitorProjection.Quad centeredAradContactQuad(MonitorProjection.DisplayPoint point, int monitorSize) {
-        return centeredAradContactQuad(point, monitorSize, ARAD_CONTACT_SCALE);
-    }
-
-    private static MonitorProjection.Quad centeredAradContactQuad(MonitorProjection.DisplayPoint point, int monitorSize, float scale) {
-        float centerX = 1f - monitorSize / 2f + point.xOffset() * monitorSize;
-        float centerZ = 1f - monitorSize / 2f + point.zOffset() * monitorSize;
-        float half = monitorSize * scale * 0.5f;
-        return new MonitorProjection.Quad(centerX - half, centerZ - half, centerX + half, centerZ + half);
-    }
-
-    private static MonitorProjection.DisplayPoint aradPoint(float bearingDegrees, float forwardBearingDegrees, float radius) {
-        double radians = Math.toRadians(bearingDegrees - forwardBearingDegrees + 180.0f);
-        return new MonitorProjection.DisplayPoint(
-                (float) (-Math.sin(radians) * radius),
-                (float) (-Math.cos(radians) * radius)
-        );
-    }
-
-    private static float monitorForwardBearing(MonitorBlockEntity blockEntity) {
-        Direction monitorFacing = blockEntity.getBlockState().getValue(MonitorBlock.FACING);
-        Vec3 forward = new Vec3(monitorFacing.getStepX(), monitorFacing.getStepY(), monitorFacing.getStepZ());
-
-        if (blockEntity.getShip() != null) {
-            forward = PhysicsHandler.getWorldVecDirectionTransform(forward, blockEntity);
-        }
-
-        double horizontalLengthSqr = forward.x * forward.x + forward.z * forward.z;
-        if (horizontalLengthSqr < 1.0E-6) {
-            return 0.0f;
-        }
-
-        double angle = Math.toDegrees(Math.atan2(forward.x, forward.z));
-        angle %= 360.0;
-        if (angle < 0.0) {
-            angle += 360.0;
-        }
-        return (float) angle;
     }
 
     private static MonitorSprite spriteFor(MonitorBlockEntity.RwrDisplayInfo contact) {

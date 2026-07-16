@@ -1,5 +1,6 @@
 package com.happysg.radar.block.radar.skyradar;
 
+import com.happysg.radar.api.arad.ARADTargeting;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.NetworkData;
@@ -71,6 +72,10 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     @Override
     public void tick() {
         super.tick();
+
+        if (level instanceof ServerLevel serverLevel) {
+            ARADTargeting.heartbeatNativeRadar(serverLevel, this);
+        }
 
         prevYawDeg = yawDeg;
 

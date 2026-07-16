@@ -64,6 +64,11 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
 
     @Override
     public void onRemove(@NotNull BlockState pState, @NotNull Level pLevel, @NotNull BlockPos pPos, @NotNull BlockState pNewState, boolean pIsMoving) {
+        if (!pState.is(pNewState.getBlock())
+                && pLevel instanceof ServerLevel serverLevel
+                && pLevel.getBlockEntity(pPos) instanceof MonitorBlockEntity monitor) {
+            ARADTargetDesignationHandler.clear(serverLevel, monitor.getController());
+        }
         MonitorMultiBlockHelper.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
         if (!pState.is(pNewState.getBlock()) && pLevel instanceof ServerLevel sl) {
             NetworkData.get(sl).onEndpointRemoved(sl, pPos);
@@ -85,8 +90,23 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
                                                         @NotNull BlockPos pos,
                                                         Player player,
                                                         @NotNull BlockHitResult hit) {
+        BlockEntity blockEntity = level.getBlockEntity(pos);
+        if (blockEntity instanceof MonitorBlockEntity monitor && monitor.getController().isAradLinked()) {
+            return onBlockEntityUse(
+                    level,
+                    pos,
+                    monitorBlockEntity -> MonitorInputHandler.onUse(
+                            monitorBlockEntity.getController(),
+                            player,
+                            InteractionHand.MAIN_HAND,
+                            hit,
+                            state.getValue(FACING)
+                    )
+            );
+        }
+
         if (RadarConfig.client().useGuiByDefault.get()) {
-            BlockEntity be = level.getBlockEntity(pos);
+            BlockEntity be = blockEntity;
             if (be instanceof MonitorBlockEntity monitor) {
                 if (monitor.getController().isAradLinked()) {
                     return InteractionResult.sidedSuccess(level.isClientSide);

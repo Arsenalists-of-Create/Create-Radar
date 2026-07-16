@@ -69,6 +69,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     private final Map<String, RwrBearingNoiseState> rwrBearingNoise = new HashMap<>();
     protected String hoveredEntity;
     public String selectedEntity;
+    private @Nullable String hoveredRwrSource;
+    private @Nullable String selectedRwrSource;
+    private @Nullable BlockPos selectedRwrRadarPos;
+    private @Nullable BlockPos selectedRwrPos;
     public RadarTrack activetrack;
     boolean reset = false;
     protected BlockPos mountBlock;
@@ -181,6 +185,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 refreshAradLinkState();
                 syncFromArad(sl);
                 updateCacheServerOrClient();
+                if (isController()) {
+                    ARADTargetDesignationHandler.validateSelection(sl, this);
+                }
 
                 // keep controller's displayed selection consistent with network
                 MonitorBlockEntity controllerBe = getController();
@@ -235,6 +242,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public void onDataLinkRemoved() {
+        if (level instanceof ServerLevel serverLevel) {
+            ARADTargetDesignationHandler.clear(serverLevel, this);
+        }
         // clear any cached network state
         this.activetrack = null;
         this.radarPos = null;
@@ -264,6 +274,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         boolean linked = ARADData.get(serverLevel).isMonitorLinked(serverLevel.dimension(), getControllerPos());
         if (aradLinked == linked) {
             return;
+        }
+        if (!linked) {
+            ARADTargetDesignationHandler.clear(serverLevel, this);
         }
         aradLinked = linked;
         setChanged();
@@ -1068,6 +1081,14 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             rwrInfos = readRwrInfos(tag.getList("RwrContacts", Tag.TAG_COMPOUND));
         }
 
+        selectedRwrSource = tag.contains("SelectedRwrSource", Tag.TAG_STRING)
+                ? tag.getString("SelectedRwrSource")
+                : null;
+        if (!clientPacket) {
+            selectedRwrRadarPos = NbtUtils.readBlockPos(tag, "SelectedRwrRadarPos").orElse(null);
+            selectedRwrPos = NbtUtils.readBlockPos(tag, "SelectedRwrPos").orElse(null);
+        }
+
         selectedEntity = tag.contains("SelectedEntity", Tag.TAG_STRING)
                 ? tag.getString("SelectedEntity")
                 : null;
@@ -1121,6 +1142,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         if (selectedEntity != null) tag.putString("SelectedEntity", selectedEntity);
         if (hoveredEntity != null) tag.putString("HoveredEntity", hoveredEntity);
+        if (selectedRwrSource != null) tag.putString("SelectedRwrSource", selectedRwrSource);
         tag.putBoolean("AradLinked", aradLinked);
 
         tag.putInt("Size", radius);
@@ -1137,6 +1159,12 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.put("Filter", filter.toTag());
             tag.put("tracks", RadarTrackUtil.serializeNBTList(cachedTracks));
         } else {
+            if (selectedRwrRadarPos != null) {
+                tag.put("SelectedRwrRadarPos", NbtUtils.writeBlockPos(selectedRwrRadarPos));
+            }
+            if (selectedRwrPos != null) {
+                tag.put("SelectedRwrPos", NbtUtils.writeBlockPos(selectedRwrPos));
+            }
             if (level instanceof ServerLevel slevel) {
                 if (getNetworkGroup(slevel) == null) {
                     if (radarPos != null)
@@ -1275,4 +1303,36 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     public String getHoveredEntity() { return hoveredEntity; }
     public String getSelectedEntity() { return selectedEntity; }
+
+    public @Nullable String getHoveredRwrSource() {
+        return hoveredRwrSource;
+    }
+
+    public void setHoveredRwrSource(@Nullable String sourceId) {
+        hoveredRwrSource = sourceId;
+    }
+
+    public @Nullable String getSelectedRwrSource() {
+        return selectedRwrSource;
+    }
+
+    @Nullable BlockPos getSelectedRwrRadarPos() {
+        return selectedRwrRadarPos;
+    }
+
+    @Nullable BlockPos getSelectedRwrPos() {
+        return selectedRwrPos;
+    }
+
+    void setRwrSelectionState(String sourceId, BlockPos radarPos, BlockPos rwrPos) {
+        selectedRwrSource = sourceId;
+        selectedRwrRadarPos = radarPos.immutable();
+        selectedRwrPos = rwrPos.immutable();
+    }
+
+    void clearRwrSelectionState() {
+        selectedRwrSource = null;
+        selectedRwrRadarPos = null;
+        selectedRwrPos = null;
+    }
 }
