@@ -4,7 +4,9 @@ import com.happysg.radar.config.RadarConfig;
 
 public record ChaffSettings(boolean enabled, double radius, int volleyWindowTicks,
                             double minChance, double maxSingleChance, double maxVolleyChance,
-                            int minDurationTicks, int maxDurationTicks) {
+                            int minDurationTicks, int maxDurationTicks,
+                            int resistanceTicks, double resistanceChanceMultiplier,
+                            double permanentBreakChancePerSuccess) {
 
     public static ChaffSettings current() {
         double configuredMinChance = RadarConfig.server().chaffMinChance.get();
@@ -26,7 +28,10 @@ public record ChaffSettings(boolean enabled, double radius, int volleyWindowTick
                 singleMax,
                 volleyMax,
                 minDuration,
-                maxDuration
+                maxDuration,
+                Math.max(0, RadarConfig.server().chaffResistanceTicks.get()),
+                clamp01(RadarConfig.server().chaffResistanceChanceMultiplier.get()),
+                clamp01(RadarConfig.server().chaffPermanentBreakChancePerSuccess.get())
         );
     }
 

@@ -1,12 +1,13 @@
 package com.happysg.radar.block.behavior.networks.config;
 
+import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -33,10 +34,10 @@ public final class AutoTargetingHelper {
         return null;
     }
 
-    public static boolean isInSafeZone(Vec3 pos, List<AABB> safeZones) {
-        if (safeZones == null || safeZones.isEmpty()) return false;
-        for (AABB zone : safeZones) {
-            if (zone.contains(pos))
+    public static boolean isInSafeZone(Vec3 pos, List<SafeZone> safeZones, @Nullable Level level) {
+        if (level == null || safeZones == null || safeZones.isEmpty()) return false;
+        for (SafeZone zone : safeZones) {
+            if (zone.contains(level, pos))
                 return true;
         }
         return false;
@@ -48,7 +49,7 @@ public final class AutoTargetingHelper {
             TargetingConfig targetingConfig,
             Vec3 origin,
             Collection<RadarTrack> tracks,
-            List<AABB> safeZones,
+            List<SafeZone> safeZones,
             IdentificationConfig identificationConfig,
             @Nullable ServerLevel serverLevel) {
 
@@ -73,7 +74,7 @@ public final class AutoTargetingHelper {
             if (isIgnoredByIdentification(track, serverLevel, ignoreList))
                 continue;
 
-            if (isInSafeZone(pos, safeZones))
+            if (isInSafeZone(pos, safeZones, serverLevel))
                 continue;
 
 

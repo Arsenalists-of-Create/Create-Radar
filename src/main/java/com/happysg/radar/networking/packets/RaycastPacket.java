@@ -18,7 +18,10 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -88,40 +91,36 @@ public record RaycastPacket() implements CustomPacketPayload {
 
     @Nullable
     private static BlockPos raycastFirstNonTransparentBlock(ServerLevel level, ServerPlayer player, double maxDistance, double step) {
-        Vec3 start = player.getEyePosition();
+        Vec3 eyePosition = player.getEyePosition();
         Vec3 dir = player.getLookAngle().normalize();
+        Vec3 end = eyePosition.add(dir.scale(maxDistance));
+        Vec3 start = eyePosition;
 
-        BlockPos lastPos = BlockPos.containing(start);
-
-        for (double t = 0.0; t <= maxDistance; t += step) {
-            Vec3 point = start.add(dir.scale(t));
-            BlockPos pos = BlockPos.containing(point);
-
-            if (Mods.SABLE.isLoaded() && SableUtils.isBlockInShipyard(level, pos)) {
-                pos = SableUtils.getWorldPos(level, pos);
+        // Sable replaces Level#clip with a sublevel-aware implementation. Aeronautics
+        // contraptions live in those sublevels, and the returned BlockPos deliberately
+        // remains in sublevel coordinates so the firing controller can follow its motion.
+        for (int passThroughs = 0; passThroughs < 256; passThroughs++) {
+            BlockHitResult hit = level.clip(new ClipContext(
+                    start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+            if (hit.getType() == HitResult.Type.MISS) {
+                return null;
             }
 
-            if (pos.equals(lastPos)) {
-                continue;
-            }
-
-            lastPos = pos;
-
-            if (!level.isLoaded(pos)) {
-                continue;
-            }
-
+            BlockPos pos = hit.getBlockPos();
             BlockState state = level.getBlockState(pos);
-
-            if (state.isAir()) {
-                continue;
+            if (!state.isAir() && !isTransparentPassThrough(level, pos, state)) {
+                return pos;
             }
 
-            if (isTransparentPassThrough(level, pos, state)) {
-                continue;
+            Vec3 worldHit = hit.getLocation();
+            if (Mods.SABLE.isLoaded() && SableUtils.isBlockInShipyard(level, pos)) {
+                worldHit = SableUtils.getWorldVec(level, worldHit);
             }
 
-            return pos;
+            start = worldHit.add(dir.scale(Math.max(0.01D, step)));
+            if (start.distanceToSqr(eyePosition) > maxDistance * maxDistance) {
+                return null;
+            }
         }
 
         return null;

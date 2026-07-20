@@ -2,6 +2,7 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.block.behavior.networks.INetworkNode;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
@@ -86,7 +87,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     /** Keep as field because renderer uses it (coloring). */
     protected DetectionConfig filter = DetectionConfig.DEFAULT;
     private BlockPos lastKnownPos = BlockPos.ZERO;
-    public final List<AABB> safeZones = new ArrayList<>();
+    public final List<SafeZone> safeZones = new ArrayList<>();
 
     public MonitorBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -187,6 +188,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 updateCacheServerOrClient();
                 if (isController()) {
                     ARADTargetDesignationHandler.validateSelection(sl, this);
+                    if (level.getGameTime() % 20 == 0) {
+                        pushSafeZonesToFilterer(sl);
+                    }
                 }
 
                 // keep controller's displayed selection consistent with network
@@ -1001,7 +1005,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         if (targetPos.get() == null)
             selectedEntity = null;
-        else if (AutoTargetingHelper.isInSafeZone(targetPos.get(), safeZones))
+        else if (AutoTargetingHelper.isInSafeZone(targetPos.get(), safeZones, level))
             return null;
 
         return targetPos.get();
@@ -1011,18 +1015,13 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
 
     public boolean isInSafeZone(Vec3 pos) {
-        return AutoTargetingHelper.isInSafeZone(pos, safeZones);
+        return AutoTargetingHelper.isInSafeZone(pos, safeZones, level);
     }
 
     public void addSafeZone(BlockPos startPos, BlockPos endPos) {
-        double minX = Math.min(startPos.getX(), endPos.getX());
-        double minY = Math.min(startPos.getY(), endPos.getY());
-        double minZ = Math.min(startPos.getZ(), endPos.getZ());
-        double maxX = Math.max(startPos.getX(), endPos.getX()) + 1;
-        double maxY = Math.max(startPos.getY(), endPos.getY()) + 1;
-        double maxZ = Math.max(startPos.getZ(), endPos.getZ()) + 1;
-
-        getController().safeZones.add(new AABB(minX, minY, minZ, maxX, maxY, maxZ));
+        MonitorBlockEntity owner = getController();
+        owner.safeZones.add(SafeZone.between(level, startPos, endPos));
+        owner.syncSafeZones();
     }
 
     public void showSafeZone() {
@@ -1036,8 +1035,15 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     @OnlyIn(Dist.CLIENT)
     private static final class Client {
         static void showSafeZone(MonitorBlockEntity be) {
-            for (AABB safeZone : be.safeZones) {
-                net.createmod.catnip.outliner.Outliner.getInstance().showAABB(safeZone, safeZone)
+            if (be.level == null) {
+                return;
+            }
+            for (SafeZone safeZone : be.safeZones) {
+                AABB worldBounds = safeZone.worldBounds(be.level);
+                if (worldBounds == null) {
+                    continue;
+                }
+                net.createmod.catnip.outliner.Outliner.getInstance().showAABB(safeZone, worldBounds)
                         .colored(0x383b42)
                         .withFaceTextures(com.simibubi.create.AllSpecialTextures.CHECKERED, com.simibubi.create.AllSpecialTextures.HIGHLIGHT_CHECKERED)
                         .lineWidth(1 / 16f);
@@ -1046,7 +1052,48 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public boolean tryRemoveAABB(BlockPos pos) {
-        return safeZones.removeIf(safeZone -> safeZone.contains(Vec3.atCenterOf(pos)));
+        if (level == null) {
+            return false;
+        }
+        SubLevelAccess clickedSubLevel = Mods.SABLE.isLoaded()
+                ? SableUtils.getShipManagingPos(level, pos)
+                : null;
+        Vec3 worldPosition = clickedSubLevel == null
+                ? Vec3.atCenterOf(pos)
+                : SableUtils.getWorldVec(level, pos);
+        boolean removed = safeZones.removeIf(safeZone -> safeZone.contains(level, worldPosition));
+        if (removed) {
+            syncSafeZones();
+        }
+        return removed;
+    }
+
+    public void clearSafeZones() {
+        MonitorBlockEntity owner = getController();
+        if (owner.safeZones.isEmpty()) {
+            return;
+        }
+        owner.safeZones.clear();
+        owner.syncSafeZones();
+    }
+
+    private void syncSafeZones() {
+        setChanged();
+        sendData();
+        if (level instanceof ServerLevel serverLevel) {
+            pushSafeZonesToFilterer(serverLevel);
+        }
+    }
+
+    private void pushSafeZonesToFilterer(ServerLevel serverLevel) {
+        NetworkData.Group group = getNetworkGroup(serverLevel);
+        if (group == null) {
+            return;
+        }
+        BlockPos filtererPos = group.key.filtererPos();
+        if (serverLevel.getBlockEntity(filtererPos) instanceof NetworkFiltererBlockEntity filterer) {
+            filterer.updateSafeZones(safeZones);
+        }
     }
 
     // -------------------------------------------------
@@ -1121,15 +1168,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         for (int i = 0; i < safeZonesTag.size(); i++) {
             CompoundTag safeZoneTag = safeZonesTag.getCompound(i);
-            AABB safeZone = new AABB(
-                    safeZoneTag.getDouble("minX"),
-                    safeZoneTag.getDouble("minY"),
-                    safeZoneTag.getDouble("minZ"),
-                    safeZoneTag.getDouble("maxX"),
-                    safeZoneTag.getDouble("maxY"),
-                    safeZoneTag.getDouble("maxZ")
-            );
-            safeZones.add(safeZone);
+            safeZones.add(SafeZone.load(level, safeZoneTag));
         }
     }
 
@@ -1288,15 +1327,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     private @NotNull ListTag saveSafeZones() {
         ListTag safeZonesTag = new ListTag();
-        for (AABB safeZone : safeZones) {
-            CompoundTag safeZoneTag = new CompoundTag();
-            safeZoneTag.putDouble("minX", safeZone.minX);
-            safeZoneTag.putDouble("minY", safeZone.minY);
-            safeZoneTag.putDouble("minZ", safeZone.minZ);
-            safeZoneTag.putDouble("maxX", safeZone.maxX);
-            safeZoneTag.putDouble("maxY", safeZone.maxY);
-            safeZoneTag.putDouble("maxZ", safeZone.maxZ);
-            safeZonesTag.add(safeZoneTag);
+        for (SafeZone safeZone : safeZones) {
+            safeZonesTag.add(safeZone.save());
         }
         return safeZonesTag;
     }

@@ -13,4 +13,9 @@ public interface ChaffLockAdapter<T extends Entity> {
     String getTargetId(T entity);
 
     void applySuppression(T entity, String targetId, long untilTick);
+
+    /** Permanently clears this lock until its owning system explicitly acquires it again. */
+    default void breakLock(T entity, String targetId) {
+        applySuppression(entity, targetId, Long.MAX_VALUE);
+    }
 }

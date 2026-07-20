@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.networkcontroller;
 
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
@@ -75,12 +76,13 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
     private @Nullable String chaffSuppressedTargetId;
     private long chaffSuppressedUntilTick;
+    private @Nullable String chaffAutoIgnoredTargetId;
 
     private long vsLoadedCacheUntilTick = -1;
     private final Map<UUID, Boolean> vsLoadedCache = new HashMap<>();
 
     private  TargetingConfig targeting = TargetingConfig.DEFAULT;
-    private List<AABB> safeZones = new ArrayList<>();
+    private List<SafeZone> safeZones = new ArrayList<>();
     private BlockPos lastKnownPos = BlockPos.ZERO;
     private RadarTrack currenttrack;
     private final Map<BlockPos, IRadar> radarCache = new HashMap<>();
@@ -669,6 +671,24 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return true;
     }
 
+    /** Clears a lock outright and prevents auto-targeting from immediately reacquiring it. */
+    public boolean breakChaffLock(String targetId) {
+        if (!(level instanceof ServerLevel sl) || targetId == null || targetId.isBlank()) {
+            return false;
+        }
+
+        NetworkData data = NetworkData.get(sl);
+        NetworkData.Group group = data.getGroup(sl.dimension(), worldPosition);
+        if (group == null || !targetId.equals(group.selectedTargetId)) {
+            return false;
+        }
+
+        chaffAutoIgnoredTargetId = targetId;
+        clearChaffState();
+        applySelectedTarget(sl, data, group, null, false);
+        return true;
+    }
+
     private boolean updateChaffState(long now, @Nullable String selectedId) {
         if (chaffSuppressedTargetId == null) {
             return false;
@@ -759,13 +779,15 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         Arrays.fill(slotNbt, null);
     }
 
-    public void receiveSelectedTargetFromMonitor(@Nullable RadarTrack track, List<AABB> safeZones) {
+    public void receiveSelectedTargetFromMonitor(@Nullable RadarTrack track, List<SafeZone> safeZones) {
         if (!(level instanceof ServerLevel sl)) return;
 
         endpointCacheUntilTick = -1;
+        if (track != null) {
+            chaffAutoIgnoredTargetId = null;
+        }
 
-        this.safeZones.clear();
-        if (safeZones != null) this.safeZones.addAll(safeZones);
+        updateSafeZones(safeZones);
 
         selectedWasAuto = false;
 
@@ -784,6 +806,21 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
 
         data.setDirty();
+    }
+
+    public void updateSafeZones(@Nullable List<SafeZone> safeZones) {
+        List<SafeZone> updated = safeZones == null ? List.of() : List.copyOf(safeZones);
+        if (this.safeZones.equals(updated)) {
+            return;
+        }
+        this.safeZones = new ArrayList<>(updated);
+        if (level instanceof ServerLevel serverLevel) {
+            for (AutoPitchControllerBlockEntity pitch : getWeaponEndpointsCached(serverLevel)) {
+                pitch.setSafeZones(this.safeZones);
+            }
+        }
+        lastPushedSafeZonesHash = safeZonesHash(this.safeZones);
+        setChanged();
     }
 
     public void onBinocularsTriggered(Player player, ItemStack binos, boolean reset) {
@@ -808,6 +845,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         NetworkData data = NetworkData.get(level);
         if (data == null) return;
 
+        updateSafeZones(List.of());
         data.dissolveNetworkForBrokenController(level, worldPosition);
         data.setDirty();
     }
@@ -885,7 +923,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
 
     @Nullable
-    private RadarTrack pickAutoTarget_PerCannon(ServerLevel sl, Collection<RadarTrack> tracks, List<AABB> safeZones) {
+    private RadarTrack pickAutoTarget_PerCannon(ServerLevel sl, Collection<RadarTrack> tracks, List<SafeZone> safeZones) {
         TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
         if (!cfg.autoTarget()) return null;
 
@@ -899,6 +937,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         ArrayList<RadarTrack> candidates = new ArrayList<>();
         for (RadarTrack track : tracks) {
             if (track == null) continue;
+            if (chaffAutoIgnoredTargetId != null
+                    && chaffAutoIgnoredTargetId.equals(track.getId())) continue;
 
             if (!cfg.test(track.trackCategory())) continue;
             if (!isVsShipStillLoaded(sl, track)) continue;
@@ -907,7 +947,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             if (pos == null) continue;
 
             if (AutoTargetingHelper.isIgnoredByIdentification(track, sl, ignoreList)) continue;
-            if (AutoTargetingHelper.isInSafeZone(pos, safeZones)) continue;
+            if (AutoTargetingHelper.isInSafeZone(pos, safeZones, sl)) continue;
 
             candidates.add(track);
         }
@@ -1251,15 +1291,17 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         );
     }
 
-    private static long safeZonesHash(List<AABB> zones) {
+    private static long safeZonesHash(List<SafeZone> zones) {
         long h = 1469598103934665603L;
-        for (AABB a : zones) {
+        for (SafeZone zone : zones) {
+            AABB a = zone.bounds();
             h ^= Double.doubleToLongBits(a.minX); h *= 1099511628211L;
             h ^= Double.doubleToLongBits(a.minY); h *= 1099511628211L;
             h ^= Double.doubleToLongBits(a.minZ); h *= 1099511628211L;
             h ^= Double.doubleToLongBits(a.maxX); h *= 1099511628211L;
             h ^= Double.doubleToLongBits(a.maxY); h *= 1099511628211L;
             h ^= Double.doubleToLongBits(a.maxZ); h *= 1099511628211L;
+            h ^= Objects.hashCode(zone.subLevelId()); h *= 1099511628211L;
         }
         return h;
     }

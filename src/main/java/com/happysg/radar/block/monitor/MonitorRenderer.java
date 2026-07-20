@@ -1,5 +1,6 @@
 package com.happysg.radar.block.monitor;
 
+import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
@@ -241,8 +242,11 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
      * Renders safety zones on the radar display
      */
     private void renderSafeZones(MonitorProjection projection, MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource) {
-        List<AABB> safeZones = blockEntity.safeZones;
+        List<SafeZone> safeZones = blockEntity.safeZones;
         if (safeZones == null || safeZones.isEmpty()) {
+            return;
+        }
+        if (blockEntity.getLevel() == null) {
             return;
         }
 
@@ -252,7 +256,11 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         float alpha = 0.4f;
 
         // Render each safe zone
-        for (AABB zone : safeZones) {
+        for (SafeZone safeZone : safeZones) {
+            AABB zone = safeZone.worldBounds(blockEntity.getLevel());
+            if (zone == null) {
+                continue;
+            }
             // Transform zone coordinates to display coordinates
             Vec3 zoneMin = transformWorldToRadar(zone.minX, zone.minY, zone.minZ, projection, blockEntity.getSize());
             Vec3 zoneMax = transformWorldToRadar(zone.maxX, zone.maxY, zone.maxZ, projection, blockEntity.getSize());

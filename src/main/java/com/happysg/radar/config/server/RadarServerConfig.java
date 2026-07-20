@@ -26,6 +26,9 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigFloat chaffMaxVolleyChance = f(0.75F, 0.0F, 1.0F, "maxVolleyChance", "Absolute combined lock-break chance cap for one firework volley");
     public final ConfigInt chaffMinDurationTicks = i(10, 1, 1200, "minDurationTicks", "Lock-break duration for one small firework star");
     public final ConfigInt chaffMaxDurationTicks = i(70, 1, 1200, "maxDurationTicks", "Maximum lock-break duration for one firework (3.5 seconds by default)");
+    public final ConfigInt chaffResistanceTicks = i(100, 0, 1200, "resistanceTicks", "Reduced-success window after a chaff effect expires (5 seconds by default)");
+    public final ConfigFloat chaffResistanceChanceMultiplier = f(0.50F, 0.0F, 1.0F, "resistanceChanceMultiplier", "Chance multiplier while post-chaff resistance is active");
+    public final ConfigFloat chaffPermanentBreakChancePerSuccess = f(0.02F, 0.0F, 1.0F, "permanentBreakChancePerSuccess", "Permanent lock-break chance added by each successful chaff roll");
 
     public final ConfigGroup sableSilhouetteConfig = group(3, "sableSilhouetteConfig", "Configs for Sable radar monitor silhouettes");
     public final ConfigInt sableSilhouetteMaxScannedBlocks = i(20000, 1, "sableSilhouetteMaxScannedBlocks", "Maximum loaded Sable sublevel blocks inspected while building one radar silhouette");

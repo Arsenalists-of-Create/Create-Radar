@@ -157,6 +157,7 @@ public class NetworkData extends SavedData {
         // 1) If the broken block is the filterer/controller itself, dissolve that group
         String filtererKey = filtererKey(new FilterKey(dim, brokenPos));
         if (groupsByFilterer.containsKey(filtererKey)) {
+            clearSafeZonesForBrokenController(level, groupsByFilterer.get(filtererKey));
             dissolveGroup(level, filtererKey);
             setDirty();
             return;
@@ -173,6 +174,23 @@ public class NetworkData extends SavedData {
             }
         }
     }
+
+    private void clearSafeZonesForBrokenController(ServerLevel level, Group group) {
+        if (group == null) {
+            return;
+        }
+        Set<BlockPos> clearedControllers = new HashSet<>();
+        for (BlockPos monitorPos : group.monitorEndpoints) {
+            if (!(level.getBlockEntity(monitorPos) instanceof MonitorBlockEntity monitor)) {
+                continue;
+            }
+            MonitorBlockEntity controller = monitor.getController();
+            if (clearedControllers.add(controller.getBlockPos())) {
+                controller.clearSafeZones();
+            }
+        }
+    }
+
     private void dissolveGroup(ServerLevel level, String filtererKey) {
         Group group = groupsByFilterer.remove(filtererKey);
         if (group == null) return;

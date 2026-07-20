@@ -41,6 +41,7 @@ public final class ChaffManager {
 
     private static final Map<ResourceKey<Level>, Map<UUID, LaunchContext>> LAUNCHES = new HashMap<>();
     private static final Map<ResourceKey<Level>, Map<VolleyKey, VolleyState>> VOLLEYS = new HashMap<>();
+    private static final Map<ResourceKey<Level>, Map<VolleyKey, ChaffHistory>> HISTORIES = new HashMap<>();
 
     private ChaffManager() {
     }
@@ -126,11 +127,16 @@ public final class ChaffManager {
                 continue;
             }
 
-            long untilTick = applyToVolley(level, "controller:" + controllerPos.asLong(),
+            ChaffRollResult result = applyToVolley(level, "controller:" + controllerPos.asLong(),
                     selectedTrack.getId(), profile, settings, now);
-            if (untilTick > now && controller.beginChaffSuppression(selectedTrack.getId(), untilTick)) {
+            if (result.lockBroken() && controller.breakChaffLock(selectedTrack.getId())) {
                 successfullySuppressedTargets.add(selectedTrack.getId());
-                rollSummary.recordSaved(selectedTrack.getId(), untilTick - now);
+                rollSummary.recordBroken(selectedTrack.getId(), result.breakChance());
+            } else if (result.untilTick() > now
+                    && controller.beginChaffSuppression(selectedTrack.getId(), result.untilTick())) {
+                successfullySuppressedTargets.add(selectedTrack.getId());
+                rollSummary.recordSaved(selectedTrack.getId(), result.untilTick() - now,
+                        result.breakChance());
             }
         }
 
@@ -163,11 +169,14 @@ public final class ChaffManager {
                 continue;
             }
 
-            long untilTick = applyToVolley(level, "entity:" + entity.getUUID(), targetId,
+            ChaffRollResult result = applyToVolley(level, "entity:" + entity.getUUID(), targetId,
                     profile, settings, now);
-            if (untilTick > now) {
-                adapter.applySuppression(entity, targetId, untilTick);
-                rollSummary.recordSaved(targetId, untilTick - now);
+            if (result.lockBroken()) {
+                adapter.breakLock(entity, targetId);
+                rollSummary.recordBroken(targetId, result.breakChance());
+            } else if (result.untilTick() > now) {
+                adapter.applySuppression(entity, targetId, result.untilTick());
+                rollSummary.recordSaved(targetId, result.untilTick() - now, result.breakChance());
             }
         }
     }
@@ -180,18 +189,23 @@ public final class ChaffManager {
                 ? String.format(Locale.ROOT, "%.2fs (%d ticks)",
                 summary.durationTicks() / 20.0D, summary.durationTicks())
                 : "n/a";
+        String result = summary.brokeLock() ? "LOCK BROKEN" : summary.succeeded() ? "SUCCESS" : "FAIL";
+        String breakChance = summary.succeeded()
+                ? String.format(Locale.ROOT, "%.1f%%", summary.breakChance() * 100.0D)
+                : "n/a";
         Component message = Component.literal(String.format(Locale.ROOT,
-                "[Chaff] stars=%d, size=%d | chance=%s | %s | entities saved=%d | duration=%s",
-                starCount, profile.weight(), chance, summary.succeeded() ? "SUCCESS" : "FAIL",
-                summary.savedCount(), duration));
+                "[Chaff] stars=%d, size=%d | chance=%s | %s | entities saved=%d | duration=%s | break chance=%s",
+                starCount, profile.weight(), chance, result, summary.savedCount(), duration, breakChance));
         level.players().forEach(player -> player.sendSystemMessage(message));
     }
 
-    private static long applyToVolley(ServerLevel level, String sourceId, String targetId,
-                                      ChaffProfile profile, ChaffSettings settings, long now) {
+    private static ChaffRollResult applyToVolley(ServerLevel level, String sourceId, String targetId,
+                                                 ChaffProfile profile, ChaffSettings settings, long now) {
         VolleyKey key = new VolleyKey(sourceId, targetId);
         Map<VolleyKey, VolleyState> dimensionVolleys = VOLLEYS.computeIfAbsent(
                 level.dimension(), ignored -> new HashMap<>());
+        ChaffHistory history = HISTORIES.computeIfAbsent(level.dimension(), ignored -> new HashMap<>())
+                .computeIfAbsent(key, ignored -> new ChaffHistory());
         VolleyState volley = dimensionVolleys.get(key);
         if (volley == null || now - volley.lastTick > settings.volleyWindowTicks()) {
             volley = new VolleyState(now, 0.0D, level.random.nextDouble(), 0, false);
@@ -200,32 +214,33 @@ public final class ChaffManager {
 
         volley.lastTick = now;
         if (!volley.succeeded) {
-            double rollChance = diminishedRollChance(
-                    profile.chance(), volley.combinedChance, settings.maxVolleyChance());
+            double rollChance = profile.chance();
+            if (history.isResistant(now, settings.resistanceTicks())) {
+                rollChance *= settings.resistanceChanceMultiplier();
+            }
             double combined = 1.0D - (1.0D - volley.combinedChance) * (1.0D - rollChance);
             volley.combinedChance = Math.min(settings.maxVolleyChance(), combined);
             if (volley.threshold < volley.combinedChance) {
                 volley.succeeded = true;
                 volley.strongestDurationTicks = profile.durationTicks();
-                return now + Math.min(settings.maxDurationTicks(), profile.durationTicks());
+                long untilTick = now + Math.min(settings.maxDurationTicks(), profile.durationTicks());
+                history.effectUntilTick = Math.max(history.effectUntilTick, untilTick);
+                history.successfulRolls++;
+                double breakChance = Math.min(1.0D,
+                        history.successfulRolls * settings.permanentBreakChancePerSuccess());
+                boolean lockBroken = level.random.nextDouble() < breakChance;
+                if (lockBroken) {
+                    history.successfulRolls = 0;
+                }
+                return new ChaffRollResult(untilTick, lockBroken, breakChance);
             }
         } else if (profile.durationTicks() > volley.strongestDurationTicks) {
             volley.strongestDurationTicks = profile.durationTicks();
-            return now + Math.min(settings.maxDurationTicks(), profile.durationTicks());
+            long untilTick = now + Math.min(settings.maxDurationTicks(), profile.durationTicks());
+            history.effectUntilTick = Math.max(history.effectUntilTick, untilTick);
+            return new ChaffRollResult(untilTick, false, 0.0D);
         }
-        return -1L;
-    }
-
-    /**
-     * Reduces each follow-up roll in proportion to how much of the volley cap has
-     * already been used. The first roll receives the firework's full profile chance.
-     */
-    static double diminishedRollChance(double profileChance, double combinedChance, double volleyCap) {
-        if (profileChance <= 0.0D || volleyCap <= 0.0D || combinedChance >= volleyCap) {
-            return 0.0D;
-        }
-        double remainingCapFraction = 1.0D - combinedChance / volleyCap;
-        return Math.min(1.0D, profileChance) * remainingCapFraction;
+        return ChaffRollResult.NONE;
     }
 
     private static boolean isNearTarget(ServerLevel level, Vec3 explosionPos, RadarTrack track, double radius) {
@@ -336,6 +351,15 @@ public final class ChaffManager {
                 VOLLEYS.remove(level.dimension());
             }
         }
+
+        Map<VolleyKey, ChaffHistory> histories = HISTORIES.get(level.dimension());
+        if (histories != null) {
+            histories.values().removeIf(history -> history.successfulRolls == 0
+                    && now >= history.effectUntilTick + settings.resistanceTicks());
+            if (histories.isEmpty()) {
+                HISTORIES.remove(level.dimension());
+            }
+        }
     }
 
     @SubscribeEvent
@@ -343,6 +367,7 @@ public final class ChaffManager {
         if (event.getLevel() instanceof ServerLevel level) {
             LAUNCHES.remove(level.dimension());
             VOLLEYS.remove(level.dimension());
+            HISTORIES.remove(level.dimension());
         }
     }
 
@@ -352,13 +377,26 @@ public final class ChaffManager {
     private record VolleyKey(String sourceId, String targetId) {
     }
 
+    private record ChaffRollResult(long untilTick, boolean lockBroken, double breakChance) {
+        private static final ChaffRollResult NONE = new ChaffRollResult(-1L, false, 0.0D);
+    }
+
     private static final class ChaffRollSummary {
         private final Set<String> savedTargetIds = new HashSet<>();
+        private final Set<String> brokenTargetIds = new HashSet<>();
         private long durationTicks;
+        private double breakChance;
 
-        private void recordSaved(String targetId, long durationTicks) {
+        private void recordSaved(String targetId, long durationTicks, double breakChance) {
             savedTargetIds.add(targetId);
             this.durationTicks = Math.max(this.durationTicks, durationTicks);
+            this.breakChance = Math.max(this.breakChance, breakChance);
+        }
+
+        private void recordBroken(String targetId, double breakChance) {
+            savedTargetIds.add(targetId);
+            brokenTargetIds.add(targetId);
+            this.breakChance = Math.max(this.breakChance, breakChance);
         }
 
         private boolean succeeded() {
@@ -369,8 +407,27 @@ public final class ChaffManager {
             return savedTargetIds.size();
         }
 
+        private boolean brokeLock() {
+            return !brokenTargetIds.isEmpty();
+        }
+
+        private double breakChance() {
+            return breakChance;
+        }
+
         private long durationTicks() {
             return durationTicks;
+        }
+    }
+
+    private static final class ChaffHistory {
+        private int successfulRolls;
+        private long effectUntilTick;
+
+        private boolean isResistant(long now, int resistanceTicks) {
+            return effectUntilTick > 0L
+                    && now >= effectUntilTick
+                    && now < effectUntilTick + resistanceTicks;
         }
     }
 

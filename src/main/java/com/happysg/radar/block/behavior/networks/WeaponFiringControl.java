@@ -143,7 +143,7 @@ public class WeaponFiringControl {
     private final Map<String, LosCache> losSelectionCache;
     private final Map<UUID, TargetMotionState> targetMotionStates;
     private final LosCache losPrefireCache;
-    public List<AABB> safeZones;
+    public List<SafeZone> safeZones;
     private long lastTargetTick;
 
     private static double clamp01(double v) {
@@ -212,8 +212,8 @@ public class WeaponFiringControl {
     private RayResult rayClear(Vec3 start, Vec3 end) {
         RayResult result = WeaponFiringControl.RayResult.CLEAR;
         if (!this.safeZones.isEmpty()) {
-            for(AABB zone : this.safeZones) {
-                if (zone != null && (zone.contains(start) || zone.contains(end) || zone.clip(start, end).isPresent())) {
+            for(SafeZone zone : this.safeZones) {
+                if (zone != null && zone.intersects(this.level, start, end)) {
                     return WeaponFiringControl.RayResult.BLOCKED_SAFEZONE;
                 }
             }
@@ -618,9 +618,9 @@ public class WeaponFiringControl {
         this.stopFireCannon();
     }
 
-    public void setSafeZones(List<AABB> safeZones) {
+    public void setSafeZones(List<SafeZone> safeZones) {
         LOGGER.debug("setSafeZones() -> {} zones", safeZones.size());
-        this.safeZones = safeZones;
+        this.safeZones = new ArrayList<>(safeZones);
     }
 
     public Entity getEntityByUUID(ServerLevel level, UUID uuid) {
@@ -1954,15 +1954,9 @@ public class WeaponFiringControl {
             } else {
                 Vec3 start = this.getCannonRayStart();
 
-                for(AABB zone : this.safeZones) {
-                    if (zone != null) {
-                        if (zone.contains(start) || zone.contains(aim)) {
-                            return true;
-                        }
-
-                        if (zone.clip(start, aim).isPresent()) {
-                            return true;
-                        }
+                for(SafeZone zone : this.safeZones) {
+                    if (zone != null && zone.intersects(this.level, start, aim)) {
+                        return true;
                     }
                 }
 

@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
+import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
@@ -20,7 +21,6 @@ import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
@@ -334,7 +334,7 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         return firingControl != null ? firingControl.getCannonRayStart() : null;
     }
 
-    public void setSafeZones(List<AABB> safeZones) {
+    public void setSafeZones(List<SafeZone> safeZones) {
         if (firingControl == null) {
             return;
         }
