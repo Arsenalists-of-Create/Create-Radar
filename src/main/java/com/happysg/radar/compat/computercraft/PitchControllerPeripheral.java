@@ -35,6 +35,6 @@ public class PitchControllerPeripheral implements GenericPeripheral {
         if (entity.firingControl != null) {
             entity.firingControl.resetTarget();
         }
-        entity.isRunning = false;
+        entity.stopController();
     }
 }

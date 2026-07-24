@@ -4,6 +4,7 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
+import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -17,7 +18,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
 
-public class AutoPitchControllerBlock extends HorizontalKineticBlock implements IBE<AutoPitchControllerBlockEntity> {
+public class AutoPitchControllerBlock extends HorizontalKineticBlock
+        implements IBE<AutoPitchControllerBlockEntity>, ICogWheel {
 
     public AutoPitchControllerBlock(Properties properties) {
         super(properties);
@@ -30,7 +32,15 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
 
     @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-        return face == state.getValue(HORIZONTAL_FACING).getOpposite();
+        return false;
+    }
+
+    @Override
+    public boolean isDedicatedCogWheel() {
+        // The controller participates in ordinary small-cog propagation, but its
+        // item is not a standard cogwheel item: this block uses HORIZONTAL_FACING
+        // instead of the AXIS property required by Create's cog placement helper.
+        return false;
     }
 
     @Override
@@ -53,6 +63,9 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (level instanceof ServerLevel sl && state.getBlock() != newState.getBlock() ) {
+            if (level.getBlockEntity(pos) instanceof AutoPitchControllerBlockEntity pitch) {
+                pitch.releaseKineticActuator();
+            }
             breakAttachedDataLinks(level, pos);
             NetworkData.get(sl).onEndpointRemoved(sl, pos);
         }
@@ -89,6 +102,7 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof AutoPitchControllerBlockEntity pitch) {
             pitch.markMountDirtyExternal();
+            pitch.invalidateKineticActuator();
         }
     }
     @Override

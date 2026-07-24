@@ -25,16 +25,17 @@ public class SimulatedAimSolver implements AimSolver {
    private static final int OBSTRUCTION_SHORTLIST_SIZE = 16;
    private static final int REFINEMENT_SHORTLIST_SIZE = 6;
    private static final int MAX_REFINEMENT_ITERATIONS = 28;
-   private static final double MIN_REFINEMENT_STEP_DEG = 0.001;
    private static final double MAX_REFINEMENT_STEP_DEG = 0.25;
    private static final double REFINEMENT_TARGET_BLOCKS = 0.25;
+   private static final double WARM_REFINEMENT_TARGET_BLOCKS = 0.05;
+   private static final double WARM_MISS_TIE_BLOCKS = 1.0E-4;
    private static final double LONG_RANGE_ACCEPTANCE_DISTANCE_BLOCKS = 8000.0;
    private static final double LONG_RANGE_ACCEPTANCE_MISS_BLOCKS = 5.0;
    private static final double MIN_ACCEPTABLE_CONFIDENCE = 0.05;
    private static final int FRACTIONAL_DISTANCE_REFINEMENT_STEPS = 9;
    private static final int HORIZON_MARGIN_TICKS = 80;
    private static final int HORIZON_EDGE_TICKS = 16;
-   private static final int WARM_REFINEMENT_ITERATIONS = 10;
+   private static final int WARM_REFINEMENT_ITERATIONS = 14;
    private final ProjectileSimulator projectileSimulator;
    private final TargetPredictor targetPredictor;
 
@@ -72,11 +73,12 @@ public class SimulatedAimSolver implements AimSolver {
          EvaluationContext warmContext = new EvaluationContext(snapshot, projectileModel, horizon, stats);
          Candidate warmSeed = this.evaluate(warmContext, snapshot.preferredYawDeg(), snapshot.preferredPitchDeg(), ObstructionResult.clearPath());
          if (warmSeed != null) {
-            RefinementResult warmRefinement = this.refineCandidate(warmContext, warmSeed, WARM_REFINEMENT_ITERATIONS);
+            RefinementResult warmRefinement = this.refineCandidate(warmContext, warmSeed, WARM_REFINEMENT_ITERATIONS, WARM_REFINEMENT_TARGET_BLOCKS, true);
+            stats.warmConverged = warmRefinement.precisionReached();
             Candidate warm = this.applyObstruction(snapshot, projectileModel, obstructionChecker, warmRefinement.candidate());
             boolean warmHighArc = warm.pitchDeg >= highArcPitchFloor(initial.pitchDeg);
-            boolean correctArc = !snapshot.preferHighArc() || warmHighArc;
-            if (correctArc && isAcceptableShot(snapshot, warm) && !nearHorizon(warm, horizon)) {
+            boolean correctArc = snapshot.preferHighArc() == warmHighArc;
+            if (warmRefinement.precisionReached() && correctArc && !warm.obstruction.blocked() && isAcceptableShot(snapshot, warm) && !nearHorizon(warm, horizon)) {
                stats.warmStart = true;
                return this.buildResult(snapshot, projectileModel, initial, warm, warmRefinement.iterations(), warmRefinement.finalStepDeg(), warmHighArc ? "high" : "low", "none", stats, startedNanos);
             }
@@ -169,6 +171,8 @@ public class SimulatedAimSolver implements AimSolver {
       List<String> debug = new ArrayList<>();
       debug.add("solver=simulated_moving_v4");
       debug.add("path=" + (stats.warmStart ? "warm" : "cold"));
+      debug.add("warmConverged=" + stats.warmConverged);
+      debug.add("refinementPrecisionBlocks=" + (stats.warmStart ? WARM_REFINEMENT_TARGET_BLOCKS : REFINEMENT_TARGET_BLOCKS));
       debug.add("initialInterceptTicks=" + initial.interceptTicks);
       debug.add("preferHighArc=" + snapshot.preferHighArc());
       debug.add("selectedHighArc=" + "high".equals(selectedArc));
@@ -199,6 +203,21 @@ public class SimulatedAimSolver implements AimSolver {
 
       if (RadarConfig.DEBUG_BEAMS) {
          LOGGER.debug("TargetingComputer simulated solve yaw={} pitch={} tick={} miss={} score={} confidence={} candidates={} ticks={} micros={} obstruction={}", best.yawDeg, best.pitchDeg, best.flightTick, best.missDistance, best.score, best.confidence, stats.candidateEvaluations, stats.simulatedTicks, elapsedMicros, best.obstruction.blocked() ? "blocked" : "clear");
+      }
+
+      if (snapshot.preferHighArc() && "low".equals(selectedArc) && !"none".equals(fallbackReason)) {
+         LOGGER.warn(
+                 "Simulated aim solver fell back from high arc to low arc: reason={} yaw={} pitch={} flightTicks={} miss={} range={} pitchConstraint={} muzzle={} target={}",
+                 fallbackReason,
+                 best.yawDeg,
+                 best.pitchDeg,
+                 best.flightTick,
+                 best.missDistance,
+                 snapshot.muzzlePosition().distanceTo(snapshot.targetPosition()),
+                 snapshot.pitchConstraint().summary(),
+                 snapshot.muzzlePosition(),
+                 snapshot.targetPosition()
+         );
       }
 
       AimSolution solution = new AimSolution(best.yawDeg, best.pitchDeg, TargetingMath.directionFromYawPitch(best.yawDeg, best.pitchDeg), best.predictedTargetPosition, best.flightTick, best.missDistance);
@@ -478,8 +497,10 @@ public class SimulatedAimSolver implements AimSolver {
       return shortlist;
    }
 
-   private static double highArcPitchFloor(double initialPitchDeg) {
-      return Math.max(20.0, Math.min(80.0, initialPitchDeg + 10.0));
+   private static double highArcPitchFloor(double directPitchDeg) {
+      // The two ideal ballistic branches straddle this angle; unlike a fixed floor,
+      // it continues to separate them when the target is above or below the muzzle.
+      return clampPitch(45.0 + directPitchDeg * 0.5);
    }
 
    private RefinementSummary refineShortlist(EvaluationContext context, List<Candidate> shortlist) {
@@ -495,7 +516,7 @@ public class SimulatedAimSolver implements AimSolver {
 
       int count = Math.min(REFINEMENT_SHORTLIST_SIZE, shortlist.size());
       for (int i = 0; i < count; ++i) {
-         RefinementResult result = this.refineCandidate(context, shortlist.get(i), MAX_REFINEMENT_ITERATIONS);
+         RefinementResult result = this.refineCandidate(context, shortlist.get(i), MAX_REFINEMENT_ITERATIONS, REFINEMENT_TARGET_BLOCKS, false);
          totalIterations += result.iterations();
          finalStepDeg = Math.max(finalStepDeg, result.finalStepDeg());
          refined.add(result.candidate());
@@ -512,10 +533,10 @@ public class SimulatedAimSolver implements AimSolver {
       return new RefinementSummary(best, totalIterations, finalStepDeg);
    }
 
-   private RefinementResult refineCandidate(EvaluationContext context, Candidate seed, int maxIterations) {
+   private RefinementResult refineCandidate(EvaluationContext context, Candidate seed, int maxIterations, double targetPrecisionBlocks, boolean prioritizeMissDistance) {
       TargetingSnapshot snapshot = context.snapshot;
       double range = Math.max(1.0, snapshot.muzzlePosition().distanceTo(seed.predictedTargetPosition));
-      double targetStep = refinementTargetStepDeg(range);
+      double targetStep = refinementTargetStepDeg(range, targetPrecisionBlocks);
       double step = Math.max(targetStep, Math.min(MAX_REFINEMENT_STEP_DEG, angularStepForBlocks(range, 4.0)));
       Candidate best = seed;
       int iterations = 0;
@@ -531,7 +552,7 @@ public class SimulatedAimSolver implements AimSolver {
                double yaw = TargetingMath.wrap180(best.yawDeg + (double)yawIndex * step);
                double pitch = clampPitch(best.pitchDeg + (double)pitchIndex * step);
                Candidate candidate = this.evaluate(context, yaw, pitch, ObstructionResult.clearPath());
-               if (candidate != null && score(snapshot, candidate) < score(snapshot, iterationBest)) {
+               if (candidate != null && betterRefinementCandidate(snapshot, candidate, iterationBest, prioritizeMissDistance)) {
                   iterationBest = candidate;
                }
             }
@@ -545,11 +566,23 @@ public class SimulatedAimSolver implements AimSolver {
          }
       }
 
-      return new RefinementResult(best, iterations, step);
+      return new RefinementResult(best, iterations, step, step <= targetStep);
    }
 
-   private static double refinementTargetStepDeg(double rangeBlocks) {
-      return Math.max(MIN_REFINEMENT_STEP_DEG, angularStepForBlocks(rangeBlocks, REFINEMENT_TARGET_BLOCKS));
+   private static boolean betterRefinementCandidate(TargetingSnapshot snapshot, Candidate candidate, Candidate incumbent, boolean prioritizeMissDistance) {
+      if (!prioritizeMissDistance) {
+         return score(snapshot, candidate) < score(snapshot, incumbent);
+      }
+
+      double missDelta = candidate.missDistance - incumbent.missDistance;
+      if (missDelta < -WARM_MISS_TIE_BLOCKS) {
+         return true;
+      }
+      return Math.abs(missDelta) <= WARM_MISS_TIE_BLOCKS && score(snapshot, candidate) < score(snapshot, incumbent);
+   }
+
+   private static double refinementTargetStepDeg(double rangeBlocks, double targetPrecisionBlocks) {
+      return angularStepForBlocks(rangeBlocks, targetPrecisionBlocks);
    }
 
    private static double angularStepForBlocks(double rangeBlocks, double blocks) {
@@ -876,7 +909,7 @@ public class SimulatedAimSolver implements AimSolver {
    private static record Candidate(double yawDeg, double pitchDeg, int flightTick, double flightTime, double missDistance, Vec3 predictedTargetPosition, Vec3 closestProjectilePosition, @Nullable ProjectileSimulator.SimulationResult trajectory, ObstructionResult obstruction, double confidence, double score) {
    }
 
-   private static record RefinementResult(Candidate candidate, int iterations, double finalStepDeg) {
+   private static record RefinementResult(Candidate candidate, int iterations, double finalStepDeg, boolean precisionReached) {
    }
 
    private static record RefinementSummary(Candidate best, int iterations, double finalStepDeg) {
@@ -888,6 +921,7 @@ public class SimulatedAimSolver implements AimSolver {
       int horizonExpansions;
       int pitchConstraintRejections;
       boolean warmStart;
+      boolean warmConverged;
    }
 
    private static final class EvaluationContext {

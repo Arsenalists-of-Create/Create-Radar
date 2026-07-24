@@ -158,7 +158,7 @@ public class CannonMountPitch {
                 currentPitch,
                 controller.getTargetAngle(),
                 diff,
-                controller.getSpeed(),
+                controller.getAvailableInputSpeed(),
                 nearDeadbandDeg
         );
 
@@ -168,7 +168,7 @@ public class CannonMountPitch {
             return;
         }
 
-        double rpm = Math.abs(controller.getSpeed());
+        double rpm = Math.abs(controller.getAvailableInputSpeed());
         if (rpm <= 0.0) {
             return;
         }

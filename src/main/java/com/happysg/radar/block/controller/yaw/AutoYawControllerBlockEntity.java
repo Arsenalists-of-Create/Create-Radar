@@ -2,8 +2,19 @@ package com.happysg.radar.block.controller.yaw;
 
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 
+import com.happysg.radar.block.controller.kinetic.CannonAxis;
+import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
+import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
+import com.happysg.radar.block.controller.kinetic.KineticAngleMath;
+import com.happysg.radar.block.controller.kinetic.KineticMountAdapter;
+import com.happysg.radar.block.controller.kinetic.KineticControllerState;
+import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
+import com.happysg.radar.block.controller.kinetic.KineticMountFrame;
+import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
+import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
@@ -13,6 +24,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -24,8 +36,12 @@ import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCan
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
 
 import javax.annotation.Nullable;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 
-public class AutoYawControllerBlockEntity extends KineticBlockEntity {
+public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final double TOLERANCE_DEG = 0.15;
     private static final double DEADBAND_DEG = 0.5;
@@ -44,6 +60,14 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
 
     private boolean mountDirty = true;
 
+    private final KineticControllerState kineticControllerState =
+            new KineticControllerState(CannonAxis.YAW);
+    private final DebugSwivelSweep debugSwivelSweep = new DebugSwivelSweep();
+    private final DebugSwivelFollow debugSwivelFollow = new DebugSwivelFollow();
+
+    private float generatedSpeed;
+    private boolean isolatedGeneratorInitialized;
+
     private final CannonMountYaw cannonHandler;
     private final PhysBearingYaw physHandler;
 
@@ -55,9 +79,18 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
 
     @Override
     public void tick() {
+        initializeIsolatedGenerator();
         super.tick();
 
         if (level == null || level.isClientSide()) {
+            return;
+        }
+
+        debugSwivelSweep.enforce(targetAngle, this::applyDebugSwivelCommand);
+        tickDebugSwivelFollow();
+        boolean kineticSelected = tickKineticActuator();
+        tickDebugSwivelSweep(kineticSelected);
+        if (kineticSelected) {
             return;
         }
 
@@ -77,12 +110,219 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
     public void setTargetAngle(float targetAngle) {
         this.targetAngle = targetAngle;
         this.isRunning = true;
+        kineticControllerState.onTargetChanged(true, targetAngle, DEADBAND_DEG);
         notifyUpdate();
         setChanged();
     }
 
     public double getTargetAngle() {
         return targetAngle;
+    }
+
+    public DebugSwivelSweep.StartResult startDebugSwivelSweep(double degrees) {
+        if (debugSwivelFollow.isActive()) {
+            return DebugSwivelSweep.StartResult.failed("player_follow_active");
+        }
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        if (!Double.isFinite(degrees) || Math.abs(degrees) > 180.0) {
+            return DebugSwivelSweep.StartResult.failed("angle_out_of_range");
+        }
+        if (!resolution.hasAdapter() || resolution.adapter() == null) {
+            return DebugSwivelSweep.StartResult.failed(resolution.reason());
+        }
+
+        KineticMountAdapter adapter = resolution.adapter();
+        String unavailableReason = debugSwivelUnavailableReason(adapter);
+        if (unavailableReason != null) {
+            return DebugSwivelSweep.StartResult.failed(unavailableReason);
+        }
+
+        double physical = adapter.getPhysicalAngleDegrees();
+        KineticMountFrame frame = adapter.frameIdentity();
+        if (!Double.isFinite(physical) || frame == null) {
+            return DebugSwivelSweep.StartResult.failed("physical_feedback_unavailable");
+        }
+        double capturedTarget = frame.controllerTargetFor(physical);
+        double step = adapter.effectiveDegreesPerTick(
+                adapter.maximumDriveRpm(getAvailableInputSpeed()));
+        debugSwivelSweep.start(degrees, capturedTarget, targetAngle, isRunning,
+                step, this::applyDebugSwivelCommand);
+        return DebugSwivelSweep.StartResult.started(adapter.relativeDirection());
+    }
+
+    public DebugSwivelFollow.ToggleResult toggleDebugSwivelFollow(ServerPlayer player) {
+        if (debugSwivelFollow.isActive()) {
+            stopDebugSwivelFollow("stopped_by_command", false);
+            return DebugSwivelFollow.ToggleResult.stopped();
+        }
+        if (debugSwivelSweep.isActive()) {
+            return DebugSwivelFollow.ToggleResult.failed("swivel_sweep_active");
+        }
+
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        if (!resolution.hasAdapter() || resolution.adapter() == null) {
+            return DebugSwivelFollow.ToggleResult.failed(resolution.reason());
+        }
+        KineticMountAdapter adapter = resolution.adapter();
+        String unavailableReason = debugSwivelFollowUnavailableReason(adapter);
+        if (unavailableReason != null) {
+            return DebugSwivelFollow.ToggleResult.failed(unavailableReason);
+        }
+        KineticMountFrame frame = adapter.frameIdentity();
+        if (frame == null) {
+            return DebugSwivelFollow.ToggleResult.failed("frame_unavailable");
+        }
+
+        Vec3 origin = worldPosition.relative(adapter.relativeDirection()).getCenter();
+        Vec3 playerTarget = player.getEyePosition();
+        if (!canPossiblyAimAt(origin, playerTarget)) {
+            return DebugSwivelFollow.ToggleResult.failed("player_outside_yaw_sector");
+        }
+        double target = DebugSwivelFollow.yawTargetDegrees(origin, playerTarget);
+        if (!Double.isFinite(target)) {
+            return DebugSwivelFollow.ToggleResult.failed("player_too_close_to_bearing");
+        }
+
+        kineticControllerState.release();
+        commandGeneratedSpeed(0.0);
+        kineticControllerState.beginContinuousTracking();
+        debugSwivelFollow.start(player.getUUID(), frame, adapter.relativeDirection(),
+                targetAngle, isRunning);
+        debugSwivelFollow.update(target, this::applyDebugSwivelCommand);
+        return DebugSwivelFollow.ToggleResult.started(adapter.relativeDirection());
+    }
+
+    @Nullable
+    private String debugSwivelUnavailableReason(KineticMountAdapter adapter) {
+        if (!adapter.isValid()) {
+            return "swivel_adapter_invalid";
+        }
+        if (!adapter.isAssembled()) {
+            return "swivel_not_assembled";
+        }
+        if (!adapter.isLocked()) {
+            return "swivel_not_locked";
+        }
+        if (Math.abs(getAvailableInputSpeed()) <= 1.0E-5) {
+            return "controller_has_no_kinetic_speed";
+        }
+        if (!adapter.isEndpointFree()) {
+            return "swivel_endpoint_busy";
+        }
+        return null;
+    }
+
+    @Nullable
+    private String debugSwivelFollowUnavailableReason(KineticMountAdapter adapter) {
+        if (!adapter.isValid()) {
+            return "swivel_adapter_invalid";
+        }
+        if (!adapter.isAssembled()) {
+            return "swivel_not_assembled";
+        }
+        if (!adapter.isLocked()) {
+            return "swivel_not_locked";
+        }
+        if (Math.abs(getAvailableInputSpeed()) <= 1.0E-5) {
+            return "controller_has_no_kinetic_speed";
+        }
+        if (!adapter.isEndpointFree() && !adapter.isDrivenBy(worldPosition)) {
+            return "swivel_endpoint_busy";
+        }
+        if (adapter.hasSequenceContext()) {
+            return "swivel_sequence_context_present";
+        }
+        return null;
+    }
+
+    private void applyDebugSwivelCommand(double degrees, boolean running) {
+        targetAngle = degrees;
+        isRunning = running;
+        kineticControllerState.onTargetChanged(running, degrees, DEADBAND_DEG);
+        notifyUpdate();
+        setChanged();
+    }
+
+    private void tickDebugSwivelFollow() {
+        if (!debugSwivelFollow.isActive()) {
+            return;
+        }
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null) {
+            stopDebugSwivelFollow(resolution.reason(), true);
+            return;
+        }
+        String unavailableReason = debugSwivelFollowUnavailableReason(adapter);
+        if (unavailableReason != null || kineticControllerState.isBlocked()) {
+            stopDebugSwivelFollow(unavailableReason != null
+                    ? unavailableReason : "controller_blocked", true);
+            return;
+        }
+        KineticMountFrame frame = adapter.frameIdentity();
+        if (frame == null || !debugSwivelFollow.matches(frame, adapter.relativeDirection())) {
+            stopDebugSwivelFollow("swivel_frame_changed", true);
+            return;
+        }
+        if (!(level instanceof ServerLevel serverLevel)
+                || debugSwivelFollow.playerId() == null) {
+            stopDebugSwivelFollow("server_level_unavailable", true);
+            return;
+        }
+        ServerPlayer player = serverLevel.getServer().getPlayerList()
+                .getPlayer(debugSwivelFollow.playerId());
+        if (player == null || player.serverLevel() != serverLevel || !player.isAlive()) {
+            stopDebugSwivelFollow("player_unavailable", true);
+            return;
+        }
+
+        Vec3 origin = worldPosition.relative(adapter.relativeDirection()).getCenter();
+        Vec3 playerTarget = player.getEyePosition();
+        if (!canPossiblyAimAt(origin, playerTarget)) {
+            stopDebugSwivelFollow("player_outside_yaw_sector", true);
+            return;
+        }
+        double target = DebugSwivelFollow.yawTargetDegrees(origin, playerTarget);
+        if (!Double.isFinite(target)) {
+            stopDebugSwivelFollow("player_too_close_to_bearing", true);
+            return;
+        }
+        debugSwivelFollow.update(target, this::applyDebugSwivelCommand);
+    }
+
+    private void stopDebugSwivelFollow(String reason, boolean logCancellation) {
+        if (!debugSwivelFollow.isActive()) {
+            return;
+        }
+        kineticControllerState.release();
+        commandGeneratedSpeed(0.0);
+        debugSwivelFollow.stop(reason, this::applyDebugSwivelCommand);
+        if (logCancellation) {
+            LOGGER.warn("Cancelled yaw Swivel player follow controller={} reason={}",
+                    worldPosition, reason);
+        }
+    }
+
+    private void tickDebugSwivelSweep(boolean kineticSelected) {
+        if (!debugSwivelSweep.isActive()) {
+            return;
+        }
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        boolean valid = kineticSelected && resolution.hasAdapter() && adapter != null
+                && adapter.isValid() && adapter.isAssembled() && adapter.isLocked()
+                && !kineticControllerState.isBlocked()
+                && (adapter.isEndpointFree() || adapter.isDrivenBy(worldPosition));
+        double step = adapter == null ? 0.0
+                : adapter.effectiveDegreesPerTick(
+                        adapter.maximumDriveRpm(getAvailableInputSpeed()));
+        String outcome = debugSwivelSweep.tick(valid, kineticControllerState.isAtDestination(),
+                step, this::applyDebugSwivelCommand);
+        if (outcome != null && !"completed".equals(outcome)) {
+            kineticControllerState.release();
+            commandGeneratedSpeed(0.0);
+            LOGGER.warn("Cancelled yaw Swivel sweep controller={} reason={}", worldPosition, outcome);
+        }
     }
 
     public void setTarget(@Nullable Vec3 targetPos) {
@@ -117,6 +357,7 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
     public void returnToInitialOrientation() {
         targetAngle = getInitialOrientationTargetAngle();
         isRunning = true;
+        kineticControllerState.onTargetChanged(true, targetAngle, DEADBAND_DEG);
         notifyUpdate();
         setChanged();
     }
@@ -146,6 +387,15 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
     public boolean atTargetYaw(boolean lag) {
         if (level == null) {
             return false;
+        }
+
+        if (debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
+            return false;
+        }
+
+        if (hasStructuralKineticSelection()) {
+            return kineticControllerState.isReady(resolveKineticMount(), isRunning,
+                    targetAngle, DEADBAND_DEG);
         }
 
         Mount mount = resolveMount();
@@ -182,6 +432,10 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
     }
 
     public void onRelevantNeighborChanged(BlockPos fromPos) {
+        if (isPerpendicularNeighbor(fromPos)) {
+            invalidateKineticActuator();
+        }
+
         BlockPos mountPos = getMountPos();
         if (mountPos == null) {
             return;
@@ -226,7 +480,7 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
         cachedMount = newMount;
         mountDirty = false;
 
-        if (newMount == null) {
+        if (newMount == null && !hasStructuralKineticSelection()) {
             isRunning = false;
             hasLastCbcYawWritten = false;
             physHandler.reset();
@@ -268,6 +522,94 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
                 || (Mods.VS_CLOCKWORK.isLoaded() && be instanceof PhysBearingBlockEntity);
     }
 
+    /** Input power is sampled, never connected to this isolated generator. */
+    public double getAvailableInputSpeed() {
+        return KineticPowerSource.strongestAdjacentShaftRpm(this, Direction.Axis.Y);
+    }
+
+    private void initializeIsolatedGenerator() {
+        if (isolatedGeneratorInitialized || level == null || level.isClientSide()) {
+            return;
+        }
+        if (hasSource() || hasNetwork() || Math.abs(getTheoreticalSpeed()) > 1.0e-5) {
+            detachKinetics();
+            removeSource();
+            setSpeed(0.0f);
+            setNetwork(null);
+        }
+        sequenceContext = null;
+        generatedSpeed = 0.0f;
+        isolatedGeneratorInitialized = true;
+    }
+
+    private void commandGeneratedSpeed(double rpm) {
+        sequenceContext = null;
+        if (hasSource()) {
+            generatedSpeed = 0.0f;
+            detachKinetics();
+            removeSource();
+            setSpeed(0.0f);
+            setNetwork(null);
+            setChanged();
+            return;
+        }
+        float next = Double.isFinite(rpm) ? (float) rpm : 0.0f;
+        if (next == 0.0f && generatedSpeed == 0.0f) {
+            return;
+        }
+        if (next != 0.0f && Math.abs(next - generatedSpeed) < 0.01f) {
+            return;
+        }
+        generatedSpeed = next;
+        updateGeneratedRotation();
+        setChanged();
+    }
+
+    private boolean tickKineticActuator() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        boolean consumed = kineticControllerState.tick(
+                this, resolution, isRunning, targetAngle, DEADBAND_DEG,
+                getAvailableInputSpeed(), this::commandGeneratedSpeed);
+        flushKineticStateSync();
+        return consumed;
+    }
+
+    private boolean hasStructuralKineticSelection() {
+        return resolveKineticMount().isStructuralSelection();
+    }
+
+    private KineticMountAdapterResolution resolveKineticMount() {
+        return Mods.SIMULATED.isLoaded()
+                ? SimulatedSwivelMountAdapter.resolve(this, Direction.Axis.Y)
+                : KineticMountAdapterResolution.absent("simulated_not_loaded");
+    }
+
+    private boolean isPerpendicularNeighbor(BlockPos pos) {
+        int dx = pos.getX() - worldPosition.getX();
+        int dy = pos.getY() - worldPosition.getY();
+        int dz = pos.getZ() - worldPosition.getZ();
+        return Math.abs(dx) + Math.abs(dy) + Math.abs(dz) == 1 && dy == 0;
+    }
+
+    public void invalidateKineticActuator() {
+        kineticControllerState.invalidate();
+        commandGeneratedSpeed(0.0);
+    }
+
+    public void releaseKineticActuator() {
+        kineticControllerState.release();
+        commandGeneratedSpeed(0.0);
+        flushKineticStateSync();
+    }
+
+    private void flushKineticStateSync() {
+        if (!kineticControllerState.consumeSyncRequested()) {
+            return;
+        }
+        setChanged();
+        notifyUpdate();
+    }
+
     public double getMinAngleDeg() {
         return minAngleDeg;
     }
@@ -301,7 +643,7 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
         double yawDeg = Math.toDegrees(Math.atan2(d.z, d.x)) - 90.0;
         yawDeg = wrap360(yawDeg);
 
-        return true;
+        return KineticAngleMath.isInInclusiveWrappedInterval(yawDeg, minAngleDeg, maxAngleDeg);
     }
 
     public double computeYawToTargetDeg(Vec3 cannonCenterWorld, Vec3 targetWorld) {
@@ -356,6 +698,9 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
 
         hasLastCbcYawWritten = false;
         physHandler.read(compound);
+        kineticControllerState.read(compound, wasMoved, clientPacket);
+        generatedSpeed = compound.getFloat("GeneratedSpeed");
+        isolatedGeneratorInitialized = false;
     }
 
     @Override
@@ -364,27 +709,54 @@ public class AutoYawControllerBlockEntity extends KineticBlockEntity {
 
         compound.putDouble("MinAngleDeg", minAngleDeg);
         compound.putDouble("MaxAngleDeg", maxAngleDeg);
-        compound.putDouble("TargetAngle", wrap360(targetAngle));
-        compound.putBoolean("IsRunning", isRunning);
+        double storedTarget = clientPacket ? targetAngle
+                : debugSwivelFollow.persistentTarget(targetAngle);
+        boolean storedRunning = clientPacket ? isRunning
+                : debugSwivelFollow.persistentRunning(isRunning);
+        compound.putDouble("TargetAngle", wrap360(storedTarget));
+        compound.putBoolean("IsRunning", storedRunning);
 
         physHandler.write(compound);
+        kineticControllerState.write(compound, clientPacket);
+        compound.putFloat("GeneratedSpeed", generatedSpeed);
     }
 
     @Override
     protected void copySequenceContextFrom(KineticBlockEntity sourceBE) {
-        // i'm keeping this empty like before
+        sequenceContext = null;
+    }
+
+    @Override
+    public float getGeneratedSpeed() {
+        return generatedSpeed;
+    }
+
+    @Override
+    public float calculateAddedStressCapacity() {
+        return 256.0f;
     }
 
     public void setInternalTargetAngle(double targetAngle) {
         this.targetAngle = targetAngle;
+        kineticControllerState.onTargetChanged(isRunning, targetAngle, DEADBAND_DEG);
     }
 
     void setRunning(boolean running) {
         this.isRunning = running;
+        kineticControllerState.onTargetChanged(running, targetAngle, DEADBAND_DEG);
     }
 
     boolean isRunningController() {
         return isRunning;
+    }
+
+    @Override
+    public void onChunkUnloaded() {
+        if (level != null && !level.isClientSide()) {
+            stopDebugSwivelFollow("controller_chunk_unloaded", false);
+            releaseKineticActuator();
+        }
+        super.onChunkUnloaded();
     }
 
     void recordCbcYawWritten(double yawDeg) {

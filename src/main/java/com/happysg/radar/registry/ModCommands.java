@@ -5,6 +5,8 @@ import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.id.IDManager;
+import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
+import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.config.RadarConfig;
@@ -140,6 +142,28 @@ public class  ModCommands {
                 Commands.literal("radar")
                         .then(Commands.literal("debug")
                                 .requires(src -> src.hasPermission(2))
+                                .then(Commands.literal("swivel_sweep")
+                                        .then(Commands.argument("degrees", FloatArgumentType.floatArg(-180.0F, 180.0F))
+                                                .executes(ctx -> debugSwivelSweep(
+                                                        ctx.getSource(),
+                                                        FloatArgumentType.getFloat(ctx, "degrees")))
+                                        )
+                                )
+                        )
+        );
+        dispatcher.register(
+                Commands.literal("radar")
+                        .then(Commands.literal("debug")
+                                .requires(src -> src.hasPermission(2))
+                                .then(Commands.literal("swivel_follow")
+                                        .executes(ctx -> debugSwivelFollow(ctx.getSource()))
+                                )
+                        )
+        );
+        dispatcher.register(
+                Commands.literal("radar")
+                        .then(Commands.literal("debug")
+                                .requires(src -> src.hasPermission(2))
                                 .then(Commands.literal("gen_debug_file")
                                         .executes(ctx -> {
                                             genDebugFile(ctx.getSource());
@@ -194,6 +218,98 @@ public class  ModCommands {
                 true
         );
         return failed == 0 ? 1 : 0;
+    }
+
+    private static int debugSwivelSweep(CommandSourceStack source, float degrees) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        ServerLevel level = player.serverLevel();
+        BlockHitResult hit = raycastBlock(player, 12.0);
+        if (hit.getType() != HitResult.Type.BLOCK) {
+            source.sendFailure(Component.literal("Look at a pitch or yaw controller."));
+            return 0;
+        }
+
+        BlockPos controllerPos = hit.getBlockPos();
+        BlockEntity blockEntity = level.getBlockEntity(controllerPos);
+        DebugSwivelSweep.StartResult result;
+        String controllerType;
+        if (blockEntity instanceof AutoPitchControllerBlockEntity pitch) {
+            result = pitch.startDebugSwivelSweep(degrees);
+            controllerType = "pitch";
+        } else if (blockEntity instanceof AutoYawControllerBlockEntity yaw) {
+            result = yaw.startDebugSwivelSweep(degrees);
+            controllerType = "yaw";
+        } else {
+            source.sendFailure(Component.literal("That block is not a pitch or yaw controller."));
+            return 0;
+        }
+
+        if (!result.started() || result.bearingDirection() == null) {
+            source.sendFailure(Component.literal("Could not start Swivel sweep: " + result.reason()));
+            return 0;
+        }
+
+        BlockPos bearingPos = controllerPos.relative(result.bearingDirection());
+        source.sendSuccess(
+                () -> Component.literal("Started " + controllerType + " Swivel sweep by " + degrees
+                        + " degrees at " + bearingPos + "; it will return to 0 after settling."),
+                false
+        );
+        LOGGER.warn("Started debug Swivel sweep controller={} type={} bearing={} degrees={}",
+                controllerPos, controllerType, bearingPos, degrees);
+        return 1;
+    }
+
+    private static int debugSwivelFollow(CommandSourceStack source) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        ServerLevel level = player.serverLevel();
+        BlockHitResult hit = raycastBlock(player, 12.0);
+        if (hit.getType() != HitResult.Type.BLOCK) {
+            source.sendFailure(Component.literal("Look at a pitch or yaw controller."));
+            return 0;
+        }
+
+        BlockPos controllerPos = hit.getBlockPos();
+        BlockEntity blockEntity = level.getBlockEntity(controllerPos);
+        DebugSwivelFollow.ToggleResult result;
+        String controllerType;
+        if (blockEntity instanceof AutoPitchControllerBlockEntity pitch) {
+            result = pitch.toggleDebugSwivelFollow(player);
+            controllerType = "pitch";
+        } else if (blockEntity instanceof AutoYawControllerBlockEntity yaw) {
+            result = yaw.toggleDebugSwivelFollow(player);
+            controllerType = "yaw";
+        } else {
+            source.sendFailure(Component.literal("That block is not a pitch or yaw controller."));
+            return 0;
+        }
+
+        if (result.state() == DebugSwivelFollow.ToggleState.FAILED) {
+            source.sendFailure(Component.literal("Could not toggle Swivel player follow: "
+                    + result.reason()));
+            return 0;
+        }
+        if (result.state() == DebugSwivelFollow.ToggleState.STOPPED) {
+            source.sendSuccess(
+                    () -> Component.literal("Stopped " + controllerType
+                            + " Swivel player follow and restored its previous target."),
+                    false
+            );
+            LOGGER.warn("Stopped debug Swivel player follow controller={} type={} player={}",
+                    controllerPos, controllerType, player.getGameProfile().getName());
+            return 1;
+        }
+
+        BlockPos bearingPos = controllerPos.relative(result.bearingDirection());
+        source.sendSuccess(
+                () -> Component.literal("Started " + controllerType
+                        + " Swivel player follow at " + bearingPos
+                        + ". Run the command again while looking at this controller to stop."),
+                false
+        );
+        LOGGER.warn("Started debug Swivel player follow controller={} type={} bearing={} player={}",
+                controllerPos, controllerType, bearingPos, player.getGameProfile().getName());
+        return 1;
     }
 
     private static int cannonSolverDebug(CommandSourceStack source, boolean drawArc, int arcTicks) throws CommandSyntaxException {

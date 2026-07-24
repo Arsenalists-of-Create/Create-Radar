@@ -93,7 +93,7 @@ public class CannonMountYaw {
             return;
         }
 
-        double rpm = Math.abs(controller.getSpeed());
+        double rpm = Math.abs(controller.getAvailableInputSpeed());
         if (rpm <= 0.0) {
             return;
         }

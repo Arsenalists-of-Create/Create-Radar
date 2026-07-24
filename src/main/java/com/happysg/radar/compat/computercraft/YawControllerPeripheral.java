@@ -32,6 +32,6 @@ public class YawControllerPeripheral implements GenericPeripheral {
         if (entity.firingControl != null) {
             entity.firingControl.resetTarget();
         }
-        entity.isRunning = false;
+        entity.stopController();
     }
 }

@@ -370,4 +370,13 @@ public class PonderScenes {
                 .colored(PonderPalette.OUTPUT)
                 .placeNearTarget();
     }
+
+    public static void sonarSetup(SceneBuilder scene, SceneBuildingUtil util){}
+
+    public static void aRADSetup(SceneBuilder scene, SceneBuildingUtil util){}
+
+    public static void jammerSetup(SceneBuilder scene, SceneBuildingUtil util){}
+
+
+
 }

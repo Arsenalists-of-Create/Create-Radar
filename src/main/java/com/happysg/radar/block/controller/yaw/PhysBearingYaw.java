@@ -150,7 +150,7 @@ public class PhysBearingYaw {
             return;
         }
 
-        double rpm = Math.abs(controller.getSpeed());
+        double rpm = Math.abs(controller.getAvailableInputSpeed());
         if (rpm <= 0.0) {
             return;
         }
@@ -205,7 +205,7 @@ public class PhysBearingYaw {
     }
 
     private double getStep(double range, double dist) {
-        double rpm = Math.abs(controller.getSpeed());
+        double rpm = Math.abs(controller.getAvailableInputSpeed());
         double r = Math.min(256.0, Math.max(0.0, rpm));
 
         double gamma = 1.6;

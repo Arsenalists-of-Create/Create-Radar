@@ -911,6 +911,12 @@ public class WeaponFiringControl {
                                                     this.cachedSableYawDeg = desiredYaw;
                                                 }
                                             }
+                                        } else {
+                                            AimCommand command = this.directAimCommand(cannon, cannonMuzzleWorld, solvePos);
+                                            if (command != null) {
+                                                desiredPitch = command.pitchDeg();
+                                                desiredYaw = command.controllerYawDeg();
+                                            }
                                         }
                                     } else if (hasNewTargetingSolution) {
                                         desiredPitch = targetingResult.desiredPitchDeg();
@@ -921,6 +927,12 @@ public class WeaponFiringControl {
                                         List<Double> pitchRoots = CannonTargeting.calculatePitch(this.cannonMount, origin, offsetAim, serverLevel);
                                         if (pitchRoots != null && !pitchRoots.isEmpty()) {
                                             desiredPitch = selectPitchRoot(pitchRoots, this.targetingConfig.preferHighArc());
+                                        }
+                                    } else if (!CannonUtil.isLaserCannon(cannon)) {
+                                        AimCommand command = this.directAimCommand(cannon, cannonMuzzleWorld, solvePos);
+                                        if (command != null) {
+                                            desiredPitch = command.pitchDeg();
+                                            desiredYaw = command.controllerYawDeg();
                                         }
                                     }
 
@@ -1666,8 +1678,20 @@ public class WeaponFiringControl {
         long tick = serverLevel.getGameTime();
         TargetMotionState previous = this.targetMotionStates.get(targetId);
         long dt = previous == null ? 1L : Math.max(1L, tick - previous.tick);
+        Vec3 sampledPosition = targetWorldPosition == null ? Vec3.ZERO : targetWorldPosition;
+        int stationarySamples = previous != null
+                && sampledPosition.distanceToSqr(previous.position) <= 1.0E-8
+                ? previous.stationarySamples + 1 : 1;
+        if (stationarySamples >= 3) {
+            rawVelocity = Vec3.ZERO;
+            rawAcceleration = Vec3.ZERO;
+        }
         Vec3 smoothedVelocity = previous == null ? rawVelocity : previous.smoothedVelocity.scale(0.45).add(rawVelocity.scale(0.55));
         Vec3 smoothedAcceleration = previous == null ? rawAcceleration : previous.smoothedAcceleration.scale(0.55).add(rawAcceleration.scale(0.45));
+        if (stationarySamples >= 3) {
+            smoothedVelocity = Vec3.ZERO;
+            smoothedAcceleration = Vec3.ZERO;
+        }
         Vec3 jerkVec = previous == null ? Vec3.ZERO : rawAcceleration.subtract(previous.rawAcceleration).scale((double)1.0F / (double)dt);
         double jerk = jerkVec.length();
         boolean onGround = targetEntity != null && targetEntity.onGround();
@@ -1691,7 +1715,9 @@ public class WeaponFiringControl {
         TargetMotionClass motionClass = previous == null ? TargetMotionClass.UNKNOWN : (erratic ? TargetMotionClass.ERRATIC : TargetMotionClass.STEADY);
         String reason = previous == null ? "warming_up" : (fallFlying ? "fall_flying" : (playerSprintJump ? "sprint_jump" : (inferredSprintJump ? "inferred_sprint_jump" : (jerk > 0.08 ? "jerk" : (directionChange > 0.55 ? "direction_change" : (fastMoving ? "fast_moving" : "steady"))))));
 
-        this.targetMotionStates.put(targetId, new TargetMotionState(targetWorldPosition == null ? Vec3.ZERO : targetWorldPosition, rawVelocity, rawAcceleration, smoothedVelocity, smoothedAcceleration, onGround, tick));
+        this.targetMotionStates.put(targetId, new TargetMotionState(sampledPosition,
+                rawVelocity, rawAcceleration, smoothedVelocity, smoothedAcceleration,
+                onGround, tick, stationarySamples));
         if (this.targetMotionStates.size() > 256) {
             this.targetMotionStates.entrySet().removeIf(entry -> tick - entry.getValue().tick > 200L);
         }
@@ -1871,6 +1897,27 @@ public class WeaponFiringControl {
         return new AimCommand(mountAngles.pitchDeg(), wrap360(mountAngles.yawDeg() + 270.0));
     }
 
+    @Nullable
+    private AimCommand directAimCommand(AbstractMountedCannonContraption cannonContraption, @Nullable Vec3 origin, @Nullable Vec3 target) {
+        if (origin == null || target == null) {
+            return null;
+        }
+
+        Vec3 direction = target.subtract(origin);
+        if (direction.lengthSqr() < 1.0E-12) {
+            return null;
+        }
+
+        PitchConstraint constraint = this.effectivePitchConstraint(cannonContraption);
+        if (!constraint.hasReachablePitch()) {
+            return null;
+        }
+
+        TargetingMath.YawPitch mountAngles = constraint.mountYawPitch(direction);
+        double pitch = Math.max(constraint.minPitchDeg(), Math.min(constraint.maxPitchDeg(), mountAngles.pitchDeg()));
+        return new AimCommand(pitch, wrap360(mountAngles.yawDeg() + 270.0));
+    }
+
     private int estimateSlewTicks(AbstractMountedCannonContraption cannonContraption, double desiredControllerYaw, double desiredPitch) {
         PitchOrientedContraptionEntity contraption = this.cannonMount.getContraption();
         if (contraption == null) {
@@ -1881,7 +1928,8 @@ public class WeaponFiringControl {
                 double currentYaw = wrap360((double)contraption.yaw);
                 double targetYaw = wrap360(desiredControllerYaw);
                 double yawError = Math.abs(shortestDelta(currentYaw, targetYaw));
-                yawTicks = ticksForAngle(yawError, (double)Math.abs(this.yawController.getSpeed()) / (double)24.0F);
+                yawTicks = ticksForAngle(yawError,
+                        Math.abs(this.yawController.getAvailableInputSpeed()) / 24.0);
             }
 
             double pitchTicks = (double)0.0F;
@@ -1890,7 +1938,8 @@ public class WeaponFiringControl {
                 int invert = -cannonContraption.initialOrientation().getStepX() + cannonContraption.initialOrientation().getStepZ();
                 currentPitch *= (double)(-invert);
                 double pitchError = Math.abs(desiredPitch - currentPitch);
-                pitchTicks = ticksForAngle(pitchError, (double)Math.abs(this.pitchController.getSpeed()) / (double)24.0F);
+                pitchTicks = ticksForAngle(pitchError,
+                        Math.abs(this.pitchController.getAvailableInputSpeed()) / 24.0);
             }
 
             double ticks = Math.max(yawTicks, pitchTicks);
@@ -2027,7 +2076,9 @@ public class WeaponFiringControl {
         long tick;
     }
 
-    private static record TargetMotionState(Vec3 position, Vec3 rawVelocity, Vec3 rawAcceleration, Vec3 smoothedVelocity, Vec3 smoothedAcceleration, boolean onGround, long tick) {
+    private static record TargetMotionState(Vec3 position, Vec3 rawVelocity, Vec3 rawAcceleration,
+                                            Vec3 smoothedVelocity, Vec3 smoothedAcceleration,
+                                            boolean onGround, long tick, int stationarySamples) {
     }
 
     private static record TargetMotionEstimate(TargetMotionClass motionClass, Vec3 velocity, Vec3 acceleration, double jerk, int stableTicksRequired, double minConfidence, double aimStableEps, boolean looseAim, String reason) {

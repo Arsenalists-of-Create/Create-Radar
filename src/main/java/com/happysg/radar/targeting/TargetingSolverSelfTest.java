@@ -49,7 +49,10 @@ public final class TargetingSolverSelfTest {
       results.add(checkLongRangeCbcStyleSolve());
       results.add(checkProjectileSimulatorLongCap());
       results.add(checkWarmStartSolve());
+      results.add(checkWarmStartStationarySequence());
+      results.add(checkWarmStartDirectionReversal());
       results.add(checkHighArcWithinLimits());
+      results.add(checkHighArcWithinTypicalCbcLimits());
       results.add(checkHighArcLimitFallback());
       results.add(checkHighArcObstructionFallback());
       results.add(checkNeitherArcWithinLimits());
@@ -258,38 +261,126 @@ public final class TargetingSolverSelfTest {
 
    private static Result checkWarmStartSolve() {
       TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
-      TargetingSnapshot coldSnapshot = TargetingSnapshot.builder(null)
-              .muzzlePosition(Vec3.ZERO)
-              .targetPosition(new Vec3(300.0, 10.0, 25.0))
-              .targetVelocity(new Vec3(0.0, 0.0, 0.08))
-              .projectileSpeed(12.0)
-              .gravity(-0.05)
-              .drag(0.002)
-              .maxFlightTicks(400)
-              .targetMotionClass(TargetMotionClass.STEADY)
-              .build();
-      TargetingResult cold = computer.solve(coldSnapshot);
-      if (!cold.valid() || !cold.hasShot()) {
-         return new Result("warm_start_tracking", false, "cold solve failed: " + cold.debugString());
+      Vec3 velocity = new Vec3(0.0, 0.0, 0.08);
+      double maxEquivalentError = 0.0;
+      int maxEvaluations = 0;
+      for (double range : new double[]{50.0, 300.0, 1200.0}) {
+         Vec3 position = new Vec3(range, 0.0, 25.0);
+         TargetingResult previous = computer.solve(warmTrackingSnapshot(position, velocity, null));
+         if (!previous.valid() || !previous.hasShot()) {
+            return new Result("warm_start_tracking", false, "range=" + range + " cold solve failed: " + previous.debugString());
+         }
+
+         for (int tick = 1; tick <= 12; ++tick) {
+            position = position.add(velocity);
+            TargetingResult warm = computer.solve(warmTrackingSnapshot(position, velocity, previous));
+            int evaluations = debugInt(warm, "candidateEvaluations=");
+            double equivalentError = noDragTrackingError(position, velocity, 12.0, warm);
+            maxEquivalentError = Math.max(maxEquivalentError, equivalentError);
+            maxEvaluations = Math.max(maxEvaluations, evaluations);
+            boolean passed = validConvergedWarmShot(warm, evaluations)
+                    && warm.desiredYawDeg() > previous.desiredYawDeg() + 1.0E-9
+                    && equivalentError <= 0.05;
+            if (!passed) {
+               return new Result("warm_start_tracking", false,
+                       "range=" + range + " tick=" + tick + " evaluations=" + evaluations + " equivalentError=" + equivalentError + " previousYaw=" + previous.desiredYawDeg() + " " + warm.debugString());
+            }
+            previous = warm;
+         }
+      }
+      return new Result("warm_start_tracking", true,
+              "ranges=3 ticksPerRange=12 maxEvaluations=" + maxEvaluations + " maxEquivalentError=" + maxEquivalentError);
+   }
+
+   private static Result checkWarmStartStationarySequence() {
+      TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
+      Vec3 position = new Vec3(300.0, 0.0, 25.0);
+      TargetingResult previous = computer.solve(warmTrackingSnapshot(position, Vec3.ZERO, null));
+      if (!previous.valid() || !previous.hasShot()) {
+         return new Result("warm_start_stationary", false, "cold solve failed: " + previous.debugString());
       }
 
-      TargetingSnapshot warmSnapshot = TargetingSnapshot.builder(null)
+      double initialYaw = previous.desiredYawDeg();
+      double initialPitch = previous.desiredPitchDeg();
+      int maxEvaluations = 0;
+      for (int tick = 1; tick <= 6; ++tick) {
+         TargetingResult warm = computer.solve(warmTrackingSnapshot(position, Vec3.ZERO, previous));
+         int evaluations = debugInt(warm, "candidateEvaluations=");
+         maxEvaluations = Math.max(maxEvaluations, evaluations);
+         boolean stable = Math.abs(warm.desiredYawDeg() - initialYaw) <= 1.0E-12
+                 && Math.abs(warm.desiredPitchDeg() - initialPitch) <= 1.0E-12;
+         if (!validConvergedWarmShot(warm, evaluations) || !stable) {
+            return new Result("warm_start_stationary", false,
+                    "tick=" + tick + " evaluations=" + evaluations + " initialYaw=" + initialYaw + " initialPitch=" + initialPitch + " " + warm.debugString());
+         }
+         previous = warm;
+      }
+      return new Result("warm_start_stationary", true, "ticks=6 maxEvaluations=" + maxEvaluations);
+   }
+
+   private static Result checkWarmStartDirectionReversal() {
+      TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
+      Vec3 position = new Vec3(300.0, 0.0, 10.0);
+      Vec3 velocity = new Vec3(0.0, 0.0, 0.08);
+      TargetingResult previous = computer.solve(warmTrackingSnapshot(position, velocity, null));
+      if (!previous.valid() || !previous.hasShot()) {
+         return new Result("warm_start_direction_reversal", false, "cold solve failed: " + previous.debugString());
+      }
+
+      int maxEvaluations = 0;
+      for (int tick = 1; tick <= 12; ++tick) {
+         if (tick == 6) {
+            velocity = velocity.scale(-1.0);
+         }
+         position = position.add(velocity);
+         TargetingResult warm = computer.solve(warmTrackingSnapshot(position, velocity, previous));
+         int evaluations = debugInt(warm, "candidateEvaluations=");
+         maxEvaluations = Math.max(maxEvaluations, evaluations);
+         double yawDelta = TargetingMath.shortestAngleDelta(previous.desiredYawDeg(), warm.desiredYawDeg());
+         boolean expectedDirection = tick < 6 ? yawDelta > 1.0E-9 : yawDelta < -1.0E-9;
+         boolean lowArc = "low".equals(debugValue(warm, "selectedArc="));
+         if (!validConvergedWarmShot(warm, evaluations) || !expectedDirection || !lowArc) {
+            return new Result("warm_start_direction_reversal", false,
+                    "tick=" + tick + " evaluations=" + evaluations + " yawDelta=" + yawDelta + " " + warm.debugString());
+         }
+         previous = warm;
+      }
+      return new Result("warm_start_direction_reversal", true, "ticks=12 maxEvaluations=" + maxEvaluations);
+   }
+
+   private static TargetingSnapshot warmTrackingSnapshot(Vec3 position, Vec3 velocity, TargetingResult preferred) {
+      return TargetingSnapshot.builder(null)
               .muzzlePosition(Vec3.ZERO)
-              .targetPosition(new Vec3(300.0, 10.0, 25.08))
-              .targetVelocity(new Vec3(0.0, 0.0, 0.08))
+              .targetPosition(position)
+              .targetVelocity(velocity)
               .projectileSpeed(12.0)
-              .gravity(-0.05)
-              .drag(0.002)
+              .gravity(0.0)
+              .drag(0.0)
               .maxFlightTicks(400)
-              .preferredYawDeg(cold.desiredYawDeg())
-              .preferredPitchDeg(cold.desiredPitchDeg())
+              .preferredYawDeg(preferred == null ? null : preferred.desiredYawDeg())
+              .preferredPitchDeg(preferred == null ? null : preferred.desiredPitchDeg())
               .targetMotionClass(TargetMotionClass.STEADY)
               .build();
-      TargetingResult warm = computer.solve(warmSnapshot);
-      boolean usedWarmPath = warm.debugInfo().stream().anyMatch(line -> line.equals("path=warm"));
-      int evaluations = debugInt(warm, "candidateEvaluations=");
-      boolean passed = warm.valid() && warm.hasShot() && usedWarmPath && evaluations > 0 && evaluations <= 81;
-      return new Result("warm_start_tracking", passed, "evaluations=" + evaluations + " " + warm.debugString());
+   }
+
+   private static boolean validConvergedWarmShot(TargetingResult result, int evaluations) {
+      return result.valid()
+              && result.hasShot()
+              && "warm".equals(debugValue(result, "path="))
+              && "true".equals(debugValue(result, "warmConverged="))
+              && "0.05".equals(debugValue(result, "refinementPrecisionBlocks="))
+              && evaluations > 0
+              && evaluations <= 113;
+   }
+
+   private static double noDragTrackingError(Vec3 targetPosition, Vec3 targetVelocity, double projectileSpeed, TargetingResult result) {
+      double interceptTicks = estimateInterceptTicks(targetPosition, targetVelocity, projectileSpeed);
+      if (!Double.isFinite(interceptTicks) || result == null || !result.hasShot()) {
+         return Double.POSITIVE_INFINITY;
+      }
+      Vec3 analyticIntercept = targetPosition.add(targetVelocity.scale(interceptTicks));
+      Vec3 solvedProjectile = TargetingMath.directionFromYawPitch(result.desiredYawDeg(), result.desiredPitchDeg()).scale(projectileSpeed * interceptTicks);
+      return solvedProjectile.distanceTo(analyticIntercept);
    }
 
    private static Result checkHighArcWithinLimits() {
@@ -299,6 +390,28 @@ public final class TargetingSolverSelfTest {
               && result.desiredPitchDeg() > 45.0
               && "high".equals(debugValue(result, "selectedArc="));
       return new Result("artillery_high_arc_within_limits", passed, result.debugString());
+   }
+
+   private static Result checkHighArcWithinTypicalCbcLimits() {
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(new Vec3(70.0, 0.0, 0.0))
+              .projectileSpeed(4.0)
+              .gravity(-0.2)
+              .drag(0.0)
+              .cbcPhysics(true)
+              .maxFlightTicks(120)
+              .pitchConstraint(PitchConstraint.world(-30.0, 60.0))
+              .preferHighArc(true)
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
+      TargetingResult result = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE).solve(snapshot);
+      boolean passed = result.valid()
+              && result.hasShot()
+              && result.desiredPitchDeg() > 45.0
+              && result.desiredPitchDeg() <= 60.0
+              && "high".equals(debugValue(result, "selectedArc="));
+      return new Result("artillery_high_arc_typical_cbc_limits", passed, result.debugString());
    }
 
    private static Result checkHighArcLimitFallback() {

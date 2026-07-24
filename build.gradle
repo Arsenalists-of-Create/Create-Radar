@@ -49,7 +49,7 @@ neoForge {
 
         gameTestServer {
             type = "gameTestServer"
-            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            systemProperty 'neoforge.enabledGameTestNamespaces', "${project.mod_id},simulated"
         }
 
         data {
@@ -219,6 +219,17 @@ tasks.register('targetingSolverSelfTest', JavaExec) {
     description = 'Runs deterministic targeting solver regression checks.'
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.happysg.radar.targeting.TargetingSolverSelfTest'
+}
+
+tasks.register('kineticControllerSelfTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs deterministic Swivel controller angle and calibration checks.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.happysg.radar.block.controller.kinetic.KineticControllerSelfTest'
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('kineticControllerSelfTest')
 }
 
 idea {

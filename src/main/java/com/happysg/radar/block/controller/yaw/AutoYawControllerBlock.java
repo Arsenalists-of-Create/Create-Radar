@@ -13,8 +13,10 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.Level;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
+import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 
-public class AutoYawControllerBlock extends DirectionalKineticBlock implements IBE<AutoYawControllerBlockEntity> {
+public class AutoYawControllerBlock extends DirectionalKineticBlock
+        implements IBE<AutoYawControllerBlockEntity>, ICogWheel {
 
     public AutoYawControllerBlock(Properties properties) {
         super(properties);
@@ -27,7 +29,15 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
 
     @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-        return face == state.getValue(FACING);
+        return false;
+    }
+
+    @Override
+    public boolean isDedicatedCogWheel() {
+        // The controller participates in ordinary small-cog propagation, but its
+        // item is not a standard cogwheel item: this block uses FACING instead of
+        // the AXIS property required by Create's cog placement helper.
+        return false;
     }
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
@@ -53,6 +63,9 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!level.isClientSide && state.getBlock() != newState.getBlock() ) {
+            if (level.getBlockEntity(pos) instanceof AutoYawControllerBlockEntity yaw) {
+                yaw.releaseKineticActuator();
+            }
             breakAttachedDataLinks(level, pos);
         }
         super.onRemove(state, level, pos, newState, isMoving);
@@ -80,6 +93,20 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
         }
     }
 
+    @Override
+    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
+        super.onPlace(state, level, pos, oldState, isMoving);
+
+        if (level.isClientSide) return;
+
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be instanceof AutoYawControllerBlockEntity yaw) {
+            yaw.markMountDirtyExternal();
+            yaw.invalidateKineticActuator();
+        }
+    }
+
+    @Override
     public void neighborChanged(BlockState state, Level level, BlockPos pos, Block block, BlockPos fromPos, boolean isMoving) {
         super.neighborChanged(state, level, pos, block, fromPos, isMoving);
 

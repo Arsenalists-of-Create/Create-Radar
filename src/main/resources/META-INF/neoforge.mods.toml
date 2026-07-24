@@ -60,3 +60,10 @@ type = "optional"
 versionRange = "[1.113.0,2.0)"
 ordering = "AFTER"
 side = "BOTH"
+
+[[dependencies.create_radar]]
+modId = "simulated"
+type = "optional"
+versionRange = "[1.2.1,)"
+ordering = "AFTER"
+side = "BOTH"
