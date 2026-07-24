@@ -1,15 +1,25 @@
 package com.happysg.radar.compat.cbc;
 
+import com.happysg.radar.compat.cbc_at.CBCATCannonCompat;
+import com.happysg.radar.compat.cbc_at.CBCATRocketAimSolver;
+import com.happysg.radar.compat.cbc_at.CBCATRocketProjectileModel;
+import com.happysg.radar.compat.cbcmoreshells.CBCMSAimSolver;
+import com.happysg.radar.compat.cbcmoreshells.CBCMSCannonCompat;
+import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.math3.analysis.UnivariateFunction;
 import com.happysg.radar.math3.analysis.solvers.BrentSolver;
 import com.happysg.radar.math3.analysis.solvers.UnivariateSolver;
 import com.mojang.logging.LogUtils;
+import com.happysg.radar.targeting.ObstructionChecker;
+import com.happysg.radar.targeting.PitchConstraint;
+import com.happysg.radar.targeting.TargetingResult;
+import com.happysg.radar.targeting.TargetingSnapshot;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionProperties;
@@ -48,7 +58,7 @@ public class CannonTargeting {
     }
 
     public static List<Double> calculatePitch(
-            CannonMountBlockEntity mount,
+            CannonMountContext mount,
             Vec3 originPos,
             Vec3 targetPos,
             ServerLevel level
@@ -62,10 +72,102 @@ public class CannonTargeting {
             return directPitchToTarget(originPos, targetPos);
         }
 
+        CBCMSCannonCompat.ShotState cbcmsShot = CannonUtil.resolveCBCMSShotState(cannon, level);
+        if (cbcmsShot != null) {
+            if ((Boolean) RadarConfig.server().forceLegacyCannonLeadSolver.get()
+                    && !cbcmsShot.legacyEligible()) {
+                return null;
+            }
+            Vec3 muzzle = CBCMuzzleUtil.getCBCSpawnAnchorWorld(contraption);
+            if (cbcmsShot.solverMode() == CBCMSCannonCompat.SolverMode.CBCMS_SERVER) {
+                TargetingSnapshot snapshot = TargetingSnapshot.builder(level)
+                        .muzzlePosition(muzzle)
+                        .targetPosition(targetPos)
+                        .projectileSpeed(cbcmsShot.projectileModel().muzzleSpeed())
+                        .gravity(cbcmsShot.projectileModel().gravity())
+                        .drag(cbcmsShot.projectileModel().drag())
+                        .quadraticDrag(cbcmsShot.projectileModel().quadraticDrag())
+                        .cbcPhysics(true)
+                        .dragDensity(cbcmsShot.projectileModel().dragDensity())
+                        .maxFlightTicks(cbcmsShot.lifetimeCapTicks())
+                        .pitchConstraint(PitchConstraint.unconstrained())
+                        .build();
+                TargetingResult result = CBCMSAimSolver.createComputer(ObstructionChecker.NONE)
+                        .solve(snapshot, cbcmsShot.projectileModel());
+                return result != null && result.valid() && result.hasShot()
+                        ? List.of(result.desiredPitchDeg())
+                        : null;
+            }
+            List<Double> roots = calculateSimulatedPitchRoots(
+                    muzzle, targetPos, cbcmsShot.projectileModel().muzzleSpeed(),
+                    cbcmsShot.projectileModel().gravity(), cbcmsShot.projectileModel().drag(), 0.0,
+                    cbcmsShot.projectileModel().dragDensity(), cbcmsShot.projectileModel().quadraticDrag(), level);
+            return roots.isEmpty() ? null : roots;
+        }
+        if (CannonUtil.isCBCMSCannon(cannon)) {
+            return null;
+        }
+
+        CBCATCannonCompat.ShotState cbcAtShot = CannonUtil.resolveCBCATShotState(cannon, level);
+        if (CannonUtil.isPoweredRocket(cannon)) {
+            if ((Boolean) RadarConfig.server().forceLegacyCannonLeadSolver.get()) {
+                LOGGER.debug("cbc_at_powered_rocket_unsupported_in_forced_legacy");
+                return null;
+            }
+            CBCATRocketProjectileModel rocketModel = cbcAtShot == null ? null : cbcAtShot.rocketModel();
+            if (rocketModel == null) {
+                return null;
+            }
+            Vec3 muzzle = CBCMuzzleUtil.getCBCSpawnAnchorWorld(contraption);
+            List<Double> roots = CBCATRocketAimSolver.solveStationaryPitchRoots(level, muzzle, targetPos, rocketModel);
+            return roots.isEmpty() ? null : roots;
+        }
+        if (CannonUtil.isCBCATCannon(cannon) && cbcAtShot == null) {
+            return null;
+        }
+
         if (CannonUtil.isBigCannon(cannon)) {
             List<Double> roots = calculateBigCannonPitch(cannon, originPos, targetPos, level);
             return roots.isEmpty() ? null : roots;
         }
+        if (cbcAtShot != null) {
+            Vec3 muzzle = CBCMuzzleUtil.getCBCSpawnAnchorWorld(contraption);
+            List<Double> roots = calculateSimulatedPitchRoots(
+                    muzzle,
+                    targetPos,
+                    cbcAtShot.projectileModel().muzzleSpeed(),
+                    cbcAtShot.projectileModel().gravity(),
+                    cbcAtShot.projectileModel().drag(),
+                    0.0,
+                    cbcAtShot.projectileModel().dragDensity(),
+                    cbcAtShot.projectileModel().quadraticDrag(),
+                    level
+            );
+            return roots.isEmpty() ? null : roots;
+        }
+
+        CBCMWCannonCompat.ShotState cbcmwShot = CannonUtil.resolveCBCMWShotState(cannon, level);
+        if (CannonUtil.isCBCMWCannon(cannon)) {
+            if (cbcmwShot == null) {
+                return null;
+            }
+            BallisticPropertiesComponent ballistics = cbcmwShot.ballistics();
+            DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(level);
+            Vec3 muzzle = CBCMuzzleUtil.getCBCSpawnAnchorWorld(contraption);
+            List<Double> roots = calculateSimulatedPitchRoots(
+                    muzzle,
+                    targetPos,
+                    cbcmwShot.speed(),
+                    ballistics.gravity() * dimension.gravityMultiplier(),
+                    ballistics.drag(),
+                    0.0,
+                    dimension.dragMultiplier(),
+                    ballistics.isQuadraticDrag(),
+                    level
+            );
+            return roots.isEmpty() ? null : roots;
+        }
+
         CannonUtil.logCannonTypeReadFailure("calculatePitch", cannon);
 
         float speed = CannonUtil.getInitialVelocity(cannon, level);
@@ -365,7 +467,7 @@ public class CannonTargeting {
     }
 
     // OLD: legacy origin
-    public static List<Double> calculatePitch(CannonMountBlockEntity mount, Vec3 targetPos, ServerLevel level) {
+    public static List<Double> calculatePitch(CannonMountContext mount, Vec3 targetPos, ServerLevel level) {
         if (mount == null || targetPos == null) return null;
         Vec3 originPos = PhysicsHandler.getWorldVec(level, mount.getBlockPos().above(2).getCenter());
         return calculatePitch(mount, originPos, targetPos, level);

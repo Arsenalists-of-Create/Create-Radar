@@ -287,6 +287,12 @@ public class SimulatedAimSolver implements AimSolver {
    private double estimateInterceptTicks(TargetingSnapshot snapshot, ProjectileModel projectileModel) {
       Vec3 r = snapshot.targetPosition().subtract(snapshot.muzzlePosition());
       Vec3 v = snapshot.targetVelocity().subtract(snapshot.inheritedVelocity());
+      if (projectileModel.usesCustomDynamics()) {
+         double estimate = projectileModel.estimateFlightTicks(r.length());
+         if (Double.isFinite(estimate) && estimate > 0.0) {
+            return Math.min(snapshot.maxFlightTicks(), estimate);
+         }
+      }
       double s = Math.max(1.0E-6, projectileModel.muzzleSpeed());
       double a = v.dot(v) - s * s;
       double b = (double)2.0F * r.dot(v);
@@ -329,6 +335,7 @@ public class SimulatedAimSolver implements AimSolver {
       double bestToY = py;
       double bestToZ = pz;
       int bestSegmentTick = 0;
+      ProjectileStep customStep = model.usesCustomDynamics() ? new ProjectileStep() : null;
 
       ++context.stats.candidateEvaluations;
       for(int tick = 0; tick < context.horizonTicks; ++tick) {
@@ -339,7 +346,15 @@ public class SimulatedAimSolver implements AimSolver {
          double nextPx;
          double nextPy;
          double nextPz;
-         if (model.cbcPhysics()) {
+         if (customStep != null) {
+            model.step(tick, px, py, pz, vx, vy, vz, snapshot.level(), customStep);
+            nextPx = customStep.positionX;
+            nextPy = customStep.positionY;
+            nextPz = customStep.positionZ;
+            vx = customStep.velocityX;
+            vy = customStep.velocityY;
+            vz = customStep.velocityZ;
+         } else if (model.cbcPhysics()) {
             double speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
             double dragForce = 0.0;
             if (speed > 1.0E-8 && model.drag() > 0.0) {

@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
@@ -13,7 +14,6 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
@@ -29,15 +29,15 @@ public class CannonMountPitch {
         this.controller = controller;
     }
 
-    public void tick(CannonMountBlockEntity mount) {
+    public void tick(CannonMountContext mount) {
         rotateCBC(mount);
     }
 
-    public void setTarget(CannonMountBlockEntity mount, Vec3 targetPos) {
+    public void setTarget(CannonMountContext mount, Vec3 targetPos) {
         setTargetCBC(mount, targetPos);
     }
 
-    public boolean atTargetPitch(CannonMountBlockEntity mount, boolean lag) {
+    public boolean atTargetPitch(CannonMountContext mount, boolean lag) {
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null) {
             return false;
@@ -59,7 +59,7 @@ public class CannonMountPitch {
         return Math.abs(currentPitch - controller.getTargetAngle()) < tol;
     }
 
-    public double getMaxEngagementRangeBlocks(CannonMountBlockEntity mount, ServerLevel sl) {
+    public double getMaxEngagementRangeBlocks(CannonMountContext mount, ServerLevel sl) {
         PitchOrientedContraptionEntity ce = mount.getContraption();
         if (ce == null) {
             return 0;
@@ -73,7 +73,7 @@ public class CannonMountPitch {
         return r;
     }
 
-    public boolean canEngageTrack(CannonMountBlockEntity mount, @Nullable RadarTrack track, boolean requireLos, ServerLevel sl) {
+    public boolean canEngageTrack(CannonMountContext mount, @Nullable RadarTrack track, boolean requireLos, ServerLevel sl) {
         if (track == null) {
             return false;
         }
@@ -89,6 +89,9 @@ public class CannonMountPitch {
 
         Vec3 p = track.position();
         if (p == null) {
+            return false;
+        }
+        if (!controller.firingControl.canAimAtFixedYaw(p)) {
             return false;
         }
 
@@ -120,7 +123,7 @@ public class CannonMountPitch {
         return controller.firingControl.hasLineOfSightTo(track, requireLos);
     }
 
-    private void rotateCBC(CannonMountBlockEntity mount) {
+    private void rotateCBC(CannonMountContext mount) {
         if (!controller.isRunningController()) {
             LOGGER.debug("PITCH.rotateCBC aborted: isRunning=false");
             return;
@@ -183,7 +186,7 @@ public class CannonMountPitch {
         mount.notifyUpdate();
     }
 
-    private void setTargetCBC(CannonMountBlockEntity mount, Vec3 targetPos) {
+    private void setTargetCBC(CannonMountContext mount, Vec3 targetPos) {
         if (!(controller.getLevel() instanceof ServerLevel serverLevel)) {
             return;
         }

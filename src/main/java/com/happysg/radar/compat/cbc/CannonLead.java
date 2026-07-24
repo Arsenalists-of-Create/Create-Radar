@@ -6,7 +6,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionProperties;
@@ -154,7 +153,7 @@ public class CannonLead {
      * - acceleration: blocks/tick^2
      */
     public static LeadSolution solveLeadPerTickWithAcceleration(
-            CannonMountBlockEntity mount,
+            CannonMountContext mount,
             AbstractMountedCannonContraption cannon,
             ServerLevel level,
 
@@ -174,7 +173,7 @@ public class CannonLead {
     }
 
     public static LeadSolution solveLeadPerTickWithAcceleration(
-            CannonMountBlockEntity mount,
+            CannonMountContext mount,
             AbstractMountedCannonContraption cannon,
             ServerLevel level,
 
@@ -192,6 +191,10 @@ public class CannonLead {
         if (mount == null || cannon == null || level == null) return null;
         if (targetPosNow == null || targetVelPerTick == null || targetAccelPerTick2 == null) return null;
         if (shooterVelPerTick == null || shooterAccelPerTick2 == null) return null;
+        if (CannonUtil.isPoweredRocket(cannon)) {
+            LOGGER.debug("[LEAD] cbc_at_powered_rocket_unsupported_in_forced_legacy");
+            return null;
+        }
 
         boolean targetMoving = targetVelPerTick.lengthSqr() >= VEL_EPS_SQR;
         boolean shooterMoving = shooterVelPerTick.lengthSqr() >= VEL_EPS_SQR;
@@ -209,6 +212,10 @@ public class CannonLead {
         Vec3 originNow = getStableOrigin(mount, level);
         final double latencyTicks = 2.0; // tune 1..3
         double muzzleForwardOffset = shotState != null ? shotState.muzzleForwardOffset() : CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon);
+        if (CannonUtil.isCBCMWCannon(cannon) && mount.getContraption() != null) {
+            muzzleForwardOffset = CBCMuzzleUtil.getCBCSpawnAnchorWorld(mount.getContraption())
+                    .distanceTo(originNow);
+        }
 
         BallisticPropertiesComponent bp = shotState != null ? shotState.ballistics() : CannonUtil.getBallistics(cannon, level);
         DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(level);
@@ -302,7 +309,7 @@ public class CannonLead {
     }
 
     public static LeadSolution solveLeadPerTickConstantVelocity(
-            CannonMountBlockEntity mount,
+            CannonMountContext mount,
             AbstractMountedCannonContraption cannon,
             ServerLevel level,
 
@@ -319,7 +326,7 @@ public class CannonLead {
     }
 
     public static LeadSolution solveLeadPerTickConstantVelocity(
-            CannonMountBlockEntity mount,
+            CannonMountContext mount,
             AbstractMountedCannonContraption cannon,
             ServerLevel level,
 
@@ -332,6 +339,14 @@ public class CannonLead {
             boolean preferHighArc
     ) {
 
+        if (mount == null || cannon == null || level == null
+                || shooterVelPerTick == null || targetPosNow == null || targetVelPerTick == null) {
+            return null;
+        }
+        if (CannonUtil.isPoweredRocket(cannon)) {
+            LOGGER.debug("[LEAD] cbc_at_powered_rocket_unsupported_in_forced_legacy");
+            return null;
+        }
 
         // Treat tiny velocities as zero to reduce noise
         if (shooterVelPerTick.lengthSqr() < VEL_EPS_SQR) shooterVelPerTick = Vec3.ZERO;
@@ -348,6 +363,10 @@ public class CannonLead {
 
         Vec3 originNow = getStableOrigin(mount, level);
         double muzzleForwardOffset = shotState != null ? shotState.muzzleForwardOffset() : CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon);
+        if (CannonUtil.isCBCMWCannon(cannon) && mount.getContraption() != null) {
+            muzzleForwardOffset = CBCMuzzleUtil.getCBCSpawnAnchorWorld(mount.getContraption())
+                    .distanceTo(originNow);
+        }
 
         BallisticPropertiesComponent bp = shotState != null ? shotState.ballistics() : CannonUtil.getBallistics(cannon, level);
         DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(level);
@@ -456,7 +475,7 @@ public class CannonLead {
         return preferHighArc && pitchRoots.size() > 1 ? pitchRoots.get(pitchRoots.size() - 1) : pitchRoots.get(0);
     }
 
-    private static Vec3 getStableOrigin(CannonMountBlockEntity mount, ServerLevel level) {
+    private static Vec3 getStableOrigin(CannonMountContext mount, ServerLevel level) {
         if (mount == null) {
             return Vec3.ZERO;
         }

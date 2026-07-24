@@ -12,6 +12,7 @@ import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
 import com.happysg.radar.block.controller.kinetic.KineticMountFrame;
 import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
@@ -35,7 +36,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 
 import javax.annotation.Nullable;
@@ -143,17 +143,21 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        if (view.yawPos() != null && level.getBlockEntity(view.yawPos()) instanceof AutoYawControllerBlockEntity aYCBE) {
-            autoyaw = aYCBE;
-        }
-
         BlockPos mountPos = view.mountPos();
         if (mountPos == null) {
             return;
         }
 
         BlockEntity be = level.getBlockEntity(mountPos);
-        if (be instanceof CannonMountBlockEntity mount) {
+        CannonMountContext mount = CannonMountContext.of(be);
+        if (mount != null) {
+            autoyaw = null;
+            // A compact mount cannot be rotated directly, but its yaw controller may
+            // still aim the complete weapon through a structural swivel bearing.
+            if (view.yawPos() != null
+                    && level.getBlockEntity(view.yawPos()) instanceof AutoYawControllerBlockEntity aYCBE) {
+                autoyaw = aYCBE;
+            }
             firingControl = new WeaponFiringControl(this, mount, autoyaw);
             LOGGER.debug("made new Weapon Config!");
         }
@@ -701,7 +705,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (mountPos != null) {
             BlockEntity be = level.getBlockEntity(mountPos);
 
-            if (Mods.CREATEBIGCANNONS.isLoaded() && be instanceof CannonMountBlockEntity cbc) {
+            CannonMountContext cbc = Mods.CREATEBIGCANNONS.isLoaded() ? CannonMountContext.of(be) : null;
+            if (cbc != null) {
                 newMount = Mount.cbc(cbc);
             } else if (Mods.VS_CLOCKWORK.isLoaded() && be instanceof PhysBearingBlockEntity phys) {
                 newMount = Mount.phys(phys);
@@ -1051,16 +1056,16 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     static class Mount {
         final MountKind kind;
-        final CannonMountBlockEntity cbc;
+        final CannonMountContext cbc;
         final PhysBearingBlockEntity phys;
 
-        private Mount(MountKind kind, @Nullable CannonMountBlockEntity cbc, @Nullable PhysBearingBlockEntity phys) {
+        private Mount(MountKind kind, @Nullable CannonMountContext cbc, @Nullable PhysBearingBlockEntity phys) {
             this.kind = kind;
             this.cbc = cbc;
             this.phys = phys;
         }
 
-        static Mount cbc(CannonMountBlockEntity cbc) {
+        static Mount cbc(CannonMountContext cbc) {
             return new Mount(MountKind.CBC, cbc, null);
         }
 

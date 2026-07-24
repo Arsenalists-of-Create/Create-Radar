@@ -13,10 +13,16 @@ import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.AccelerationTracker;
 import com.happysg.radar.compat.cbc.CBCMuzzleUtil;
 import com.happysg.radar.compat.cbc.CannonLead;
+import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.compat.cbc.VelocityTracker;
+import com.happysg.radar.compat.cbc_at.CBCATCannonCompat;
+import com.happysg.radar.compat.cbc_at.CBCATRocketAimSolver;
+import com.happysg.radar.compat.cbcmoreshells.CBCMSAimSolver;
+import com.happysg.radar.compat.cbcmoreshells.CBCMSCannonCompat;
+import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
@@ -70,7 +76,6 @@ import net.minecraft.world.phys.HitResult.Type;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.MountedBigCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
@@ -87,7 +92,7 @@ public class WeaponFiringControl {
     private int aimStableTicks;
     private static final int AIM_STABLE_REQUIRED = 2;
     private static final double AIM_STABLE_EPS = (double)0.5F;
-    public final CannonMountBlockEntity cannonMount;
+    public final CannonMountContext cannonMount;
     public AutoPitchControllerBlockEntity pitchController;
     public AutoYawControllerBlockEntity yawController;
     public FireControllerBlockEntity fireController;
@@ -101,6 +106,8 @@ public class WeaponFiringControl {
     private UUID targetShipId;
     @Nullable
     private Vec3 lastAimPoint;
+    @Nullable
+    private Double fixedMountDesiredYaw;
     private List<List<Double>> cachedSableAngles;
     private Vec3 cachedSableAimTarget;
     private long cachedSableSolveTick;
@@ -120,6 +127,9 @@ public class WeaponFiringControl {
     private static final ExecutorService TARGETING_EXECUTOR = createTargetingExecutor();
     private final TargetingComputer targetingComputer;
     private final TargetingComputer asyncTargetingComputer;
+    private final TargetingComputer cbcAtRocketTargetingComputer;
+    private final TargetingComputer asyncCBCAtRocketTargetingComputer;
+    private final TargetingComputer cbcmsTargetingComputer;
     private final ProjectileSimulator validationProjectileSimulator;
     private final ObstructionChecker mainThreadObstructionChecker;
     private long lastTargetingDebugLogTick;
@@ -130,6 +140,15 @@ public class WeaponFiringControl {
     @Nullable
     private Vec3 cachedTargetingSolvePos;
     private long cachedTargetingSolveTick;
+    @Nullable
+    private String cachedTargetingShotFingerprint;
+    private long lastCBCMSSolveAttemptTick;
+    @Nullable
+    private UUID lastCBCMSSolveTargetId;
+    @Nullable
+    private String lastCBCMSSolveFingerprint;
+    @Nullable
+    private TargetingResult lastCBCMSSolveResult;
     @Nullable
     private CompletableFuture<AsyncTargetingResult> pendingTargetingFuture;
     @Nullable
@@ -169,12 +188,13 @@ public class WeaponFiringControl {
         c.hasFrac = true;
     }
 
-    public WeaponFiringControl(AutoPitchControllerBlockEntity controller, CannonMountBlockEntity cannonMount, AutoYawControllerBlockEntity yawController) {
+    public WeaponFiringControl(AutoPitchControllerBlockEntity controller, CannonMountContext cannonMount, AutoYawControllerBlockEntity yawController) {
         this.targetingConfig = TargetingConfig.DEFAULT;
         this.lastOffsetAim = null;
         this.aimStableTicks = 0;
         this.targetShipId = null;
         this.lastAimPoint = null;
+        this.fixedMountDesiredYaw = null;
         this.cachedSableAngles = null;
         this.cachedSableAimTarget = null;
         this.cachedSableSolveTick = -1L;
@@ -182,15 +202,23 @@ public class WeaponFiringControl {
         this.cachedSableYawDeg = null;
         this.visCache = new HashMap<>();
         this.maxSimDistanceBlocks = (double)8192.0F;
+        this.mainThreadObstructionChecker = new ObstructionChecker();
         this.targetingComputer = TargetingComputer.createDefault();
         this.asyncTargetingComputer = new TargetingComputer(null, new ProjectileSimulator(), null, null);
+        this.cbcAtRocketTargetingComputer = CBCATRocketAimSolver.createComputer(this.mainThreadObstructionChecker);
+        this.asyncCBCAtRocketTargetingComputer = CBCATRocketAimSolver.createComputer(ObstructionChecker.NONE);
+        this.cbcmsTargetingComputer = CBCMSAimSolver.createComputer(this.mainThreadObstructionChecker);
         this.validationProjectileSimulator = new ProjectileSimulator();
-        this.mainThreadObstructionChecker = new ObstructionChecker();
         this.lastTargetingDebugLogTick = Long.MIN_VALUE;
         this.cachedTargetingResult = null;
         this.cachedTargetingTargetId = null;
         this.cachedTargetingSolvePos = null;
         this.cachedTargetingSolveTick = Long.MIN_VALUE;
+        this.cachedTargetingShotFingerprint = null;
+        this.lastCBCMSSolveAttemptTick = Long.MIN_VALUE;
+        this.lastCBCMSSolveTargetId = null;
+        this.lastCBCMSSolveFingerprint = null;
+        this.lastCBCMSSolveResult = null;
         this.pendingTargetingFuture = null;
         this.pendingTargetingRequest = null;
         this.lastSableVelocityTargetId = null;
@@ -639,7 +667,8 @@ public class WeaponFiringControl {
                 this.fireController = null;
                 return;
             }
-            if (this.view.yawPos() != null && this.level.getBlockEntity(this.view.yawPos()) instanceof AutoYawControllerBlockEntity autoyaw) {
+            if (this.view.yawPos() != null
+                    && this.level.getBlockEntity(this.view.yawPos()) instanceof AutoYawControllerBlockEntity autoyaw) {
                 this.yawController = autoyaw;
             } else {
                 this.yawController = null;
@@ -847,12 +876,42 @@ public class WeaponFiringControl {
                                     CannonLead.LeadSolution lead = null;
                                     TargetingResult targetingResult = null;
                                     boolean forceLegacyLead = (Boolean)RadarConfig.server().forceLegacyCannonLeadSolver.get();
+                                    ResolvedProjectileState currentProjectile = this.resolveProjectileState(cannon, serverLevel);
+                                    boolean rejectCustomLegacy = forceLegacyLead
+                                            && (currentProjectile == null
+                                            ? CannonUtil.isPoweredRocket(cannon) || CannonUtil.isCBCMSCannon(cannon)
+                                            : !currentProjectile.legacyEligible());
+                                    boolean rejectCustomDirect = currentProjectile == null
+                                            ? CannonUtil.isPoweredRocket(cannon) || CannonUtil.isCBCMSCannon(cannon)
+                                            : !currentProjectile.legacyEligible();
                                     boolean useNewSolver = !forceLegacyLead && (Boolean)RadarConfig.server().useNewTargetingComputer.get() && !CannonUtil.isLaserCannon(cannon);
-                                    if (useNewSolver) {
+                                    if (useNewSolver && currentProjectile != null
+                                            && currentProjectile.solverKind() == SolverKind.CBCMS_SERVER) {
+                                        boolean sameAttempt = this.lastCBCMSSolveAttemptTick == serverLevel.getGameTime()
+                                                && currentProjectile.fingerprint().equals(this.lastCBCMSSolveFingerprint)
+                                                && (targetMotionId == null
+                                                ? this.lastCBCMSSolveTargetId == null
+                                                : targetMotionId.equals(this.lastCBCMSSolveTargetId));
+                                        if (sameAttempt) {
+                                            targetingResult = this.lastCBCMSSolveResult;
+                                        } else {
+                                            targetingResult = this.solveWithTargetingComputer(serverLevel, cannon, rawTargetPos,
+                                                    solvePos, targetVel, targetAccel, shooterVel, this.targetEntity,
+                                                    this.targetSublevel, motion.motionClass(), trackingLeadTicks);
+                                            this.lastCBCMSSolveAttemptTick = serverLevel.getGameTime();
+                                            this.lastCBCMSSolveTargetId = targetMotionId;
+                                            this.lastCBCMSSolveFingerprint = currentProjectile.fingerprint();
+                                            this.lastCBCMSSolveResult = targetingResult;
+                                            this.storeTargetingResult(serverLevel, targetMotionId, solvePos,
+                                                    currentProjectile.fingerprint(), targetingResult);
+                                        }
+                                    } else if (useNewSolver && currentProjectile != null) {
                                         targetingResult = this.pollCompletedAsyncTargetingResult(serverLevel, cannon, targetMotionId, solvePos);
                                         boolean completedAsyncResult = targetingResult != null;
-                                        boolean solveEveryTick = this.shouldSolveEveryTick(targetVel, motion, dist);
-                                        if (targetingResult == null && this.shouldReuseTargetingResult(serverLevel, targetMotionId, solvePos, targetVel, motion, dist)) {
+                                        boolean solveEveryTick = CannonUtil.isCBCATCannon(cannon)
+                                                || this.shouldSolveEveryTick(targetVel, motion, dist);
+                                        if (targetingResult == null && this.shouldReuseTargetingResult(serverLevel, targetMotionId,
+                                                solvePos, targetVel, motion, dist, currentProjectile.fingerprint())) {
                                             targetingResult = this.cachedTargetingResult;
                                         }
 
@@ -862,7 +921,7 @@ public class WeaponFiringControl {
                                     }
 
                                     boolean newSolverOk = targetingResult != null && targetingResult.valid() && targetingResult.hasShot() && targetingResult.confidence() >= motion.minConfidence();
-                                    if (forceLegacyLead && !CannonUtil.isLaserCannon(cannon) && dist > noLeadDist) {
+                                    if (forceLegacyLead && !rejectCustomLegacy && !CannonUtil.isLaserCannon(cannon) && dist > noLeadDist) {
                                         lead = CannonLead.solveLeadPerTickConstantVelocity(this.cannonMount, cannon, serverLevel, shooterVel, solvePos, targetVel, (Integer)RadarConfig.server().leadFiringDelay.get() + trackingLeadTicks, this.maxSimDistanceBlocks, this.targetingConfig.preferHighArc());
                                     }
 
@@ -911,7 +970,7 @@ public class WeaponFiringControl {
                                                     this.cachedSableYawDeg = desiredYaw;
                                                 }
                                             }
-                                        } else {
+                                        } else if (!rejectCustomDirect) {
                                             AimCommand command = this.directAimCommand(cannon, cannonMuzzleWorld, solvePos);
                                             if (command != null) {
                                                 desiredPitch = command.pitchDeg();
@@ -928,7 +987,7 @@ public class WeaponFiringControl {
                                         if (pitchRoots != null && !pitchRoots.isEmpty()) {
                                             desiredPitch = selectPitchRoot(pitchRoots, this.targetingConfig.preferHighArc());
                                         }
-                                    } else if (!CannonUtil.isLaserCannon(cannon)) {
+                                    } else if (!rejectCustomDirect && !CannonUtil.isLaserCannon(cannon)) {
                                         AimCommand command = this.directAimCommand(cannon, cannonMuzzleWorld, solvePos);
                                         if (command != null) {
                                             desiredPitch = command.pitchDeg();
@@ -939,6 +998,10 @@ public class WeaponFiringControl {
                                     if (desiredPitch != null && this.pitchController != null) {
                                         this.pitchController.setTargetAngle(desiredPitch.floatValue());
                                     }
+
+                                    this.fixedMountDesiredYaw =
+                                            !this.cannonMount.supportsDirectYawControl() && this.yawController == null
+                                                    ? desiredYaw : null;
 
                                     if (desiredYaw != null && this.yawController != null) {
                                         this.yawController.setTargetAngle(desiredYaw.floatValue());
@@ -960,7 +1023,9 @@ public class WeaponFiringControl {
                                         }
 
                                         if (!hasLeadSolution && !hasNewTargetingSolution && !canFireWithoutLead) {
-                                            LOGGER.debug("WFC BLOCK: no lead solution");
+                                            LOGGER.debug("WFC BLOCK: {}", rejectCustomLegacy
+                                                    ? "custom_dynamics_unsupported_in_forced_legacy"
+                                                    : "no lead solution");
                                         }
 
                                         if (!safeOk) {
@@ -1069,7 +1134,9 @@ public class WeaponFiringControl {
         }
     }
 
-    private boolean shouldReuseTargetingResult(ServerLevel serverLevel, @Nullable UUID targetMotionId, Vec3 solvePos, Vec3 targetVel, TargetMotionEstimate motion, double distanceToTarget) {
+    private boolean shouldReuseTargetingResult(ServerLevel serverLevel, @Nullable UUID targetMotionId,
+                                               Vec3 solvePos, Vec3 targetVel, TargetMotionEstimate motion,
+                                               double distanceToTarget, String shotFingerprint) {
         if (this.cachedTargetingResult == null || !this.cachedTargetingResult.valid() || !this.cachedTargetingResult.hasShot()) {
             return false;
         }
@@ -1080,6 +1147,9 @@ public class WeaponFiringControl {
         }
 
         if (this.shouldSolveEveryTick(targetVel, motion, distanceToTarget)) {
+            return false;
+        }
+        if (shotFingerprint == null || !shotFingerprint.equals(this.cachedTargetingShotFingerprint)) {
             return false;
         }
 
@@ -1102,12 +1172,14 @@ public class WeaponFiringControl {
         return targetVel.length() * (double)20.0F >= extremeSpeedMps;
     }
 
-    private void storeTargetingResult(ServerLevel serverLevel, @Nullable UUID targetMotionId, Vec3 solvePos, @Nullable TargetingResult targetingResult) {
+    private void storeTargetingResult(ServerLevel serverLevel, @Nullable UUID targetMotionId, Vec3 solvePos,
+                                      String shotFingerprint, @Nullable TargetingResult targetingResult) {
         if (targetingResult != null && targetingResult.valid() && targetingResult.hasShot()) {
             this.cachedTargetingResult = targetingResult;
             this.cachedTargetingTargetId = targetMotionId;
             this.cachedTargetingSolvePos = solvePos;
             this.cachedTargetingSolveTick = serverLevel.getGameTime();
+            this.cachedTargetingShotFingerprint = shotFingerprint;
         } else {
             this.clearTargetingResultCache();
         }
@@ -1118,6 +1190,7 @@ public class WeaponFiringControl {
         this.cachedTargetingTargetId = null;
         this.cachedTargetingSolvePos = null;
         this.cachedTargetingSolveTick = Long.MIN_VALUE;
+        this.cachedTargetingShotFingerprint = null;
         if (this.pendingTargetingFuture != null) {
             this.pendingTargetingFuture.cancel(true);
         }
@@ -1142,7 +1215,8 @@ public class WeaponFiringControl {
             }
 
             TargetingResult validated = this.validateAsyncTargetingResult(serverLevel, cannonContraption, asyncResult.request(), asyncResult.result());
-            this.storeTargetingResult(serverLevel, targetMotionId, solvePos, validated);
+            this.storeTargetingResult(serverLevel, targetMotionId, solvePos,
+                    asyncResult.request().shotFingerprint(), validated);
             return validated;
         } catch (Throwable throwable) {
             LOGGER.warn("WFC TargetingComputer async solve failed", throwable);
@@ -1170,13 +1244,19 @@ public class WeaponFiringControl {
     }
 
     private void submitAsyncTargetingSolve(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, Vec3 rawTargetPos, Vec3 targetWorldPos, Vec3 targetVel, Vec3 targetAccel, Vec3 shooterVel, @Nullable Entity targetEntity, @Nullable SubLevelAccess targetSublevel, TargetMotionClass targetMotionClass, int trackingLeadTicks, @Nullable UUID targetMotionId) {
+        ResolvedProjectileState currentProjectile = this.resolveProjectileState(cannonContraption, serverLevel);
+        if (currentProjectile == null || currentProjectile.solverKind() == SolverKind.CBCMS_SERVER) {
+            return;
+        }
         if (this.pendingTargetingFuture != null && !this.pendingTargetingFuture.isDone()) {
             AsyncTargetingRequest pending = this.pendingTargetingRequest;
             long age = pending == null ? 0L : serverLevel.getGameTime() - pending.requestTick();
             boolean differentTarget = pending != null && (targetMotionId != null || pending.targetId() != null)
                     && (targetMotionId == null || !targetMotionId.equals(pending.targetId()));
             boolean movedTooFar = pending != null && targetWorldPos.distanceToSqr(pending.solvePos()) > 4.0;
-            if (age < ASYNC_TARGETING_RESULT_TTL_TICKS && !differentTarget && !movedTooFar) {
+            boolean differentShot = pending != null
+                    && !currentProjectile.fingerprint().equals(pending.shotFingerprint());
+            if (age < ASYNC_TARGETING_RESULT_TTL_TICKS && !differentTarget && !movedTooFar && !differentShot) {
                 return;
             }
             this.pendingTargetingFuture.cancel(true);
@@ -1191,12 +1271,152 @@ public class WeaponFiringControl {
 
         try {
             this.pendingTargetingRequest = request;
-            this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, this.asyncTargetingComputer.solve(request.snapshot())), TARGETING_EXECUTOR);
+            TargetingComputer computer = this.targetingComputerFor(request.solverKind(), true);
+            this.pendingTargetingFuture = CompletableFuture.supplyAsync(
+                    () -> new AsyncTargetingResult(request, computer.solve(request.snapshot(), request.projectileModel())),
+                    TARGETING_EXECUTOR
+            );
         } catch (RejectedExecutionException rejected) {
             this.pendingTargetingRequest = null;
             this.pendingTargetingFuture = null;
             LOGGER.debug("WFC TargetingComputer async solve queue is full; skipping request for mount={} target={}", request.mountPos(), request.targetId());
         }
+    }
+
+    @Nullable
+    private ResolvedProjectileState resolveProjectileState(AbstractMountedCannonContraption cannon, ServerLevel level) {
+        if (cannon == null || level == null) {
+            return null;
+        }
+
+        CBCMSCannonCompat.ShotState cbcmsShot = CannonUtil.resolveCBCMSShotState(cannon, level);
+        if (cbcmsShot != null) {
+            SolverKind solverKind = cbcmsShot.solverMode() == CBCMSCannonCompat.SolverMode.CBCMS_SERVER
+                    ? SolverKind.CBCMS_SERVER
+                    : SolverKind.STANDARD_ASYNC;
+            return new ResolvedProjectileState(
+                    cbcmsShot.projectileModel(),
+                    cbcmsShot.ballistics(),
+                    cbcmsShot.lifetimeCapTicks(),
+                    cbcmsShot.diagnosticReason(),
+                    solverKind,
+                    cbcmsShot.fingerprint(),
+                    cbcmsShot.legacyEligible(),
+                    cbcmsShot.family().name().toLowerCase(),
+                    cbcmsShot.ammunitionId(),
+                    0
+            );
+        }
+        if (CannonUtil.isCBCMSCannon(cannon)) {
+            return null;
+        }
+
+        CBCATCannonCompat.ShotState cbcAtShot = CannonUtil.resolveCBCATShotState(cannon, level);
+        if (CannonUtil.isCBCATCannon(cannon)) {
+            if (cbcAtShot == null) {
+                return null;
+            }
+            return new ResolvedProjectileState(
+                    cbcAtShot.projectileModel(),
+                    cbcAtShot.ballistics(),
+                    cbcAtShot.maxFlightTicks(),
+                    cbcAtShot.reason(),
+                    cbcAtShot.poweredRocket() ? SolverKind.CBCAT_ASYNC : SolverKind.STANDARD_ASYNC,
+                    cbcAtShot.fingerprint(),
+                    !cbcAtShot.poweredRocket(),
+                    cbcAtShot.kind().name().toLowerCase(),
+                    cbcAtShot.ammunition(),
+                    cbcAtShot.fuelTicks()
+            );
+        }
+
+        CBCMWCannonCompat.ShotState cbcmwShot = CannonUtil.resolveCBCMWShotState(cannon, level);
+        if (CannonUtil.isCBCMWCannon(cannon)) {
+            if (cbcmwShot == null || !Float.isFinite(cbcmwShot.speed()) || cbcmwShot.speed() <= 0.0F) {
+                return null;
+            }
+            BallisticPropertiesComponent ballistics = cbcmwShot.ballistics();
+            DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(level);
+            ProjectileModel model = ProjectileModel.cbc(
+                    cbcmwShot.speed(),
+                    ballistics.gravity() * dimension.gravityMultiplier(),
+                    ballistics.drag(),
+                    dimension.dragMultiplier(),
+                    ballistics.isQuadraticDrag()
+            );
+            String family = CannonUtil.isMediumCannon(cannon) ? "cbcmw_medium" : "cbcmw_rotary";
+            String fingerprint = Integer.toHexString(java.util.Objects.hash(
+                    family, cbcmwShot.speed(), ballistics, cbcmwShot.lifetimeTicks(), cbcmwShot.ammunition()));
+            return new ResolvedProjectileState(
+                    model,
+                    ballistics,
+                    cbcmwShot.lifetimeTicks(),
+                    "cbcmodernwarfare_projectile",
+                    SolverKind.STANDARD_ASYNC,
+                    fingerprint,
+                    true,
+                    family,
+                    cbcmwShot.ammunition(),
+                    0
+            );
+        }
+
+        if (CannonUtil.isBigCannon(cannon)) {
+            CannonUtil.BigCannonShotState bigShot = CannonUtil.resolveBigCannonShotState(cannon, level);
+            if (bigShot == null || !Double.isFinite(bigShot.speed()) || bigShot.speed() <= 0.0F) {
+                return null;
+            }
+            BallisticPropertiesComponent ballistics = bigShot.ballistics();
+            DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(level);
+            ProjectileModel model = ProjectileModel.cbc(
+                    bigShot.speed(),
+                    ballistics.gravity() * dimension.gravityMultiplier(),
+                    ballistics.drag(),
+                    dimension.dragMultiplier(),
+                    ballistics.isQuadraticDrag()
+            );
+            String fingerprint = Integer.toHexString(java.util.Objects.hash(
+                    bigShot.speed(), ballistics, bigShot.projectileClass(), bigShot.projectileLocalPos(),
+                    bigShot.propellantCharges(), bigShot.propellantPower(), bigShot.projectileAddedPower()));
+            return new ResolvedProjectileState(model, ballistics, 0, bigShot.reason(),
+                    SolverKind.STANDARD_ASYNC, fingerprint, true, "big_cannon",
+                    bigShot.projectileClass() == null ? "<unresolved>" : bigShot.projectileClass(), 0);
+        }
+
+        double speed = CannonUtil.getInitialVelocity(cannon, level);
+        if (!Double.isFinite(speed) || speed <= 0.0) {
+            return null;
+        }
+        BallisticPropertiesComponent ballistics = CannonUtil.getBallistics(cannon, level);
+        double gravity = ballistics == null ? CannonUtil.getProjectileGravity(cannon, level) : ballistics.gravity();
+        double drag = ballistics == null ? CannonUtil.getProjectileDrag(cannon, level) : ballistics.drag();
+        if (!Double.isFinite(gravity)) {
+            gravity = -0.05;
+        }
+        if (!Double.isFinite(drag)) {
+            drag = 0.01;
+        }
+        ProjectileModel model = ProjectileModel.simple(
+                speed,
+                gravity,
+                drag,
+                ballistics != null && ballistics.isQuadraticDrag()
+        );
+        int lifetime = CannonUtil.isAutocannonFamily(cannon)
+                ? CannonUtil.getAutocannonLifetimeTicks(cannon, level)
+                : 0;
+        String fingerprint = Integer.toHexString(java.util.Objects.hash(
+                cannon.getClass().getName(), model, ballistics, lifetime));
+        return new ResolvedProjectileState(model, ballistics, lifetime, "standard_projectile",
+                SolverKind.STANDARD_ASYNC, fingerprint, true, "standard",
+                CannonUtil.isAutocannonFamily(cannon) ? "<autocannon ammo>" : "<standard ammo>", 0);
+    }
+
+    private int solverFlightTicks(ResolvedProjectileState projectile, Vec3 muzzlePosition, Vec3 targetPosition) {
+        int computed = this.computeNewSolverMaxFlightTicks(projectile.model().muzzleSpeed(), muzzlePosition, targetPosition);
+        return projectile.lifetimeCapTicks() > 0
+                ? Math.max(1, Math.min(computed, projectile.lifetimeCapTicks()))
+                : computed;
     }
 
     @Nullable
@@ -1211,32 +1431,20 @@ public class WeaponFiringControl {
             return null;
         }
 
-        boolean cbcPhysics = CannonUtil.isBigCannon(cannonContraption);
-        CannonUtil.BigCannonShotState bigCannonShotState = cbcPhysics ? CannonUtil.resolveBigCannonShotState(cannonContraption, serverLevel) : null;
-        double projectileSpeed = bigCannonShotState != null ? bigCannonShotState.speed() : (double)CannonUtil.getInitialVelocity(cannonContraption, serverLevel);
-        if (!Double.isFinite(projectileSpeed) || projectileSpeed <= (double)0.0F) {
+        ResolvedProjectileState projectile = this.resolveProjectileState(cannonContraption, serverLevel);
+        if (projectile == null) {
             return null;
         }
-
-        BallisticPropertiesComponent ballistics = bigCannonShotState != null ? bigCannonShotState.ballistics() : CannonUtil.getBallistics(cannonContraption, serverLevel);
-        double gravity = ballistics != null ? ballistics.gravity() : CannonUtil.getProjectileGravity(cannonContraption, serverLevel);
-        double drag = ballistics != null ? ballistics.drag() : CannonUtil.getProjectileDrag(cannonContraption, serverLevel);
-        double dragDensity = (double)1.0F;
-        if (!cbcPhysics) {
-            CannonUtil.logCannonTypeReadFailure("async targeting snapshot", cannonContraption);
+        if (projectile.solverKind() == SolverKind.CBCMS_SERVER) {
+            return null;
         }
-        if (cbcPhysics) {
-            DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(serverLevel);
-            gravity *= dimension.gravityMultiplier();
-            dragDensity = dimension.dragMultiplier();
-        }
-        if (!Double.isFinite(gravity)) {
-            gravity = -0.05;
-        }
-
-        if (!Double.isFinite(drag)) {
-            drag = 0.01;
-        }
+        ProjectileModel model = projectile.model();
+        BallisticPropertiesComponent ballistics = projectile.ballistics();
+        double projectileSpeed = model.muzzleSpeed();
+        double gravity = model.gravity();
+        double drag = model.drag();
+        double dragDensity = model.dragDensity();
+        boolean cbcPhysics = model.cbcPhysics();
 
         Vec3 safeTargetVel = finiteOrZero(targetVel);
         Vec3 safeTargetAccel = clampAcceleration(finiteOrZero(targetAccel));
@@ -1250,12 +1458,9 @@ public class WeaponFiringControl {
 
         if (this.shouldLogTargetingDebug(serverLevel)) {
             this.logTargetingCoordinateResolution(serverLevel, rawTargetPos, targetWorldPos, rawMuzzlePos, muzzleWorldPos, safeShooterVel);
-            if (bigCannonShotState != null) {
-                LOGGER.warn("WFC async big cannon shot state: speed={} projectile={} projectileLocal={} muzzleExit={} muzzleOffset={} gravity={} drag={} quadratic={} reason={}",
-                        bigCannonShotState.speed(), bigCannonShotState.projectileClass(), bigCannonShotState.projectileLocalPos(),
-                        bigCannonShotState.muzzleExitLocalPos(), bigCannonShotState.muzzleForwardOffset(),
-                        gravity, drag, ballistics != null && ballistics.isQuadraticDrag(), bigCannonShotState.reason());
-            }
+            LOGGER.warn("WFC async projectile state: speed={} gravity={} drag={} quadratic={} cbcPhysics={} lifetimeCap={} reason={}",
+                    projectileSpeed, gravity, drag, model.quadraticDrag(), cbcPhysics,
+                    projectile.lifetimeCapTicks(), projectile.reason());
         }
 
         TargetingResult previous = this.cachedTargetingResult;
@@ -1268,8 +1473,9 @@ public class WeaponFiringControl {
         }
         Double preferredYaw = this.preferredYaw(previousYaw);
         Double preferredPitch = this.preferredPitch(previousPitch);
-        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).quadraticDrag(ballistics != null && ballistics.isQuadraticDrag()).cbcPhysics(cbcPhysics).dragDensity(dragDensity).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed, muzzleWorldPos, delayedTargetPos)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(preferredYaw).preferredPitchDeg(preferredPitch).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).pitchConstraint(this.effectivePitchConstraint(cannonContraption)).preferHighArc(this.targetingConfig.preferHighArc()).build();
-        return new AsyncTargetingRequest(this.cannonMount.getBlockPos().immutable(), targetMotionId, targetWorldPos, serverLevel.getGameTime(), snapshot);
+        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).quadraticDrag(model.quadraticDrag()).cbcPhysics(cbcPhysics).dragDensity(dragDensity).maxFlightTicks(this.solverFlightTicks(projectile, muzzleWorldPos, delayedTargetPos)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(preferredYaw).preferredPitchDeg(preferredPitch).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).pitchConstraint(this.effectivePitchConstraint(cannonContraption)).preferHighArc(this.targetingConfig.preferHighArc()).build();
+        return new AsyncTargetingRequest(this.cannonMount.getBlockPos().immutable(), targetMotionId, targetWorldPos,
+                serverLevel.getGameTime(), snapshot, model, projectile.solverKind(), projectile.fingerprint());
     }
 
     private int predictedAsyncSolveTicks(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, int trackingLeadTicks) {
@@ -1283,6 +1489,14 @@ public class WeaponFiringControl {
         }
 
         return Math.max(0, Math.min(60, predictedTicks));
+    }
+
+    private TargetingComputer targetingComputerFor(SolverKind solverKind, boolean async) {
+        return switch (solverKind) {
+            case CBCAT_ASYNC -> async ? this.asyncCBCAtRocketTargetingComputer : this.cbcAtRocketTargetingComputer;
+            case CBCMS_SERVER -> this.cbcmsTargetingComputer;
+            case STANDARD_ASYNC -> async ? this.asyncTargetingComputer : this.targetingComputer;
+        };
     }
 
     @Nullable
@@ -1322,9 +1536,13 @@ public class WeaponFiringControl {
         }
 
         TargetingSnapshot snapshot = request.snapshot();
-        ProjectileModel model = snapshot.cbcPhysics()
-                ? ProjectileModel.cbc(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag(), snapshot.dragDensity(), snapshot.quadraticDrag())
-                : ProjectileModel.simple(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag(), snapshot.quadraticDrag());
+        ProjectileModel model = request.projectileModel();
+        ResolvedProjectileState currentProjectile = this.resolveProjectileState(cannonContraption, serverLevel);
+        if (currentProjectile == null
+                || !request.shotFingerprint().equals(currentProjectile.fingerprint())
+                || request.solverKind() != currentProjectile.solverKind()) {
+            return null;
+        }
         int validationTicks = Math.max(1, Math.min(snapshot.maxFlightTicks(), result.predictedFlightTicks() + 1));
         ProjectileSimulator.SimulationResult trajectory = this.validationProjectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), model, validationTicks, snapshot.level());
         ObstructionResult obstruction = this.mainThreadObstructionChecker.check(serverLevel, trajectory, Math.max(0, result.predictedFlightTicks()));
@@ -1332,7 +1550,8 @@ public class WeaponFiringControl {
             return result;
         }
 
-        TargetingResult fallback = this.targetingComputer.solve(snapshot);
+        TargetingComputer computer = this.targetingComputerFor(currentProjectile.solverKind(), false);
+        TargetingResult fallback = computer.solve(snapshot, model);
         return fallback != null && fallback.valid() && fallback.hasShot() ? fallback : null;
     }
 
@@ -1370,95 +1589,72 @@ public class WeaponFiringControl {
 
     @Nullable
     private TargetingResult solveWithTargetingComputer(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, Vec3 rawTargetPos, Vec3 targetWorldPos, Vec3 targetVel, Vec3 targetAccel, Vec3 shooterVel, @Nullable Entity targetEntity, @Nullable SubLevelAccess targetSublevel, TargetMotionClass targetMotionClass, int trackingLeadTicks) {
-        if (serverLevel != null && cannonContraption != null && targetWorldPos != null) {
-            Vec3 rawMuzzlePos = this.getCannonRayStart();
-            Vec3 muzzleWorldPos = this.resolveMuzzleWorldPosition(cannonContraption);
-            if (muzzleWorldPos == null) {
-                return null;
-            } else {
-                boolean cbcPhysics = CannonUtil.isBigCannon(cannonContraption);
-                CannonUtil.BigCannonShotState bigCannonShotState = cbcPhysics ? CannonUtil.resolveBigCannonShotState(cannonContraption, serverLevel) : null;
-                double projectileSpeed = bigCannonShotState != null ? bigCannonShotState.speed() : (double)CannonUtil.getInitialVelocity(cannonContraption, serverLevel);
-                if (Double.isFinite(projectileSpeed) && !(projectileSpeed <= (double)0.0F)) {
-                    BallisticPropertiesComponent ballistics = bigCannonShotState != null ? bigCannonShotState.ballistics() : CannonUtil.getBallistics(cannonContraption, serverLevel);
-                    double gravity = ballistics != null ? ballistics.gravity() : CannonUtil.getProjectileGravity(cannonContraption, serverLevel);
-                    double drag = ballistics != null ? ballistics.drag() : CannonUtil.getProjectileDrag(cannonContraption, serverLevel);
-                    double dragDensity = (double)1.0F;
-                    if (!cbcPhysics) {
-                        CannonUtil.logCannonTypeReadFailure("targeting snapshot", cannonContraption);
-                    }
-                    if (cbcPhysics) {
-                        DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(serverLevel);
-                        gravity *= dimension.gravityMultiplier();
-                        dragDensity = dimension.dragMultiplier();
-                    }
-                    if (!Double.isFinite(gravity)) {
-                        gravity = -0.05;
-                    }
-
-                    if (!Double.isFinite(drag)) {
-                        drag = 0.01;
-                    }
-
-                    Vec3 safeTargetVel = finiteOrZero(targetVel);
-                    Vec3 safeTargetAccel = clampAcceleration(finiteOrZero(targetAccel));
-                    Vec3 safeShooterVel = finiteOrZero(shooterVel);
-                    boolean logTargetingDebug = this.shouldLogTargetingDebug(serverLevel);
-                    if (logTargetingDebug) {
-                        this.logTargetingCoordinateResolution(serverLevel, rawTargetPos, targetWorldPos, rawMuzzlePos, muzzleWorldPos, safeShooterVel);
-                        if (bigCannonShotState != null) {
-                            LOGGER.warn("WFC big cannon shot state: speed={} projectile={} projectileLocal={} muzzleExit={} muzzleOffset={} gravity={} drag={} quadratic={} reason={}",
-                                    bigCannonShotState.speed(), bigCannonShotState.projectileClass(), bigCannonShotState.projectileLocalPos(),
-                                    bigCannonShotState.muzzleExitLocalPos(), bigCannonShotState.muzzleForwardOffset(),
-                                    gravity, drag, ballistics != null && ballistics.isQuadraticDrag(), bigCannonShotState.reason());
-                        }
-                    }
-
-                    AABB baseTargetAabb = targetEntity != null ? this.resolveEntityWorldAabb(serverLevel, targetEntity) : this.resolveSublevelWorldAabb(targetSublevel);
-                    int predictedTicks = Math.max(0, trackingLeadTicks);
-                    TargetingResult result = null;
-                    for(int i = 0; i < 3; ++i) {
-                        Vec3 delayedTargetPos = predictTarget(targetWorldPos, safeTargetVel, safeTargetAccel, (double)predictedTicks, targetMotionClass, gravity);
-                        AABB targetAabb = baseTargetAabb;
-                        if (targetAabb != null && predictedTicks > 0) {
-                            targetAabb = targetAabb.move(delayedTargetPos.subtract(targetWorldPos));
-                        }
-
-                        TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(projectileSpeed).gravity(gravity).drag(drag).quadraticDrag(ballistics != null && ballistics.isQuadraticDrag()).cbcPhysics(cbcPhysics).dragDensity(dragDensity).maxFlightTicks(this.computeNewSolverMaxFlightTicks(projectileSpeed, muzzleWorldPos, delayedTargetPos)).gameTime(serverLevel.getGameTime() + (long)predictedTicks).preferredYawDeg(this.preferredYaw(null)).preferredPitchDeg(this.preferredPitch(null)).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).pitchConstraint(this.effectivePitchConstraint(cannonContraption)).preferHighArc(this.targetingConfig.preferHighArc()).build();
-                        result = this.targetingComputer.solve(snapshot);
-                        if (result == null || !result.valid() || !result.hasShot()) {
-                            break;
-                        }
-
-                        Vec3 aimPoint = result.aimSolution() != null && result.aimSolution().aimPoint() != null ? result.aimSolution().aimPoint() : delayedTargetPos;
-                        int nextTicks = this.estimateSlewTicksForSolution(cannonContraption, result.aimSolution(), result.desiredYawDeg() + (double)270.0F, result.desiredPitchDeg()) + Math.max(0, trackingLeadTicks);
-                        nextTicks = Math.max(0, Math.min(60, nextTicks));
-                        if (Math.abs(nextTicks - predictedTicks) <= 1) {
-                            predictedTicks = nextTicks;
-                            break;
-                        }
-
-                        predictedTicks = nextTicks;
-                    }
-
-                    if (this.level.getGameTime() % 20L == 1L && result != null) {
-                        LOGGER.warn("WFC TargetingComputer trackingLead={} {}", predictedTicks, result.debugString());
-                    }
-
-                    return result;
-                } else {
-                    return null;
-                }
-            }
-        } else {
+        if (serverLevel == null || cannonContraption == null || targetWorldPos == null) {
             return null;
         }
+
+        Vec3 rawMuzzlePos = this.getCannonRayStart();
+        Vec3 muzzleWorldPos = this.resolveMuzzleWorldPosition(cannonContraption);
+        ResolvedProjectileState projectile = this.resolveProjectileState(cannonContraption, serverLevel);
+        if (muzzleWorldPos == null || projectile == null) {
+            return null;
+        }
+
+        ProjectileModel model = projectile.model();
+        Vec3 safeTargetVel = finiteOrZero(targetVel);
+        Vec3 safeTargetAccel = clampAcceleration(finiteOrZero(targetAccel));
+        Vec3 safeShooterVel = finiteOrZero(shooterVel);
+        if (this.shouldLogTargetingDebug(serverLevel)) {
+            this.logTargetingCoordinateResolution(serverLevel, rawTargetPos, targetWorldPos, rawMuzzlePos, muzzleWorldPos, safeShooterVel);
+            LOGGER.warn("WFC projectile state: speed={} gravity={} drag={} quadratic={} cbcPhysics={} lifetimeCap={} reason={}",
+                    model.muzzleSpeed(), model.gravity(), model.drag(), model.quadraticDrag(), model.cbcPhysics(),
+                    projectile.lifetimeCapTicks(), projectile.reason());
+        }
+
+        AABB baseTargetAabb = targetEntity != null
+                ? this.resolveEntityWorldAabb(serverLevel, targetEntity)
+                : this.resolveSublevelWorldAabb(targetSublevel);
+        int predictedTicks = Math.max(0, trackingLeadTicks);
+        TargetingResult result = null;
+        TargetingComputer computer = this.targetingComputerFor(projectile.solverKind(), false);
+        for (int i = 0; i < 3; ++i) {
+            Vec3 delayedTargetPos = predictTarget(targetWorldPos, safeTargetVel, safeTargetAccel, predictedTicks, targetMotionClass, model.gravity());
+            AABB targetAabb = baseTargetAabb;
+            if (targetAabb != null && predictedTicks > 0) {
+                targetAabb = targetAabb.move(delayedTargetPos.subtract(targetWorldPos));
+            }
+
+            TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel).muzzlePosition(muzzleWorldPos).inheritedVelocity(safeShooterVel).targetPosition(delayedTargetPos).targetVelocity(safeTargetVel).targetAcceleration(safeTargetAccel).targetAabb(targetAabb).projectileSpeed(model.muzzleSpeed()).gravity(model.gravity()).drag(model.drag()).quadraticDrag(model.quadraticDrag()).cbcPhysics(model.cbcPhysics()).dragDensity(model.dragDensity()).maxFlightTicks(this.solverFlightTicks(projectile, muzzleWorldPos, delayedTargetPos)).gameTime(serverLevel.getGameTime() + predictedTicks).preferredYawDeg(this.preferredYaw(null)).preferredPitchDeg(this.preferredPitch(null)).currentYawDeg(this.currentSolverYawDeg()).currentPitchDeg(this.currentPitchDeg(cannonContraption)).targetSublevelId(targetSublevel != null ? targetSublevel.getUniqueId() : null).targetMotionClass(targetMotionClass).pitchConstraint(this.effectivePitchConstraint(cannonContraption)).preferHighArc(this.targetingConfig.preferHighArc()).build();
+            result = computer.solve(snapshot, model);
+            if (result == null || !result.valid() || !result.hasShot()) {
+                break;
+            }
+
+            int nextTicks = this.estimateSlewTicksForSolution(cannonContraption, result.aimSolution(), result.desiredYawDeg() + 270.0, result.desiredPitchDeg()) + Math.max(0, trackingLeadTicks);
+            nextTicks = Math.max(0, Math.min(60, nextTicks));
+            if (Math.abs(nextTicks - predictedTicks) <= 1) {
+                break;
+            }
+            predictedTicks = nextTicks;
+        }
+
+        if (this.level.getGameTime() % 20L == 1L && result != null) {
+            LOGGER.warn("WFC TargetingComputer trackingLead={} {}", predictedTicks, result.debugString());
+        }
+        return result;
     }
 
     @Nullable
     private Vec3 resolveMuzzleWorldPosition(AbstractMountedCannonContraption cannon) {
-        if (cannon instanceof MountedBigCannonContraption && this.cannonMount != null && this.cannonMount.getContraption() != null && !this.isSableMount()) {
-            return CBCMuzzleUtil.getCBCSpawnAnchorWorld(this.cannonMount.getContraption());
+        if ((CannonUtil.isBigCannon(cannon) || CannonUtil.isAutocannonFamily(cannon)
+                || CannonUtil.isCBCMSCannon(cannon))
+                && this.cannonMount != null && this.cannonMount.getContraption() != null) {
+            Vec3 anchor = CBCMuzzleUtil.getCBCSpawnAnchorWorld(this.cannonMount.getContraption());
+            if (this.isSableMount()) {
+                SubLevelAccess mountShip = SableCompanion.INSTANCE.getContaining(this.level, this.cannonMount.getBlockPos());
+                return SableUtils.getWorldVec(anchor, mountShip);
+            }
+            return anchor;
         }
         return this.getCannonRayStart();
     }
@@ -1493,29 +1689,32 @@ public class WeaponFiringControl {
         double dragDensity = 1.0;
         boolean quadraticDrag = false;
         boolean cbcPhysics = cannon != null && CannonUtil.isBigCannon(cannon);
+        ProjectileModel debugModel = null;
         String shellType = "<unknown>";
         String propellant = "<unknown>";
         String ballisticsReason = "<none>";
 
         if (cannon != null && serverLevel != null) {
-            CannonUtil.BigCannonShotState bigShot = cbcPhysics ? CannonUtil.resolveBigCannonShotState(cannon, serverLevel) : null;
-            BallisticPropertiesComponent ballistics = bigShot != null ? bigShot.ballistics() : CannonUtil.getBallistics(cannon, serverLevel);
-            projectileSpeed = bigShot != null ? bigShot.speed() : (double) CannonUtil.getInitialVelocity(cannon, serverLevel);
-            if (ballistics != null) {
-                gravity = ballistics.gravity();
-                drag = ballistics.drag();
-                quadraticDrag = ballistics.isQuadraticDrag();
-            }
-            if (cbcPhysics) {
-                DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(serverLevel);
-                gravity *= dimension.gravityMultiplier();
-                dragDensity = dimension.dragMultiplier();
+            ResolvedProjectileState projectile = this.resolveProjectileState(cannon, serverLevel);
+            CannonUtil.BigCannonShotState bigShot = CannonUtil.isBigCannon(cannon) ? CannonUtil.resolveBigCannonShotState(cannon, serverLevel) : null;
+            if (projectile != null) {
+                debugModel = projectile.model();
+                projectileSpeed = debugModel.muzzleSpeed();
+                gravity = debugModel.gravity();
+                drag = debugModel.drag();
+                quadraticDrag = debugModel.quadraticDrag();
+                cbcPhysics = debugModel.cbcPhysics();
+                dragDensity = debugModel.dragDensity();
+                ballisticsReason = projectile.reason();
             }
             if (bigShot != null) {
                 shellType = bigShot.projectileClass() == null ? "<none detected; using HE fallback ballistics>" : bigShot.projectileClass();
                 propellant = bigShot.propellantCharges() + " charges, propellantPower=" + fmt(bigShot.propellantPower())
                         + ", projectileAddedPower=" + fmt(bigShot.projectileAddedPower());
                 ballisticsReason = bigShot.reason();
+            } else if (projectile != null) {
+                shellType = projectile.ammunition() + " (" + projectile.family() + ")";
+                propellant = projectile.fuelTicks() > 0 ? "fuelTicks=" + projectile.fuelTicks() : "n/a";
             } else {
                 shellType = CannonUtil.isAutocannonFamily(cannon) ? "<autocannon ammo>" : "<unknown non-big-cannon>";
                 propellant = "n/a";
@@ -1566,9 +1765,9 @@ public class WeaponFiringControl {
         if (serverLevel != null && muzzleWorldPos != null && direction != null && direction.lengthSqr() >= 1.0E-12
                 && Double.isFinite(projectileSpeed) && projectileSpeed > 0.0
                 && Double.isFinite(gravity) && Double.isFinite(drag)) {
-            ProjectileModel model = cbcPhysics
+            ProjectileModel model = debugModel != null ? debugModel : (cbcPhysics
                     ? ProjectileModel.cbc(projectileSpeed, gravity, drag, dragDensity, quadraticDrag)
-                    : ProjectileModel.simple(projectileSpeed, gravity, drag, quadraticDrag);
+                    : ProjectileModel.simple(projectileSpeed, gravity, drag, quadraticDrag));
             int ticks = Math.max(20, Math.min(400, arcTicks));
             trajectory = this.validationProjectileSimulator.simulate(muzzleWorldPos, direction, Vec3.ZERO, model, ticks, serverLevel);
             lines.add("arc samples=" + trajectory.samples().size() + " ticks=" + ticks);
@@ -1586,6 +1785,12 @@ public class WeaponFiringControl {
             return "<none>";
         }
         String family = CannonUtil.isBigCannon(cannon) ? "big_cannon"
+                : CannonUtil.isRocketPod(cannon) ? "cbc_at_rocket_pod"
+                : CannonUtil.isMediumRocketRail(cannon) ? "cbc_at_medium_rocket_rail"
+                : CannonUtil.isHeavyAutocannon(cannon) ? "cbc_at_heavy_autocannon"
+                : CannonUtil.isTwinAutocannon(cannon) ? "cbc_at_twin_autocannon"
+                : CannonUtil.isMediumCannon(cannon) ? "cbcmw_medium"
+                : CannonUtil.isRotaryCannon(cannon) ? "cbcmw_rotary"
                 : CannonUtil.isAutocannonFamily(cannon) ? "autocannon"
                 : CannonUtil.isEnergyCannon(cannon) ? "energy"
                 : CannonUtil.isLaserCannon(cannon) ? "laser"
@@ -1867,10 +2072,10 @@ public class WeaponFiringControl {
                 : this.pitchController.getMaxAngleDeg();
         double cannonMin = cannonContraption == null
                 ? PitchConstraint.SOLVER_MIN_PITCH_DEG
-                : -cannonContraption.maximumDepression(this.cannonMount);
+                : -cannonContraption.maximumDepression(this.cannonMount.controller());
         double cannonMax = cannonContraption == null
                 ? PitchConstraint.SOLVER_MAX_PITCH_DEG
-                : cannonContraption.maximumElevation(this.cannonMount);
+                : cannonContraption.maximumElevation(this.cannonMount.controller());
 
         Vec3 rightAxis = new Vec3(1.0, 0.0, 0.0);
         Vec3 upAxis = new Vec3(0.0, 1.0, 0.0);
@@ -2020,14 +2225,41 @@ public class WeaponFiringControl {
         if (this.yawController == null && this.pitchController == null) {
             return false;
         } else {
-            boolean yaw = true;
+            boolean yaw = this.cannonMount.supportsDirectYawControl()
+                    || this.isFixedMountYawAligned(this.fixedMountDesiredYaw, lag);
             if (this.yawController != null) {
                 yaw = this.yawController.atTargetYaw(lag);
             }
 
-            boolean pitch = this.pitchController.atTargetPitch(lag);
+            boolean pitch = this.pitchController != null && this.pitchController.atTargetPitch(lag);
             return yaw && pitch;
         }
+    }
+
+    public boolean canAimAtFixedYaw(@Nullable Vec3 aimPoint) {
+        if (this.yawController != null || this.cannonMount.supportsDirectYawControl()) {
+            return true;
+        }
+        PitchOrientedContraptionEntity mounted = this.cannonMount.getContraption();
+        if (mounted == null
+                || !(mounted.getContraption() instanceof AbstractMountedCannonContraption cannon)
+                || aimPoint == null) {
+            return false;
+        }
+        AimCommand command = this.directAimCommand(cannon, this.getCannonRayStart(), aimPoint);
+        return command != null && this.isFixedMountYawAligned(command.controllerYawDeg(), false);
+    }
+
+    private boolean isFixedMountYawAligned(@Nullable Double desiredYaw, boolean lag) {
+        PitchOrientedContraptionEntity mounted = this.cannonMount.getContraption();
+        if (desiredYaw == null || mounted == null) {
+            return false;
+        }
+        double tolerance = AutoYawControllerBlockEntity.getToleranceDeg();
+        if (!lag) {
+            tolerance += RadarConfig.server().targetLoosenAmount.get();
+        }
+        return Math.abs(shortestDelta(wrap360(mounted.yaw), wrap360(desiredYaw))) < tolerance;
     }
 
     private void stopFireCannon() {
@@ -2090,7 +2322,29 @@ public class WeaponFiringControl {
     private static record AimCommand(double pitchDeg, double controllerYawDeg) {
     }
 
-    private static record AsyncTargetingRequest(BlockPos mountPos, @Nullable UUID targetId, Vec3 solvePos, long requestTick, TargetingSnapshot snapshot) {
+    private enum SolverKind {
+        STANDARD_ASYNC,
+        CBCAT_ASYNC,
+        CBCMS_SERVER
+    }
+
+    private static record ResolvedProjectileState(
+            ProjectileModel model,
+            @Nullable BallisticPropertiesComponent ballistics,
+            int lifetimeCapTicks,
+            String reason,
+            SolverKind solverKind,
+            String fingerprint,
+            boolean legacyEligible,
+            String family,
+            String ammunition,
+            int fuelTicks
+    ) {
+    }
+
+    private static record AsyncTargetingRequest(BlockPos mountPos, @Nullable UUID targetId, Vec3 solvePos, long requestTick,
+                                                TargetingSnapshot snapshot, ProjectileModel projectileModel,
+                                                SolverKind solverKind, String shotFingerprint) {
     }
 
     private static record AsyncTargetingResult(AsyncTargetingRequest request, @Nullable TargetingResult result) {

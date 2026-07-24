@@ -11,6 +11,7 @@ import com.dsvv.cbcat.cannon.twin_autocannon.TwinAutocannonBlock;
 import com.dsvv.cbcat.cannon.twin_autocannon.contraption.MountedTwinAutocannonContraption;
 import com.dsvv.cbcat.cartridge.IProjectileCartridgeBlock;
 import com.dsvv.cbcat.config.CBCATConfigs;
+import com.happysg.radar.compat.cbc_at.CBCATCannonCompat;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -51,38 +52,25 @@ final class CBCATCompat {
     }
 
     static boolean isHeavyAutocannon(AbstractMountedCannonContraption cannon) {
-        return cannon instanceof MountedHeavyAutocannonContraption;
+        return CBCATCannonCompat.isHeavyAutocannon(cannon);
     }
 
     static boolean isTwinAutocannon(AbstractMountedCannonContraption cannon) {
-        return cannon instanceof MountedTwinAutocannonContraption;
+        return CBCATCannonCompat.isTwinAutocannon(cannon);
     }
 
     static boolean isAutocannonBarrel(BlockEntity blockEntity) {
-        return blockEntity instanceof ITwinAutocannonBlockEntity
-                || blockEntity instanceof IHeavyAutocannonBlockEntity;
+        return CBCATCannonCompat.isCBCATBarrel(blockEntity);
     }
 
     @Nullable
     static AbstractCannonProjectile createAutocannonProjectile(ItemStack stack, Level level) {
-        if (stack.getItem() instanceof HeavyAutocannonAmmoItem item) {
-            return item.getAutocannonProjectile(stack, level);
-        }
-        return null;
+        return CBCATCannonCompat.createProjectile(stack, level);
     }
 
     @Nullable
     static AutocannonMaterial getAutocannonMaterial(AbstractMountedCannonContraption cannon) {
-        for (BlockEntity blockEntity : cannon.presentBlockEntities.values()) {
-            Block block = blockEntity.getBlockState().getBlock();
-            if (block instanceof TwinAutocannonBlock twinAutocannonBlock) {
-                return twinAutocannonBlock.getAutocannonMaterial();
-            }
-            if (block instanceof HeavyAutocannonBlock heavyAutocannonBlock) {
-                return heavyAutocannonBlock.getAutocannonMaterial();
-            }
-        }
-        return null;
+        return CBCATCannonCompat.getAutocannonMaterial(cannon);
     }
 
     /**

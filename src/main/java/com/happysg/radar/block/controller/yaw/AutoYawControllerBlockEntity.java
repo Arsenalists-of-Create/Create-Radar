@@ -502,6 +502,9 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
         if (level instanceof ServerLevel serverLevel) {
             BlockPos linkedMount = WeaponNetworkRuntime.get(serverLevel).getMountForController(worldPosition);
             if (linkedMount != null) {
+                // A network link is authoritative even when its mount does not support direct
+                // yaw. The kinetic actuator may still drive a swivel, while returning this
+                // position prevents fallback rotation of an unrelated adjacent cannon mount.
                 return linkedMount;
             }
         }
@@ -780,7 +783,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
         this.maxAngleDeg = v;
     }
 
-    static double getToleranceDeg() {
+    public static double getToleranceDeg() {
         return TOLERANCE_DEG;
     }
 

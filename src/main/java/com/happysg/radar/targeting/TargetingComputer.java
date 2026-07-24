@@ -27,10 +27,17 @@ public class TargetingComputer {
          ProjectileModel model = snapshot.cbcPhysics()
                  ? ProjectileModel.cbc(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag(), snapshot.dragDensity(), snapshot.quadraticDrag())
                  : ProjectileModel.simple(snapshot.projectileSpeed(), snapshot.gravity(), snapshot.drag(), snapshot.quadraticDrag());
-         return this.solver.solve(snapshot, model, this.obstructionChecker);
+         return this.solve(snapshot, model);
       } else {
          return TargetingResult.invalid("invalid snapshot");
       }
+   }
+
+   public TargetingResult solve(TargetingSnapshot snapshot, ProjectileModel model) {
+      if (snapshot == null || model == null || !snapshot.isValid()) {
+         return TargetingResult.invalid("invalid snapshot or projectile model");
+      }
+      return this.solver.solve(snapshot, model, this.obstructionChecker);
    }
 
    public ProjectileSimulator projectileSimulator() {

@@ -164,7 +164,7 @@
   "item.create_radar.binoculars.tooltip.behaviour1": "Emparelha-rá os _Binóculos_ ao _Controlador de Rede_",
   "item.create_radar.binoculars.tooltip.condition2": "Quando Olhando através dos Binóculos Emparelhados",
   "item.create_radar.binoculars.tooltip.behaviour2": "Guia todos os Canhões para a Posição _Mirada_ enquanto segurando _Botão Esquerdo_",
-  "item.create_radar.guided_fuze": "Espoleta Guiada",
+  "item.create_radar.guided_fuze": "Espoleta Guiada [OBSOLETA]",
   "item.create_radar.ident_filter_item": "Filtro de Identificação",
   "item.create_radar.ident_filter_item.tooltip.summary": "Permite Excluír _Jogadores_ e _Contrapções VS2_ da Mira Automática. Pode ser Adicionado ao _Controlaor de Rede_",
   "item.create_radar.radar_filter_item": "Filtro de Deteção",

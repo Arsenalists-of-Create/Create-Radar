@@ -68,7 +68,7 @@
   "create_radar.radar_button.player": "Jugador",
   "create_radar.radar_button.projectile": "Proyectil",
   "create_radar.radar_button.vs2": "VS2",
-  "item.create_radar.guided_fuze": "Espoleta Guiada",
+  "item.create_radar.guided_fuze": "Espoleta Guiada [OBSOLETA]",
   "item.create_radar.radar_safe_zone_designator": "Designador de zona segura de radar",
   "itemGroup.create_radar.radar": "Create: Radares"
 }

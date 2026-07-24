@@ -41,6 +41,27 @@ ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.create_radar]]
+modId = "cbcmodernwarfare"
+type = "optional"
+versionRange = "[0.0.6v,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.create_radar]]
+modId = "cbcmoreshells"
+type = "optional"
+versionRange = "[2.1.0,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.create_radar]]
+modId = "cbc_at"
+type = "optional"
+versionRange = "[0.1.4c-1.21.1,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.create_radar]]
 modId = "valkyrienskies"
 type = "optional"
 versionRange = "[2.4.7,)"

@@ -57,11 +57,7 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         this.endpoint = bearing.getExtraKinetics();
     }
 
-    /**
-     * Resolves exactly one direct, axis-aligned Swivel Bearing on a face perpendicular
-     * to the controller's rotation axis. A busy or not-yet-assembled bearing is still
-     * structurally selected so legacy actuator handling remains suppressed.
-     */
+
     public static KineticMountAdapterResolution resolve(KineticBlockEntity controller,
                                                         Direction.Axis rotationAxis) {
         Level level = controller.getLevel();

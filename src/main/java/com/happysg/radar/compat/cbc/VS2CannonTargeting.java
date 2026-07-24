@@ -1,5 +1,18 @@
 package com.happysg.radar.compat.cbc;
 
+import com.happysg.radar.compat.cbc_at.CBCATCannonCompat;
+import com.happysg.radar.compat.cbc_at.CBCATRocketAimSolver;
+import com.happysg.radar.compat.cbc_at.CBCATRocketProjectileModel;
+import com.happysg.radar.compat.cbcmoreshells.CBCMSAimSolver;
+import com.happysg.radar.compat.cbcmoreshells.CBCMSCannonCompat;
+import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
+import com.happysg.radar.compat.vs2.SableUtils;
+import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.targeting.PitchConstraint;
+import com.happysg.radar.targeting.ObstructionChecker;
+import com.happysg.radar.targeting.TargetingSnapshot;
+import com.happysg.radar.targeting.TargetingMath;
+import com.happysg.radar.targeting.TargetingResult;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.Direction;
@@ -9,7 +22,6 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix3d;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
@@ -32,38 +44,11 @@ public class VS2CannonTargeting {
         return deg;
     }
 
-    public static List<List<Double>> calculatePitchAndYawVS2(CannonMountBlockEntity mount, Vec3 targetPos, ServerLevel level) {
-        if (mount == null || targetPos == null) {
-            return null;
-        }
-
-        PitchOrientedContraptionEntity contraption = mount.getContraption();
-        if (contraption == null || !(contraption.getContraption() instanceof AbstractMountedCannonContraption cannonContraption)) {
-            return null;
-        }
-
-        Vec3 mountPos = mount.getBlockPos().getCenter();
-        int barrelLength = CannonUtil.getBarrelLength(cannonContraption);
-        Direction initialDirection = cannonContraption.initialOrientation();
-
-        if (CannonUtil.isLaserCannon(cannonContraption)) {
-            SubLevelAccess ship = SableCompanion.INSTANCE.getContaining(level, mountPos);
-            Vec3 localTarget = ship == null ? targetPos : toShipPosition(ship, targetPos);
-            return directAimToTarget(mountPos, localTarget);
-        }
-
-        float chargePower = CannonUtil.getInitialVelocity(cannonContraption, level);
-        double drag = CannonUtil.getProjectileDrag(cannonContraption, level);
-        double gravity = CannonUtil.getProjectileGravity(cannonContraption, level);
-
-        if (chargePower <= 0) {
-            return directAimToTarget(mountPos, targetPos);
-        }
-
-        return calculatePitchAndYawVS2(level, chargePower, targetPos, mountPos, barrelLength, initialDirection, drag, gravity);
+    public static List<List<Double>> calculatePitchAndYawVS2(CannonMountContext mount, Vec3 targetPos, ServerLevel level) {
+        return calculatePitchAndYawVS2(mount, targetPos, level, null, null);
     }
 
-    public static List<List<Double>> calculatePitchAndYawVS2(CannonMountBlockEntity mount, Vec3 targetPos, ServerLevel level, Double preferredPitchDeg, Double preferredYawDeg) {
+    public static List<List<Double>> calculatePitchAndYawVS2(CannonMountContext mount, Vec3 targetPos, ServerLevel level, Double preferredPitchDeg, Double preferredYawDeg) {
         if (mount == null || targetPos == null) {
             return null;
         }
@@ -83,11 +68,118 @@ public class VS2CannonTargeting {
             return directAimToTarget(mountPos, localTarget);
         }
 
+        CBCMSCannonCompat.ShotState cbcmsShot = CannonUtil.resolveCBCMSShotState(cannonContraption, level);
+        if (cbcmsShot != null) {
+            if ((Boolean) RadarConfig.server().forceLegacyCannonLeadSolver.get()
+                    && !cbcmsShot.legacyEligible()) {
+                return null;
+            }
+            Vec3 muzzleShipyard = CBCMuzzleUtil.getCBCSpawnAnchorWorld(contraption);
+            SubLevelAccess mountShip = SableCompanion.INSTANCE.getContaining(level, mountPos);
+            Vec3 muzzleWorld = SableUtils.getWorldVec(muzzleShipyard, mountShip);
+            if (cbcmsShot.solverMode() == CBCMSCannonCompat.SolverMode.CBCMS_SERVER) {
+                Double solverPreferredYaw = preferredYawDeg == null
+                        ? null
+                        : TargetingMath.wrap180(preferredYawDeg - 270.0);
+                TargetingSnapshot snapshot = TargetingSnapshot.builder(level)
+                        .muzzlePosition(muzzleWorld)
+                        .targetPosition(targetPos)
+                        .projectileSpeed(cbcmsShot.projectileModel().muzzleSpeed())
+                        .gravity(cbcmsShot.projectileModel().gravity())
+                        .drag(cbcmsShot.projectileModel().drag())
+                        .quadraticDrag(cbcmsShot.projectileModel().quadraticDrag())
+                        .cbcPhysics(true)
+                        .dragDensity(cbcmsShot.projectileModel().dragDensity())
+                        .maxFlightTicks(cbcmsShot.lifetimeCapTicks())
+                        .preferredPitchDeg(preferredPitchDeg)
+                        .preferredYawDeg(solverPreferredYaw)
+                        .pitchConstraint(PitchConstraint.unconstrained())
+                        .build();
+                TargetingResult result = CBCMSAimSolver.createComputer(ObstructionChecker.NONE)
+                        .solve(snapshot, cbcmsShot.projectileModel());
+                if (result == null || !result.valid() || !result.hasShot() || result.aimSolution() == null) {
+                    return null;
+                }
+                Vec3 localDirection = mountShip == null
+                        ? result.aimSolution().aimDirection()
+                        : SableUtils.getShipVecDirectionTransform(result.aimSolution().aimDirection(), mountShip);
+                TargetingMath.YawPitch angles = TargetingMath.yawPitchFromDirection(localDirection);
+                return List.of(List.of(angles.pitchDeg(), wrap360(angles.yawDeg() + 270.0)));
+            }
+            Vec3 localTarget = mountShip == null ? targetPos : toShipPosition(mountShip, targetPos);
+            List<Double> roots = CannonTargeting.calculatePitch(mount, muzzleShipyard, localTarget, level);
+            if (roots == null || roots.isEmpty()) return null;
+            double pitch = roots.getFirst();
+            Vec3 diff = localTarget.subtract(muzzleShipyard);
+            double yaw = wrap360(Math.toDegrees(Math.atan2(diff.z, diff.x)) + 270.0);
+            return List.of(List.of(pitch, yaw));
+        }
+        if (CannonUtil.isCBCMSCannon(cannonContraption)) {
+            return null;
+        }
+
+        if (CannonUtil.isPoweredRocket(cannonContraption)) {
+            if ((Boolean) RadarConfig.server().forceLegacyCannonLeadSolver.get()) {
+                return null;
+            }
+            CBCATCannonCompat.ShotState shot = CannonUtil.resolveCBCATShotState(cannonContraption, level);
+            CBCATRocketProjectileModel model = shot == null ? null : shot.rocketModel();
+            if (model == null) {
+                return null;
+            }
+            Vec3 muzzleShipyard = CBCMuzzleUtil.getCBCSpawnAnchorWorld(contraption);
+            SubLevelAccess ship = SableCompanion.INSTANCE.getContaining(level, mountPos);
+            Vec3 muzzleWorld = SableUtils.getWorldVec(muzzleShipyard, ship);
+            Double solverPreferredYaw = preferredYawDeg == null
+                    ? null
+                    : TargetingMath.wrap180(preferredYawDeg - 270.0);
+            TargetingResult result = CBCATRocketAimSolver.solveStationary(
+                    level,
+                    muzzleWorld,
+                    targetPos,
+                    model,
+                    false,
+                    preferredPitchDeg,
+                    solverPreferredYaw,
+                    PitchConstraint.unconstrained()
+            );
+            if (result == null || !result.valid() || !result.hasShot() || result.aimSolution() == null) {
+                return null;
+            }
+            Vec3 localDirection = ship == null
+                    ? result.aimSolution().aimDirection()
+                    : SableUtils.getShipVecDirectionTransform(result.aimSolution().aimDirection(), ship);
+            TargetingMath.YawPitch angles = TargetingMath.yawPitchFromDirection(localDirection);
+            return List.of(List.of(angles.pitchDeg(), wrap360(angles.yawDeg() + 270.0)));
+        }
+
+        CBCMWCannonCompat.ShotState cbcmwShot =
+                CannonUtil.resolveCBCMWShotState(cannonContraption, level);
+        if (CannonUtil.isCBCMWCannon(cannonContraption)) {
+            if (cbcmwShot == null) {
+                return null;
+            }
+            Vec3 muzzleShipyard = CBCMuzzleUtil.getCBCSpawnAnchorWorld(contraption);
+            SubLevelAccess mountShip = SableCompanion.INSTANCE.getContaining(level, mountPos);
+            Vec3 localTarget = mountShip == null ? targetPos : toShipPosition(mountShip, targetPos);
+            List<Double> roots = CannonTargeting.calculatePitch(
+                    mount, muzzleShipyard, localTarget, level);
+            if (roots == null || roots.isEmpty()) {
+                return null;
+            }
+            Vec3 difference = localTarget.subtract(muzzleShipyard);
+            double yaw = wrap360(Math.toDegrees(Math.atan2(difference.z, difference.x)) + 270.0);
+            return List.of(List.of(roots.getFirst(), yaw));
+        }
+
         float chargePower = CannonUtil.getInitialVelocity(cannonContraption, level);
         double drag = CannonUtil.getProjectileDrag(cannonContraption, level);
         double gravity = CannonUtil.getProjectileGravity(cannonContraption, level);
 
         if (chargePower <= 0) {
+            if (CannonUtil.isCBCATCannon(cannonContraption)) {
+                return null;
+            }
             return directAimToTarget(mountPos, targetPos);
         }
 

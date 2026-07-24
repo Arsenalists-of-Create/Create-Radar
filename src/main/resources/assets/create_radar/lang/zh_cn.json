@@ -146,7 +146,7 @@
   "display_link.success": "成功！",
   "display_link.too_far": "太远了",
   "item.create_radar.binoculars": "双筒望远镜",
-  "item.create_radar.guided_fuze": "制导引信",
+  "item.create_radar.guided_fuze": "制导引信 [已弃用]",
   "item.create_radar.ident_filter_item": "识别过滤器",
   "item.create_radar.radar_filter_item": "探测过滤器",
   "item.create_radar.radar_safe_zone_designator": "雷达安全区标定器",

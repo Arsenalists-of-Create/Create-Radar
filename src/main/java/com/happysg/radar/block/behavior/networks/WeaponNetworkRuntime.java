@@ -130,7 +130,6 @@ public final class WeaponNetworkRuntime {
         if (type == DataLinkBlockEntity.WeaponEndpointType.NONE) {
             return false;
         }
-
         BlockPos existingMount = controllerToMount.get(endpointPos);
         if (existingMount != null && !existingMount.equals(mountPos)) {
             return false;

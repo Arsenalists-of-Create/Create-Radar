@@ -14,6 +14,7 @@
     "CBCATFuzedHeavyAutocannonProjectileMixin",
     "CBCATMountedHeavyAutocannonContraptionMixin",
     "CBCATMountedTwinAutocannonContraptionMixin",
+    "CBCATQuickFireBreechAccessor",
     "CompassItemMixin",
     "FlakAutocannonProjectileMixin",
     "FireworkRocketEntityMixin",

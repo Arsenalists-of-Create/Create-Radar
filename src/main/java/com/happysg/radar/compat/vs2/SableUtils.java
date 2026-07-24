@@ -111,6 +111,12 @@ public class SableUtils {
         if (!Mods.SABLE.isLoaded())
             return vec3;
         SubLevelAccess subLevel = SableCompanion.INSTANCE.getContaining(level, vec3);
+        return getWorldVec(vec3, subLevel);
+    }
+
+    public static Vec3 getWorldVec(Vec3 vec3, SubLevelAccess subLevel) {
+        if (!Mods.SABLE.isLoaded())
+            return vec3;
         if (subLevel != null) {
             final Vector3d vec = subLevel.logicalPose().transformPosition(new Vector3d(vec3.x, vec3.y, vec3.z));
             return new Vec3(vec.x(), vec.y(), vec.z());

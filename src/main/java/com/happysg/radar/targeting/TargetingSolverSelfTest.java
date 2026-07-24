@@ -1,6 +1,10 @@
 package com.happysg.radar.targeting;
 
 import com.happysg.radar.compat.cbc.CannonTargeting;
+import com.happysg.radar.compat.cbc_at.CBCATLaunchMath;
+import com.happysg.radar.compat.cbc_at.CBCATRocketAimSolver;
+import com.happysg.radar.compat.cbc_at.CBCATRocketProjectileModel;
+import com.happysg.radar.compat.cbcmoreshells.CBCMSTorpedoProjectileModel;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
@@ -38,6 +42,15 @@ public final class TargetingSolverSelfTest {
       results.add(checkIntercept("moving_away", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)2.0F, (double)0.0F, (double)0.0F), (double)10.0F, true));
       results.add(checkIntercept("target_too_fast_to_intercept", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)12.0F, (double)0.0F, (double)0.0F), (double)10.0F, false));
       results.add(checkProjectileIntegrationOrder());
+      results.add(checkCBCATLaunchFormulas());
+      results.add(checkCBCATSmallRocketPoweredStep());
+      results.add(checkCBCATMediumRocketPoweredStep());
+      results.add(checkCBCATRocketFuelBoundary());
+      results.add(checkCBCATRocketStationarySolve());
+      results.add(checkCBCATRocketMovingSolve());
+      results.add(checkCBCMSBigCannonTorpedoMedia());
+      results.add(checkCBCMSTorpedoTerminalVelocity());
+      results.add(checkCBCMSLifetimeBoundaries());
       results.add(checkBigCannonPitch("big_cannon_pitch_50", 50.0));
       results.add(checkBigCannonPitch("big_cannon_pitch_100", 100.0));
       results.add(checkBigCannonReported150BlockShot());
@@ -111,6 +124,96 @@ public final class TargetingSolverSelfTest {
       } else {
          return Double.NaN;
       }
+   }
+
+   private static Result checkCBCATLaunchFormulas() {
+      double heavy = CBCATLaunchMath.initialSpeed(4.0F, 0.5F, 3, 2, false, false);
+      double strongHeavy = CBCATLaunchMath.initialSpeed(4.0F, 0.5F, 3, 2, false, true);
+      double rocket = CBCATLaunchMath.initialSpeed(4.0F, 0.5F, 3, 2, true, false);
+      int heavyLife = CBCATLaunchMath.flightLifetime(100, 0, false, true);
+      int twinLife = CBCATLaunchMath.flightLifetime(100, 0, false, false);
+      int rocketLife = CBCATLaunchMath.flightLifetime(100, 18, true, false);
+      boolean passed = close(heavy, 5.0)
+              && close(strongHeavy, 7.5)
+              && close(rocket, 2.25)
+              && heavyLife == 300
+              && twinLife == 100
+              && rocketLife == 118;
+      return new Result("cbc_at_launch_formulas", passed,
+              "heavy=" + heavy + " strong=" + strongHeavy + " rocket=" + rocket
+                      + " lifetimes=" + heavyLife + "/" + twinLife + "/" + rocketLife);
+   }
+
+   private static Result checkCBCATSmallRocketPoweredStep() {
+      CBCATRocketProjectileModel model = new CBCATRocketProjectileModel(
+              1.0, -0.1, 0.0, false, 1.0, 2, 10, 0.025, 2.5
+      );
+      ProjectileStep step = new ProjectileStep();
+      model.step(0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, null, step);
+      boolean passed = close(step.positionX, 1.025)
+              && close(step.positionY, -0.04375)
+              && close(step.velocityX, 1.05)
+              && close(step.velocityY, -0.0875);
+      return new Result("cbc_at_small_rocket_powered_step", passed,
+              "pos=" + step.positionX + "," + step.positionY
+                      + " vel=" + step.velocityX + "," + step.velocityY);
+   }
+
+   private static Result checkCBCATMediumRocketPoweredStep() {
+      CBCATRocketProjectileModel model = new CBCATRocketProjectileModel(
+              1.0, 0.0, 0.0, false, 1.0, 2, 10, 0.05, 3.75
+      );
+      ProjectileStep step = new ProjectileStep();
+      model.step(0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, null, step);
+      boolean passed = close(step.positionX, 1.05) && close(step.velocityX, 1.1);
+      return new Result("cbc_at_medium_rocket_powered_step", passed,
+              "positionX=" + step.positionX + " velocityX=" + step.velocityX);
+   }
+
+   private static Result checkCBCATRocketFuelBoundary() {
+      CBCATRocketProjectileModel model = new CBCATRocketProjectileModel(
+              1.0, -0.1, 0.0, false, 1.0, 1, 10, 0.025, 2.5
+      );
+      ProjectileStep step = new ProjectileStep();
+      model.step(1, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, null, step);
+      boolean passed = close(step.positionX, 1.0)
+              && close(step.positionY, -0.065)
+              && close(step.velocityX, 1.0)
+              && close(step.velocityY, -0.13);
+      return new Result("cbc_at_rocket_fuel_boundary", passed,
+              "pos=" + step.positionX + "," + step.positionY
+                      + " vel=" + step.velocityX + "," + step.velocityY);
+   }
+
+   private static Result checkCBCATRocketStationarySolve() {
+      return checkCBCATRocketSolve("cbc_at_rocket_stationary_intercept", Vec3.ZERO);
+   }
+
+   private static Result checkCBCATRocketMovingSolve() {
+      return checkCBCATRocketSolve("cbc_at_rocket_moving_intercept", new Vec3(0.0, 0.0, 0.1));
+   }
+
+   private static Result checkCBCATRocketSolve(String name, Vec3 targetVelocity) {
+      CBCATRocketProjectileModel model = new CBCATRocketProjectileModel(
+              1.5, -0.04, 0.002, false, 1.0, 18, 140, 0.025, 2.5
+      );
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(new Vec3(80.0, 4.0, 0.0))
+              .targetVelocity(targetVelocity)
+              .projectileSpeed(model.muzzleSpeed())
+              .gravity(model.gravity())
+              .drag(model.drag())
+              .quadraticDrag(model.quadraticDrag())
+              .cbcPhysics(true)
+              .dragDensity(model.dragDensity())
+              .maxFlightTicks(model.maxFlightTicks())
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
+      TargetingComputer computer = CBCATRocketAimSolver.createComputer(ObstructionChecker.NONE);
+      TargetingResult result = computer.solve(snapshot, model);
+      boolean passed = result != null && result.valid() && result.hasShot() && result.missDistance() < 1.0;
+      return new Result(name, passed, result == null ? "<null>" : result.debugString());
    }
 
    private static Result checkProjectileIntegrationOrder() {
@@ -223,6 +326,50 @@ public final class TargetingSolverSelfTest {
       }
       dragForce = Math.min(dragForce, speed);
       return velocity.normalize().scale(-dragForce).add(acceleration);
+   }
+
+   private static Result checkCBCMSBigCannonTorpedoMedia() {
+      CBCMSTorpedoProjectileModel model =
+              new CBCMSTorpedoProjectileModel(10.0, -0.05, 0.2, false, 1.0,
+                      0.5, 8.0, 20);
+      ProjectileStep air = new ProjectileStep();
+      ProjectileStep water = new ProjectileStep();
+      model.stepForMedium(false, 0, 0, 0, 10, 2, 0, air);
+      model.stepForMedium(true, 0, 0, 0, 10, 2, 0, water);
+      boolean passed = air.velocityX < 10.0 && water.velocityX < 10.0
+              && water.velocityY < air.velocityY;
+      return new Result("cbcms_big_cannon_torpedo_media", passed,
+              "air=" + air.velocityX + "," + air.velocityY
+                      + " water=" + water.velocityX + "," + water.velocityY);
+   }
+
+   private static Result checkCBCMSTorpedoTerminalVelocity() {
+      CBCMSTorpedoProjectileModel model =
+              new CBCMSTorpedoProjectileModel(4.0, 0.0, 0.1, false, 1.0,
+                      0.0, 8.0, 200);
+      ProjectileStep step = new ProjectileStep();
+      double velocity = 4.0;
+      double position = 0.0;
+      for (int i = 0; i < 100; i++) {
+         model.stepForMedium(true, position, 0, 0, velocity, 0, 0, step);
+         position = step.positionX;
+         velocity = step.velocityX;
+      }
+      boolean passed = Math.abs(velocity - 8.0) < 0.01;
+      return new Result("cbcms_big_cannon_torpedo_terminal_velocity", passed, "velocity=" + velocity);
+   }
+
+   private static Result checkCBCMSLifetimeBoundaries() {
+      CBCMSTorpedoProjectileModel torpedo =
+              new CBCMSTorpedoProjectileModel(2.0, 0.0, 0.0, false, 1.0,
+                      0.0, 2.0, 6);
+      ProjectileSimulator simulator = new ProjectileSimulator();
+      ProjectileSimulator.SimulationResult result =
+              simulator.simulate(Vec3.ZERO, new Vec3(1, 0, 0), Vec3.ZERO,
+                      torpedo, torpedo.maxFlightTicks(), null);
+      boolean passed = result.ticks() == 6 && result.samples().size() == 7;
+      return new Result("cbcms_big_cannon_torpedo_lifetime", passed,
+              "integrations=" + result.ticks() + " samples=" + result.samples().size());
    }
 
    private static Result checkTrustedAccelerationPrediction() {

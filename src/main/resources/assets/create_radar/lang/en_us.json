@@ -177,7 +177,7 @@
   "item.create_radar.binoculars.tooltip.behaviour1": "Pairs the _Binoculars_ to the _Network Controller_",
   "item.create_radar.binoculars.tooltip.condition2": "When zoomed in with paired binoculars",
   "item.create_radar.binoculars.tooltip.behaviour2": "Slaves any connected guns to the position you are looking at while _Zoomed in_ and _holding _L-Click_",
-  "item.create_radar.guided_fuze": "Guided Fuze [DEPRECATED}",
+  "item.create_radar.guided_fuze": "Guided Fuze [DEPRECATED]",
   "item.create_radar.advanced_proxy_fuze": "Advanced Proximity Fuze",
   "item.create_radar.advanced_proxy_fuze.tooltip.summary": "Detonates when in the configured proximity of any _living entity_ or sublevel. Has a 5 tick arming delay",
   "item.create_radar.advanced_proxy_fuze.tooltip.condition1": "When fired from a Radar Controlled Cannon",

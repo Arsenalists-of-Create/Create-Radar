@@ -1,5 +1,6 @@
 package com.happysg.radar.targeting;
 
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 public interface ProjectileModel {
@@ -17,6 +18,33 @@ public interface ProjectileModel {
 
    default double dragDensity() {
       return 1.0;
+   }
+
+   /**
+    * Custom models own their complete per-tick integration. Existing simple
+    * and CBC models keep using the allocation-free built-in solver branches.
+    */
+   default boolean usesCustomDynamics() {
+      return false;
+   }
+
+   default void step(
+           int tick,
+           double positionX,
+           double positionY,
+           double positionZ,
+           double velocityX,
+           double velocityY,
+           double velocityZ,
+           Level level,
+           ProjectileStep output
+   ) {
+      throw new UnsupportedOperationException("Projectile model does not define custom dynamics");
+   }
+
+   default double estimateFlightTicks(double distance) {
+      double speed = Math.max(1.0E-6, this.muzzleSpeed());
+      return Double.isFinite(distance) && distance > 0.0 ? distance / speed : 0.0;
    }
 
    default Vec3 velocityAfterTick(Vec3 velocity) {

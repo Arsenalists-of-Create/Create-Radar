@@ -1,6 +1,7 @@
 package com.happysg.radar.block.controller.yaw;
 
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.config.RadarConfig;
 import net.minecraft.server.level.ServerLevel;
@@ -28,7 +29,12 @@ public class CannonMountYaw {
         }
 
         if (PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
-            List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
+            CannonMountContext mountContext = CannonMountContext.of(mount);
+            if (mountContext == null) {
+                return;
+            }
+            List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(
+                    mountContext, targetPos, serverLevel);
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
                 return;
             }

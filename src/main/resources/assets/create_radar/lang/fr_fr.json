@@ -52,6 +52,6 @@
   "create_radar.radar_link.no_source": "Pas une source radar",
   "create_radar.radar_link.no_target": "Pas une cible radar",
   "create_radar.radar_link.title": "Liaison radar",
-  "item.create_radar.guided_fuze": "Détonateur à tête chercheuse",
+  "item.create_radar.guided_fuze": "Détonateur à tête chercheuse [OBSOLÈTE]",
   "itemGroup.create_radar.radar": "Create: Radars"
 }

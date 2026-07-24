@@ -16,6 +16,7 @@ import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
 import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.AllDataBehaviors;
@@ -138,7 +139,7 @@ public class DataLinkBlockItem extends BlockItem {
     }
 
     private InteractionResult trySelectSource(LinkUse use) {
-        if (isMount(use.clickedState())) {
+        if (isMount(use.be(), use.clickedState())) {
             if (!use.level().isClientSide) {
                 use.tag().put(SELECTED_MOUNT_POS, NbtUtils.writeBlockPos(use.clickedPos()));
                 use.tag().remove(SELECTED_FILTERER_POS);
@@ -177,9 +178,12 @@ public class DataLinkBlockItem extends BlockItem {
         return null;
     }
 
-    private static boolean isMount(BlockState state) {
+    private static boolean isMount(@Nullable BlockEntity blockEntity, BlockState state) {
         boolean isEnergyMount = Mods.CREATEENERGYCANNONS.isLoaded() && state.getBlock() instanceof EnergyCannonMount;
-        return state.getBlock() instanceof CannonMountBlock || isEnergyMount;
+        return CannonMountContext.of(blockEntity) != null
+                || CannonMountContext.isCompactMount(blockEntity, state)
+                || state.getBlock() instanceof CannonMountBlock
+                || isEnergyMount;
     }
 
     private InteractionResult completeWeaponLink(LinkUse use, ControllerType controllerType) {

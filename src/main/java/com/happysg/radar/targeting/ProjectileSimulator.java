@@ -18,7 +18,47 @@ public class ProjectileSimulator {
       if (model == null) {
          return ProjectileSimulator.SimulationResult.empty(startPosition);
       }
+      if (model.usesCustomDynamics()) {
+         return this.simulateCustom(startPosition, aimDirection, inheritedVelocity, model, maxTicks, level);
+      }
       return this.simulate(startPosition, aimDirection, inheritedVelocity, model.muzzleSpeed(), model.gravity(), model.drag(), model.quadraticDrag(), model.cbcPhysics(), model.dragDensity(), maxTicks, level);
+   }
+
+   private SimulationResult simulateCustom(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, ProjectileModel model, int maxTicks, Level level) {
+      Vec3 safeStart = finite(startPosition) ? startPosition : Vec3.ZERO;
+      Vec3 safeInherited = finite(inheritedVelocity) ? inheritedVelocity : Vec3.ZERO;
+      if (aimDirection == null || !finite(aimDirection) || aimDirection.lengthSqr() < 1.0E-12
+              || !Double.isFinite(model.muzzleSpeed()) || model.muzzleSpeed() <= 0.0) {
+         return SimulationResult.empty(safeStart);
+      }
+
+      Vec3 direction = aimDirection.normalize();
+      double px = safeStart.x;
+      double py = safeStart.y;
+      double pz = safeStart.z;
+      double vx = safeInherited.x + direction.x * model.muzzleSpeed();
+      double vy = safeInherited.y + direction.y * model.muzzleSpeed();
+      double vz = safeInherited.z + direction.z * model.muzzleSpeed();
+      int ticks = Math.max(0, Math.min(MAX_SIMULATION_TICKS, maxTicks));
+      List<Trajectory.Sample> samples = new ArrayList<>(ticks + 1);
+      ProjectileStep step = new ProjectileStep();
+
+      for (int tick = 0; tick <= ticks; tick++) {
+         samples.add(new Trajectory.Sample(tick, new Vec3(px, py, pz), new Vec3(vx, vy, vz)));
+         if (tick == ticks) {
+            break;
+         }
+         model.step(tick, px, py, pz, vx, vy, vz, level, step);
+         px = step.positionX;
+         py = step.positionY;
+         pz = step.positionZ;
+         vx = step.velocityX;
+         vy = step.velocityY;
+         vz = step.velocityZ;
+      }
+
+      Trajectory trajectory = new Trajectory(samples);
+      return new SimulationResult(trajectory, ticks, trajectory.endPosition(), trajectory.endVelocity());
    }
 
    public SimulationResult simulate(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, double muzzleSpeed, double gravity, double drag, int maxTicks) {

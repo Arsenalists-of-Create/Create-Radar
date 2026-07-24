@@ -129,6 +129,8 @@ repositories {
 }
 
 dependencies {
+    def includeOptionalCbcCompatRuntime = !project.hasProperty("skipOptionalCbcCompatRuntime")
+
     compileOnly files ("lib/createenergycannons-forge-0.2.jar")
     compileOnly("org.joml:joml-primitives:1.10.0")
     compileOnly("maven.modrinth:kotlin-for-forge:${forge_kotlin_version}")
@@ -167,8 +169,16 @@ dependencies {
         transitive = false
     }
     compileOnly files("lib/createenergycannons-0.2+mc1.20.1.jar")
-    compileOnly files("lib/createbigcannons-5.11.3-mc.1.21.1.jar")
-    compileOnly files("lib/cbc_at_Neoforge_1.21.1_0.1.4c.jar")
+    compileOnly files("lib/createbigcannons-${cbc_version}+mc.${minecraft_version}.jar")
+    compileOnly files("lib/cbcmodernwarfare-${cbc_mw_version}+mc.${minecraft_version}-neoforge.jar")
+    compileOnly files("lib/cbc_at_Neoforge_${minecraft_version}_${cbc_at_version}.jar")
+    compileOnly files("lib/CBC-Military-Supplement-1.21.1-2.1.0.jar")
+    localRuntime files("lib/createbigcannons-${cbc_version}+mc.${minecraft_version}.jar")
+    if (includeOptionalCbcCompatRuntime) {
+        localRuntime files("lib/cbcmodernwarfare-${cbc_mw_version}+mc.${minecraft_version}-neoforge.jar")
+        localRuntime files("lib/cbc_at_Neoforge_${minecraft_version}_${cbc_at_version}.jar")
+        localRuntime files("lib/CBC-Military-Supplement-1.21.1-2.1.0.jar")
+    }
 
     annotationProcessor "org.spongepowered:mixin:0.8.5:processor"
 
@@ -228,8 +238,110 @@ tasks.register('kineticControllerSelfTest', JavaExec) {
     mainClass = 'com.happysg.radar.block.controller.kinetic.KineticControllerSelfTest'
 }
 
+tasks.register('optionalCbcIsolationCheck') {
+    group = 'verification'
+    description = 'Checks CBC:MS, CBC:AT, and CBC:MW class-loading isolation without those mods present.'
+    dependsOn tasks.named('classes')
+
+    doLast {
+        if (!project.hasProperty('skipOptionalCbcCompatRuntime')) {
+            throw new GradleException(
+                    'Run optionalCbcIsolationCheck with -PskipOptionalCbcCompatRuntime')
+        }
+
+        def forbiddenJarTokens = [
+                'cbcmodernwarfare',
+                'cbc_at_',
+                'cbc-military-supplement'
+        ]
+        def leakedJars = sourceSets.main.runtimeClasspath.files.findAll { file ->
+            def name = file.name.toLowerCase(Locale.ROOT)
+            forbiddenJarTokens.any { name.contains(it) }
+        }
+        if (!leakedJars.isEmpty()) {
+            throw new GradleException(
+                    "Optional CBC jars leaked onto the isolation classpath: ${leakedJars}")
+        }
+
+        def forbiddenClassPrefixes = [
+                'riftyboi/cbcmodernwarfare/',
+                'com/cainiao1053/cbcmoreshells/',
+                'com/dsvv/cbcat/'
+        ]
+        def allowedBridgePrefixes = [
+                'com/happysg/radar/compat/cbcmw/CBCMW',
+                'com/happysg/radar/compat/cbcmoreshells/CBCMSCannonCompat',
+                'com/happysg/radar/compat/cbc_at/CBCATCannonCompat',
+                'com/happysg/radar/compat/cbc/CBCATCompat',
+                'com/happysg/radar/mixin/CBCAT'
+        ]
+        def boundaryViolations = []
+        def unsafePseudoMixins = []
+        sourceSets.main.output.classesDirs.files.each { classesDir ->
+            if (!classesDir.exists()) {
+                return
+            }
+            classesDir.eachFileRecurse { classFile ->
+                if (!classFile.name.endsWith('.class')) {
+                    return
+                }
+                def relativePath = classesDir.toPath().relativize(classFile.toPath())
+                        .toString().replace(File.separatorChar, '/' as char)
+                def classBytes = new String(
+                        classFile.bytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+                if (relativePath.startsWith('com/happysg/radar/mixin/CBCAT')) {
+                    if (!classBytes.contains('org/spongepowered/asm/mixin/Pseudo')) {
+                        unsafePseudoMixins.add(relativePath)
+                    }
+                    return
+                }
+                if (allowedBridgePrefixes.any { relativePath.startsWith(it) }) {
+                    return
+                }
+                if (forbiddenClassPrefixes.any { classBytes.contains(it) }) {
+                    boundaryViolations.add(relativePath)
+                }
+            }
+        }
+        if (!boundaryViolations.isEmpty()) {
+            throw new GradleException(
+                    "Unguarded optional CBC class references found in: ${boundaryViolations}")
+        }
+        if (!unsafePseudoMixins.isEmpty()) {
+            throw new GradleException(
+                    "Optional CBC:AT mixins missing @Pseudo: ${unsafePseudoMixins}")
+        }
+
+        def urls = sourceSets.main.runtimeClasspath.files.collect {
+            it.toURI().toURL()
+        } as URL[]
+        def loader = new URLClassLoader(urls, ClassLoader.getPlatformClassLoader())
+        try {
+            [
+                    'com.happysg.radar.compat.cbc.CannonMountContext',
+                    'com.happysg.radar.compat.cbc.CannonUtil',
+                    'com.happysg.radar.compat.cbc.CBCMuzzleUtil',
+                    'com.happysg.radar.compat.cbc.CannonTargeting',
+                    'com.happysg.radar.compat.cbc.VS2CannonTargeting',
+                    'com.happysg.radar.block.behavior.networks.WeaponFiringControl',
+                    'com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity',
+                    'com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity',
+                    'com.happysg.radar.block.datalink.DataLinkBlockItem'
+            ].each { className ->
+                Class.forName(className, false, loader)
+            }
+        } finally {
+            loader.close()
+        }
+
+        logger.lifecycle(
+                'PASS optional CBC isolation: CBC:MS, CBC:AT, and CBC:MW are absent and core classes link safely')
+    }
+}
+
 tasks.named('check') {
     dependsOn tasks.named('kineticControllerSelfTest')
+    dependsOn tasks.named('targetingSolverSelfTest')
 }
 
 idea {

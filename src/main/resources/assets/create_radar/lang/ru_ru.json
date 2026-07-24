@@ -69,7 +69,7 @@
   "create_radar.radar_button.player": "Игроки",
   "create_radar.radar_button.projectile": "Снаряды",
   "create_radar.radar_button.vs2": "Конструкции VS2",
-  "item.create_radar.guided_fuze": "Наводящий взрыватель",
+  "item.create_radar.guided_fuze": "Наводящий взрыватель [УСТАРЕЛО]",
   "item.create_radar.radar_safe_zone_designator": "Контроллер безопасных зон",
   "itemGroup.create_radar.radar": "Create: Radars"
 }

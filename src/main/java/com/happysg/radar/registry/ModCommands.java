@@ -9,6 +9,7 @@ import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
+import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.targeting.Trajectory;
 import com.happysg.radar.targeting.TargetingSolverSelfTest;
@@ -44,7 +45,6 @@ import net.neoforged.fml.loading.FMLLoader;
 import net.neoforged.neoforge.internal.versions.neoforge.NeoForgeVersion;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 
 import javax.annotation.Nullable;
 import java.awt.*;
@@ -363,7 +363,7 @@ public class  ModCommands {
             return null;
         }
 
-        CannonMountBlockEntity mount = be instanceof CannonMountBlockEntity cbcMount ? cbcMount : null;
+        CannonMountContext mount = CannonMountContext.of(be);
         AutoPitchControllerBlockEntity pitch = be instanceof AutoPitchControllerBlockEntity pitchController ? pitchController : null;
         AutoYawControllerBlockEntity yaw = be instanceof AutoYawControllerBlockEntity yawController ? yawController : null;
 
@@ -376,8 +376,8 @@ public class  ModCommands {
         }
 
         if (group != null) {
-            if (mount == null && level.getBlockEntity(group.mountPos()) instanceof CannonMountBlockEntity linkedMount) {
-                mount = linkedMount;
+            if (mount == null) {
+                mount = CannonMountContext.of(level.getBlockEntity(group.mountPos()));
             }
             if (pitch == null && group.pitchPos() != null && level.getBlockEntity(group.pitchPos()) instanceof AutoPitchControllerBlockEntity linkedPitch) {
                 pitch = linkedPitch;
@@ -405,7 +405,7 @@ public class  ModCommands {
     }
 
     private record SolverDebugContext(ServerLevel level,
-                                      @Nullable CannonMountBlockEntity mount,
+                                      @Nullable CannonMountContext mount,
                                       @Nullable AutoPitchControllerBlockEntity pitch,
                                       @Nullable AutoYawControllerBlockEntity yaw) {
     }

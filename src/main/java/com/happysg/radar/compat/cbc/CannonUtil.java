@@ -1,8 +1,13 @@
 package com.happysg.radar.compat.cbc;
 
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.cbc_at.CBCATCannonCompat;
+import com.happysg.radar.compat.cbcmoreshells.CBCMSCannonCompat;
+import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
+import com.happysg.radar.compat.cbcmw.CBCMWMountCompat;
 import com.happysg.radar.mixin.AbstractCannonAccessor;
 import com.happysg.radar.mixin.AutoCannonAccessor;
+import com.happysg.radar.targeting.ProjectileSimulator;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import net.arsenalists.createenergycannons.content.cannons.magnetic.railgun.MountedEnergyCannonContraption;
@@ -77,9 +82,10 @@ public class CannonUtil {
     public static boolean isAutocannonFamily(AbstractMountedCannonContraption cannon) {
         return isAutoCannon(cannon)
                 || isTwinAutocannon(cannon)
-                || isHeavyAutocannon(cannon);
-//                || isRotaryCannon(cannon)
-//                || isMediumCannon(cannon);
+                || isHeavyAutocannon(cannon)
+                || isRocketPod(cannon)
+                || isMediumRocketRail(cannon)
+                || isCBCMWCannon(cannon);
     }
 
     public static int getBarrelLength(AbstractMountedCannonContraption cannon) {
@@ -99,23 +105,26 @@ public class CannonUtil {
     public static Vec3 getCannonMountOffset(BlockEntity mount) {
         if (mount == null) return Vec3.ZERO;
 
-//        if (Mods.CBCMODERNWARFARE.isLoaded() && mount instanceof CompactCannonMountBlockEntity mwMount) {
-//            if (mwMount.getBlockState().hasProperty(HORIZONTAL_FACING)) {
-//                Direction dir = mwMount.getBlockState().getValue(HORIZONTAL_FACING);
-//                return switch (dir) {
-//                    case EAST -> new Vec3(0, 0,  1);
-//                    case SOUTH -> new Vec3(-1,0,  0);
-//                    case WEST -> new Vec3(0, 0, -1);
-//                    case NORTH -> new Vec3(1, 0,  0);
-//                    default -> Vec3.ZERO;
-//                };
-//            }
-//        }
+        if (Mods.CBCMODERNWARFARE.isLoaded() && CBCMWMountCompat.isCompactMount(mount)) {
+            return CBCMWMountCompat.getMountOffset(mount);
+        }
 
         return isUp(mount) ? new Vec3(0, 2, 0) : new Vec3(0, -2, 0);
     }
 
     public static BallisticPropertiesComponent getAutocannonBallistics(AbstractMountedCannonContraption cannon, Level level) {
+        if (Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isCBCMWCannon(cannon)) {
+            CBCMWCannonCompat.ShotState shotState = CBCMWCannonCompat.resolveShotState(cannon, level);
+            if (shotState != null) {
+                return shotState.ballistics();
+            }
+        }
+        if (Mods.CBC_AT.isLoaded() && level instanceof ServerLevel serverLevel && CBCATCannonCompat.isCBCATCannon(cannon)) {
+            CBCATCannonCompat.ShotState shotState = CBCATCannonCompat.resolveShotState(cannon, serverLevel);
+            if (shotState != null) {
+                return shotState.ballistics();
+            }
+        }
         BallisticPropertiesComponent loaded = getLoadedAutocannonBallistics(cannon, level);
         if (loaded != null) {
             return loaded;
@@ -349,7 +358,7 @@ public class CannonUtil {
     }
 
     @Nullable
-    private static BallisticPropertiesComponent getProjectileBallistics(AbstractCannonProjectile projectile) {
+    public static BallisticPropertiesComponent getProjectileBallistics(AbstractCannonProjectile projectile) {
         if (projectile == null) {
             return null;
         }
@@ -424,6 +433,15 @@ public class CannonUtil {
     public static float getInitialVelocity(AbstractMountedCannonContraption cannon, ServerLevel level) {
         if (cannon == null) return 0f;
 
+        if (Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isCBCMWCannon(cannon)) {
+            CBCMWCannonCompat.ShotState shotState = CBCMWCannonCompat.resolveShotState(cannon, level);
+            return shotState == null ? 0.0F : shotState.speed();
+        }
+
+        if (Mods.CBC_AT.isLoaded() && CBCATCannonCompat.isCBCATCannon(cannon)) {
+            CBCATCannonCompat.ShotState shotState = CBCATCannonCompat.resolveShotState(cannon, level);
+            return shotState == null ? 0.0F : shotState.speed();
+        }
 
 
         if (isEnergyCannon(cannon)) {
@@ -469,6 +487,9 @@ public class CannonUtil {
             AutocannonMaterial mat = getAutocannonMaterial(cannon);
             if (mat != null) {
                 int t = mat.properties().projectileLifetime();
+                if (isHeavyAutocannon(cannon)) {
+                    t *= 3;
+                }
                 if (t > 0) return t;
             }
         } catch (Throwable ignored) {
@@ -478,6 +499,18 @@ public class CannonUtil {
         return 100;
     }
 
+    public static int getAutocannonLifetimeTicks(AbstractMountedCannonContraption cannon, ServerLevel level) {
+        if (Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isCBCMWCannon(cannon)) {
+            CBCMWCannonCompat.ShotState shotState = CBCMWCannonCompat.resolveShotState(cannon, level);
+            return shotState == null ? 0 : shotState.lifetimeTicks();
+        }
+        if (Mods.CBC_AT.isLoaded() && CBCATCannonCompat.isCBCATCannon(cannon)) {
+            CBCATCannonCompat.ShotState shotState = CBCATCannonCompat.resolveShotState(cannon, level);
+            return shotState == null ? 0 : shotState.maxFlightTicks();
+        }
+        return getAutocannonLifetimeTicks(cannon);
+    }
+
     public static double getMaxProjectileRangeBlocks(AbstractMountedCannonContraption cannon, ServerLevel level) {
         if (cannon == null || level == null) return 0;
 
@@ -485,10 +518,26 @@ public class CannonUtil {
         if (speed <= 0) return 0;
 
         // lifetime
-        int lifeTicks = getAutocannonLifetimeTicks(cannon);
+        int lifeTicks = getAutocannonLifetimeTicks(cannon, level);
         if (lifeTicks <= 0) return 0;
 
         if (isAutocannonFamily(cannon)) {
+            if (Mods.CBC_AT.isLoaded() && CBCATCannonCompat.isPoweredRocket(cannon)) {
+                CBCATCannonCompat.ShotState shotState = CBCATCannonCompat.resolveShotState(cannon, level);
+                if (shotState == null || shotState.rocketModel() == null) {
+                    return 0.0;
+                }
+                ProjectileSimulator.SimulationResult simulation = new ProjectileSimulator().simulate(
+                        Vec3.ZERO,
+                        new Vec3(1.0, 0.0, 0.0),
+                        Vec3.ZERO,
+                        shotState.rocketModel(),
+                        shotState.maxFlightTicks(),
+                        null
+                );
+                Vec3 end = simulation.endPosition();
+                return Math.hypot(end.x, end.z);
+            }
             BallisticPropertiesComponent bp = getAutocannonBallistics(cannon, level);
 
             double drag = Math.max(0.0, Math.min(0.25, bp.drag()));
@@ -531,6 +580,64 @@ public class CannonUtil {
         return CBCATCompat.isTwinAutocannon(cannon);
     }
 
+    public static boolean isRocketPod(AbstractMountedCannonContraption cannon) {
+        return Mods.CBC_AT.isLoaded() && CBCATCannonCompat.isRocketPod(cannon);
+    }
+
+    public static boolean isMediumRocketRail(AbstractMountedCannonContraption cannon) {
+        return Mods.CBC_AT.isLoaded() && CBCATCannonCompat.isMediumRocketRail(cannon);
+    }
+
+    public static boolean isPoweredRocket(AbstractMountedCannonContraption cannon) {
+        return Mods.CBC_AT.isLoaded() && CBCATCannonCompat.isPoweredRocket(cannon);
+    }
+
+    public static boolean isCBCATCannon(AbstractMountedCannonContraption cannon) {
+        return Mods.CBC_AT.isLoaded() && CBCATCannonCompat.isCBCATCannon(cannon);
+    }
+
+    public static boolean isCBCMWCannon(AbstractMountedCannonContraption cannon) {
+        return Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isCBCMWCannon(cannon);
+    }
+
+    public static boolean isMediumCannon(AbstractMountedCannonContraption cannon) {
+        return Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isMediumCannon(cannon);
+    }
+
+    public static boolean isRotaryCannon(AbstractMountedCannonContraption cannon) {
+        return Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isRotaryCannon(cannon);
+    }
+
+    @Nullable
+    public static CBCMWCannonCompat.ShotState resolveCBCMWShotState(
+            AbstractMountedCannonContraption cannon, Level level
+    ) {
+        return Mods.CBCMODERNWARFARE.isLoaded()
+                ? CBCMWCannonCompat.resolveShotState(cannon, level)
+                : null;
+    }
+
+    public static boolean isCBCMSCannon(AbstractMountedCannonContraption cannon) {
+        return Mods.CBCMORESHELLS.isLoaded() && CBCMSCannonCompat.isCBCMSMount(cannon);
+    }
+
+    public static boolean isCBCMSFamily(AbstractMountedCannonContraption cannon) {
+        return Mods.CBCMORESHELLS.isLoaded()
+                && (CBCMSCannonCompat.isCBCMSMount(cannon) || isBigCannon(cannon));
+    }
+
+    @Nullable
+    public static CBCMSCannonCompat.ShotState resolveCBCMSShotState(
+            AbstractMountedCannonContraption cannon, ServerLevel level
+    ) {
+        return Mods.CBCMORESHELLS.isLoaded() ? CBCMSCannonCompat.resolveShotState(cannon, level) : null;
+    }
+
+    @Nullable
+    public static CBCATCannonCompat.ShotState resolveCBCATShotState(AbstractMountedCannonContraption cannon, ServerLevel level) {
+        return Mods.CBC_AT.isLoaded() ? CBCATCannonCompat.resolveShotState(cannon, level) : null;
+    }
+
     public static boolean isBigCannon(AbstractMountedCannonContraption cannon) {
         return cannon instanceof MountedBigCannonContraption;
     }
@@ -564,15 +671,6 @@ public class CannonUtil {
     public static boolean isAutoCannon(AbstractMountedCannonContraption cannon) {
         return cannon instanceof MountedAutocannonContraption;
     }
-//    public static boolean isRotaryCannon(AbstractMountedCannonContraption cannonContraption){
-//        if(!Mods.CBCMODERNWARFARE.isLoaded()) return false;
-//        return cannonContraption instanceof MountedRotarycannonContraption;
-//    }
-//    public static boolean isMediumCannon(AbstractMountedCannonContraption cannonContraption){
-//        if(!Mods.CBCMODERNWARFARE.isLoaded()) return false;
-//        return cannonContraption instanceof MountedMediumcannonContraption;
-//    }
-
     public static boolean isEnergyCannon(AbstractMountedCannonContraption cannonContraption){
         if(!Mods.CREATEENERGYCANNONS.isLoaded()) return false;
         return cannonContraption instanceof MountedEnergyCannonContraption;
@@ -592,6 +690,14 @@ public class CannonUtil {
         }
 
         // Regular cannons are always ready
+        return true;
+    }
+
+    public static boolean isCannonReadyToFire(CannonMountContext mount) {
+        if (mount == null) return false;
+        if (mount.blockEntity() instanceof CannonMountBlockEntity cbcMount) {
+            return isCannonReadyToFire(cbcMount);
+        }
         return true;
     }
 
