@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.kinetic;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 
@@ -34,6 +35,51 @@ public interface KineticMountAdapter {
 
     @Nullable
     KineticMountFrame frameIdentity();
+
+    /**
+     * World basis of the bearing's containing (parent) level. This must never
+     * be derived from the child assembly rotated by this bearing.
+     */
+    @Nullable
+    KineticAimFrame aimFrame();
+
+    default double controllerTargetForWorldDirection(Vec3 worldDirection) {
+        KineticAimFrame aim = aimFrame();
+        return aim == null ? Double.NaN
+                : aim.controllerTargetDegrees(axis(), worldDirection);
+    }
+
+    default double getPhysicalControllerAngleDegrees() {
+        KineticMountFrame identity = frameIdentity();
+        double physical = getPhysicalAngleDegrees();
+        if (identity == null || !Double.isFinite(physical)) {
+            return Double.NaN;
+        }
+        double controllerAngle = identity.controllerTargetFor(physical);
+        return axis() == CannonAxis.PITCH
+                ? KineticAngleMath.wrap180(controllerAngle) : controllerAngle;
+    }
+
+    default Vec3 getPhysicalWorldDirection() {
+        KineticMountFrame identity = frameIdentity();
+        KineticAimFrame aim = aimFrame();
+        double physicalController = getPhysicalControllerAngleDegrees();
+        if (identity == null || aim == null || !Double.isFinite(physicalController)) {
+            return Vec3.ZERO;
+        }
+        if (axis() == CannonAxis.YAW) {
+            return aim.worldDirection(physicalController, 0.0);
+        }
+        Direction initial = identity.cannonInitialOrientation();
+        double yaw = switch (initial == null ? Direction.SOUTH : initial) {
+            case SOUTH -> 0.0;
+            case WEST -> 90.0;
+            case NORTH -> 180.0;
+            case EAST -> 270.0;
+            default -> 0.0;
+        };
+        return aim.worldDirection(yaw, physicalController);
+    }
 
     double getEndpointTheoreticalSpeed();
 

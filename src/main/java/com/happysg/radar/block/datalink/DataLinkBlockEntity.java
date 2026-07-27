@@ -295,6 +295,34 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         refreshWeaponRuntime();
     }
 
+    /**
+     * Re-bases a link after Sable has moved both the link and its target into or
+     * out of a plot.  Unlike {@link #target(BlockPos)}, this deliberately keeps
+     * the stored coordinates in level/plot space: the weapon runtime resolves
+     * block entities by those coordinates, not by the sublevel's rendered
+     * world-space pose.
+     */
+    public void finishAssemblyRelocation(BlockPos targetPosition) {
+        linkedShipId = null;
+        targetOffsetShip = BlockPos.ZERO;
+        targetOffset = targetPosition.subtract(worldPosition);
+        targetWorldPosFallback = targetPosition.immutable();
+        lastKnownPos = worldPosition.immutable();
+        activeSource = null;
+        activeTarget = null;
+        setChanged();
+        notifyUpdate();
+    }
+
+    /**
+     * Records an exact assembly move before the delayed saved-data repair gets
+     * a chance to mistake the relocated block for a schematic copy.
+     */
+    public void markAssemblyRelocated() {
+        lastKnownPos = worldPosition.immutable();
+        setChanged();
+    }
+
     public WeaponEndpointType getWeaponEndpointType() {
         return weaponEndpointType;
     }

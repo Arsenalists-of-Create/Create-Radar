@@ -43,6 +43,7 @@ public class NetworkData extends SavedData {
     public enum RadarKind { BEARING, STATIONARY, SKY, SONAR }
     public enum Mountkind { NORMAL, FIXED, COMPACT}
     public enum LinkOrigin { DATALINK, CONTACT }
+    public enum WeaponRelocationResult { UPDATED, NOT_FOUND, CONFLICT }
     private static final String DATA_NAME = "network_data";
 
     // radarPos -> filtererKey
@@ -513,6 +514,11 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         return fk == null ? null : posFromKey(fk);
     }
 
+    public @Nullable BlockPos getWeaponMountForController(ResourceKey<Level> dim, BlockPos controllerPos) {
+        String mountKey = controllerToWeaponMount.get(key(dim, controllerPos));
+        return mountKey == null ? null : posFromKey(mountKey);
+    }
+
     public @Nullable LinkOrigin getEndpointOrigin(ResourceKey<Level> dim, BlockPos endpointPos) {
         return endpointOrigins.get(key(dim, endpointPos));
     }
@@ -911,6 +917,20 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
         String oldKey = key(dim, oldPos);
         String newKey = key(dim, newPos);
+        String alreadyMovedFilterer = dataLinkToFilterer.get(newKey);
+        if (!dataLinkToFilterer.containsKey(oldKey)) {
+            return alreadyMovedFilterer != null;
+        }
+        String oldFilterer = dataLinkToFilterer.get(oldKey);
+        if (alreadyMovedFilterer != null && !alreadyMovedFilterer.equals(oldFilterer)) {
+            return false;
+        }
+        String oldEndpoint = dataLinkToEndpoint.get(oldKey);
+        String newEndpoint = dataLinkToEndpoint.get(newKey);
+        if (newEndpoint != null && !Objects.equals(newEndpoint, oldEndpoint)) {
+            return false;
+        }
+
         String filtererKey = dataLinkToFilterer.remove(oldKey);
         String endpointKey = dataLinkToEndpoint.remove(oldKey);
         if (filtererKey == null) return false;
@@ -933,6 +953,109 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         if (endpointKey != null) dataLinkToEndpoint.put(newKey, endpointKey);
         setDirty();
         return true;
+    }
+
+    /**
+     * Atomically relocates a radar-owned weapon controller and its mount. This
+     * is intentionally separate from the generic endpoint relocation because a
+     * weapon move must keep every ownership index in lock-step.
+     */
+    public WeaponRelocationResult relocateWeaponEndpoint(
+            ResourceKey<Level> dim,
+            BlockPos oldController,
+            BlockPos newController,
+            BlockPos oldMount,
+            BlockPos newMount
+    ) {
+        if (oldController == null || newController == null || oldMount == null || newMount == null) {
+            return WeaponRelocationResult.NOT_FOUND;
+        }
+
+        String oldEndpointKey = key(dim, oldController);
+        String newEndpointKey = key(dim, newController);
+        String oldMountKey = key(dim, oldMount);
+        String newMountKey = key(dim, newMount);
+
+        String filtererKey = endpointToFilterer.get(oldEndpointKey);
+        if (filtererKey == null) {
+            filtererKey = endpointToFilterer.get(newEndpointKey);
+        }
+        if (filtererKey == null) {
+            return WeaponRelocationResult.NOT_FOUND;
+        }
+
+        Group group = groupsByFilterer.get(filtererKey);
+        if (group == null) {
+            return WeaponRelocationResult.NOT_FOUND;
+        }
+
+        String newEndpointOwner = endpointToFilterer.get(newEndpointKey);
+        if (newEndpointOwner != null && !newEndpointOwner.equals(filtererKey)) {
+            return WeaponRelocationResult.CONFLICT;
+        }
+        String newMountOwner = weaponMountToFilterer.get(newMountKey);
+        if (newMountOwner != null && !newMountOwner.equals(filtererKey)) {
+            return WeaponRelocationResult.CONFLICT;
+        }
+        String oldMountOwner = weaponMountToFilterer.get(oldMountKey);
+        if (oldMountOwner != null && !oldMountOwner.equals(filtererKey)) {
+            return WeaponRelocationResult.CONFLICT;
+        }
+
+        boolean hasOldEndpoint = group.weaponEndpoints.contains(oldController);
+        boolean hasNewEndpoint = group.weaponEndpoints.contains(newController);
+        if (!hasOldEndpoint && !hasNewEndpoint) {
+            return WeaponRelocationResult.NOT_FOUND;
+        }
+
+        String storedMount = controllerToWeaponMount.get(oldEndpointKey);
+        if (storedMount == null) {
+            storedMount = controllerToWeaponMount.get(newEndpointKey);
+        }
+        if (storedMount != null && !storedMount.equals(oldMountKey) && !storedMount.equals(newMountKey)) {
+            return WeaponRelocationResult.CONFLICT;
+        }
+
+        if (!oldController.equals(newController)) {
+            group.weaponEndpoints.remove(oldController);
+            group.weaponEndpoints.add(newController);
+            endpointToFilterer.remove(oldEndpointKey);
+            endpointToFilterer.put(newEndpointKey, filtererKey);
+            LinkOrigin origin = endpointOrigins.remove(oldEndpointKey);
+            if (origin != null) {
+                endpointOrigins.put(newEndpointKey, origin);
+            }
+        } else {
+            endpointToFilterer.put(newEndpointKey, filtererKey);
+        }
+
+        controllerToWeaponMount.remove(oldEndpointKey);
+        controllerToWeaponMount.put(newEndpointKey, newMountKey);
+        group.usedWeaponMounts.add(newMount);
+        weaponMountToFilterer.put(newMountKey, filtererKey);
+
+        boolean oldMountStillUsed = false;
+        for (BlockPos endpoint : group.weaponEndpoints) {
+            if (oldMountKey.equals(controllerToWeaponMount.get(key(dim, endpoint)))) {
+                oldMountStillUsed = true;
+                break;
+            }
+        }
+        if (!oldMountStillUsed && !oldMount.equals(newMount)) {
+            group.usedWeaponMounts.remove(oldMount);
+            if (filtererKey.equals(weaponMountToFilterer.get(oldMountKey))) {
+                weaponMountToFilterer.remove(oldMountKey);
+            }
+        }
+
+        for (Map.Entry<String, String> entry : dataLinkToEndpoint.entrySet()) {
+            if (oldEndpointKey.equals(entry.getValue())) {
+                entry.setValue(newEndpointKey);
+            }
+        }
+
+        setDirty();
+        return WeaponRelocationResult.UPDATED;
     }
 
     public CompoundTag writeSchematicSnapshot(Group group, Function<BlockPos, CompoundTag> encoder) {

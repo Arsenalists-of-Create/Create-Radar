@@ -6,6 +6,7 @@ import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
+import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
 import com.happysg.radar.block.controller.kinetic.KineticMountAdapter;
 import com.happysg.radar.block.controller.kinetic.KineticControllerState;
 import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
@@ -14,6 +15,7 @@ import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
+import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
@@ -191,6 +193,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public void setTargetAngle(float angle) {
+        kineticControllerState.endContinuousTracking();
         this.targetAngle = angle;
         this.isRunning = true;
         kineticControllerState.onTargetChanged(true, angle, DEADBAND_DEG);
@@ -206,6 +209,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public void stopController() {
+        kineticControllerState.endContinuousTracking();
         isRunning = false;
         kineticControllerState.onTargetChanged(false, targetAngle, DEADBAND_DEG);
         notifyUpdate();
@@ -428,6 +432,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
+        KineticMountAdapterResolution kineticResolution = resolveKineticMount();
+        if (kineticResolution.isStructuralSelection()) {
+            Vec3 origin = PhysicsHandler.getWorldVec(this);
+            setStructuralAimDirection(targetPos.subtract(origin), false);
+            return;
+        }
+
         Mount mount = resolveMount();
         if (mount == null) {
             return;
@@ -444,6 +455,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public void returnToZero() {
+        kineticControllerState.endContinuousTracking();
         targetAngle = 0.0;
         isRunning = true;
         kineticControllerState.onTargetChanged(true, targetAngle, DEADBAND_DEG);
@@ -796,6 +808,119 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private boolean hasStructuralKineticSelection() {
         return resolveKineticMount().isStructuralSelection();
+    }
+
+    public boolean hasStructuralKineticSelectionForTargeting() {
+        return hasStructuralKineticSelection();
+    }
+
+    @Nullable
+    public KineticAimFrame getStructuralAimFrame() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
+                || !adapter.isAssembled() || !adapter.isLocked()
+                || adapter.frameIdentity() == null) {
+            return null;
+        }
+        return adapter.aimFrame();
+    }
+
+    @Nullable
+    public Double getStructuralPhysicalControllerAngle() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()) {
+            return null;
+        }
+        double angle = adapter.getPhysicalControllerAngleDegrees();
+        return Double.isFinite(angle) ? angle : null;
+    }
+
+    @Nullable
+    public Vec3 getStructuralPhysicalWorldDirection() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()) {
+            return null;
+        }
+        Vec3 direction = adapter.getPhysicalWorldDirection();
+        return direction.lengthSqr() < 1.0e-12 ? null : direction;
+    }
+
+    public double getStructuralEffectiveDegreesPerTick() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()) {
+            return 0.0;
+        }
+        double rpm = adapter.maximumDriveRpm(getAvailableInputSpeed());
+        return adapter.effectiveDegreesPerTick(rpm);
+    }
+
+    public boolean setRadarAimDirection(@Nullable Vec3 worldAimDirection) {
+        return setStructuralAimDirection(worldAimDirection, true);
+    }
+
+    public void endRadarTracking() {
+        kineticControllerState.endContinuousTracking();
+    }
+
+    public void failClosedRadarAim() {
+        kineticControllerState.endContinuousTracking();
+        isRunning = false;
+        kineticControllerState.onTargetChanged(false, targetAngle, DEADBAND_DEG);
+        commandGeneratedSpeed(0.0);
+        flushKineticStateSync();
+        notifyUpdate();
+        setChanged();
+    }
+
+    private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection,
+                                              boolean continuous) {
+        if (debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
+            return false;
+        }
+        if (level == null || level.isClientSide() || worldAimDirection == null
+                || worldAimDirection.lengthSqr() < 1.0e-12) {
+            if (continuous && level != null && !level.isClientSide()) {
+                failClosedRadarAim();
+            }
+            return false;
+        }
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
+                || !adapter.isAssembled() || !adapter.isLocked()
+                || adapter.frameIdentity() == null || adapter.aimFrame() == null) {
+            if (continuous) {
+                failClosedRadarAim();
+            }
+            return false;
+        }
+        double target = adapter.controllerTargetForWorldDirection(worldAimDirection);
+        if (!Double.isFinite(target)
+                || target < minAngleDeg - 1.0e-6
+                || target > maxAngleDeg + 1.0e-6) {
+            if (continuous) {
+                failClosedRadarAim();
+            }
+            return false;
+        }
+
+        if (continuous) {
+            kineticControllerState.beginContinuousTracking();
+        } else {
+            kineticControllerState.endContinuousTracking();
+        }
+        targetAngle = target;
+        isRunning = true;
+        kineticControllerState.onTargetChanged(true, target, DEADBAND_DEG);
+        lastTargetPos = null;
+        physHandler.reset();
+        notifyUpdate();
+        setChanged();
+        return true;
     }
 
     private KineticMountAdapterResolution resolveKineticMount() {

@@ -2,6 +2,7 @@ package com.happysg.radar.block.behavior.networks;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -33,6 +34,7 @@ public final class WeaponGroupCoordinator {
     @SubscribeEvent
     public static void onLevelUnload(LevelEvent.Unload event) {
         if (event.getLevel() instanceof ServerLevel level) {
+            SableDataLinkRelocation.clear(level);
             WeaponNetworkRuntime.clear(level);
             LAST_ERROR_LOG.keySet().removeIf(key -> key.startsWith(level.dimension().location() + "|"));
         }
@@ -42,6 +44,7 @@ public final class WeaponGroupCoordinator {
     public static void onLevelTick(LevelTickEvent.Post event) {
         if (!(event.getLevel() instanceof ServerLevel sl)) return;
 
+        SableDataLinkRelocation.process(sl);
         WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(sl);
 
         // Ensure each mount group is processed only once per tick

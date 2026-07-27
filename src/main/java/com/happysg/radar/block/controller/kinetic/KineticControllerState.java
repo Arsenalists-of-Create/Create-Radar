@@ -340,10 +340,31 @@ public final class KineticControllerState {
      * targets. The cumulative travel bound remains active in this mode.
      */
     public void beginContinuousTracking() {
+        if (continuousTracking) {
+            return;
+        }
         continuousTracking = true;
         watchdogActive = false;
         watchdogStallTicks = 0;
         hardBlocked = false;
+    }
+
+    /**
+     * Ends a moving-target session without discarding the verified mount
+     * frame. The next ordinary set-angle command gets a fresh finite watchdog.
+     */
+    public void endContinuousTracking() {
+        if (!continuousTracking) {
+            return;
+        }
+        continuousTracking = false;
+        watchdogActive = false;
+        watchdogStallTicks = 0;
+        hardBlocked = false;
+    }
+
+    boolean isContinuousTracking() {
+        return continuousTracking;
     }
 
     public boolean isReady(KineticMountAdapterResolution resolution, boolean running,

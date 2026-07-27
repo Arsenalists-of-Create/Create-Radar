@@ -15,6 +15,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -39,30 +40,41 @@ public class RadarContraption extends BearingContraption {
     }
 
     @Override
+    protected boolean movementAllowed(BlockState state, Level world, BlockPos pos) {
+        return isRadarPart(state) && super.movementAllowed(state, world, pos);
+    }
+
+    @Override
     public void addBlock(Level level, BlockPos pos, Pair<StructureTemplate.StructureBlockInfo, BlockEntity> capture) {
-        if (capture.getKey().state().getBlock() instanceof DataLinkBlock) {
+        BlockState state = capture.getKey().state();
+
+        if (state.getBlock() instanceof DataLinkBlock || state.getBlock() instanceof DisplayLinkBlock) {
             return;
         }
 
-        if (capture.getKey().state().getBlock() instanceof DisplayLinkBlock) {
+        if (!isRadarPart(state)) {
             return;
         }
 
         super.addBlock(level, pos, capture);
 
-        if (ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.has(capture.getKey().state())) {
+        if (ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.has(state)) {
             creative = true;
         }
 
         // todo replace with tag instead of block instance check
-        if (capture.getKey().state().getBlock() instanceof AbstractRadarFrame) {
+        if (state.getBlock() instanceof AbstractRadarFrame) {
             dishCount++;
         }
 
-        if (capture.getKey().state().getBlock() instanceof RadarReceiverBlock) {
+        if (state.getBlock() instanceof RadarReceiverBlock) {
             hasReceiver = true;
-            receiverFacing = capture.getKey().state().getValue(RadarReceiverBlock.FACING);
+            receiverFacing = state.getValue(RadarReceiverBlock.FACING);
         }
+    }
+
+    private static boolean isRadarPart(BlockState state) {
+        return state.getBlock() instanceof AbstractRadarFrame || state.getBlock() instanceof RadarReceiverBlock;
     }
 
     public int getDishCount() {

@@ -28,6 +28,7 @@ public final class KineticControllerSelfTest {
     public static List<String> runChecks() {
         List<String> failures = new ArrayList<>();
         checkAngleMath(failures);
+        checkAimFrames(failures);
         checkFrames(failures);
         checkFirstNonzeroAndReadiness(failures);
         checkPowerLossAndFailClosedStates(failures);
@@ -49,6 +50,43 @@ public final class KineticControllerSelfTest {
                 KineticAngleMath.isInInclusiveWrappedInterval(10.0, 350.0, 10.0));
         expectFalse(failures, "wrapped_interval_rejects",
                 KineticAngleMath.isInInclusiveWrappedInterval(180.0, 350.0, 10.0));
+    }
+
+    private static void checkAimFrames(List<String> failures) {
+        KineticAimFrame world = KineticAimFrame.world();
+        expectClose(failures, "world_aim_yaw_south",
+                world.controllerTargetDegrees(CannonAxis.YAW, new Vec3(0.0, 0.0, 1.0)), 0.0);
+        expectClose(failures, "world_aim_yaw_west",
+                world.controllerTargetDegrees(CannonAxis.YAW, new Vec3(-1.0, 0.0, 0.0)), 90.0);
+        expectClose(failures, "world_aim_pitch",
+                world.controllerTargetDegrees(CannonAxis.PITCH, new Vec3(1.0, 1.0, 0.0)), 45.0);
+
+        KineticAimFrame parentYawedWest = new KineticAimFrame(
+                new Vec3(0.0, 0.0, -1.0),
+                new Vec3(0.0, 1.0, 0.0),
+                new Vec3(-1.0, 0.0, 0.0));
+        expectClose(failures, "parent_frame_yaw_is_relative_to_parent",
+                parentYawedWest.controllerTargetDegrees(
+                        CannonAxis.YAW, new Vec3(-1.0, 0.0, 0.0)), 0.0);
+        expectClose(failures, "parent_frame_pitch_inherits_yaw",
+                parentYawedWest.controllerTargetDegrees(
+                        CannonAxis.PITCH, new Vec3(-1.0, 1.0, 0.0)), 45.0);
+        Vec3 recoveredWorld = parentYawedWest.worldDirection(0.0, 45.0);
+        expectClose(failures, "parent_frame_world_round_trip_pitch",
+                parentYawedWest.controllerTargetDegrees(
+                        CannonAxis.PITCH, recoveredWorld), 45.0);
+        expectClose(failures, "parent_frame_world_round_trip_yaw",
+                parentYawedWest.controllerTargetDegrees(
+                        CannonAxis.YAW, recoveredWorld), 0.0);
+
+        // The child bearing/assembly angle is intentionally not an input. A
+        // fixed world vector must stay fixed while that child rotates.
+        double fixedBefore = world.controllerTargetDegrees(
+                CannonAxis.YAW, new Vec3(-1.0, 0.0, 1.0));
+        double fixedAfter = world.controllerTargetDegrees(
+                CannonAxis.YAW, new Vec3(-1.0, 0.0, 1.0));
+        expectClose(failures, "fixed_world_aim_does_not_become_residual",
+                fixedAfter, fixedBefore);
     }
 
     private static void checkFrames(List<String> failures) {
@@ -337,6 +375,9 @@ public final class KineticControllerSelfTest {
         }
         expectFalse(failures, "continuous_follow_does_not_expire_total_duration",
                 followState.isBlocked());
+        followState.endContinuousTracking();
+        expectFalse(failures, "continuous_tracking_ends_explicitly",
+                followState.isContinuousTracking());
 
         FakeRig stalledFollowRig = new FakeRig();
         stalledFollowRig.acceptDrive = false;
@@ -546,6 +587,7 @@ public final class KineticControllerSelfTest {
         }
         @Override public boolean wakePhysicalAssembly() { return valid && assembled; }
         @Override public KineticMountFrame frameIdentity() { return assembled ? frame : null; }
+        @Override public KineticAimFrame aimFrame() { return KineticAimFrame.world(); }
         @Override public double getEndpointTheoreticalSpeed() { return endpointRpm; }
         @Override public int getPositiveRotationSign() { return positiveRotationSign; }
         @Override public boolean isEndpointFree() { return free && !driven; }

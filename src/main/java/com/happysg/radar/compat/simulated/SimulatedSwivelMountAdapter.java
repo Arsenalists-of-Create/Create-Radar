@@ -1,6 +1,7 @@
 package com.happysg.radar.compat.simulated;
 
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
+import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
 import com.happysg.radar.block.controller.kinetic.KineticAngleMath;
 import com.happysg.radar.block.controller.kinetic.KineticMountFrame;
 import com.happysg.radar.block.controller.kinetic.KineticMountAdapter;
@@ -25,7 +26,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
+import org.joml.Vector3d;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 
@@ -290,6 +293,31 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         cachedFrame = new KineticMountFrame(KineticMountFrame.CURRENT_VERSION, bearingFacing,
                 controllerFacing, assemblyId, initialOrientation, sign, neutral);
         return cachedFrame;
+    }
+
+    @Override
+    public KineticAimFrame aimFrame() {
+        if (!isValid()) {
+            return null;
+        }
+        SubLevel containing = Sable.HELPER.getContaining(bearing);
+        if (containing == null) {
+            return KineticAimFrame.world();
+        }
+        if (containing.isRemoved()) {
+            return null;
+        }
+
+        Vector3d right = containing.logicalPose().transformNormal(new Vector3d(1.0, 0.0, 0.0));
+        Vector3d up = containing.logicalPose().transformNormal(new Vector3d(0.0, 1.0, 0.0));
+        Vector3d forward = containing.logicalPose().transformNormal(new Vector3d(0.0, 0.0, 1.0));
+        if (!right.isFinite() || !up.isFinite() || !forward.isFinite()) {
+            return null;
+        }
+        return new KineticAimFrame(
+                new Vec3(right.x, right.y, right.z),
+                new Vec3(up.x, up.y, up.z),
+                new Vec3(forward.x, forward.y, forward.z));
     }
 
     @Override

@@ -5,6 +5,7 @@ import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
+import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
 import com.happysg.radar.block.controller.kinetic.KineticAngleMath;
 import com.happysg.radar.block.controller.kinetic.KineticMountAdapter;
 import com.happysg.radar.block.controller.kinetic.KineticControllerState;
@@ -13,6 +14,7 @@ import com.happysg.radar.block.controller.kinetic.KineticMountFrame;
 import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
+import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
@@ -108,6 +110,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
     }
 
     public void setTargetAngle(float targetAngle) {
+        kineticControllerState.endContinuousTracking();
         this.targetAngle = targetAngle;
         this.isRunning = true;
         kineticControllerState.onTargetChanged(true, targetAngle, DEADBAND_DEG);
@@ -335,6 +338,13 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
             return;
         }
 
+        KineticMountAdapterResolution kineticResolution = resolveKineticMount();
+        if (kineticResolution.isStructuralSelection()) {
+            Vec3 origin = PhysicsHandler.getWorldVec(this);
+            setStructuralAimDirection(targetPos.subtract(origin), false);
+            return;
+        }
+
         Mount mount = resolveMount();
         if (mount == null) {
             return;
@@ -355,6 +365,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
     }
 
     public void returnToInitialOrientation() {
+        kineticControllerState.endContinuousTracking();
         targetAngle = getInitialOrientationTargetAngle();
         isRunning = true;
         kineticControllerState.onTargetChanged(true, targetAngle, DEADBAND_DEG);
@@ -581,6 +592,122 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
         return resolveKineticMount().isStructuralSelection();
     }
 
+    public boolean hasStructuralKineticSelectionForTargeting() {
+        return hasStructuralKineticSelection();
+    }
+
+    @Nullable
+    public KineticAimFrame getStructuralAimFrame() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
+                || !adapter.isAssembled() || !adapter.isLocked()
+                || adapter.frameIdentity() == null) {
+            return null;
+        }
+        return adapter.aimFrame();
+    }
+
+    @Nullable
+    public Double getStructuralPhysicalControllerAngle() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()) {
+            return null;
+        }
+        double angle = adapter.getPhysicalControllerAngleDegrees();
+        return Double.isFinite(angle) ? angle : null;
+    }
+
+    @Nullable
+    public Vec3 getStructuralPhysicalWorldDirection() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()) {
+            return null;
+        }
+        Vec3 direction = adapter.getPhysicalWorldDirection();
+        return direction.lengthSqr() < 1.0e-12 ? null : direction;
+    }
+
+    public double getStructuralEffectiveDegreesPerTick() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()) {
+            return 0.0;
+        }
+        double rpm = adapter.maximumDriveRpm(getAvailableInputSpeed());
+        return adapter.effectiveDegreesPerTick(rpm);
+    }
+
+    /**
+     * Applies a radar solver's world launch direction as an absolute Swivel
+     * command. This is intentionally separate from setTargetAngle so CC and
+     * ordinary mount commands retain their finite-command watchdog.
+     */
+    public boolean setRadarAimDirection(@Nullable Vec3 worldAimDirection) {
+        return setStructuralAimDirection(worldAimDirection, true);
+    }
+
+    public void endRadarTracking() {
+        kineticControllerState.endContinuousTracking();
+    }
+
+    public void failClosedRadarAim() {
+        kineticControllerState.endContinuousTracking();
+        isRunning = false;
+        kineticControllerState.onTargetChanged(false, targetAngle, DEADBAND_DEG);
+        commandGeneratedSpeed(0.0);
+        flushKineticStateSync();
+        notifyUpdate();
+        setChanged();
+    }
+
+    private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection,
+                                              boolean continuous) {
+        if (debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
+            return false;
+        }
+        if (level == null || level.isClientSide() || worldAimDirection == null
+                || worldAimDirection.lengthSqr() < 1.0e-12) {
+            if (continuous && level != null && !level.isClientSide()) {
+                failClosedRadarAim();
+            }
+            return false;
+        }
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
+                || !adapter.isAssembled() || !adapter.isLocked()
+                || adapter.frameIdentity() == null || adapter.aimFrame() == null) {
+            if (continuous) {
+                failClosedRadarAim();
+            }
+            return false;
+        }
+        double target = adapter.controllerTargetForWorldDirection(worldAimDirection);
+        if (!Double.isFinite(target)
+                || !KineticAngleMath.isInInclusiveWrappedInterval(
+                        target, minAngleDeg, maxAngleDeg)) {
+            if (continuous) {
+                failClosedRadarAim();
+            }
+            return false;
+        }
+
+        if (continuous) {
+            kineticControllerState.beginContinuousTracking();
+        } else {
+            kineticControllerState.endContinuousTracking();
+        }
+        targetAngle = target;
+        isRunning = true;
+        kineticControllerState.onTargetChanged(true, target, DEADBAND_DEG);
+        notifyUpdate();
+        setChanged();
+        return true;
+    }
+
     private KineticMountAdapterResolution resolveKineticMount() {
         return Mods.SIMULATED.isLoaded()
                 ? SimulatedSwivelMountAdapter.resolve(this, Direction.Axis.Y)
@@ -643,10 +770,20 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
             return true;
         }
 
-        double yawDeg = Math.toDegrees(Math.atan2(d.z, d.x)) - 90.0;
-        yawDeg = wrap360(yawDeg);
+        double yawDeg;
+        if (hasStructuralKineticSelection()) {
+            KineticAimFrame aimFrame = getStructuralAimFrame();
+            if (aimFrame == null) {
+                return false;
+            }
+            yawDeg = aimFrame.controllerTargetDegrees(CannonAxis.YAW, d);
+        } else {
+            yawDeg = wrap360(Math.toDegrees(Math.atan2(d.z, d.x)) - 90.0);
+        }
 
-        return KineticAngleMath.isInInclusiveWrappedInterval(yawDeg, minAngleDeg, maxAngleDeg);
+        return Double.isFinite(yawDeg)
+                && KineticAngleMath.isInInclusiveWrappedInterval(
+                        yawDeg, minAngleDeg, maxAngleDeg);
     }
 
     public double computeYawToTargetDeg(Vec3 cannonCenterWorld, Vec3 targetWorld) {

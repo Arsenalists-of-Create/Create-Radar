@@ -25,6 +25,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
@@ -107,6 +108,10 @@ public final class SimulatedSwivelControllerGameTests {
     }
 
     private static void sample(Fixture fixture, SampleState samples) {
+        // Production radar targeting refreshes the same world-space launch
+        // direction as solver results arrive. Reassert it every sample so this
+        // test cannot accidentally exercise only the finite setAngle path.
+        fixture.command().run();
         paceAsynchronousPhysics(fixture);
         KineticMountAdapter adapter = resolveAdapter(fixture.controller());
         KineticBlockEntity endpoint = fixture.bearing().getExtraKinetics();
@@ -404,13 +409,31 @@ public final class SimulatedSwivelControllerGameTests {
         }
         double startingSetpoint = bearing.getTargetAngleDegrees();
         if (controller instanceof AutoYawControllerBlockEntity yaw) {
+            Vec3 worldAim = new Vec3(
+                    -Math.sin(Math.toRadians(COMMAND_DEGREES)),
+                    0.0,
+                    Math.cos(Math.toRadians(COMMAND_DEGREES)));
             return new Fixture(controller, motor, bearing, startingSetpoint,
-                    () -> yaw.setTargetAngle((float) COMMAND_DEGREES),
+                    () -> {
+                        if (!yaw.setRadarAimDirection(worldAim)) {
+                            throw new GameTestAssertException(
+                                    "Yaw controller rejected a valid world-space radar aim");
+                        }
+                    },
                     () -> yaw.atTargetYaw(true));
         }
         if (controller instanceof AutoPitchControllerBlockEntity pitch) {
+            Vec3 worldAim = new Vec3(
+                    Math.cos(Math.toRadians(COMMAND_DEGREES)),
+                    Math.sin(Math.toRadians(COMMAND_DEGREES)),
+                    0.0);
             return new Fixture(controller, motor, bearing, startingSetpoint,
-                    () -> pitch.setTargetAngle((float) COMMAND_DEGREES),
+                    () -> {
+                        if (!pitch.setRadarAimDirection(worldAim)) {
+                            throw new GameTestAssertException(
+                                    "Pitch controller rejected a valid world-space radar aim");
+                        }
+                    },
                     () -> pitch.atTargetPitch(true));
         }
         throw new GameTestAssertException("Controller block entity was not created");

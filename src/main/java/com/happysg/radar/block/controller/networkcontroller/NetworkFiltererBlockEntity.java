@@ -97,13 +97,22 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
     private List<AutoPitchControllerBlockEntity> endpointCache = List.of();
     private long endpointCacheUntilTick = -1;
+    private long endpointCacheSignature = Long.MIN_VALUE;
 
 
     private @Nullable String lastPushedTrackId = null;
-    private @Nullable Vec3 lastPushedTrackPos = null;
-    private long lastPushedTrackScanTime = Long.MIN_VALUE;
+    private @Nullable TrackCategory lastPushedTrackCategory = null;
     private int lastPushedCfgHash = 0;
     private long lastPushedSafeZonesHash = 0;
+    private boolean endpointRepushRequired = true;
+
+    public void onWeaponTopologyChanged() {
+        endpointCache = List.of();
+        endpointCacheUntilTick = -1;
+        endpointCacheSignature = Long.MIN_VALUE;
+        endpointRepushRequired = true;
+        setChanged();
+    }
 
     public static void tick(Level level, BlockPos pos, BlockState state, NetworkFiltererBlockEntity be) {
         if (!(level instanceof ServerLevel sl)) return;
@@ -309,15 +318,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         TargetingConfig cfg2 = targeting != null ? targeting : TargetingConfig.DEFAULT;
 
         String newId = selected == null ? null : selected.getId();
-        Vec3 newPos = selected == null ? null : selected.position();
-        long newScanTime = selected == null ? Long.MIN_VALUE : selected.scannedTime();
+        TrackCategory newCategory = selected == null ? null : selected.getTrackCategory();
         int newCfgHash = cfgHash(cfg2);
         long newZonesHash = safeZonesHash(safeZones);
 
         boolean changed =
-                !Objects.equals(lastPushedTrackId, newId) ||
-                        !sameTrackPos(lastPushedTrackPos, newPos) ||
-                        lastPushedTrackScanTime != newScanTime ||
+                endpointRepushRequired ||
+                        !Objects.equals(lastPushedTrackId, newId) ||
+                        lastPushedTrackCategory != newCategory ||
                         lastPushedCfgHash != newCfgHash ||
                         lastPushedSafeZonesHash != newZonesHash;
 
@@ -325,10 +333,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         if (changed) {
             lastPushedTrackId = newId;
-            lastPushedTrackPos = newPos;
-            lastPushedTrackScanTime = newScanTime;
+            lastPushedTrackCategory = newCategory;
             lastPushedCfgHash = newCfgHash;
             lastPushedSafeZonesHash = newZonesHash;
+            endpointRepushRequired = false;
             pushToEndpoints(selected);
         }
     }
@@ -480,16 +488,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private void markPushedTrack(@Nullable RadarTrack track) {
         TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
         lastPushedTrackId = track == null ? null : track.getId();
-        lastPushedTrackPos = track == null ? null : track.position();
-        lastPushedTrackScanTime = track == null ? Long.MIN_VALUE : track.scannedTime();
+        lastPushedTrackCategory = track == null ? null : track.getTrackCategory();
         lastPushedCfgHash = cfgHash(cfg);
         lastPushedSafeZonesHash = safeZonesHash(safeZones);
-    }
-
-    private static boolean sameTrackPos(@Nullable Vec3 a, @Nullable Vec3 b) {
-        if (a == b) return true;
-        if (a == null || b == null) return false;
-        return a.distanceToSqr(b) <= 1.0e-8;
+        endpointRepushRequired = false;
     }
 
     private double distSqFromFilterer(Vec3 pos) {
@@ -883,6 +885,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
 
         endpointCache = getWeaponEndpointBlockEntities();
+        long signature = 1L;
+        for (AutoPitchControllerBlockEntity endpoint : endpointCache) {
+            signature = 31L * signature + endpoint.getBlockPos().asLong();
+        }
+        if (signature != endpointCacheSignature) {
+            endpointCacheSignature = signature;
+            endpointRepushRequired = true;
+        }
         endpointCacheUntilTick = now + 20;
         return endpointCache;
     }
@@ -1141,6 +1151,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         if (!(level instanceof ServerLevel sl)) return;
 
         endpointCacheUntilTick = -1;
+        endpointRepushRequired = true;
 
         DetectionConfig detection = readDetectionFromSlot();
         IdentificationConfig ident = readIdentificationFromSlot();

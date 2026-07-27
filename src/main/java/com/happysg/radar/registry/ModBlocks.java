@@ -20,6 +20,8 @@ import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
 
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarSublevelConnectorBlock;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableAwareDataLinkBlock;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BuilderTransformers;
 import com.simibubi.create.foundation.data.SharedProperties;
@@ -60,7 +62,7 @@ public class ModBlocks {
 
 
     public static final BlockEntry<DataLinkBlock> RADAR_LINK =
-            REGISTRATE.block("data_link", DataLinkBlock::new)
+            REGISTRATE.block("data_link", ModBlocks::createDataLinkBlock)
                     .initialProperties(SharedProperties::softMetal)
                     .properties(p -> p.mapColor(MapColor.TERRACOTTA_BROWN))
                     .properties(p -> p.noOcclusion())
@@ -71,6 +73,12 @@ public class ModBlocks {
                     .item(DataLinkBlockItem::new)
                     .build()
                     .register();
+
+    private static DataLinkBlock createDataLinkBlock(BlockBehaviour.Properties properties) {
+        return Mods.SABLE.<DataLinkBlock>runIfInstalled(
+                        () -> () -> new SableAwareDataLinkBlock(properties))
+                .orElseGet(() -> new DataLinkBlock(properties));
+    }
 
 
     public static final BlockEntry<RadarBearingBlock> RADAR_BEARING_BLOCK =

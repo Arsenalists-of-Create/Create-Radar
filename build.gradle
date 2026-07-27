@@ -238,6 +238,13 @@ tasks.register('kineticControllerSelfTest', JavaExec) {
     mainClass = 'com.happysg.radar.block.controller.kinetic.KineticControllerSelfTest'
 }
 
+tasks.register('weaponNetworkRelocationSelfTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs deterministic weapon network relocation checks.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.happysg.radar.block.behavior.networks.WeaponNetworkRelocationSelfTest'
+}
+
 tasks.register('optionalCbcIsolationCheck') {
     group = 'verification'
     description = 'Checks CBC:MS, CBC:AT, and CBC:MW class-loading isolation without those mods present.'
@@ -342,6 +349,7 @@ tasks.register('optionalCbcIsolationCheck') {
 tasks.named('check') {
     dependsOn tasks.named('kineticControllerSelfTest')
     dependsOn tasks.named('targetingSolverSelfTest')
+    dependsOn tasks.named('weaponNetworkRelocationSelfTest')
 }
 
 idea {

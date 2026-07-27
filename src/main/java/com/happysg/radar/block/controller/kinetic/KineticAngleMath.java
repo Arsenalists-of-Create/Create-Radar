@@ -9,6 +9,11 @@ public final class KineticAngleMath {
         return wrapped < 0.0 ? wrapped + 360.0 : wrapped;
     }
 
+    public static double wrap180(double degrees) {
+        double wrapped = wrap360(degrees);
+        return wrapped >= 180.0 ? wrapped - 360.0 : wrapped;
+    }
+
     public static double shortestDelta(double fromDegrees, double toDegrees) {
         double delta = wrap360(toDegrees) - wrap360(fromDegrees);
         if (delta >= 180.0) {

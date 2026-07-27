@@ -1,5 +1,6 @@
 package com.happysg.radar.targeting;
 
+import com.happysg.radar.block.behavior.networks.WeaponFiringControlSelfTest;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc_at.CBCATLaunchMath;
 import com.happysg.radar.compat.cbc_at.CBCATRocketAimSolver;
@@ -72,6 +73,7 @@ public final class TargetingSolverSelfTest {
       results.add(checkWarmStartOutsideLimits());
       results.add(checkPitchConstraintIntersections());
       results.add(checkRotatedMountPitchConstraint());
+      results.addAll(WeaponFiringControlSelfTest.runChecks());
       return List.copyOf(results);
    }
 
