@@ -62,15 +62,15 @@ public final class TargetingSolverSelfTest {
       results.add(checkLongRangeMovingSolve());
       results.add(checkLongRangeCbcStyleSolve());
       results.add(checkProjectileSimulatorLongCap());
-      results.add(checkWarmStartSolve());
-      results.add(checkWarmStartStationarySequence());
-      results.add(checkWarmStartDirectionReversal());
+      results.add(checkRankedTrackingSequence());
+      results.add(checkRankedStationarySequence());
+      results.add(checkRankedDirectionReversal());
       results.add(checkHighArcWithinLimits());
       results.add(checkHighArcWithinTypicalCbcLimits());
       results.add(checkHighArcLimitFallback());
       results.add(checkHighArcObstructionFallback());
       results.add(checkNeitherArcWithinLimits());
-      results.add(checkWarmStartOutsideLimits());
+      results.add(checkPreferredAimOutsideLimits());
       results.add(checkPitchConstraintIntersections());
       results.add(checkRotatedMountPitchConstraint());
       results.addAll(WeaponFiringControlSelfTest.runChecks());
@@ -408,96 +408,133 @@ public final class TargetingSolverSelfTest {
       return new Result("projectile_simulator_long_cap", passed, "ticks=" + result.ticks() + " samples=" + result.samples().size());
    }
 
-   private static Result checkWarmStartSolve() {
+   private static Result checkRankedTrackingSequence() {
       TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
       Vec3 velocity = new Vec3(0.0, 0.0, 0.08);
       double maxEquivalentError = 0.0;
+      double maxAngularStep = 0.0;
       int maxEvaluations = 0;
       for (double range : new double[]{50.0, 300.0, 1200.0}) {
          Vec3 position = new Vec3(range, 0.0, 25.0);
-         TargetingResult previous = computer.solve(warmTrackingSnapshot(position, velocity, null));
+         TargetingResult previous = computer.solve(rankedTrackingSnapshot(position, velocity, null));
          if (!previous.valid() || !previous.hasShot()) {
-            return new Result("warm_start_tracking", false, "range=" + range + " cold solve failed: " + previous.debugString());
+            return new Result("ranked_tracking_continuity", false, "range=" + range + " initial solve failed: " + previous.debugString());
          }
 
          for (int tick = 1; tick <= 12; ++tick) {
             position = position.add(velocity);
-            TargetingResult warm = computer.solve(warmTrackingSnapshot(position, velocity, previous));
-            int evaluations = debugInt(warm, "candidateEvaluations=");
-            double equivalentError = noDragTrackingError(position, velocity, 12.0, warm);
+            TargetingResult ranked = computer.solve(rankedTrackingSnapshot(position, velocity, previous));
+            int evaluations = debugInt(ranked, "candidateEvaluations=");
+            double equivalentError = noDragTrackingError(position, velocity, 12.0, ranked);
+            double yawDelta = TargetingMath.shortestAngleDelta(
+                    previous.desiredYawDeg(), ranked.desiredYawDeg());
+            double pitchDelta = ranked.desiredPitchDeg()
+                    - previous.desiredPitchDeg();
+            double angularStep = Math.hypot(yawDelta, pitchDelta);
             maxEquivalentError = Math.max(maxEquivalentError, equivalentError);
+            maxAngularStep = Math.max(maxAngularStep, angularStep);
             maxEvaluations = Math.max(maxEvaluations, evaluations);
-            boolean passed = validConvergedWarmShot(warm, evaluations)
-                    && warm.desiredYawDeg() > previous.desiredYawDeg() + 1.0E-9
-                    && equivalentError <= 0.05;
+            boolean passed = validRankedShot(ranked, evaluations)
+                    && yawDelta > 1.0E-9
+                    && angularStep <= 0.25
+                    && equivalentError <= 0.25;
             if (!passed) {
-               return new Result("warm_start_tracking", false,
-                       "range=" + range + " tick=" + tick + " evaluations=" + evaluations + " equivalentError=" + equivalentError + " previousYaw=" + previous.desiredYawDeg() + " " + warm.debugString());
+               return new Result("ranked_tracking_continuity", false,
+                       "range=" + range + " tick=" + tick
+                               + " evaluations=" + evaluations
+                               + " equivalentError=" + equivalentError
+                               + " angularStep=" + angularStep + " "
+                               + ranked.debugString());
             }
-            previous = warm;
+            previous = ranked;
          }
       }
-      return new Result("warm_start_tracking", true,
-              "ranges=3 ticksPerRange=12 maxEvaluations=" + maxEvaluations + " maxEquivalentError=" + maxEquivalentError);
+      return new Result("ranked_tracking_continuity", true,
+              "ranges=3 ticksPerRange=12 maxEvaluations=" + maxEvaluations
+                      + " maxEquivalentError=" + maxEquivalentError
+                      + " maxAngularStep=" + maxAngularStep);
    }
 
-   private static Result checkWarmStartStationarySequence() {
+   private static Result checkRankedStationarySequence() {
       TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
       Vec3 position = new Vec3(300.0, 0.0, 25.0);
-      TargetingResult previous = computer.solve(warmTrackingSnapshot(position, Vec3.ZERO, null));
+      TargetingResult previous = computer.solve(rankedTrackingSnapshot(position, Vec3.ZERO, null));
       if (!previous.valid() || !previous.hasShot()) {
-         return new Result("warm_start_stationary", false, "cold solve failed: " + previous.debugString());
+         return new Result("ranked_stationary_stability", false, "initial solve failed: " + previous.debugString());
       }
 
       double initialYaw = previous.desiredYawDeg();
       double initialPitch = previous.desiredPitchDeg();
+      double maxVariation = 0.0;
       int maxEvaluations = 0;
       for (int tick = 1; tick <= 6; ++tick) {
-         TargetingResult warm = computer.solve(warmTrackingSnapshot(position, Vec3.ZERO, previous));
-         int evaluations = debugInt(warm, "candidateEvaluations=");
+         TargetingResult ranked = computer.solve(rankedTrackingSnapshot(position, Vec3.ZERO, previous));
+         int evaluations = debugInt(ranked, "candidateEvaluations=");
          maxEvaluations = Math.max(maxEvaluations, evaluations);
-         boolean stable = Math.abs(warm.desiredYawDeg() - initialYaw) <= 1.0E-12
-                 && Math.abs(warm.desiredPitchDeg() - initialPitch) <= 1.0E-12;
-         if (!validConvergedWarmShot(warm, evaluations) || !stable) {
-            return new Result("warm_start_stationary", false,
-                    "tick=" + tick + " evaluations=" + evaluations + " initialYaw=" + initialYaw + " initialPitch=" + initialPitch + " " + warm.debugString());
+         double variation = Math.hypot(
+                 TargetingMath.shortestAngleDelta(
+                         initialYaw, ranked.desiredYawDeg()),
+                 ranked.desiredPitchDeg() - initialPitch);
+         maxVariation = Math.max(maxVariation, variation);
+         if (!validRankedShot(ranked, evaluations) || variation > 0.05) {
+            return new Result("ranked_stationary_stability", false,
+                    "tick=" + tick + " evaluations=" + evaluations
+                            + " variation=" + variation + " "
+                            + ranked.debugString());
          }
-         previous = warm;
+         previous = ranked;
       }
-      return new Result("warm_start_stationary", true, "ticks=6 maxEvaluations=" + maxEvaluations);
+      return new Result("ranked_stationary_stability", true,
+              "ticks=6 maxEvaluations=" + maxEvaluations
+                      + " maxVariation=" + maxVariation);
    }
 
-   private static Result checkWarmStartDirectionReversal() {
+   private static Result checkRankedDirectionReversal() {
       TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
       Vec3 position = new Vec3(300.0, 0.0, 10.0);
       Vec3 velocity = new Vec3(0.0, 0.0, 0.08);
-      TargetingResult previous = computer.solve(warmTrackingSnapshot(position, velocity, null));
+      TargetingResult previous = computer.solve(rankedTrackingSnapshot(position, velocity, null));
       if (!previous.valid() || !previous.hasShot()) {
-         return new Result("warm_start_direction_reversal", false, "cold solve failed: " + previous.debugString());
+         return new Result("ranked_direction_reversal", false, "initial solve failed: " + previous.debugString());
       }
 
+      double maxAngularStep = 0.0;
       int maxEvaluations = 0;
       for (int tick = 1; tick <= 12; ++tick) {
          if (tick == 6) {
             velocity = velocity.scale(-1.0);
          }
          position = position.add(velocity);
-         TargetingResult warm = computer.solve(warmTrackingSnapshot(position, velocity, previous));
-         int evaluations = debugInt(warm, "candidateEvaluations=");
+         TargetingResult ranked = computer.solve(rankedTrackingSnapshot(position, velocity, previous));
+         int evaluations = debugInt(ranked, "candidateEvaluations=");
          maxEvaluations = Math.max(maxEvaluations, evaluations);
-         double yawDelta = TargetingMath.shortestAngleDelta(previous.desiredYawDeg(), warm.desiredYawDeg());
+         double yawDelta = TargetingMath.shortestAngleDelta(
+                 previous.desiredYawDeg(), ranked.desiredYawDeg());
+         double pitchDelta = ranked.desiredPitchDeg()
+                 - previous.desiredPitchDeg();
+         double angularStep = Math.hypot(yawDelta, pitchDelta);
+         maxAngularStep = Math.max(maxAngularStep, angularStep);
          boolean expectedDirection = tick < 6 ? yawDelta > 1.0E-9 : yawDelta < -1.0E-9;
-         boolean lowArc = "low".equals(debugValue(warm, "selectedArc="));
-         if (!validConvergedWarmShot(warm, evaluations) || !expectedDirection || !lowArc) {
-            return new Result("warm_start_direction_reversal", false,
-                    "tick=" + tick + " evaluations=" + evaluations + " yawDelta=" + yawDelta + " " + warm.debugString());
+         boolean lowArc = "low".equals(debugValue(ranked, "selectedArc="));
+         double allowedAngularStep = tick == 6 ? 1.0 : 0.25;
+         if (!validRankedShot(ranked, evaluations)
+                 || !expectedDirection || !lowArc
+                 || angularStep > allowedAngularStep) {
+            return new Result("ranked_direction_reversal", false,
+                    "tick=" + tick + " evaluations=" + evaluations
+                            + " yawDelta=" + yawDelta
+                            + " angularStep=" + angularStep
+                            + " allowed=" + allowedAngularStep + " "
+                            + ranked.debugString());
          }
-         previous = warm;
+         previous = ranked;
       }
-      return new Result("warm_start_direction_reversal", true, "ticks=12 maxEvaluations=" + maxEvaluations);
+      return new Result("ranked_direction_reversal", true,
+              "ticks=12 maxEvaluations=" + maxEvaluations
+                      + " maxAngularStep=" + maxAngularStep);
    }
 
-   private static TargetingSnapshot warmTrackingSnapshot(Vec3 position, Vec3 velocity, TargetingResult preferred) {
+   private static TargetingSnapshot rankedTrackingSnapshot(Vec3 position, Vec3 velocity, TargetingResult preferred) {
       return TargetingSnapshot.builder(null)
               .muzzlePosition(Vec3.ZERO)
               .targetPosition(position)
@@ -512,14 +549,12 @@ public final class TargetingSolverSelfTest {
               .build();
    }
 
-   private static boolean validConvergedWarmShot(TargetingResult result, int evaluations) {
+   private static boolean validRankedShot(TargetingResult result, int evaluations) {
       return result.valid()
               && result.hasShot()
-              && "warm".equals(debugValue(result, "path="))
-              && "true".equals(debugValue(result, "warmConverged="))
-              && "0.05".equals(debugValue(result, "refinementPrecisionBlocks="))
-              && evaluations > 0
-              && evaluations <= 113;
+              && "ranked".equals(debugValue(result, "path="))
+              && "0.25".equals(debugValue(result, "refinementPrecisionBlocks="))
+              && evaluations > 113;
    }
 
    private static double noDragTrackingError(Vec3 targetPosition, Vec3 targetVelocity, double projectileSpeed, TargetingResult result) {
@@ -608,15 +643,16 @@ public final class TargetingSolverSelfTest {
       return new Result("artillery_neither_arc_within_limits", passed, result.debugString());
    }
 
-   private static Result checkWarmStartOutsideLimits() {
+   private static Result checkPreferredAimOutsideLimits() {
       TargetingResult result = solveArtillery(PitchConstraint.world(-10.0, 45.0), ObstructionChecker.NONE, 75.0);
       int rejections = debugInt(result, "pitchConstraintRejections=");
       boolean passed = result.valid()
               && result.hasShot()
               && result.desiredPitchDeg() <= 45.0
-              && "cold".equals(debugValue(result, "path="))
+              && "ranked".equals(debugValue(result, "path="))
               && rejections > 0;
-      return new Result("warm_start_outside_pitch_limits", passed, "rejections=" + rejections + " " + result.debugString());
+      return new Result("preferred_aim_outside_pitch_limits", passed,
+              "rejections=" + rejections + " " + result.debugString());
    }
 
    private static Result checkPitchConstraintIntersections() {

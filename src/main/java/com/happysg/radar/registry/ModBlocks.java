@@ -9,6 +9,7 @@ import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock
 import com.happysg.radar.block.controller.firing.FireControllerBlock;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlock;
 
+import com.happysg.radar.block.controller.tpitch.TPitchControllerBlock;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
@@ -278,7 +279,14 @@ public class ModBlocks {
                     .properties(BlockBehaviour.Properties::noLootTable)
                     .blockstate((c, p) -> p.simpleBlock(c.get(), p.models().getExistingFile(ResourceLocation.withDefaultNamespace("block/barrier"))))
                     .register();
-
+    public static final BlockEntry<TPitchControllerBlock> T_PITCH =
+        REGISTRATE.block("t_pitch",TPitchControllerBlock::new)
+                .initialProperties(SharedProperties::softMetal)
+                .properties(p -> p.noOcclusion())
+                .properties(p -> p.strength(0.8f))
+                .transform(axeOrPickaxe())
+                .simpleItem()
+                .register();
 
     public static void register() {
         CreateRadar.getLogger().info("Registering blocks!");

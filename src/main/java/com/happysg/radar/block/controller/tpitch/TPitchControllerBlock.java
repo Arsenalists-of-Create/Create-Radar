@@ -1,4 +1,9 @@
 package com.happysg.radar.block.controller.tpitch;
 
-public class TPitchControllerBlock {
+import net.minecraft.world.level.block.Block;
+
+public class TPitchControllerBlock extends Block {
+    public TPitchControllerBlock(Properties properties) {
+        super(properties);
+    }
 }
