@@ -43,6 +43,7 @@ public final class TargetingSolverSelfTest {
       results.add(checkIntercept("moving_away", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)2.0F, (double)0.0F, (double)0.0F), (double)10.0F, true));
       results.add(checkIntercept("target_too_fast_to_intercept", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)12.0F, (double)0.0F, (double)0.0F), (double)10.0F, false));
       results.add(checkProjectileIntegrationOrder());
+      results.add(checkStatefulDynamicsIsolation());
       results.add(checkCBCATLaunchFormulas());
       results.add(checkCBCATSmallRocketPoweredStep());
       results.add(checkCBCATMediumRocketPoweredStep());
@@ -453,6 +454,89 @@ public final class TargetingSolverSelfTest {
               "ranges=3 ticksPerRange=12 maxEvaluations=" + maxEvaluations
                       + " maxEquivalentError=" + maxEquivalentError
                       + " maxAngularStep=" + maxAngularStep);
+   }
+
+   private static Result checkStatefulDynamicsIsolation() {
+      int[] factories = {0};
+      ProjectileModel model = new ProjectileModel() {
+         @Override
+         public double muzzleSpeed() {
+            return 1.0;
+         }
+
+         @Override
+         public double gravity() {
+            return 0.0;
+         }
+
+         @Override
+         public double drag() {
+            return 0.0;
+         }
+
+         @Override
+         public boolean quadraticDrag() {
+            return false;
+         }
+
+         @Override
+         public boolean usesCustomDynamics() {
+            return true;
+         }
+
+         @Override
+         public ProjectileDynamics createDynamics(
+                 Vec3 startPosition,
+                 Vec3 aimDirection,
+                 Vec3 inheritedVelocity
+         ) {
+            factories[0]++;
+            return new ProjectileDynamics() {
+               private int steps;
+
+               @Override
+               public void step(
+                       int tick,
+                       double positionX,
+                       double positionY,
+                       double positionZ,
+                       double velocityX,
+                       double velocityY,
+                       double velocityZ,
+                       net.minecraft.world.level.Level level,
+                       ProjectileStep output
+               ) {
+                  double acceleration = steps++ == 0 ? 1.0 : 0.0;
+                  output.set(
+                          positionX + velocityX + acceleration * 0.5,
+                          positionY,
+                          positionZ,
+                          velocityX + acceleration,
+                          velocityY,
+                          velocityZ);
+               }
+            };
+         }
+      };
+
+      ProjectileSimulator simulator = new ProjectileSimulator();
+      ProjectileSimulator.SimulationResult first = simulator.simulate(
+              Vec3.ZERO, new Vec3(1.0, 0.0, 0.0), Vec3.ZERO,
+              model, 2, null);
+      ProjectileSimulator.SimulationResult second = simulator.simulate(
+              Vec3.ZERO, new Vec3(1.0, 0.0, 0.0), Vec3.ZERO,
+              model, 2, null);
+      boolean passed = factories[0] == 2
+              && close(first.endPosition().x, 3.5)
+              && close(second.endPosition().x, 3.5)
+              && close(first.endVelocity().x, 2.0)
+              && close(second.endVelocity().x, 2.0);
+      return new Result(
+              "stateful_projectile_dynamics_isolation",
+              passed,
+              "factories=" + factories[0]
+                      + " first=" + first.endPosition().x
+                      + " second=" + second.endPosition().x);
    }
 
    private static Result checkRankedStationarySequence() {

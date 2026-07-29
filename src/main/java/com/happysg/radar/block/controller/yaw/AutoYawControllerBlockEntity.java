@@ -397,6 +397,10 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
     }
 
     public boolean atTargetYaw(boolean lag) {
+        return atTargetYaw(lag, 0.0);
+    }
+
+    public boolean atTargetYaw(boolean lag, double minimumToleranceDegrees) {
         if (level == null) {
             return false;
         }
@@ -416,27 +420,34 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
         }
 
         if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-            return cannonHandler.atTargetYaw(mount.cbc, lag);
+            return cannonHandler.atTargetYaw(mount.cbc, lag, minimumToleranceDegrees);
         }
 
         if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
-            return physHandler.atTargetYaw(mount.phys, lag);
+            return physHandler.atTargetYaw(mount.phys, lag, minimumToleranceDegrees);
         }
 
         return false;
     }
 
     public boolean isAlignedForFiring(boolean lag) {
+        return isAlignedForFiring(lag, 0.0);
+    }
+
+    public boolean isAlignedForFiring(boolean lag, double minimumToleranceDegrees) {
         if (level == null || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
         if (!hasStructuralKineticSelection()) {
-            return atTargetYaw(lag);
+            return atTargetYaw(lag, minimumToleranceDegrees);
         }
 
         double tolerance = DEADBAND_DEG;
         if (!lag) {
             tolerance += RadarConfig.server().targetLoosenAmount.get();
+        }
+        if (Double.isFinite(minimumToleranceDegrees)) {
+            tolerance = Math.max(tolerance, Math.max(0.0, minimumToleranceDegrees));
         }
         return kineticControllerState.isAlignedForFiring(
                 resolveKineticMount(), worldPosition, isRunning, targetAngle, tolerance);

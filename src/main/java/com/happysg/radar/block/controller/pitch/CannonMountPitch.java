@@ -38,6 +38,11 @@ public class CannonMountPitch {
     }
 
     public boolean atTargetPitch(CannonMountContext mount, boolean lag) {
+        return atTargetPitch(mount, lag, 0.0);
+    }
+
+    public boolean atTargetPitch(CannonMountContext mount, boolean lag,
+                                 double minimumToleranceDegrees) {
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null) {
             return false;
@@ -51,12 +56,17 @@ public class CannonMountPitch {
         if (!lag) {
             tol += RadarConfig.server().targetLoosenAmount.get();
         }
+        tol = Math.max(tol, sanitizeTolerance(minimumToleranceDegrees));
 
         double currentPitch = contraption.pitch;
         int invert = -cannonContraption.initialOrientation().getStepX() + cannonContraption.initialOrientation().getStepZ();
         currentPitch = currentPitch * -invert;
 
         return Math.abs(currentPitch - controller.getTargetAngle()) < tol;
+    }
+
+    private static double sanitizeTolerance(double tolerance) {
+        return Double.isFinite(tolerance) ? Math.max(0.0, tolerance) : 0.0;
     }
 
     public double getMaxEngagementRangeBlocks(CannonMountContext mount, ServerLevel sl) {

@@ -60,6 +60,11 @@ public class CannonMountYaw {
     }
 
     public boolean atTargetYaw(CannonMountBlockEntity mount, boolean lag) {
+        return atTargetYaw(mount, lag, 0.0);
+    }
+
+    public boolean atTargetYaw(CannonMountBlockEntity mount, boolean lag,
+                               double minimumToleranceDegrees) {
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null) {
             return false;
@@ -69,6 +74,8 @@ public class CannonMountYaw {
         if (!lag) {
             effectiveTolerance += RadarConfig.server().targetLoosenAmount.get();
         }
+        effectiveTolerance = Math.max(
+                effectiveTolerance, sanitizeTolerance(minimumToleranceDegrees));
 
         double desired = AutoYawControllerBlockEntity.wrap360(controller.getTargetAngle());
         double current = controller.hasLastCbcYawWritten()
@@ -76,6 +83,10 @@ public class CannonMountYaw {
                 : AutoYawControllerBlockEntity.wrap360(contraption.yaw);
 
         return Math.abs(AutoYawControllerBlockEntity.shortestDelta(current, desired)) < effectiveTolerance;
+    }
+
+    private static double sanitizeTolerance(double tolerance) {
+        return Double.isFinite(tolerance) ? Math.max(0.0, tolerance) : 0.0;
     }
 
     private void rotateCBC(CannonMountBlockEntity mount) {

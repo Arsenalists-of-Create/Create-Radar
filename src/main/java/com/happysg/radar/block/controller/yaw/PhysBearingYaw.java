@@ -52,6 +52,11 @@ public class PhysBearingYaw {
     }
 
     public boolean atTargetYaw(PhysBearingBlockEntity mount, boolean lag) {
+        return atTargetYaw(mount, lag, 0.0);
+    }
+
+    public boolean atTargetYaw(PhysBearingBlockEntity mount, boolean lag,
+                               double minimumToleranceDegrees) {
         Double actualRad = mount.getActualAngle();
         if (actualRad == null) {
             return false;
@@ -61,12 +66,18 @@ public class PhysBearingYaw {
         if (!lag) {
             effectiveTolerance += 0.15;
         }
+        effectiveTolerance = Math.max(
+                effectiveTolerance, sanitizeTolerance(minimumToleranceDegrees));
 
         double currentDeg = AutoYawControllerBlockEntity.wrap360(Math.toDegrees(actualRad));
         double desiredDeg = AutoYawControllerBlockEntity.wrap360(360.0 - controller.getTargetAngle());
 
         return Math.abs(AutoYawControllerBlockEntity.shortestDelta(currentDeg, desiredDeg))
                 < Math.max(effectiveTolerance, AutoYawControllerBlockEntity.getDeadbandDeg());
+    }
+
+    private static double sanitizeTolerance(double tolerance) {
+        return Double.isFinite(tolerance) ? Math.max(0.0, tolerance) : 0.0;
     }
 
     public void maybeUpdateYawZeroFromCannonInitialOrientation() {

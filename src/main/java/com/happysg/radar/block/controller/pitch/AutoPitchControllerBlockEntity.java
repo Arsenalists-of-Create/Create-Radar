@@ -468,6 +468,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public boolean atTargetPitch(boolean lag) {
+        return atTargetPitch(lag, 0.0);
+    }
+
+    public boolean atTargetPitch(boolean lag, double minimumToleranceDegrees) {
         if (level == null) {
             return false;
         }
@@ -487,27 +491,34 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-            return cannonHandler.atTargetPitch(mount.cbc, lag);
+            return cannonHandler.atTargetPitch(mount.cbc, lag, minimumToleranceDegrees);
         }
 
         if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
-            return physHandler.atTargetPitch(mount.phys, lag);
+            return physHandler.atTargetPitch(mount.phys, lag, minimumToleranceDegrees);
         }
 
         return false;
     }
 
     public boolean isAlignedForFiring(boolean lag) {
+        return isAlignedForFiring(lag, 0.0);
+    }
+
+    public boolean isAlignedForFiring(boolean lag, double minimumToleranceDegrees) {
         if (level == null || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
         if (!hasStructuralKineticSelection()) {
-            return atTargetPitch(lag);
+            return atTargetPitch(lag, minimumToleranceDegrees);
         }
 
         double tolerance = DEADBAND_DEG;
         if (!lag) {
             tolerance += RadarConfig.server().targetLoosenAmount.get();
+        }
+        if (Double.isFinite(minimumToleranceDegrees)) {
+            tolerance = Math.max(tolerance, Math.max(0.0, minimumToleranceDegrees));
         }
         return kineticControllerState.isAlignedForFiring(
                 resolveKineticMount(), worldPosition, isRunning, targetAngle, tolerance);

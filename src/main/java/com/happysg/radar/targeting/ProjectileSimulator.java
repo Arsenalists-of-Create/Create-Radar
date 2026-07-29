@@ -33,6 +33,10 @@ public class ProjectileSimulator {
       }
 
       Vec3 direction = aimDirection.normalize();
+      ProjectileDynamics dynamics = model.createDynamics(safeStart, direction, safeInherited);
+      if (dynamics == null) {
+         return SimulationResult.empty(safeStart);
+      }
       double px = safeStart.x;
       double py = safeStart.y;
       double pz = safeStart.z;
@@ -48,7 +52,7 @@ public class ProjectileSimulator {
          if (tick == ticks) {
             break;
          }
-         model.step(tick, px, py, pz, vx, vy, vz, level, step);
+         dynamics.step(tick, px, py, pz, vx, vy, vz, level, step);
          px = step.positionX;
          py = step.positionY;
          pz = step.positionZ;

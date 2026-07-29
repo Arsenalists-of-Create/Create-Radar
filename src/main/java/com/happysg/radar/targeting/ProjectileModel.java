@@ -28,6 +28,18 @@ public interface ProjectileModel {
       return false;
    }
 
+   /**
+    * Creates isolated state for one simulated trajectory. Stateful integrations
+    * should capture their per-flight values here rather than on the shared model.
+    */
+   default ProjectileDynamics createDynamics(
+           Vec3 startPosition,
+           Vec3 aimDirection,
+           Vec3 inheritedVelocity
+   ) {
+      return this::step;
+   }
+
    default void step(
            int tick,
            double positionX,
