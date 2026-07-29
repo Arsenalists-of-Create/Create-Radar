@@ -17,8 +17,6 @@ import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
-import com.happysg.radar.compat.vs2.PhysicsHandler;
-import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.AllDataBehaviors;
 import com.happysg.radar.registry.ModBlocks;
 import net.arsenalists.createenergycannons.content.energymount.EnergyCannonMount;
@@ -42,7 +40,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
@@ -64,7 +61,6 @@ public class DataLinkBlockItem extends BlockItem {
 
     private static final String DISPLAY_CLEAR = "display_link.clear";
     private static final String DISPLAY_SUCCESS = "display_link.success";
-    private static final String DISPLAY_TOO_FAR = "display_link.too_far";
     private static final String DATA_LINK_COMMIT_FAILED = CreateRadar.MODID + ".data_link.commit_failed";
     private static final String DATA_LINK_CONTROLLER_ALREADY_LINKED = CreateRadar.MODID + ".data_link.controller_already_linked";
     private static final String DATA_LINK_CONTROLLER_NO_WEAPON_GROUP = CreateRadar.MODID + ".data_link.controller_no_weapon_group";
@@ -78,7 +74,6 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String DATA_LINK_ONLY_PITCH_ALLOWED = CreateRadar.MODID + ".data_link.only_pitch_allowed";
     private static final String DATA_LINK_PLACE_FAILED = CreateRadar.MODID + ".data_link.place_failed";
     private static final String DATA_LINK_SELECT_FIRST = CreateRadar.MODID + ".data_link.select_mount_or_filterer_first";
-    private static final String DATA_LINK_TOO_FAR = CreateRadar.MODID + ".data_link.too_far";
 
     public DataLinkBlockItem(Block pBlock, Properties pProperties) {
         super(pBlock, pProperties);
@@ -208,13 +203,6 @@ public class DataLinkBlockItem extends BlockItem {
         }
 
         BlockPos placedPos = getPlacementPos(use);
-        double range = RadarConfig.server().radarLinkRange.get();
-        if (!withinRange(use.level(), placedPos, mountPos, range) || !withinRange(use.level(), placedPos, use.clickedPos(), range)) {
-            sendError(use.player(), DATA_LINK_TOO_FAR);
-            clearLinkTag(use.stack());
-            return InteractionResult.FAIL;
-        }
-
         DataLinkBlockEntity.WeaponEndpointType endpointType = controllerType.endpointType();
         if (!weaponRuntime.canAttachEndpoint(endpointType, use.clickedPos(), mountPos)) {
             sendError(use.player(), DATA_LINK_DUPLICATE_CONTROLLER_TYPE);
@@ -269,13 +257,6 @@ public class DataLinkBlockItem extends BlockItem {
         if (monitorPos == null) monitorPos = use.clickedPos();
 
         BlockPos placedPos = getPlacementPos(use);
-        double range = RadarConfig.server().radarLinkRange.get();
-        if (!withinRange(use.level(), placedPos, rwrPos, range) || !withinRange(use.level(), placedPos, monitorPos, range)) {
-            sendError(use.player(), DISPLAY_TOO_FAR);
-            clearLinkTag(use.stack());
-            return InteractionResult.FAIL;
-        }
-
         ARADData aradData = ARADData.get(serverLevel);
         ARADData.Group group = aradData.getOrCreateGroup(serverLevel.dimension(), rwrPos);
         if (!aradData.canAttachMonitor(serverLevel, group, monitorPos)) {
@@ -325,13 +306,6 @@ public class DataLinkBlockItem extends BlockItem {
         }
 
         BlockPos placedPos = getPlacementPos(use);
-        double range = RadarConfig.server().radarLinkRange.get();
-        if (!withinRange(use.level(), placedPos, filtererPos, range) || !withinRange(use.level(), placedPos, use.clickedPos(), range)) {
-            sendError(use.player(), DISPLAY_TOO_FAR);
-            clearLinkTag(use.stack());
-            return InteractionResult.FAIL;
-        }
-
         NetworkData filterData = NetworkData.get(serverLevel);
         NetworkData.Group group = filterData.getOrCreateGroup(serverLevel.dimension(), filtererPos);
 
@@ -432,12 +406,6 @@ public class DataLinkBlockItem extends BlockItem {
 
     private static void clearLinkTag(ItemStack stack) {
         stack.remove(DataComponents.CUSTOM_DATA);
-    }
-
-    private static boolean withinRange(Level level, BlockPos a, BlockPos b, double range) {
-        Vec3 wa = PhysicsHandler.getWorldPos(level, a).getCenter();
-        Vec3 wb = PhysicsHandler.getWorldPos(level, b).getCenter();
-        return wa.closerThan(wb, range);
     }
 
     private record LinkUse(

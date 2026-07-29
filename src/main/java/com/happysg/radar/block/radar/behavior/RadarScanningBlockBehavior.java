@@ -3,6 +3,7 @@ package com.happysg.radar.block.radar.behavior;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 
+import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
@@ -50,6 +51,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     private boolean running = false;
     private SmartBlockEntity bearingEntity;
     private RadarBearingBlockEntity radarBearing;
+    private final RadarType radarType;
     Vec3 scanPos = Vec3.ZERO;
 
     private final Set<Entity> scannedEntities = new HashSet<>();
@@ -58,8 +60,13 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     private final HashMap<String, RadarTrack> radarTracks = new HashMap<>();
 
     public RadarScanningBlockBehavior(SmartBlockEntity be) {
+        this(be, RadarType.GROUND);
+    }
+
+    public RadarScanningBlockBehavior(SmartBlockEntity be, RadarType radarType) {
         super(be);
         this.bearingEntity = be;
+        this.radarType = radarType;
     }
 
     public void applyDetectionConfig(DetectionConfig cfg) {
@@ -150,7 +157,9 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
 
         for (Entity entity : scannedEntities) {
-            if (entity.isAlive() && isInFovAndRange(entity.position())) {
+            if (entity.isAlive()
+                    && isInFovAndRange(entity.position())
+                    && !RadarOcclusion.isOccluded(bearingEntity, scanPos, entity, radarType)) {
                 radarTracks.compute(entity.getUUID().toString(), (id, track) -> {
                     if (track == null) return new RadarTrack(entity);
                     track.updateRadarTrack(entity);
@@ -165,11 +174,18 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
         for (SubLevelAccess ship : scannedShips) {
             Vec3 pos = RadarTrackUtil.getPosition(ship);
-            if (isInPassiveRwrCoverage(pos) && isServer) {
+            boolean inPassiveCoverage = isInPassiveRwrCoverage(pos);
+            boolean inActiveCoverage = isInFovAndRange(pos);
+            if (!inPassiveCoverage && !inActiveCoverage) {
+                continue;
+            }
+
+            boolean occluded = RadarOcclusion.isOccluded(bearingEntity, scanPos, pos, radarType, ship);
+            if (inPassiveCoverage && isServer && !occluded) {
                 RadarContactRegistry.markInRange(sl, ship.getUniqueId(), radarSourceId(sl), 40, redstoneSignalFor(pos));
             }
 
-            if (isInFovAndRange(pos)) {
+            if (inActiveCoverage && !occluded) {
 
                 radarTracks.compute(ship.getUniqueId().toString(), (id, track) -> {
                     if (track == null) return RadarTrackUtil.getRadarTrack(ship, level);
@@ -251,7 +267,9 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return false;
         }
         Vec3 radarPos = PhysicsHandler.getWorldVec(bearingEntity);
-        return isInPassiveRwrCoverage(pos.get(), radarPos);
+        return isInPassiveRwrCoverage(pos.get(), radarPos)
+                && !RadarOcclusion.isOccluded(
+                bearingEntity, radarPos, level, receiver, pos.get(), radarType);
     }
 
     public boolean canLockRwrTarget(RwrTargetReference target, ServerLevel level) {
@@ -267,7 +285,9 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         }
         Vec3 radarPos = PhysicsHandler.getWorldVec(bearingEntity);
         // Lock capability reuses the scanner's real FOV/range test, not a separate distance approximation.
-        return isInFovAndRange(pos.get(), radarPos);
+        return isInFovAndRange(pos.get(), radarPos)
+                && !RadarOcclusion.isOccluded(
+                bearingEntity, radarPos, level, target, pos.get(), radarType);
     }
 
     public float signalStrengthForRwrReceiver(RwrTargetReference receiver, ServerLevel level) {
@@ -276,7 +296,11 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return 0.0F;
         }
         Vec3 radarPos = PhysicsHandler.getWorldVec(bearingEntity);
-        return isInPassiveRwrCoverage(pos.get(), radarPos) ? redstoneSignalFor(pos.get(), radarPos) : 0.0F;
+        return isInPassiveRwrCoverage(pos.get(), radarPos)
+                && !RadarOcclusion.isOccluded(
+                bearingEntity, radarPos, level, receiver, pos.get(), radarType)
+                ? redstoneSignalFor(pos.get(), radarPos)
+                : 0.0F;
     }
 
     private boolean canScanTarget(RwrTargetReference target, ServerLevel level) {

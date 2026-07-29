@@ -15,6 +15,7 @@ import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.config.RadarConfig;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
@@ -423,6 +424,22 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
         }
 
         return false;
+    }
+
+    public boolean isAlignedForFiring(boolean lag) {
+        if (level == null || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
+            return false;
+        }
+        if (!hasStructuralKineticSelection()) {
+            return atTargetYaw(lag);
+        }
+
+        double tolerance = DEADBAND_DEG;
+        if (!lag) {
+            tolerance += RadarConfig.server().targetLoosenAmount.get();
+        }
+        return kineticControllerState.isAlignedForFiring(
+                resolveKineticMount(), worldPosition, isRunning, targetAngle, tolerance);
     }
 
     public boolean isUpsideDown() {

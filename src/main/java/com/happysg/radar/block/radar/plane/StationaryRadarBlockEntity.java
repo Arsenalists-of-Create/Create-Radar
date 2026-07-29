@@ -74,7 +74,7 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
 
     @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-        scanningBehavior = new RadarScanningBlockBehavior(this);
+        scanningBehavior = new RadarScanningBlockBehavior(this, RadarType.AIRBORNE);
         scanningBehavior.setRunning(true);
         scanningBehavior.setRange(RadarConfig.server().planeRadarRange.get());
         scanningBehavior.setAngle((getScanFacing().toYRot() + 360) % 360);

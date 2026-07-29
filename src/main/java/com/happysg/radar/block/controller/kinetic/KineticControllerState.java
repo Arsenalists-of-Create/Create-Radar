@@ -390,6 +390,54 @@ public final class KineticControllerState {
                 <= Math.max(0.0, toleranceDegrees);
     }
 
+    /**
+     * Checks whether this actuator is safe and accurately aligned for firing.
+     * Unlike {@link #isReady}, an endpoint driven by this controller may pass:
+     * radar tracking continuously revises the destination and may never enter
+     * the fully stopped, three-tick settled state.
+     */
+    public boolean isAlignedForFiring(KineticMountAdapterResolution resolution,
+                                      BlockPos controllerPos, boolean running,
+                                      double controllerTargetDegrees,
+                                      double toleranceDegrees) {
+        if (!structuralMode || hardBlocked || !running || !observedRunning
+                || !Double.isFinite(controllerTargetDegrees)
+                || !Double.isFinite(toleranceDegrees)
+                || resolution == null || !resolution.hasAdapter()
+                || resolution.adapter() == null || activeAdapter == null
+                || resolution.adapter().axis() != axis
+                || !activeAdapter.hasSameEndpoint(resolution.adapter())) {
+            return false;
+        }
+
+        double tolerance = Math.max(0.0, toleranceDegrees);
+        if (!Double.isFinite(observedTarget)
+                || Math.abs(KineticAngleMath.shortestDelta(
+                        observedTarget, controllerTargetDegrees)) > tolerance
+                || (lifecycle != KineticControllerLifecycle.MOVING
+                && lifecycle != KineticControllerLifecycle.SETTLING)
+                || !activeAdapter.isValid()
+                || !activeAdapter.isAssembled()
+                || !activeAdapter.isLocked()
+                || frame == null
+                || !Objects.equals(frame, activeAdapter.frameIdentity())
+                || activeAdapter.hasSequenceContext()) {
+            return false;
+        }
+
+        boolean endpointSafe = activeAdapter.isEndpointSafelyReleased()
+                || activeAdapter.isDrivenBy(controllerPos);
+        if (!endpointSafe) {
+            return false;
+        }
+
+        double physical = activeAdapter.getPhysicalAngleDegrees();
+        double desired = frame.bearingTargetFor(controllerTargetDegrees);
+        return Double.isFinite(physical) && Double.isFinite(desired)
+                && Math.abs(KineticAngleMath.shortestDelta(physical, desired))
+                <= tolerance;
+    }
+
     private void selectAdapter(KineticMountAdapter resolved, DoubleConsumer commandGenerator) {
         if (activeAdapter != null && activeAdapter.hasSameEndpoint(resolved)) {
             return;

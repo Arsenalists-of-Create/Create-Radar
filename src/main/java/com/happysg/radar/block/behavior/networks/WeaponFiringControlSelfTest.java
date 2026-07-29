@@ -22,6 +22,7 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkVelocityCompatibility());
         results.add(checkPendingSolveLifetime());
         results.add(checkVelocityChangeSupersedesPendingSolve());
+        results.add(checkAsyncBallisticAimHandoff());
         return List.copyOf(results);
     }
 
@@ -115,6 +116,43 @@ public final class WeaponFiringControlSelfTest {
                         + " accelerationSupersedes="
                         + accelerationSupersedes
                         + " stopSupersedes=" + stopSupersedes);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkAsyncBallisticAimHandoff() {
+        WeaponFiringControl.AimUpdateMode firstSolution =
+                WeaponFiringControl.selectAimUpdateMode(true, true);
+        WeaponFiringControl.AimUpdateMode pending =
+                WeaponFiringControl.selectAimUpdateMode(false, true);
+        WeaponFiringControl.AimUpdateMode nextSolution =
+                WeaponFiringControl.selectAimUpdateMode(true, true);
+        WeaponFiringControl.AimUpdateMode initialWait =
+                WeaponFiringControl.selectAimUpdateMode(false, true);
+        WeaponFiringControl.AimUpdateMode intentionalDirect =
+                WeaponFiringControl.selectAimUpdateMode(false, false);
+
+        boolean passed =
+                firstSolution == WeaponFiringControl.AimUpdateMode.SOLVED
+                && pending == WeaponFiringControl.AimUpdateMode.HOLD
+                && nextSolution == WeaponFiringControl.AimUpdateMode.SOLVED
+                && initialWait == WeaponFiringControl.AimUpdateMode.HOLD
+                && intentionalDirect == WeaponFiringControl.AimUpdateMode.DIRECT
+                && !WeaponFiringControl.shouldIssueAimCommand(pending)
+                && !WeaponFiringControl.shouldIssueAimCommand(initialWait)
+                && WeaponFiringControl.shouldIssueAimCommand(firstSolution)
+                && WeaponFiringControl.shouldIssueAimCommand(intentionalDirect)
+                && !WeaponFiringControl.hasFireEligibleAim(
+                        false, false, false)
+                && WeaponFiringControl.hasFireEligibleAim(
+                        false, true, false)
+                && WeaponFiringControl.hasFireEligibleAim(
+                        true, false, false)
+                && WeaponFiringControl.hasFireEligibleAim(
+                        false, false, true);
+        return result("async_ballistic_gap_holds_aim", passed,
+                "timeline=" + firstSolution + "->" + pending + "->"
+                        + nextSolution + " initial=" + initialWait
+                        + " direct=" + intentionalDirect);
     }
 
     private static RadarTrack track(String id, TrackCategory category,

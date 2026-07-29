@@ -1,5 +1,6 @@
 package com.happysg.radar.compat.simulated;
 
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
 import com.happysg.radar.block.controller.kinetic.KineticAngleMath;
@@ -8,6 +9,7 @@ import com.happysg.radar.block.controller.kinetic.KineticMountAdapter;
 import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
+import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import dev.simulated_team.simulated.content.blocks.swivel_bearing.SwivelBearingBlock;
@@ -22,6 +24,7 @@ import dev.ryanhcode.sable.sublevel.ServerSubLevel;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -29,8 +32,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
-import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -38,7 +39,7 @@ import java.util.UUID;
 
 public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
     private static final double SPEED_EPSILON = 1.0e-5;
-    private static final double CONTROLLER_SWIVEL_RPM_LIMIT = 32.0;
+    private static final long CANNON_MOUNT_RESCAN_TICKS = 20L;
 
     private final KineticBlockEntity controller;
     private final Direction.Axis rotationAxis;
@@ -46,7 +47,9 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
     private final Direction relativeDirection;
     private final SwivelBearingBlockEntity bearing;
     private final KineticBlockEntity endpoint;
-    private KineticMountFrame cachedFrame;
+    private UUID cachedCannonMountAssemblyId;
+    private BlockPos cachedCannonMountPos;
+    private long nextCannonMountScanTick = Long.MIN_VALUE;
 
     private SimulatedSwivelMountAdapter(KineticBlockEntity controller,
                                         Direction.Axis rotationAxis,
@@ -276,23 +279,19 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         if (assemblyId == null || controllerFacing == null) {
             return null;
         }
-        if (cachedFrame != null && cachedFrame.assemblyId().equals(assemblyId)
-                && cachedFrame.bearingFacing() == bearingFacing
-                && cachedFrame.controllerFacing() == controllerFacing) {
-            return cachedFrame;
+
+        CannonCalibration calibration = resolveCannonCalibration(assemblyId);
+        if (calibration.blocked()) {
+            return null;
         }
 
-        Direction initialOrientation = findCannonInitialOrientation(assemblyId);
-        if (initialOrientation == null && cannonAxis == CannonAxis.YAW) {
-            initialOrientation = Direction.SOUTH;
-        }
+        Direction initialOrientation = calibration.initialOrientation();
         double neutral = cannonAxis == CannonAxis.YAW
                 ? controllerYawForCardinal(initialOrientation) : 0.0;
         int sign = KineticMountFrame.conversionSignFor(cannonAxis, bearingFacing,
                 controllerFacing, initialOrientation);
-        cachedFrame = new KineticMountFrame(KineticMountFrame.CURRENT_VERSION, bearingFacing,
+        return new KineticMountFrame(KineticMountFrame.CURRENT_VERSION, bearingFacing,
                 controllerFacing, assemblyId, initialOrientation, sign, neutral);
-        return cachedFrame;
     }
 
     @Override
@@ -388,8 +387,7 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
             return 0.0;
         }
         double maxRpm = SimConfigService.INSTANCE.server().blocks.maxSwivelBearingSpeed.getF();
-        return Math.min(Math.abs(availableInputRpm),
-                Math.min(CONTROLLER_SWIVEL_RPM_LIMIT, Math.max(0.0, maxRpm)));
+        return Math.min(Math.abs(availableInputRpm), Math.max(0.0, maxRpm));
     }
 
     @Override
@@ -409,35 +407,105 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         return null;
     }
 
-    private Direction findCannonInitialOrientation(UUID assemblyId) {
+    private CannonCalibration resolveCannonCalibration(UUID assemblyId) {
         Level level = controller.getLevel();
         SubLevelContainer container = level == null ? null : SubLevelContainer.getContainer(level);
         SubLevel attached = container == null ? null : container.getSubLevel(assemblyId);
         if (attached == null) {
-            return null;
+            return CannonCalibration.unavailable();
         }
+
+        if (!assemblyId.equals(cachedCannonMountAssemblyId)) {
+            cachedCannonMountAssemblyId = assemblyId;
+            cachedCannonMountPos = null;
+            nextCannonMountScanTick = Long.MIN_VALUE;
+        }
+
+        if (level instanceof ServerLevel serverLevel) {
+            BlockPos linkedMount = WeaponNetworkRuntime.get(serverLevel)
+                    .getMountForController(controller.getBlockPos());
+            if (linkedMount != null) {
+                // The weapon-network link is authoritative and may point into a
+                // nested pitch sublevel downstream of this yaw swivel.
+                CannonCalibration linked = calibrationAt(attached, linkedMount, false);
+                if (!linked.hasMount()) {
+                    return CannonCalibration.unavailable();
+                }
+                return linked;
+            }
+        }
+
+        if (cachedCannonMountPos != null) {
+            CannonCalibration cached = calibrationAt(attached, cachedCannonMountPos, true);
+            if (cached.hasMount()) {
+                return cached;
+            }
+            cachedCannonMountPos = null;
+            nextCannonMountScanTick = Long.MIN_VALUE;
+        }
+
+        long now = level == null ? 0L : level.getGameTime();
+        if (now < nextCannonMountScanTick) {
+            return CannonCalibration.standalone();
+        }
+        nextCannonMountScanTick = now + CANNON_MOUNT_RESCAN_TICKS;
+
         var bounds = attached.getPlot().getBoundingBox();
         if (bounds == null || bounds.volume() <= 0 || bounds.volume() > 65_536) {
-            return null;
+            return CannonCalibration.unavailable();
         }
+
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        BlockPos discoveredMount = null;
+        Direction discoveredOrientation = null;
+        boolean discoveredReady = false;
         for (int x = bounds.minX(); x <= bounds.maxX(); x++) {
             for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
                 for (int z = bounds.minZ(); z <= bounds.maxZ(); z++) {
                     BlockEntity candidate = level.getBlockEntity(cursor.set(x, y, z));
-                    if (candidate instanceof CannonMountBlockEntity mount
-                            && mount.getContraption() != null
-                            && mount.getContraption().getContraption()
-                            instanceof AbstractMountedCannonContraption cannon) {
-                        Direction initial = cannon.initialOrientation();
-                        if (initial != null && initial.getAxis().isHorizontal()) {
-                            return initial;
-                        }
+                    CannonMountContext mount = CannonMountContext.of(candidate);
+                    if (mount == null) {
+                        continue;
                     }
+                    if (discoveredMount != null) {
+                        return CannonCalibration.unavailable();
+                    }
+                    discoveredMount = candidate.getBlockPos().immutable();
+                    discoveredOrientation = mount.initialOrientation();
+                    discoveredReady = discoveredOrientation != null;
                 }
             }
         }
-        return null;
+
+        if (discoveredMount == null) {
+            return CannonCalibration.standalone();
+        }
+        cachedCannonMountPos = discoveredMount;
+        return discoveredReady
+                ? CannonCalibration.ready(discoveredOrientation)
+                : CannonCalibration.blockedWithMount();
+    }
+
+    private CannonCalibration calibrationAt(SubLevel attached, BlockPos mountPos,
+                                             boolean requireDirectAttachment) {
+        Level level = controller.getLevel();
+        if (level == null || !level.hasChunkAt(mountPos)) {
+            return CannonCalibration.blockedWithMount();
+        }
+        BlockEntity candidate = level.getBlockEntity(mountPos);
+        CannonMountContext mount = CannonMountContext.of(candidate);
+        if (mount == null) {
+            return CannonCalibration.missing();
+        }
+        SubLevel containing = requireDirectAttachment
+                ? Sable.HELPER.getContaining(candidate) : null;
+        if (requireDirectAttachment && containing != attached) {
+            return CannonCalibration.blockedWithMount();
+        }
+        Direction initial = mount.initialOrientation();
+        return initial == null
+                ? CannonCalibration.blockedWithMount()
+                : CannonCalibration.ready(initial);
     }
 
     private static double controllerYawForCardinal(Direction direction) {
@@ -451,5 +519,28 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
             case EAST -> 270.0;
             default -> 0.0;
         };
+    }
+
+    private record CannonCalibration(boolean hasMount, boolean blocked,
+                                     Direction initialOrientation) {
+        private static CannonCalibration standalone() {
+            return new CannonCalibration(false, false, null);
+        }
+
+        private static CannonCalibration missing() {
+            return new CannonCalibration(false, false, null);
+        }
+
+        private static CannonCalibration ready(Direction initialOrientation) {
+            return new CannonCalibration(true, false, initialOrientation);
+        }
+
+        private static CannonCalibration blockedWithMount() {
+            return new CannonCalibration(true, true, null);
+        }
+
+        private static CannonCalibration unavailable() {
+            return new CannonCalibration(false, true, null);
+        }
     }
 }

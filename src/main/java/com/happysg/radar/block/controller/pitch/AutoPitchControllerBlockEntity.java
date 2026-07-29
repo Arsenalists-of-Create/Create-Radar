@@ -16,6 +16,7 @@ import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
@@ -494,6 +495,22 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         return false;
+    }
+
+    public boolean isAlignedForFiring(boolean lag) {
+        if (level == null || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
+            return false;
+        }
+        if (!hasStructuralKineticSelection()) {
+            return atTargetPitch(lag);
+        }
+
+        double tolerance = DEADBAND_DEG;
+        if (!lag) {
+            tolerance += RadarConfig.server().targetLoosenAmount.get();
+        }
+        return kineticControllerState.isAlignedForFiring(
+                resolveKineticMount(), worldPosition, isRunning, targetAngle, tolerance);
     }
 
     public void setAndAcquireTrack(@Nullable RadarTrack tTrack, TargetingConfig config) {

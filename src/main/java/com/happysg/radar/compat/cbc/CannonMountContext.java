@@ -3,11 +3,13 @@ package com.happysg.radar.compat.cbc;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbcmw.CBCMWMountCompat;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import rbasamoyai.createbigcannons.cannon_control.ControlPitchContraption;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
+import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
 import javax.annotation.Nullable;
@@ -69,6 +71,21 @@ public final class CannonMountContext {
             return ((CannonMountBlockEntity) blockEntity).getContraption();
         }
         return CBCMWMountCompat.getContraption(blockEntity);
+    }
+
+    /**
+     * Returns the assembled cannon's neutral horizontal facing. This is the
+     * common zero-point needed by external structural yaw actuators.
+     */
+    @Nullable
+    public Direction initialOrientation() {
+        PitchOrientedContraptionEntity entity = getContraption();
+        if (entity == null
+                || !(entity.getContraption() instanceof AbstractMountedCannonContraption cannon)) {
+            return null;
+        }
+        Direction initial = cannon.initialOrientation();
+        return initial != null && initial.getAxis().isHorizontal() ? initial : null;
     }
 
     public void setPitch(float pitch) {

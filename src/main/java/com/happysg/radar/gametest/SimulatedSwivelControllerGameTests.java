@@ -13,6 +13,7 @@ import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import dev.simulated_team.simulated.content.blocks.swivel_bearing.SwivelBearingBlockEntity;
+import dev.simulated_team.simulated.service.SimConfigService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTest;
@@ -37,7 +38,6 @@ import java.util.function.BooleanSupplier;
 public final class SimulatedSwivelControllerGameTests {
     private static final BlockPos BEARING_POS = new BlockPos(2, 3, 2);
     private static final double COMMAND_DEGREES = 5.0;
-    private static final double MAX_CONTROLLER_SWIVEL_RPM = 32.0;
     private static final int SAMPLE_TICKS = 700;
     private static final long PHYSICS_TICK_NANOS = 45_000_000L;
     private static long lastPacedGameTick = Long.MIN_VALUE;
@@ -127,9 +127,12 @@ public final class SimulatedSwivelControllerGameTests {
 
         double generatedRpm = fixture.controller().getGeneratedSpeed();
         double endpointRpm = endpoint.getTheoreticalSpeed();
-        if (Math.abs(generatedRpm) > MAX_CONTROLLER_SWIVEL_RPM + 1.0e-4
-                || Math.abs(endpointRpm) > MAX_CONTROLLER_SWIVEL_RPM + 1.0e-4) {
-            throw new GameTestAssertException("Swivel controller exceeded 32 RPM: generated="
+        double configuredMaxRpm = Math.max(0.0,
+                SimConfigService.INSTANCE.server().blocks.maxSwivelBearingSpeed.getF());
+        if (Math.abs(generatedRpm) > configuredMaxRpm + 1.0e-4
+                || Math.abs(endpointRpm) > configuredMaxRpm + 1.0e-4) {
+            throw new GameTestAssertException("Swivel controller exceeded Simulated's "
+                    + configuredMaxRpm + " RPM limit: generated="
                     + generatedRpm + " endpoint=" + endpointRpm);
         }
         if (fixture.controller().hasSource()) {
@@ -469,6 +472,13 @@ public final class SimulatedSwivelControllerGameTests {
         double physical = adapter.getPhysicalAngleDegrees();
         if (!adapter.isAssembled() || !adapter.isLocked() || !Double.isFinite(physical)) {
             throw new GameTestAssertException("Swivel was not physically ready before commanding motion");
+        }
+        double configuredMaxRpm = Math.max(0.0,
+                SimConfigService.INSTANCE.server().blocks.maxSwivelBearingSpeed.getF());
+        double adapterMaxRpm = adapter.maximumDriveRpm(256.0);
+        if (Math.abs(adapterMaxRpm - configuredMaxRpm) > 1.0e-4) {
+            throw new GameTestAssertException("Swivel adapter limit did not match Simulated config: adapter="
+                    + adapterMaxRpm + " configured=" + configuredMaxRpm);
         }
         samples.initialSetpoint = adapter.getTargetAngleDegrees();
         samples.lastSetpoint = samples.initialSetpoint;

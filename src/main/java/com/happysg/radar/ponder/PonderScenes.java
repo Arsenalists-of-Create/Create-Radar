@@ -246,7 +246,7 @@ public class PonderScenes {
 
         scene.idle(90);
         scene.overlay().showText(80)
-                .text("The Sky Radar must be above a specific altitude to function properly. By default, this value is y = 96")
+                .text("",RadarConfig.server().skyRadarMinY.get())
                 .pointAt(datalink.getCenter())
                 .attachKeyFrame()
                 .placeNearTarget();

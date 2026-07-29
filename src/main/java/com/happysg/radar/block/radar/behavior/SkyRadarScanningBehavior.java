@@ -2,6 +2,7 @@ package com.happysg.radar.block.radar.behavior;
 
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
+import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.block.radar.track.RadarEntityTypeTags;
 import com.happysg.radar.block.radar.track.RadarTrack;
@@ -161,7 +162,9 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
         ServerLevel sl = level instanceof ServerLevel serverLevel ? serverLevel : null;
 
         for (Entity entity : scannedEntities) {
-            if (entity.isAlive() && isInFovAndRange(entity.position())) {
+            if (entity.isAlive()
+                    && isInFovAndRange(entity.position())
+                    && !RadarOcclusion.isOccluded(radarEntity, scanPos, entity, RadarType.SKY)) {
                 radarTracks.compute(entity.getUUID().toString(), (id, track) -> {
                     if (track == null) return new RadarTrack(entity);
                     track.updateRadarTrack(entity);
@@ -175,11 +178,19 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
 
         for (SubLevelAccess ship : scannedShips) {
             Vec3 pos = RadarTrackUtil.getPosition(ship);
-            if (sl != null && isInPassiveRwrSkyRadarVolume(pos)) {
+            boolean inPassiveCoverage = isInPassiveRwrSkyRadarVolume(pos);
+            boolean inActiveCoverage = isInFovAndRange(pos);
+            if (!inPassiveCoverage && !inActiveCoverage) {
+                continue;
+            }
+
+            boolean occluded = RadarOcclusion.isOccluded(
+                    radarEntity, scanPos, pos, RadarType.SKY, ship);
+            if (sl != null && inPassiveCoverage && !occluded) {
                 RadarContactRegistry.markInRange(sl, ship.getUniqueId(), radarSourceId(sl), 40, redstoneSignalFor(pos));
             }
 
-            if (isInFovAndRange(pos)) {
+            if (inActiveCoverage && !occluded) {
                 radarTracks.compute(ship.getUniqueId().toString(), (id, track) -> {
                     if (track == null) return RadarTrackUtil.getRadarTrack(ship, level);
                     track.updateRadarTrack(ship, level);
@@ -316,7 +327,9 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
             return false;
         }
         Vec3 radarPos = PhysicsHandler.getWorldVec(radarEntity);
-        return isInPassiveRwrSkyRadarVolume(pos.get(), radarPos);
+        return isInPassiveRwrSkyRadarVolume(pos.get(), radarPos)
+                && !RadarOcclusion.isOccluded(
+                radarEntity, radarPos, level, receiver, pos.get(), RadarType.SKY);
     }
 
     public boolean canLockRwrTarget(RwrTargetReference target, ServerLevel level) {
@@ -332,7 +345,9 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
         }
         Vec3 radarPos = PhysicsHandler.getWorldVec(radarEntity);
         // Lock capability reuses the sky scanner's FOV/range/altitude test.
-        return isInFovAndRange(pos.get(), radarPos);
+        return isInFovAndRange(pos.get(), radarPos)
+                && !RadarOcclusion.isOccluded(
+                radarEntity, radarPos, level, target, pos.get(), RadarType.SKY);
     }
 
     public float signalStrengthForRwrReceiver(RwrTargetReference receiver, ServerLevel level) {
@@ -341,7 +356,11 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
             return 0.0F;
         }
         Vec3 radarPos = PhysicsHandler.getWorldVec(radarEntity);
-        return isInPassiveRwrSkyRadarVolume(pos.get(), radarPos) ? redstoneSignalFor(pos.get(), radarPos) : 0.0F;
+        return isInPassiveRwrSkyRadarVolume(pos.get(), radarPos)
+                && !RadarOcclusion.isOccluded(
+                radarEntity, radarPos, level, receiver, pos.get(), RadarType.SKY)
+                ? redstoneSignalFor(pos.get(), radarPos)
+                : 0.0F;
     }
 
     private boolean canScanTarget(RwrTargetReference target, ServerLevel level) {

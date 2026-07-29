@@ -966,14 +966,18 @@ public class WeaponFiringControl {
                                     boolean hasLeadSolution = lead != null && lead.aimPoint != null;
                                     boolean hasNewTargetingSolution = newSolverOk && targetingResult.aimSolution() != null;
                                     boolean canFireWithoutLead = CannonUtil.isLaserCannon(cannon);
-                                    Vec3 offsetAim = hasNewTargetingSolution && targetingResult.aimSolution().aimPoint() != null ? targetingResult.aimSolution().aimPoint() : (hasLeadSolution ? lead.aimPoint : trackingSolvePos);
-                                    this.lastAimPoint = offsetAim;
-                                    if (this.lastOffsetAim != null && !(this.lastOffsetAim.distanceTo(offsetAim) > motion.aimStableEps())) {
-                                        ++this.aimStableTicks;
-                                    } else {
-                                        this.aimStableTicks = 0;
-                                        this.lastOffsetAim = offsetAim;
-                                    }
+                                    boolean asyncBallisticAimExpected = useNewSolver
+                                            && currentProjectile != null
+                                            && currentProjectile.solverKind() != SolverKind.CBCMS_SERVER;
+                                    AimUpdateMode aimUpdateMode = selectAimUpdateMode(
+                                            hasNewTargetingSolution || hasLeadSolution || canFireWithoutLead,
+                                            asyncBallisticAimExpected);
+                                    Vec3 offsetAim = hasNewTargetingSolution
+                                            && targetingResult.aimSolution().aimPoint() != null
+                                            ? targetingResult.aimSolution().aimPoint()
+                                            : (hasLeadSolution ? lead.aimPoint
+                                            : (aimUpdateMode == AimUpdateMode.HOLD
+                                            ? this.lastAimPoint : trackingSolvePos));
 
                                     Double desiredPitch = null;
                                     Double desiredYaw = null;
@@ -990,6 +994,9 @@ public class WeaponFiringControl {
                                             } else {
                                                 hasNewTargetingSolution = false;
                                                 worldAimDirection = null;
+                                                aimUpdateMode = selectAimUpdateMode(
+                                                        hasLeadSolution || canFireWithoutLead,
+                                                        asyncBallisticAimExpected);
                                             }
                                         } else if (hasLeadSolution || canFireWithoutLead) {
                                             long now = this.level.getGameTime();
@@ -1023,7 +1030,8 @@ public class WeaponFiringControl {
                                                     this.cachedSableYawDeg = desiredYaw;
                                                 }
                                             }
-                                        } else if (!rejectCustomDirect) {
+                                        } else if (aimUpdateMode == AimUpdateMode.DIRECT
+                                                && !rejectCustomDirect) {
                                             AimCommand command = this.directAimCommand(cannon, cannonMuzzleWorld, solvePos);
                                             if (command != null) {
                                                 desiredPitch = command.pitchDeg();
@@ -1044,7 +1052,9 @@ public class WeaponFiringControl {
                                             worldAimDirection = this.worldDirectionFromMountCommand(
                                                     desiredPitch, desiredYaw);
                                         }
-                                    } else if (!rejectCustomDirect && !CannonUtil.isLaserCannon(cannon)) {
+                                    } else if (aimUpdateMode == AimUpdateMode.DIRECT
+                                            && !rejectCustomDirect
+                                            && !CannonUtil.isLaserCannon(cannon)) {
                                         AimCommand command = this.directAimCommand(cannon, cannonMuzzleWorld, solvePos);
                                         if (command != null) {
                                             desiredPitch = command.pitchDeg();
@@ -1054,40 +1064,63 @@ public class WeaponFiringControl {
                                         }
                                     }
 
+                                    if (aimUpdateMode != AimUpdateMode.HOLD) {
+                                        this.lastAimPoint = offsetAim;
+                                        if (this.lastOffsetAim != null
+                                                && !(this.lastOffsetAim.distanceTo(offsetAim)
+                                                > motion.aimStableEps())) {
+                                            ++this.aimStableTicks;
+                                        } else {
+                                            this.aimStableTicks = 0;
+                                            this.lastOffsetAim = offsetAim;
+                                        }
+                                    }
+
                                     boolean structuralAimAccepted = true;
                                     boolean structuralPitch = this.pitchController != null
                                             && this.pitchController.hasStructuralKineticSelectionForTargeting();
                                     boolean structuralYaw = this.yawController != null
                                             && this.yawController.hasStructuralKineticSelectionForTargeting();
 
-                                    if (structuralPitch) {
-                                        if (worldAimDirection == null) {
-                                            this.pitchController.failClosedRadarAim();
-                                            structuralAimAccepted = false;
-                                        } else {
-                                            structuralAimAccepted =
-                                                    this.pitchController.setRadarAimDirection(
-                                                            worldAimDirection);
+                                    boolean issueAimCommand =
+                                            shouldIssueAimCommand(aimUpdateMode);
+                                    if (issueAimCommand) {
+                                        if (structuralPitch) {
+                                            if (worldAimDirection == null) {
+                                                this.pitchController.failClosedRadarAim();
+                                                structuralAimAccepted = false;
+                                            } else {
+                                                structuralAimAccepted =
+                                                        this.pitchController.setRadarAimDirection(
+                                                                worldAimDirection);
+                                            }
+                                        } else if (desiredPitch != null
+                                                && this.pitchController != null) {
+                                            this.pitchController.setTargetAngle(
+                                                    desiredPitch.floatValue());
                                         }
-                                    } else if (desiredPitch != null && this.pitchController != null) {
-                                        this.pitchController.setTargetAngle(desiredPitch.floatValue());
                                     }
 
-                                    this.fixedMountDesiredYaw =
-                                            !this.cannonMount.supportsDirectYawControl() && this.yawController == null
-                                                    ? desiredYaw : null;
+                                    if (issueAimCommand) {
+                                        this.fixedMountDesiredYaw =
+                                                !this.cannonMount.supportsDirectYawControl()
+                                                        && this.yawController == null
+                                                        ? desiredYaw : null;
 
-                                    if (structuralYaw) {
-                                        if (worldAimDirection == null) {
-                                            this.yawController.failClosedRadarAim();
-                                            structuralAimAccepted = false;
-                                        } else {
-                                            structuralAimAccepted &=
-                                                    this.yawController.setRadarAimDirection(
-                                                            worldAimDirection);
+                                        if (structuralYaw) {
+                                            if (worldAimDirection == null) {
+                                                this.yawController.failClosedRadarAim();
+                                                structuralAimAccepted = false;
+                                            } else {
+                                                structuralAimAccepted &=
+                                                        this.yawController.setRadarAimDirection(
+                                                                worldAimDirection);
+                                            }
+                                        } else if (desiredYaw != null
+                                                && this.yawController != null) {
+                                            this.yawController.setTargetAngle(
+                                                    desiredYaw.floatValue());
                                         }
-                                    } else if (desiredYaw != null && this.yawController != null) {
-                                        this.yawController.setTargetAngle(desiredYaw.floatValue());
                                     }
 
                                     boolean auto = this.targetingConfig.autoFire();
@@ -1096,9 +1129,9 @@ public class WeaponFiringControl {
                                     boolean cannonReady = CannonUtil.isCannonReadyToFire(this.cannonMount);
                                     boolean stableOk = this.aimStableTicks >= motion.stableTicksRequired();
                                     if (this.level.getGameTime() % 20L == 0L) {
-                                        LOGGER.debug("WFC FIREGATES: auto={} lead={} newSolver={} newConf={} minConf={} laserNoLead={} yawPitchOk={} safeOk={} cannonReady={} stableOk={} firingBE={} target={} aim={} offset={} stable={}/{} motion={} jerk={} eps={} reason={}", new Object[]{auto, hasLeadSolution, hasNewTargetingSolution, targetingResult != null ? targetingResult.confidence() : null, motion.minConfidence(), canFireWithoutLead, yawPitchOk, safeOk, cannonReady, stableOk, this.fireController != null, this.target, offsetAim, this.offset, this.aimStableTicks, motion.stableTicksRequired(), motion.motionClass(), motion.jerk(), motion.aimStableEps(), motion.reason()});
+                                        LOGGER.debug("WFC FIREGATES: auto={} lead={} newSolver={} aimMode={} newConf={} minConf={} laserNoLead={} yawPitchOk={} safeOk={} cannonReady={} stableOk={} firingBE={} target={} aim={} offset={} stable={}/{} motion={} jerk={} eps={} reason={}", new Object[]{auto, hasLeadSolution, hasNewTargetingSolution, aimUpdateMode, targetingResult != null ? targetingResult.confidence() : null, motion.minConfidence(), canFireWithoutLead, yawPitchOk, safeOk, cannonReady, stableOk, this.fireController != null, this.target, offsetAim, this.offset, this.aimStableTicks, motion.stableTicksRequired(), motion.motionClass(), motion.jerk(), motion.aimStableEps(), motion.reason()});
                                         if (!yawPitchOk) {
-                                            LOGGER.debug("WFC AIMCHK: yawCtrl={} pitchCtrl={} atYaw={} atPitch={} targYaw={} targPitch={}", new Object[]{this.yawController != null ? this.yawController.getBlockPos() : null, this.pitchController != null ? this.pitchController.getBlockPos() : null, this.yawController != null && this.yawController.atTargetYaw(lag), this.pitchController != null && this.pitchController.atTargetPitch(lag), this.yawController != null ? this.yawController.getTargetAngle() : null, this.pitchController != null ? this.pitchController.getTargetAngle() : null});
+                                            LOGGER.debug("WFC AIMCHK: yawCtrl={} pitchCtrl={} atYaw={} atPitch={} targYaw={} targPitch={}", new Object[]{this.yawController != null ? this.yawController.getBlockPos() : null, this.pitchController != null ? this.pitchController.getBlockPos() : null, this.yawController != null && this.yawController.isAlignedForFiring(lag), this.pitchController != null && this.pitchController.isAlignedForFiring(lag), this.yawController != null ? this.yawController.getTargetAngle() : null, this.pitchController != null ? this.pitchController.getTargetAngle() : null});
                                         }
 
                                         if (!auto) {
@@ -1129,9 +1162,10 @@ public class WeaponFiringControl {
                                     }
 
                                     boolean shouldFire = this.targetingConfig.autoFire()
-                                            && (hasLeadSolution
-                                            || hasNewTargetingSolution
-                                            || canFireWithoutLead)
+                                            && hasFireEligibleAim(
+                                                    hasLeadSolution,
+                                                    hasNewTargetingSolution,
+                                                    canFireWithoutLead)
                                             && structuralAimAccepted && yawPitchOk && safeOk
                                             && cannonReady && stableOk;
                                     if (this.fireController != null) {
@@ -2594,10 +2628,11 @@ public class WeaponFiringControl {
             boolean yaw = this.cannonMount.supportsDirectYawControl()
                     || this.isFixedMountYawAligned(this.fixedMountDesiredYaw, lag);
             if (this.yawController != null) {
-                yaw = this.yawController.atTargetYaw(lag);
+                yaw = this.yawController.isAlignedForFiring(lag);
             }
 
-            boolean pitch = this.pitchController != null && this.pitchController.atTargetPitch(lag);
+            boolean pitch = this.pitchController != null
+                    && this.pitchController.isAlignedForFiring(lag);
             return yaw && pitch;
         }
     }
@@ -2700,6 +2735,34 @@ public class WeaponFiringControl {
     }
 
     private static record AimCommand(double pitchDeg, double controllerYawDeg) {
+    }
+
+    static AimUpdateMode selectAimUpdateMode(
+            boolean hasResolvedAim, boolean asyncBallisticAimExpected) {
+        if (hasResolvedAim) {
+            return AimUpdateMode.SOLVED;
+        }
+        return asyncBallisticAimExpected
+                ? AimUpdateMode.HOLD : AimUpdateMode.DIRECT;
+    }
+
+    static boolean shouldIssueAimCommand(AimUpdateMode mode) {
+        return mode != AimUpdateMode.HOLD;
+    }
+
+    static boolean hasFireEligibleAim(
+            boolean hasLeadSolution,
+            boolean hasNewTargetingSolution,
+            boolean canFireWithoutLead) {
+        return hasLeadSolution
+                || hasNewTargetingSolution
+                || canFireWithoutLead;
+    }
+
+    enum AimUpdateMode {
+        SOLVED,
+        HOLD,
+        DIRECT
     }
 
     private enum SolverKind {

@@ -31,6 +31,7 @@ public final class KineticControllerSelfTest {
         checkAimFrames(failures);
         checkFrames(failures);
         checkFirstNonzeroAndReadiness(failures);
+        checkFiringAlignment(failures);
         checkPowerLossAndFailClosedStates(failures);
         checkUnavailableAndReassembly(failures);
         checkReversal(failures);
@@ -97,6 +98,31 @@ public final class KineticControllerSelfTest {
         expectClose(failures, "yaw_up_mapping", yawUp.bearingTargetFor(120.0), 330.0);
         expectClose(failures, "inverse_mapping", yawUp.controllerTargetFor(330.0), 120.0);
 
+        Direction[] cardinals = {
+                Direction.SOUTH, Direction.WEST, Direction.NORTH, Direction.EAST
+        };
+        double[] neutralAngles = {0.0, 90.0, 180.0, 270.0};
+        for (int i = 0; i < cardinals.length; i++) {
+            Direction initial = cardinals[i];
+            double neutral = neutralAngles[i];
+            for (Direction bearingFacing : new Direction[]{Direction.DOWN, Direction.UP}) {
+                int sign = KineticMountFrame.conversionSignFor(
+                        CannonAxis.YAW, bearingFacing, bearingFacing, initial);
+                KineticMountFrame calibrated = frame(
+                        id, bearingFacing, initial, sign, neutral);
+                String suffix = initial.getSerializedName() + "_"
+                        + bearingFacing.getSerializedName();
+                expectClose(failures, "yaw_neutral_maps_to_zero_" + suffix,
+                        calibrated.bearingTargetFor(neutral), 0.0);
+                expectClose(failures, "yaw_zero_maps_to_neutral_" + suffix,
+                        calibrated.controllerTargetFor(0.0), neutral);
+            }
+        }
+        KineticMountFrame standalone = frame(
+                id, Direction.DOWN, null, 1, 0.0);
+        expectClose(failures, "standalone_swivel_preserves_south_zero",
+                standalone.bearingTargetFor(0.0), 0.0);
+
         KineticMountFrame pitchMatched = frame(id, Direction.EAST, 1, 0.0);
         KineticMountFrame pitchMirrored = frame(id, Direction.WEST, -1, 0.0);
         expectClose(failures, "pitch_matched", pitchMatched.bearingTargetFor(25.0), 25.0);
@@ -129,10 +155,10 @@ public final class KineticControllerSelfTest {
         expectTrue(failures, "first_nonzero_commands_generator", rig.commandedRpm < -EPSILON);
         expectTrue(failures, "command_clamped_to_input",
                 Math.abs(rig.commandedRpm) <= rig.availableInputRpm + EPSILON);
-        expectTrue(failures, "command_clamped_to_swivel_limit",
-                Math.abs(rig.commandedRpm) <= 32.0 + EPSILON);
-        expectClose(failures, "swivel_drive_limit_is_32_rpm",
-                rig.adapter.maximumDriveRpm(64.0), 32.0);
+        expectTrue(failures, "command_clamped_to_adapter_limit",
+                Math.abs(rig.commandedRpm) <= rig.adapter.maximumRpm + EPSILON);
+        expectClose(failures, "adapter_drive_limit_is_respected",
+                rig.adapter.maximumDriveRpm(128.0), rig.adapter.maximumRpm);
         expectFalse(failures, "sequence_context_unused", rig.adapter.sequenceContext);
 
         double travel = 0.0;
@@ -159,6 +185,78 @@ public final class KineticControllerSelfTest {
         state.onTargetChanged(true, 60.0, 0.5);
         expectFalse(failures, "same_tick_readiness_invalidation",
                 state.isReady(present, true, 60.0, 0.5));
+    }
+
+    private static void checkFiringAlignment(List<String> failures) {
+        FakeRig settlingRig = new FakeRig();
+        KineticControllerState settlingState =
+                new KineticControllerState(CannonAxis.YAW);
+        KineticMountAdapterResolution settlingPresent =
+                KineticMountAdapterResolution.present(settlingRig.adapter);
+        tick(settlingState, settlingRig, settlingPresent, true, 0.0);
+        tick(settlingState, settlingRig, settlingPresent, true, 0.0);
+        expectFalse(failures, "settling_swivel_not_fully_ready",
+                settlingState.isReady(settlingPresent, true, 0.0, 0.5));
+        expectTrue(failures, "settling_swivel_aligned_for_fire",
+                settlingState.isAlignedForFiring(
+                        settlingPresent, BlockPos.ZERO, true, 0.0, 0.5));
+
+        FakeRig trackingRig = new FakeRig();
+        KineticControllerState trackingState =
+                new KineticControllerState(CannonAxis.YAW);
+        KineticMountAdapterResolution trackingPresent =
+                KineticMountAdapterResolution.present(trackingRig.adapter);
+        tick(trackingState, trackingRig, trackingPresent, true, 20.0);
+        tick(trackingState, trackingRig, trackingPresent, true, 20.0);
+        trackingRig.adapter.targetAngle = 20.0;
+        trackingRig.adapter.physicalAngle = 20.0;
+        trackingState.onTargetChanged(true, 21.0, 0.5);
+
+        expectFalse(failures, "moving_target_revision_not_fully_ready",
+                trackingState.isReady(trackingPresent, true, 21.0, 2.0));
+        expectTrue(failures, "controller_driven_tracking_swivel_can_fire",
+                trackingState.isAlignedForFiring(
+                        trackingPresent, BlockPos.ZERO, true, 21.0, 2.0));
+        expectFalse(failures, "tracking_swivel_respects_firing_tolerance",
+                trackingState.isAlignedForFiring(
+                        trackingPresent, BlockPos.ZERO, true, 21.0, 0.5));
+
+        FakeRig pitchRig = new FakeRig(CannonAxis.PITCH);
+        KineticControllerState pitchState =
+                new KineticControllerState(CannonAxis.PITCH);
+        KineticMountAdapterResolution pitchPresent =
+                KineticMountAdapterResolution.present(pitchRig.adapter);
+        tick(pitchState, pitchRig, pitchPresent, true, 10.0);
+        tick(pitchState, pitchRig, pitchPresent, true, 10.0);
+        pitchRig.adapter.targetAngle = 10.0;
+        pitchRig.adapter.physicalAngle = 10.0;
+        pitchState.onTargetChanged(true, 11.0, 0.5);
+        boolean yawAligned = trackingState.isAlignedForFiring(
+                trackingPresent, BlockPos.ZERO, true, 21.0, 2.0);
+        boolean pitchAligned = pitchState.isAlignedForFiring(
+                pitchPresent, BlockPos.ZERO, true, 11.0, 2.0);
+        expectTrue(failures, "dual_swivel_axes_can_align_for_fire",
+                yawAligned && pitchAligned);
+        pitchRig.adapter.physicalAngle = 8.0;
+        expectFalse(failures, "dual_swivel_requires_both_axes_aligned",
+                yawAligned && pitchState.isAlignedForFiring(
+                        pitchPresent, BlockPos.ZERO, true, 11.0, 2.0));
+
+        trackingRig.adapter.sequenceContext = true;
+        expectFalse(failures, "sequence_context_blocks_firing",
+                trackingState.isAlignedForFiring(
+                        trackingPresent, BlockPos.ZERO, true, 21.0, 2.0));
+        trackingRig.adapter.sequenceContext = false;
+        trackingRig.adapter.driven = false;
+        trackingRig.adapter.free = false;
+        expectFalse(failures, "foreign_endpoint_blocks_firing",
+                trackingState.isAlignedForFiring(
+                        trackingPresent, BlockPos.ZERO, true, 21.0, 2.0));
+        trackingRig.adapter.free = true;
+        trackingRig.adapter.assembled = false;
+        expectFalse(failures, "disassembled_swivel_blocks_firing",
+                trackingState.isAlignedForFiring(
+                        trackingPresent, BlockPos.ZERO, true, 21.0, 2.0));
     }
 
     private static void checkPowerLossAndFailClosedStates(List<String> failures) {
@@ -267,6 +365,15 @@ public final class KineticControllerSelfTest {
         }
         expectTrue(failures, "same_assembly_settles_before_reassembly",
                 reloaded.isReady(samePresent, true, 20.0, 0.5));
+
+        KineticMountFrame previousFrame = sameAssembly.adapter.frame;
+        sameAssembly.adapter.frame = frame(previousFrame.assemblyId(), Direction.DOWN,
+                Direction.EAST, 1, 270.0);
+        tick(reloaded, sameAssembly, samePresent, true, 20.0);
+        expectFalse(failures, "same_assembly_recalibration_invalidates_readiness",
+                reloaded.isAtDestination());
+        expectClose(failures, "same_assembly_recalibration_stops_old_command",
+                sameAssembly.commandedRpm, 0.0);
 
         sameAssembly.adapter.frame = frame(new UUID(9, 9), Direction.UP, -1, 0.0);
         tick(reloaded, sameAssembly, samePresent, true, 20.0);
@@ -497,8 +604,13 @@ public final class KineticControllerSelfTest {
     }
 
     private static KineticMountFrame frame(UUID id, Direction facing, int sign, double neutral) {
+        return frame(id, facing, Direction.SOUTH, sign, neutral);
+    }
+
+    private static KineticMountFrame frame(UUID id, Direction facing,
+                                           Direction initial, int sign, double neutral) {
         return new KineticMountFrame(KineticMountFrame.CURRENT_VERSION, facing, facing,
-                id, Direction.SOUTH, sign, neutral);
+                id, initial, sign, neutral);
     }
 
     private static void tick(KineticControllerState state, FakeRig rig,
@@ -523,12 +635,20 @@ public final class KineticControllerSelfTest {
     }
 
     private static final class FakeRig {
-        private final FakeAdapter adapter = new FakeAdapter();
+        private final FakeAdapter adapter;
         private double availableInputRpm = 16.0;
         private double commandedRpm;
         private boolean foreignOwned;
         private boolean acceptDrive = true;
         private int propagationDelayTicks;
+
+        private FakeRig() {
+            this(CannonAxis.YAW);
+        }
+
+        private FakeRig(CannonAxis axis) {
+            adapter = new FakeAdapter(axis);
+        }
 
         private void command(double rpm) {
             commandedRpm = rpm;
@@ -563,6 +683,7 @@ public final class KineticControllerSelfTest {
     }
 
     private static final class FakeAdapter implements KineticMountAdapter {
+        private final CannonAxis axis;
         private boolean valid = true;
         private boolean assembled = true;
         private boolean locked = true;
@@ -572,10 +693,15 @@ public final class KineticControllerSelfTest {
         private double targetAngle;
         private double physicalAngle;
         private double endpointRpm;
+        private double maximumRpm = 96.0;
         private int positiveRotationSign = 1;
         private KineticMountFrame frame = frame(new UUID(1, 1), Direction.DOWN, 1, 0.0);
 
-        @Override public CannonAxis axis() { return CannonAxis.YAW; }
+        private FakeAdapter(CannonAxis axis) {
+            this.axis = axis;
+        }
+
+        @Override public CannonAxis axis() { return axis; }
         @Override public Direction relativeDirection() { return Direction.EAST; }
         @Override public boolean isValid() { return valid; }
         @Override public boolean hasSameEndpoint(KineticMountAdapter other) { return other == this; }
@@ -604,7 +730,7 @@ public final class KineticControllerSelfTest {
             return true;
         }
         @Override public double maximumDriveRpm(double availableInputRpm) {
-            return Math.max(0.0, Math.min(Math.abs(availableInputRpm), 32.0));
+            return Math.max(0.0, Math.min(Math.abs(availableInputRpm), maximumRpm));
         }
         @Override public double effectiveDegreesPerTick(double expectedEndpointSpeed) {
             return Math.abs(expectedEndpointSpeed) * 0.3;

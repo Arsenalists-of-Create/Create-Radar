@@ -3,7 +3,6 @@ package com.happysg.radar.config.server;
 import net.createmod.catnip.config.ConfigBase;
 
 public class RadarServerConfig extends ConfigBase {
-    public final ConfigInt radarLinkRange = i(128, 1, "radarLinkRange", "Maximum possible distance in blocks between radar links in blocks");
     public final ConfigInt monitorMaxSize = i(9, 1, "monitorMaxSize", "Maximum size of monitor MultiBlock");
     public final ConfigFloat targetLoosenThreshold = f(3.0F, 0.0F, "targetLoosenThreshold", "how fast a target must be moving before looser firing conditions are applied (value is in m/s)");
     public final ConfigInt targetLoosenAmount = i(15, 0, 180, "targetLoosenAmount", "increases the tolerance used to determine if cannons are pointing at the target (degrees)");
@@ -38,6 +37,11 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigInt sableSilhouetteRefreshTicks = i(1200, 20, "sableSilhouetteRefreshTicks", "Conservative refresh interval for visible Sable silhouettes");
     public final ConfigBool sableSilhouetteUseFallbackBox = b(true, "sableSilhouetteUseFallbackBox", "Use a simple local bounding-box silhouette when detailed scanning is unavailable");
     public final ConfigBool sableSilhouetteDebugLogging = b(false, "sableSilhouetteDebugLogging", "Log Sable silhouette builds, failures, and revision changes");
+
+    public final ConfigGroup radarOcclusionConfig = group(3, "radarOcclusionConfig", "Block occlusion behavior for native radars");
+    public final ConfigBool radarOcclusionEnabled = b(true, "enabled", "Allow solid blocks to obstruct native radar signals");
+    public final ConfigInt groundRadarMaxSolidBlocks = i(16, 0, "groundRadarMaxSolidBlocks", "Maximum number of solid blocks a ground radar signal can pass through");
+    public final ConfigInt skyPlaneRadarMaxSolidBlocks = i(8, 0, "skyPlaneRadarMaxSolidBlocks", "Maximum number of solid blocks a sky or plane radar signal can pass through");
 
     public final ConfigGroup radarStats = group(3, "radarStatsConfig", "Configs for radar bearing and radar stats");
     public final ConfigInt maxRadarRange = i(2048, 1, "maxRadarRange", "Maximum range of a Radar Contraption in blocks");

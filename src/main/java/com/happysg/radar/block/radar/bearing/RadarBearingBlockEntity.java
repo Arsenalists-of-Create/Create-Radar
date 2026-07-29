@@ -62,7 +62,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
         super.addBehaviours(behaviours);
         movementMode.setValue(MovementMode.MOVE_NEVER_PLACE.ordinal());
-        scanningBehavior = new RadarScanningBlockBehavior(this);
+        scanningBehavior = new RadarScanningBlockBehavior(this, RadarType.GROUND);
         behaviours.add(scanningBehavior);
     }
 

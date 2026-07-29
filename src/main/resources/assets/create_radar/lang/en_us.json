@@ -123,7 +123,7 @@
   "create_radar.ponder.sky_radar_ponder.text_1": "The Sky Radar Mount is an alternative, high power variant of the Radar Bearing",
   "create_radar.ponder.sky_radar_ponder.text_2": "The Radar Contraption is the same between both radar types",
   "create_radar.ponder.sky_radar_ponder.text_3": "And is linked to the Radar Network in the same way as well",
-  "create_radar.ponder.sky_radar_ponder.text_4": "The Sky Radar must be above a specific altitude to function properly. By default, this value is y = 96",
+  "create_radar.ponder.sky_radar_ponder.text_4": "The Sky Radar must be above a specific altitude to function properly. This value is currently y = %s",
   "create_radar.ponder.sky_radar_ponder.text_5": "Unlike the normal radar, the Sky Radar cannot detect targets below its horizon",
   "create_radar.ponder.sky_radar_ponder.text_6": "However, there is no upper detection bound, meaning that it can see anything above itself that is within its range",
   "create_radar.ponder.weapon_setup.header": "Making a simple weapon network",
@@ -170,7 +170,6 @@
   "display_link.set": "Target Set",
   "display_link.success": "Success!",
   "display_link.too_far": "Too Far",
-
   "item.create_radar.binoculars": "Binoculars",
   "item.create_radar.binoculars.tooltip.summary": "Allows for manual targeting of cannons connected to the paired _Network Controller_",
   "item.create_radar.binoculars.tooltip.condition1": "When Sneaking and right clicked on a Network Controller Block",
@@ -189,18 +188,14 @@
   "item.create_radar.radar_safe_zone_designator": "Safe Zone Designator",
   "item.create_radar.radar_safe_zone_designator.condition1": "When paired to a Network Controller",
   "item.create_radar.radar_safe_zone_designator.behavior1": "Prevents _Radar Controlled Cannons_ from firing at entities _within or beyond the designated area_",
-
   "item.create_radar.target_filter_item": "Targeting Filter",
   "item.create_radar.target_filter_item.tooltip.summary": "Allows you to enable _Autotargeting_, as well as set the targeting behavior. _Line of Sight_ will work outside of autotargeting. Can be placed in the _Network Controller_",
   "create_radar.monitor.button.autofit": "Auto Fit",
   "create_radar.monitor.button.autofit.tooltip": "Return to automatic radar framing",
-
   "create_radar.monitor.button.center": "Center",
   "create_radar.monitor.button.center.tooltip": "Center the view on this monitor",
-
   "create_radar.monitor.button.ship_lock": "Ship Lock",
   "create_radar.monitor.button.ship_lock.tooltip": "Lock the view to this sublevel",
-
   "create_radar.monitor.ship_lock_unavailable": "Ship lock is unavailable",
   "itemGroup.create_radar.radar": "Create: Radars"
 }
