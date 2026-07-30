@@ -23,6 +23,9 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkPendingSolveLifetime());
         results.add(checkVelocityChangeSupersedesPendingSolve());
         results.add(checkAsyncBallisticAimHandoff());
+        results.add(checkDualMountYawConvergence());
+        results.add(checkDualFirePolicy());
+        results.add(checkDualYawTopologyPolicy());
         return List.copyOf(results);
     }
 
@@ -153,6 +156,93 @@ public final class WeaponFiringControlSelfTest {
                 "timeline=" + firstSolution + "->" + pending + "->"
                         + nextSolution + " initial=" + initialWait
                         + " direct=" + intentionalDirect);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkDualMountYawConvergence() {
+        Vec3 leftOrigin = new Vec3(-2.0, 0.0, 0.0);
+        Vec3 rightOrigin = new Vec3(2.0, 0.0, 0.0);
+        Vec3 aimPoint = new Vec3(0.0, 0.0, 100.0);
+        Vec3 rightAxis = new Vec3(1.0, 0.0, 0.0);
+        Vec3 upAxis = new Vec3(0.0, 1.0, 0.0);
+        Vec3 forwardAxis = new Vec3(0.0, 0.0, 1.0);
+
+        Double leftYaw =
+                WeaponFiringControl.calculateControllerYawForFrame(
+                        leftOrigin, aimPoint,
+                        rightAxis, upAxis, forwardAxis);
+        Double rightYaw =
+                WeaponFiringControl.calculateControllerYawForFrame(
+                        rightOrigin, aimPoint,
+                        rightAxis, upAxis, forwardAxis);
+        boolean finite = leftYaw != null && rightYaw != null
+                && Double.isFinite(leftYaw)
+                && Double.isFinite(rightYaw);
+        double separation = finite
+                ? Math.abs(shortestDelta(leftYaw, rightYaw))
+                : 0.0;
+        boolean oppositeCorrections = finite
+                && Math.abs(shortestDelta(0.0, leftYaw)
+                + shortestDelta(0.0, rightYaw)) < 1.0e-6;
+        boolean passed = finite && separation > 2.0
+                && oppositeCorrections;
+        return result("t_pitch_per_mount_yaw_convergence", passed,
+                "left=" + leftYaw + " right=" + rightYaw
+                        + " separation=" + separation);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkDualFirePolicy() {
+        boolean allReady =
+                WeaponFiringControl.dualSideFireEligible(
+                        true, true, true,
+                        true, true, true);
+        boolean yawBlocksOnlySide =
+                !WeaponFiringControl.dualSideFireEligible(
+                        true, true, false,
+                        true, true, true);
+        boolean profileBlocksOnlySide =
+                !WeaponFiringControl.dualSideFireEligible(
+                        true, true, true,
+                        true, true, false);
+        boolean sharedGateStops =
+                !WeaponFiringControl.dualSideFireEligible(
+                        false, true, true,
+                        true, true, true);
+        boolean passed = allReady && yawBlocksOnlySide
+                && profileBlocksOnlySide && sharedGateStops;
+        return result("t_pitch_independent_fire_gates", passed,
+                "ready=" + allReady
+                        + " yawBlocked=" + yawBlocksOnlySide
+                        + " profileBlocked=" + profileBlocksOnlySide
+                        + " sharedBlocked=" + sharedGateStops);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkDualYawTopologyPolicy() {
+        boolean oneDirect =
+                WeaponFiringControl.selectDualYawMode(1, 0)
+                == WeaponFiringControl.DualYawMode.PER_MOUNT;
+        boolean twoDirect =
+                WeaponFiringControl.selectDualYawMode(2, 0)
+                == WeaponFiringControl.DualYawMode.PER_MOUNT;
+        boolean oneSwivel =
+                WeaponFiringControl.selectDualYawMode(1, 1)
+                == WeaponFiringControl.DualYawMode.SHARED_STRUCTURAL;
+        boolean mixedRejected =
+                WeaponFiringControl.selectDualYawMode(2, 1)
+                == WeaponFiringControl.DualYawMode.INVALID_MIXED;
+        boolean passed = oneDirect && twoDirect
+                && oneSwivel && mixedRejected;
+        return result("t_pitch_shared_swivel_yaw_policy", passed,
+                "oneDirect=" + oneDirect
+                        + " twoDirect=" + twoDirect
+                        + " oneSwivel=" + oneSwivel
+                        + " mixedRejected=" + mixedRejected);
+    }
+
+    private static double shortestDelta(double from, double to) {
+        return (to - from + 540.0) % 360.0 - 180.0;
     }
 
     private static RadarTrack track(String id, TrackCategory category,

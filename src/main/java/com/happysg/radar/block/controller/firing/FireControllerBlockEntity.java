@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.firing;
 
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
@@ -7,6 +8,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -39,6 +41,10 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
         super.tick();
         if (level == null || level.isClientSide) return;
 
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel)
+                    .advertiseContactController(this);
+        }
         long now = level.getGameTime();
 
         // i hard fail-safe: if nobody has told me to keep firing recently, i turn off
@@ -183,7 +189,20 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
         pulseOffTick = -1;
 
         if (level != null && !level.isClientSide) {
+            if (level instanceof ServerLevel serverLevel) {
+                WeaponNetworkRuntime.get(serverLevel)
+                        .advertiseContactController(this);
+            }
             setPoweredInternal(false);
         }
+    }
+
+    @Override
+    public void onChunkUnloaded() {
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel)
+                    .unregisterContactController(worldPosition);
+        }
+        super.onChunkUnloaded();
     }
 }

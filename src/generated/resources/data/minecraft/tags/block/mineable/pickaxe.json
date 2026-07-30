@@ -14,6 +14,7 @@
     "create_radar:plane_radar",
     "create_radar:identification_transponder",
     "create_radar:radar_warning_receiver",
-    "create_radar:sky_radar"
+    "create_radar:sky_radar",
+    "create_radar:t_pitch"
   ]
 }

@@ -18,6 +18,7 @@ public final class ModBlockData {
                 ModBlocks.CREATIVE_RADAR_PLATE_BLOCK,
                 ModBlocks.AUTO_YAW_CONTROLLER_BLOCK,
                 ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK,
+                ModBlocks.T_PITCH,
                 ModBlocks.FIRE_CONTROLLER_BLOCK,
                 ModBlocks.NETWORK_FILTERER_BLOCK,
                 ModBlocks.STATIONARY_RADAR,

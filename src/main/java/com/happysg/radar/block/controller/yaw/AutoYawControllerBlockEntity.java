@@ -13,6 +13,7 @@ import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
 import com.happysg.radar.block.controller.kinetic.KineticMountFrame;
 import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
@@ -34,7 +35,6 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
 
@@ -62,6 +62,9 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
     private Mount cachedMount = null;
 
     private boolean mountDirty = true;
+    private long mountResolutionTick = Long.MIN_VALUE;
+    @Nullable
+    private BlockPos cachedMountEndpointPos;
 
     private final KineticControllerState kineticControllerState =
             new KineticControllerState(CannonAxis.YAW);
@@ -89,6 +92,10 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
             return;
         }
 
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel)
+                    .advertiseContactController(this);
+        }
         debugSwivelSweep.enforce(targetAngle, this::applyDebugSwivelCommand);
         tickDebugSwivelFollow();
         boolean kineticSelected = tickKineticActuator();
@@ -468,6 +475,10 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
 
     public void markMountDirtyExternal() {
         mountDirty = true;
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel)
+                    .markContactTopologyDirty();
+        }
     }
 
     public void onRelevantNeighborChanged(BlockPos fromPos) {
@@ -491,25 +502,37 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
             return null;
         }
 
-        if (mountDirty) {
-            refreshMountCache();
+        BlockPos mountPos = getMountPos();
+        long gameTime = level.getGameTime();
+        if (mountDirty || mountResolutionTick != gameTime
+                || !java.util.Objects.equals(cachedMountEndpointPos, mountPos)
+                || (cachedMount != null
+                    && cachedMount.kind == MountKind.CBC
+                    && (cachedMount.cbc == null
+                        || !cachedMount.cbc.isCurrent()))) {
+            refreshMountCache(mountPos);
         }
 
         return cachedMount;
     }
 
-    private void refreshMountCache() {
+    private void refreshMountCache(@Nullable BlockPos mountPos) {
         if (level == null) {
             return;
         }
 
-        BlockPos mountPos = getMountPos();
+        Mount oldMount = cachedMount;
         Mount newMount = null;
 
         if (mountPos != null) {
-            BlockEntity adjacent = level.getBlockEntity(mountPos);
+            BlockEntity adjacent = level.hasChunkAt(mountPos)
+                    ? level.getBlockEntity(mountPos)
+                    : null;
 
-            if (Mods.CREATEBIGCANNONS.isLoaded() && adjacent instanceof CannonMountBlockEntity cbc) {
+            CannonMountContext cbc = Mods.CREATEBIGCANNONS.isLoaded()
+                    ? CannonMountContext.resolveEndpoint(level, mountPos)
+                    : null;
+            if (cbc != null && cbc.supportsDirectYawControl()) {
                 newMount = Mount.cbc(cbc);
             } else if (Mods.VS_CLOCKWORK.isLoaded() && adjacent instanceof PhysBearingBlockEntity phys) {
                 newMount = Mount.phys(phys);
@@ -517,7 +540,15 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
         }
 
         cachedMount = newMount;
+        cachedMountEndpointPos = mountPos == null ? null : mountPos.immutable();
+        mountResolutionTick = level.getGameTime();
         mountDirty = false;
+
+        if (oldMount != null && !sameMount(oldMount, newMount)) {
+            isRunning = false;
+            hasLastCbcYawWritten = false;
+            kineticControllerState.onTargetChanged(false, targetAngle, DEADBAND_DEG);
+        }
 
         if (newMount == null && !hasStructuralKineticSelection()) {
             isRunning = false;
@@ -559,9 +590,27 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
     }
 
     private boolean isControllableMount(BlockPos pos) {
+        if (level == null || !level.hasChunkAt(pos)) {
+            return false;
+        }
         BlockEntity be = level.getBlockEntity(pos);
-        return (Mods.CREATEBIGCANNONS.isLoaded() && be instanceof CannonMountBlockEntity)
+        CannonMountContext cbc = Mods.CREATEBIGCANNONS.isLoaded()
+                ? CannonMountContext.resolveEndpoint(level, pos)
+                : null;
+        return (cbc != null && cbc.supportsDirectYawControl())
                 || (Mods.VS_CLOCKWORK.isLoaded() && be instanceof PhysBearingBlockEntity);
+    }
+
+    private static boolean sameMount(@Nullable Mount first, @Nullable Mount second) {
+        if (first == second) {
+            return true;
+        }
+        if (first == null || second == null || first.kind != second.kind) {
+            return false;
+        }
+        return first.kind == MountKind.CBC
+                ? first.cbc != null && first.cbc.sameMount(second.cbc)
+                : first.phys == second.phys;
     }
 
     /** Input power is sampled, never connected to this isolated generator. */
@@ -919,8 +968,21 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
     }
 
     @Override
+    public void onLoad() {
+        super.onLoad();
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel)
+                    .advertiseContactController(this);
+        }
+    }
+
+    @Override
     public void onChunkUnloaded() {
         if (level != null && !level.isClientSide()) {
+            if (level instanceof ServerLevel serverLevel) {
+                WeaponNetworkRuntime.get(serverLevel)
+                        .unregisterContactController(worldPosition);
+            }
             stopDebugSwivelFollow("controller_chunk_unloaded", false);
             releaseKineticActuator();
         }
@@ -989,16 +1051,16 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity {
 
     static class Mount {
         final MountKind kind;
-        final CannonMountBlockEntity cbc;
+        final CannonMountContext cbc;
         final PhysBearingBlockEntity phys;
 
-        private Mount(MountKind kind, @Nullable CannonMountBlockEntity cbc, @Nullable PhysBearingBlockEntity phys) {
+        private Mount(MountKind kind, @Nullable CannonMountContext cbc, @Nullable PhysBearingBlockEntity phys) {
             this.kind = kind;
             this.cbc = cbc;
             this.phys = phys;
         }
 
-        static Mount cbc(CannonMountBlockEntity cbc) {
+        static Mount cbc(CannonMountContext cbc) {
             return new Mount(MountKind.CBC, cbc, null);
         }
 

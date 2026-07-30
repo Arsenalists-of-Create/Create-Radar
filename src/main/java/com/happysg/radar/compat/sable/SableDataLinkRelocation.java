@@ -201,12 +201,30 @@ public final class SableDataLinkRelocation {
     }
 
     private static void invalidateControllers(ServerLevel level, BlockPos mountPos) {
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(level);
+        Set<BlockPos> endpoints = new HashSet<>();
         WeaponNetworkRuntime.WeaponGroupView group =
-                WeaponNetworkRuntime.get(level).getWeaponGroupView(mountPos);
-        if (group == null) {
-            return;
+                runtime.getWeaponGroupView(mountPos);
+        if (group != null) {
+            endpoints.addAll(group.endpoints());
         }
-        for (BlockPos endpoint : group.endpoints()) {
+
+        WeaponNetworkRuntime.WeaponControlView controlView =
+                runtime.getWeaponControlViewForMount(mountPos);
+        if (controlView != null) {
+            endpoints.add(controlView.pitchPos());
+            for (WeaponNetworkRuntime.MountChannelView channel
+                    : controlView.channels()) {
+                if (channel.yawPos() != null) {
+                    endpoints.add(channel.yawPos());
+                }
+                if (channel.firingPos() != null) {
+                    endpoints.add(channel.firingPos());
+                }
+            }
+        }
+
+        for (BlockPos endpoint : endpoints) {
             BlockEntity blockEntity = level.getBlockEntity(endpoint);
             if (blockEntity instanceof AutoPitchControllerBlockEntity pitch) {
                 pitch.markMountDirtyExternal();

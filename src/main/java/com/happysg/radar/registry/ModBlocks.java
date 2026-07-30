@@ -280,13 +280,28 @@ public class ModBlocks {
                     .blockstate((c, p) -> p.simpleBlock(c.get(), p.models().getExistingFile(ResourceLocation.withDefaultNamespace("block/barrier"))))
                     .register();
     public static final BlockEntry<TPitchControllerBlock> T_PITCH =
-        REGISTRATE.block("t_pitch",TPitchControllerBlock::new)
-                .initialProperties(SharedProperties::softMetal)
-                .properties(p -> p.noOcclusion())
-                .properties(p -> p.strength(0.8f))
-                .transform(axeOrPickaxe())
-                .simpleItem()
-                .register();
+            REGISTRATE.block("t_pitch", TPitchControllerBlock::new)
+                    .lang("T-Pitch Controller")
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .blockstate((c, p) -> p.getVariantBuilder(c.get())
+                            .forAllStates(state -> {
+                                TPitchControllerBlock.Orientation orientation =
+                                        state.getValue(TPitchControllerBlock.ORIENTATION);
+                                return ConfiguredModel.builder()
+                                        .modelFile(p.models().getExistingFile(
+                                                CreateRadar.asResource("block/track_controller")))
+                                        .rotationX(orientation.modelRotationX())
+                                        .rotationY(orientation.modelRotationY())
+                                        .build();
+                            }))
+                    .transform(axeOrPickaxe())
+                    .item()
+                    .model((c, p) -> p.withExistingParent(c.getName(),
+                            CreateRadar.asResource("block/track_controller")))
+                    .build()
+                    .register();
 
     public static void register() {
         CreateRadar.getLogger().info("Registering blocks!");

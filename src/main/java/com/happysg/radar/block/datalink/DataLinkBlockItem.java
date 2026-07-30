@@ -10,6 +10,7 @@ import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
+import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
@@ -74,6 +75,10 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String DATA_LINK_ONLY_PITCH_ALLOWED = CreateRadar.MODID + ".data_link.only_pitch_allowed";
     private static final String DATA_LINK_PLACE_FAILED = CreateRadar.MODID + ".data_link.place_failed";
     private static final String DATA_LINK_SELECT_FIRST = CreateRadar.MODID + ".data_link.select_mount_or_filterer_first";
+    private static final String DATA_LINK_T_PITCH_INVALID_MOUNT =
+            CreateRadar.MODID + ".data_link.t_pitch_invalid_mount";
+    private static final String DATA_LINK_T_PITCH_MOUNT_RESERVED =
+            CreateRadar.MODID + ".data_link.t_pitch_mount_reserved";
 
     public DataLinkBlockItem(Block pBlock, Properties pProperties) {
         super(pBlock, pProperties);
@@ -134,9 +139,10 @@ public class DataLinkBlockItem extends BlockItem {
     }
 
     private InteractionResult trySelectSource(LinkUse use) {
-        if (isMount(use.be(), use.clickedState())) {
+        BlockPos selectedMount = resolveSelectableMount(use);
+        if (selectedMount != null) {
             if (!use.level().isClientSide) {
-                use.tag().put(SELECTED_MOUNT_POS, NbtUtils.writeBlockPos(use.clickedPos()));
+                use.tag().put(SELECTED_MOUNT_POS, NbtUtils.writeBlockPos(selectedMount));
                 use.tag().remove(SELECTED_FILTERER_POS);
                 use.tag().remove(SELECTED_RWR_POS);
                 clearControllerSelections(use.tag());
@@ -173,12 +179,23 @@ public class DataLinkBlockItem extends BlockItem {
         return null;
     }
 
-    private static boolean isMount(@Nullable BlockEntity blockEntity, BlockState state) {
-        boolean isEnergyMount = Mods.CREATEENERGYCANNONS.isLoaded() && state.getBlock() instanceof EnergyCannonMount;
-        return CannonMountContext.of(blockEntity) != null
-                || CannonMountContext.isCompactMount(blockEntity, state)
+    @Nullable
+    private static BlockPos resolveSelectableMount(LinkUse use) {
+        CannonMountContext cbc =
+                CannonMountContext.resolveEndpoint(use.level(), use.clickedPos());
+        if (cbc != null) {
+            return cbc.getBlockPos().immutable();
+        }
+
+        BlockState state = use.clickedState();
+        boolean isEnergyMount = Mods.CREATEENERGYCANNONS.isLoaded()
+                && state.getBlock() instanceof EnergyCannonMount;
+        if (CannonMountContext.isCompactMount(use.be(), state)
                 || state.getBlock() instanceof CannonMountBlock
-                || isEnergyMount;
+                || isEnergyMount) {
+            return use.clickedPos().immutable();
+        }
+        return null;
     }
 
     private InteractionResult completeWeaponLink(LinkUse use, ControllerType controllerType) {
@@ -193,9 +210,21 @@ public class DataLinkBlockItem extends BlockItem {
             clearLinkTag(use.stack());
             return InteractionResult.FAIL;
         }
+        CannonMountContext selectedMount =
+                CannonMountContext.resolveEndpoint(serverLevel, mountPos);
+        if (selectedMount != null) {
+            mountPos = selectedMount.getBlockPos().immutable();
+        }
+        if (use.be() instanceof TPitchControllerBlockEntity tPitch
+                && !tPitch.canLinkMount(mountPos)) {
+            sendError(use.player(), DATA_LINK_T_PITCH_INVALID_MOUNT);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
 
         WeaponNetworkRuntime weaponRuntime = WeaponNetworkRuntime.get(serverLevel);
-        BlockPos existingMount = weaponRuntime.getMountForController(use.clickedPos());
+        BlockPos existingMount =
+                weaponRuntime.getExplicitMountForController(use.clickedPos());
         if (existingMount != null) {
             sendError(use.player(), DATA_LINK_CONTROLLER_ALREADY_LINKED);
             clearLinkTag(use.stack());
@@ -204,6 +233,13 @@ public class DataLinkBlockItem extends BlockItem {
 
         BlockPos placedPos = getPlacementPos(use);
         DataLinkBlockEntity.WeaponEndpointType endpointType = controllerType.endpointType();
+        if (endpointType == DataLinkBlockEntity.WeaponEndpointType.PITCH
+                && weaponRuntime.hasPitchReservationConflict(
+                use.clickedPos(), mountPos)) {
+            sendError(use.player(), DATA_LINK_T_PITCH_MOUNT_RESERVED);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
+        }
         if (!weaponRuntime.canAttachEndpoint(endpointType, use.clickedPos(), mountPos)) {
             sendError(use.player(), DATA_LINK_DUPLICATE_CONTROLLER_TYPE);
             clearLinkTag(use.stack());

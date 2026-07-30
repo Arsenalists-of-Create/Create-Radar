@@ -1,5 +1,8 @@
 package com.happysg.radar.block.controller.yaw;
 
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
+import com.happysg.radar.block.controller.kinetic.CannonMountPlacement;
+import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.simibubi.create.foundation.block.IBE;
@@ -16,7 +19,12 @@ import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 
 public class AutoYawControllerBlock extends DirectionalKineticBlock
-        implements IBE<AutoYawControllerBlockEntity>, ICogWheel {
+        implements IBE<AutoYawControllerBlockEntity>, ICogWheel,
+        PlacementShaftTarget {
+    private static final Direction[] MOUNT_DIRECTIONS = {
+            Direction.UP,
+            Direction.DOWN
+    };
 
     public AutoYawControllerBlock(Properties properties) {
         super(properties);
@@ -33,6 +41,13 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
     }
 
     @Override
+    public boolean hasPlacementShaftTowards(
+            LevelReader world, BlockPos pos, BlockState state, Direction face
+    ) {
+        return face == state.getValue(FACING);
+    }
+
+    @Override
     public boolean isDedicatedCogWheel() {
         // The controller participates in ordinary small-cog propagation, but its
         // item is not a standard cogwheel item: this block uses FACING instead of
@@ -42,6 +57,14 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         boolean crouching = context.getPlayer() != null && context.getPlayer().isCrouching();
+        if (!crouching) {
+            Direction mountDirection = CannonMountPlacement.findPreferredMount(
+                    context, MOUNT_DIRECTIONS);
+            if (mountDirection != null) {
+                return defaultBlockState()
+                        .setValue(FACING, mountDirection.getOpposite());
+            }
+        }
 
         Direction vertical = context.getPlayer() != null && context.getPlayer().getXRot() > 0
                 ? Direction.UP : Direction.DOWN ;
@@ -67,6 +90,11 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
                 yaw.releaseKineticActuator();
             }
             breakAttachedDataLinks(level, pos);
+            if (level instanceof net.minecraft.server.level.ServerLevel
+                    serverLevel) {
+                WeaponNetworkRuntime.get(serverLevel)
+                        .unregisterContactController(pos);
+            }
         }
         super.onRemove(state, level, pos, newState, isMoving);
 

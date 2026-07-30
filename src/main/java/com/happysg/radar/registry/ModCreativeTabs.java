@@ -66,6 +66,7 @@ public class ModCreativeTabs {
         pOutput.accept(ModBlocks.CREATIVE_RADAR_PLATE_BLOCK);
         pOutput.accept(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK);
         pOutput.accept(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK);
+        pOutput.accept(ModBlocks.T_PITCH);
         pOutput.accept(ModBlocks.NETWORK_FILTERER_BLOCK);
         pOutput.accept(ModBlocks.FIRE_CONTROLLER_BLOCK);
         pOutput.accept(ModBlocks.SKY_RADAR);

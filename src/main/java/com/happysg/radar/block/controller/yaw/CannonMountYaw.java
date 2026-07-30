@@ -6,7 +6,6 @@ import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.config.RadarConfig;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
 import java.util.List;
@@ -19,22 +18,18 @@ public class CannonMountYaw {
         this.controller = controller;
     }
 
-    public void tick(CannonMountBlockEntity mount) {
+    public void tick(CannonMountContext mount) {
         rotateCBC(mount);
     }
 
-    public void setTarget(CannonMountBlockEntity mount, Vec3 targetPos) {
+    public void setTarget(CannonMountContext mount, Vec3 targetPos) {
         if (!(controller.getLevel() instanceof ServerLevel serverLevel)) {
             return;
         }
 
         if (PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
-            CannonMountContext mountContext = CannonMountContext.of(mount);
-            if (mountContext == null) {
-                return;
-            }
             List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(
-                    mountContext, targetPos, serverLevel);
+                    mount, targetPos, serverLevel);
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
                 return;
             }
@@ -59,11 +54,11 @@ public class CannonMountYaw {
         controller.setChanged();
     }
 
-    public boolean atTargetYaw(CannonMountBlockEntity mount, boolean lag) {
+    public boolean atTargetYaw(CannonMountContext mount, boolean lag) {
         return atTargetYaw(mount, lag, 0.0);
     }
 
-    public boolean atTargetYaw(CannonMountBlockEntity mount, boolean lag,
+    public boolean atTargetYaw(CannonMountContext mount, boolean lag,
                                double minimumToleranceDegrees) {
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null) {
@@ -89,8 +84,11 @@ public class CannonMountYaw {
         return Double.isFinite(tolerance) ? Math.max(0.0, tolerance) : 0.0;
     }
 
-    private void rotateCBC(CannonMountBlockEntity mount) {
+    private void rotateCBC(CannonMountContext mount) {
         if (!controller.isRunningController()) {
+            return;
+        }
+        if (!mount.supportsDirectYawControl()) {
             return;
         }
 
@@ -104,7 +102,9 @@ public class CannonMountYaw {
 
         double yawDiff = AutoYawControllerBlockEntity.shortestDelta(currentYaw, desiredYaw);
         if (Math.abs(yawDiff) <= AutoYawControllerBlockEntity.getToleranceDeg()) {
-            mount.setYaw((float) desiredYaw);
+            if (!mount.trySetYaw((float) desiredYaw)) {
+                return;
+            }
             controller.recordCbcYawWritten(desiredYaw);
             mount.notifyUpdate();
             return;
@@ -121,7 +121,9 @@ public class CannonMountYaw {
         double move = Math.signum(yawDiff) * Math.min(Math.abs(yawDiff), stepDeg);
         double nextYaw = AutoYawControllerBlockEntity.wrap360(currentYaw + move);
 
-        mount.setYaw((float) nextYaw);
+        if (!mount.trySetYaw((float) nextYaw)) {
+            return;
+        }
         controller.recordCbcYawWritten(nextYaw);
         mount.notifyUpdate();
     }

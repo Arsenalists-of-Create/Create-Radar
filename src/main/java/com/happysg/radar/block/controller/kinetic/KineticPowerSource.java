@@ -25,26 +25,45 @@ public final class KineticPowerSource {
             if (direction.getAxis() != axis) {
                 continue;
             }
-            BlockPos sourcePos = controller.getBlockPos().relative(direction);
-            if (!level.hasChunkAt(sourcePos)) {
-                continue;
-            }
-            BlockEntity candidate = level.getBlockEntity(sourcePos);
-            if (!(candidate instanceof KineticBlockEntity kinetic) || kinetic == controller) {
-                continue;
-            }
-            BlockState sourceState = level.getBlockState(sourcePos);
-            if (!(sourceState.getBlock() instanceof IRotate rotate)
-                    || rotate.getRotationAxis(sourceState) != axis
-                    || !rotate.hasShaftTowards(level, sourcePos, sourceState,
-                    direction.getOpposite())) {
-                continue;
-            }
-            double rpm = kinetic.getSpeed();
+            double rpm = adjacentShaftRpm(controller, direction);
             if (Double.isFinite(rpm) && Math.abs(rpm) > Math.abs(strongest)) {
                 strongest = rpm;
             }
         }
         return strongest;
+    }
+
+    /**
+     * Samples a single directed shaft input without kinetically joining the
+     * controller's isolated generator to the source network.
+     */
+    public static double adjacentShaftRpm(KineticBlockEntity controller,
+                                          Direction direction) {
+        Level level = controller.getLevel();
+        if (level == null) {
+            return 0.0;
+        }
+
+        BlockPos sourcePos = controller.getBlockPos().relative(direction);
+        if (!level.hasChunkAt(sourcePos)) {
+            return 0.0;
+        }
+
+        BlockEntity candidate = level.getBlockEntity(sourcePos);
+        if (!(candidate instanceof KineticBlockEntity kinetic)
+                || kinetic == controller) {
+            return 0.0;
+        }
+
+        BlockState sourceState = level.getBlockState(sourcePos);
+        if (!(sourceState.getBlock() instanceof IRotate rotate)
+                || rotate.getRotationAxis(sourceState) != direction.getAxis()
+                || !rotate.hasShaftTowards(level, sourcePos, sourceState,
+                direction.getOpposite())) {
+            return 0.0;
+        }
+
+        double rpm = kinetic.getSpeed();
+        return Double.isFinite(rpm) ? rpm : 0.0;
     }
 }

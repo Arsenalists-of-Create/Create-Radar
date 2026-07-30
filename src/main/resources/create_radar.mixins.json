@@ -19,8 +19,12 @@
     "FlakAutocannonProjectileMixin",
     "FireworkRocketEntityMixin",
     "FuzedBigCannonProjectileMixin",
+    "DirectionalKineticBlockPlacementMixin",
+    "HorizontalAxisKineticBlockPlacementMixin",
+    "HorizontalKineticBlockPlacementMixin",
     "MountedAutocannonContraptionMixin",
     "MountedBigCannonContraptionMixin",
+    "RotatedPillarKineticBlockPlacementMixin",
     "SimulatedCompassNavigationTargetMixin"
   ],
   "injectors": {

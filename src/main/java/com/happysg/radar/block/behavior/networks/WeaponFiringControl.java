@@ -52,9 +52,11 @@ import dev.ryanhcode.sable.companion.SubLevelAccess;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -103,6 +105,12 @@ public class WeaponFiringControl {
     public AutoYawControllerBlockEntity yawController;
     public FireControllerBlockEntity fireController;
     public WeaponNetworkRuntime.WeaponGroupView view;
+    @Nullable
+    private WeaponNetworkRuntime.WeaponControlView controlView;
+    private List<WeaponSide> weaponSides = List.of();
+    @Nullable
+    private AutoYawControllerBlockEntity sharedYawController;
+    private boolean dualTopologyValid = true;
     public final Level level;
     private RadarTrack activetrack;
     private Entity targetEntity;
@@ -279,19 +287,32 @@ public class WeaponFiringControl {
     }
 
     public Vec3 getCannonRayStart() {
-        if (this.cannonMount == null) {
+        return getCannonRayStart(this.cannonMount);
+    }
+
+    @Nullable
+    private Vec3 getCannonRayStart(
+            @Nullable CannonMountContext mount
+    ) {
+        if (mount == null) {
             return null;
         } else {
-            PitchOrientedContraptionEntity poce = this.cannonMount.getContraption();
-            if (Mods.SABLE.isLoaded() && SableUtils.isBlockInShipyard(this.level, this.cannonMount.getBlockPos())) {
+            PitchOrientedContraptionEntity poce = mount.getContraption();
+            if (Mods.SABLE.isLoaded()
+                    && SableUtils.isBlockInShipyard(
+                    this.level, mount.getBlockPos())) {
                 if (poce != null) {
                     Vec3 shipyardPos = poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
                     return SableUtils.getWorldVec(this.level, shipyardPos);
                 } else {
-                    return SableUtils.getWorldVec(this.level, this.cannonMount.getBlockPos().getCenter());
+                    return SableUtils.getWorldVec(
+                            this.level, mount.getBlockPos().getCenter());
                 }
             } else {
-                return poce == null ? this.cannonMount.getBlockPos().getCenter() : poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
+                return poce == null
+                        ? mount.getBlockPos().getCenter()
+                        : poce.toGlobalVector(
+                        Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
             }
         }
     }
@@ -674,32 +695,147 @@ public class WeaponFiringControl {
 
     public void refreshControllers() {
         if (this.level instanceof ServerLevel serverLevel) {
-            this.view = WeaponNetworkRuntime.get(serverLevel).getWeaponGroupViewFromEndpoint(this.pitchController.getBlockPos());
-            if (this.view == null) {
-                this.yawController = null;
-                this.fireController = null;
+            Set<FireControllerBlockEntity> previousFires =
+                    currentFireControllers();
+            BlockPos pitchPos = this.pitchController == null
+                    ? null : this.pitchController.getBlockPos();
+            if (pitchPos == null) {
+                clearControllerTopology(previousFires);
                 return;
             }
-            if (this.view.yawPos() != null
-                    && this.level.getBlockEntity(this.view.yawPos()) instanceof AutoYawControllerBlockEntity autoyaw) {
-                this.yawController = autoyaw;
-            } else {
-                this.yawController = null;
+
+            WeaponNetworkRuntime runtime =
+                    WeaponNetworkRuntime.get(serverLevel);
+            this.view = runtime.getWeaponGroupViewFromEndpoint(pitchPos);
+            this.controlView =
+                    runtime.getWeaponControlViewFromPitch(pitchPos);
+            if (this.view == null || this.controlView == null) {
+                clearControllerTopology(previousFires);
+                return;
             }
 
-            if (this.view.pitchPos() != null && this.level.getBlockEntity(this.view.pitchPos()) instanceof AutoPitchControllerBlockEntity autopitch) {
+            if (this.level.getBlockEntity(this.controlView.pitchPos())
+                    instanceof AutoPitchControllerBlockEntity autopitch) {
                 this.pitchController = autopitch;
             } else {
-                this.pitchController = null;
-            }
-
-            if (this.view.firingPos() != null && this.level.getBlockEntity(this.view.firingPos()) instanceof FireControllerBlockEntity firecont) {
-                this.fireController = firecont;
+                clearControllerTopology(previousFires);
                 return;
             }
 
-            this.fireController = null;
+            List<WeaponSide> resolvedSides = new ArrayList<>(2);
+            Set<AutoYawControllerBlockEntity> yawControllers =
+                    new HashSet<>();
+            for (WeaponNetworkRuntime.MountChannelView channel
+                    : this.controlView.channels()) {
+                CannonMountContext mount = CannonMountContext.resolveEndpoint(
+                        this.level, channel.mountPos());
+                AutoYawControllerBlockEntity yaw =
+                        channel.yawPos() != null
+                                && this.level.getBlockEntity(
+                                channel.yawPos())
+                                instanceof AutoYawControllerBlockEntity y
+                                ? y : null;
+                FireControllerBlockEntity fire =
+                        channel.firingPos() != null
+                                && this.level.getBlockEntity(
+                                channel.firingPos())
+                                instanceof FireControllerBlockEntity f
+                                ? f : null;
+                if (yaw != null) {
+                    yawControllers.add(yaw);
+                }
+                resolvedSides.add(new WeaponSide(
+                        channel.mountPos(), mount, yaw, fire));
+            }
+
+            this.weaponSides = List.copyOf(resolvedSides);
+            this.sharedYawController = null;
+            this.dualTopologyValid =
+                    this.controlView.validTopology();
+            boolean dual = isDualNetwork();
+            long structuralYawCount = yawControllers.stream()
+                    .filter(AutoYawControllerBlockEntity
+                            ::hasStructuralKineticSelectionForTargeting)
+                    .count();
+            if (dual) {
+                DualYawMode yawMode = selectDualYawMode(
+                        yawControllers.size(),
+                        (int) structuralYawCount);
+                if (yawMode == DualYawMode.SHARED_STRUCTURAL) {
+                    this.sharedYawController =
+                            yawControllers.iterator().next();
+                } else if (yawMode == DualYawMode.INVALID_MIXED) {
+                    this.dualTopologyValid = false;
+                }
+            }
+
+            WeaponSide authority = authoritySide();
+            if (authority == null || authority.mount == null
+                    || !authority.mount.sameMount(this.cannonMount)) {
+                this.dualTopologyValid = false;
+                this.yawController = null;
+                this.fireController = null;
+            } else {
+                this.yawController = this.sharedYawController != null
+                        ? this.sharedYawController : authority.yaw;
+                this.fireController = authority.fire;
+            }
+
+            Set<FireControllerBlockEntity> activeFires =
+                    currentFireControllers();
+            for (FireControllerBlockEntity previous : previousFires) {
+                if (!activeFires.contains(previous)) {
+                    previous.setPowered(false);
+                }
+            }
+            if (!this.dualTopologyValid) {
+                stopFireCannon();
+            }
         }
+    }
+
+    private void clearControllerTopology(
+            Set<FireControllerBlockEntity> previousFires
+    ) {
+        for (FireControllerBlockEntity fire : previousFires) {
+            fire.setPowered(false);
+        }
+        this.controlView = null;
+        this.weaponSides = List.of();
+        this.sharedYawController = null;
+        this.dualTopologyValid = false;
+        this.yawController = null;
+        this.fireController = null;
+    }
+
+    private Set<FireControllerBlockEntity> currentFireControllers() {
+        Set<FireControllerBlockEntity> controllers = new HashSet<>();
+        if (this.fireController != null) {
+            controllers.add(this.fireController);
+        }
+        for (WeaponSide side : this.weaponSides) {
+            if (side.fire != null) {
+                controllers.add(side.fire);
+            }
+        }
+        return controllers;
+    }
+
+    private boolean isDualNetwork() {
+        return this.controlView != null
+                && this.controlView.mode()
+                == WeaponNetworkRuntime.WeaponNetworkMode.T_PITCH_DUAL;
+    }
+
+    @Nullable
+    private WeaponSide authoritySide() {
+        for (WeaponSide side : this.weaponSides) {
+            if (side.mount != null
+                    && side.mount.sameMount(this.cannonMount)) {
+                return side;
+            }
+        }
+        return null;
     }
 
     private boolean isOutOfKnownRange(@Nullable Vec3 point) {
@@ -717,7 +853,8 @@ public class WeaponFiringControl {
     }
 
     public void tick() {
-        if (!this.isMountStateOk()) {
+        if (!this.isMountStateOk()
+                || !this.dualTopologyValid) {
             this.stopFireCannon();
             this.endStructuralRadarTracking();
         } else {
@@ -1162,6 +1299,14 @@ public class WeaponFiringControl {
                                         }
                                     }
 
+                                    if (isDualNetwork()) {
+                                        structuralAimAccepted &=
+                                                this.commandDualYawControllers(
+                                                        issueAimCommand,
+                                                        offsetAim,
+                                                        desiredYaw);
+                                    }
+
                                     double minimumFiringTolerance = adapterShot == null
                                             ? 0.0 : adapterShot.minimumFiringToleranceDegrees();
                                     boolean auto = this.targetingConfig.autoFire();
@@ -1205,23 +1350,41 @@ public class WeaponFiringControl {
                                         }
                                     }
 
-                                    boolean shouldFire = this.targetingConfig.autoFire()
+                                    boolean sharedFireGates =
+                                            this.targetingConfig.autoFire()
                                             && hasFireEligibleAim(
                                                     hasLeadSolution,
                                                     hasNewTargetingSolution,
                                                     canFireWithoutLead)
-                                            && structuralAimAccepted && yawPitchOk && safeOk
-                                            && cannonReady && stableOk;
-                                    if (shouldFire && adapterShot != null
-                                            && !this.prepareAdapterShotForFire(
-                                            adapterShot, adapterContext)) {
-                                        shouldFire = false;
-                                    }
-                                    if (this.fireController != null) {
-                                        if (shouldFire) {
-                                            this.tryFireCannon();
-                                        } else {
-                                            this.stopFireCannon();
+                                            && structuralAimAccepted
+                                            && safeOk && stableOk;
+                                    if (isDualNetwork()) {
+                                        this.updateDualFireControllers(
+                                                serverLevel,
+                                                sharedFireGates,
+                                                lag,
+                                                minimumFiringTolerance,
+                                                adapterShot,
+                                                currentProjectile,
+                                                cannon);
+                                    } else {
+                                        boolean shouldFire =
+                                                sharedFireGates
+                                                && yawPitchOk
+                                                && cannonReady;
+                                        if (shouldFire
+                                                && adapterShot != null
+                                                && !this.prepareAdapterShotForFire(
+                                                adapterShot,
+                                                adapterContext)) {
+                                            shouldFire = false;
+                                        }
+                                        if (this.fireController != null) {
+                                            if (shouldFire) {
+                                                this.tryFireCannon();
+                                            } else {
+                                                this.stopFireCannon();
+                                            }
                                         }
                                     }
 
@@ -1565,11 +1728,21 @@ public class WeaponFiringControl {
 
     @Nullable
     private ResolvedProjectileState resolveProjectileState(AbstractMountedCannonContraption cannon, ServerLevel level) {
+        return resolveProjectileState(this.cannonMount, cannon, level);
+    }
+
+    @Nullable
+    private ResolvedProjectileState resolveProjectileState(
+            CannonMountContext mount,
+            AbstractMountedCannonContraption cannon,
+            ServerLevel level
+    ) {
         if (cannon == null || level == null) {
             return null;
         }
 
-        WeaponShotProfile adapterShot = this.resolveAdapterShot(cannon, level);
+        WeaponShotProfile adapterShot =
+                this.resolveAdapterShot(mount, cannon, level);
         if (adapterShot != null) {
             if (adapterShot.aimMode() != WeaponShotProfile.AimMode.BALLISTIC
                     || adapterShot.projectileModel() == null) {
@@ -1717,12 +1890,23 @@ public class WeaponFiringControl {
             AbstractMountedCannonContraption cannon,
             ServerLevel serverLevel
     ) {
-        PitchOrientedContraptionEntity entity = this.cannonMount.getContraption();
+        return resolveAdapterShot(
+                this.cannonMount, cannon, serverLevel);
+    }
+
+    @Nullable
+    private WeaponShotProfile resolveAdapterShot(
+            CannonMountContext mount,
+            AbstractMountedCannonContraption cannon,
+            ServerLevel serverLevel
+    ) {
+        PitchOrientedContraptionEntity entity = mount.getContraption();
         if (cannon == null || serverLevel == null || entity == null) {
             return null;
         }
         return WeaponShotAdapterRegistry.resolve(
-                new WeaponShotContext(serverLevel, this.cannonMount, entity, cannon));
+                new WeaponShotContext(
+                        serverLevel, mount, entity, cannon));
     }
 
     private int solverFlightTicks(ResolvedProjectileState projectile, Vec3 muzzlePosition, Vec3 targetPosition) {
@@ -2161,15 +2345,98 @@ public class WeaponFiringControl {
     }
 
     private Double calculateControllerYaw(Vec3 origin, Vec3 aimPoint) {
+        return calculateControllerYawForFrame(
+                origin, aimPoint,
+                new Vec3(1.0, 0.0, 0.0),
+                new Vec3(0.0, 1.0, 0.0),
+                new Vec3(0.0, 0.0, 1.0));
+    }
+
+    @Nullable
+    private Double calculateControllerYaw(
+            CannonMountContext mount,
+            Vec3 aimPoint
+    ) {
+        Vec3 origin = getCannonRayStart(mount);
+        Vec3 right = new Vec3(1.0, 0.0, 0.0);
+        Vec3 up = new Vec3(0.0, 1.0, 0.0);
+        Vec3 forward = new Vec3(0.0, 0.0, 1.0);
+        if (Mods.SABLE.isLoaded()) {
+            SubLevelAccess mountShip = SableCompanion.INSTANCE
+                    .getContaining(this.level, mount.getBlockPos());
+            if (mountShip != null) {
+                right = SableUtils.getWorldVecDirectionTransform(
+                        right, mountShip);
+                up = SableUtils.getWorldVecDirectionTransform(
+                        up, mountShip);
+                forward = SableUtils.getWorldVecDirectionTransform(
+                        forward, mountShip);
+            }
+        }
+        return calculateControllerYawForFrame(
+                origin, aimPoint, right, up, forward);
+    }
+
+    @Nullable
+    static Double calculateControllerYawForFrame(
+            @Nullable Vec3 origin,
+            @Nullable Vec3 aimPoint,
+            Vec3 right,
+            Vec3 up,
+            Vec3 forward
+    ) {
         if (origin == null || aimPoint == null) {
             return null;
         }
-
-        double dx = aimPoint.x - origin.x;
-        double dz = aimPoint.z - origin.z;
-        double yawDeg = Math.toDegrees(Math.atan2(dz, dx)) + (double)90.0F;
-        double controllerYaw = wrap360(yawDeg + (double)180.0F);
+        Vec3 direction = aimPoint.subtract(origin);
+        if (direction.lengthSqr() < 1.0e-12) {
+            return null;
+        }
+        PitchConstraint frame = new PitchConstraint(
+                PitchConstraint.SOLVER_MIN_PITCH_DEG,
+                PitchConstraint.SOLVER_MAX_PITCH_DEG,
+                right, up, forward);
+        double controllerYaw = wrap360(
+                frame.mountYawPitch(direction).yawDeg() + 270.0);
         return controllerYaw < 0.02 || controllerYaw > 359.98 ? (double)0.0F : controllerYaw;
+    }
+
+    private boolean commandDualYawControllers(
+            boolean issueAimCommand,
+            @Nullable Vec3 aimPoint,
+            @Nullable Double authorityYaw
+    ) {
+        if (!isDualNetwork() || !this.dualTopologyValid) {
+            return false;
+        }
+        if (!issueAimCommand) {
+            return true;
+        }
+
+        WeaponSide authority = authoritySide();
+        if (authority == null) {
+            return false;
+        }
+        authority.desiredYaw = authorityYaw;
+        if (this.sharedYawController != null) {
+            for (WeaponSide side : this.weaponSides) {
+                side.desiredYaw = authorityYaw;
+            }
+            return true;
+        }
+
+        for (WeaponSide side : this.weaponSides) {
+            if (side == authority) {
+                continue;
+            }
+            side.desiredYaw = side.mount == null || aimPoint == null
+                    ? null : calculateControllerYaw(side.mount, aimPoint);
+            if (side.yaw != null && side.desiredYaw != null) {
+                side.yaw.setTargetAngle(
+                        side.desiredYaw.floatValue());
+            }
+        }
+        return true;
     }
 
     private Vec3 toWorldPosition(ServerLevel serverLevel, Vec3 rawPosition, @Nullable Entity entity) {
@@ -2776,9 +3043,187 @@ public class WeaponFiringControl {
         return Math.abs(shortestDelta(wrap360(mounted.yaw), wrap360(desiredYaw))) < tolerance;
     }
 
+    private void updateDualFireControllers(
+            ServerLevel serverLevel,
+            boolean sharedFireGates,
+            boolean lag,
+            double authorityMinimumTolerance,
+            @Nullable WeaponShotProfile authorityAdapter,
+            @Nullable ResolvedProjectileState authorityProjectile,
+            AbstractMountedCannonContraption authorityCannon
+    ) {
+        WeaponSide authority = authoritySide();
+        String authorityFingerprint = shotFingerprint(
+                authorityAdapter, authorityProjectile, authorityCannon);
+        for (WeaponSide side : this.weaponSides) {
+            SideShot shot = side == authority
+                    ? resolveSideShot(
+                    side, serverLevel,
+                    authorityAdapter,
+                    authorityProjectile,
+                    authorityCannon)
+                    : resolveSideShot(side, serverLevel);
+            double tolerance = Math.max(
+                    authorityMinimumTolerance,
+                    shot == null ? 0.0 : shot.minimumTolerance);
+            boolean pitchAligned = this.pitchController != null
+                    && this.pitchController
+                    .isCbcMountAlignedForFiring(
+                            side.mount, lag, tolerance);
+            boolean yawCommandValid =
+                    this.sharedYawController != null
+                            || side.desiredYaw != null;
+            boolean yawAligned;
+            if (this.sharedYawController != null) {
+                yawAligned = this.sharedYawController
+                        .isAlignedForFiring(lag, tolerance);
+            } else {
+                yawAligned = side.yaw != null
+                        && side.yaw.isAlignedForFiring(
+                        lag, tolerance);
+            }
+            boolean profileMatches = side == authority
+                    || authorityFingerprint != null
+                    && shot != null
+                    && authorityFingerprint.equals(shot.fingerprint);
+            boolean shouldFire = dualSideFireEligible(
+                    sharedFireGates,
+                    pitchAligned,
+                    yawCommandValid && yawAligned,
+                    shot != null && shot.ready,
+                    side.fire != null,
+                    profileMatches)
+                    && side.mount != null
+                    && isMountStateOk(side.mount);
+            if (shouldFire && shot.adapter != null
+                    && !prepareAdapterShotForFire(
+                    shot.adapter, shot.context, side.mount)) {
+                shouldFire = false;
+            }
+
+            if (side.fire != null) {
+                if (shouldFire) {
+                    tryFireCannon(side);
+                } else {
+                    side.fire.setPowered(false);
+                }
+            }
+        }
+    }
+
+    static boolean dualSideFireEligible(
+            boolean sharedFireGates,
+            boolean pitchAligned,
+            boolean yawAligned,
+            boolean cannonReady,
+            boolean fireControllerPresent,
+            boolean profileMatches
+    ) {
+        return sharedFireGates && pitchAligned && yawAligned
+                && cannonReady && fireControllerPresent
+                && profileMatches;
+    }
+
+    static DualYawMode selectDualYawMode(
+            int yawControllerCount,
+            int structuralYawCount
+    ) {
+        int controllers = Math.max(0, yawControllerCount);
+        int structural = Math.max(
+                0, Math.min(controllers, structuralYawCount));
+        if (controllers == 1 && structural == 1) {
+            return DualYawMode.SHARED_STRUCTURAL;
+        }
+        if (controllers > 1 && structural > 0) {
+            return DualYawMode.INVALID_MIXED;
+        }
+        return DualYawMode.PER_MOUNT;
+    }
+
+    @Nullable
+    private SideShot resolveSideShot(
+            WeaponSide side,
+            ServerLevel serverLevel
+    ) {
+        if (side.mount == null) {
+            return null;
+        }
+        PitchOrientedContraptionEntity entity =
+                side.mount.getContraption();
+        if (entity == null
+                || !(entity.getContraption()
+                instanceof AbstractMountedCannonContraption cannon)) {
+            return null;
+        }
+        WeaponShotProfile adapter = resolveAdapterShot(
+                side.mount, cannon, serverLevel);
+        ResolvedProjectileState projectile = resolveProjectileState(
+                side.mount, cannon, serverLevel);
+        return resolveSideShot(
+                side, serverLevel, adapter, projectile, cannon);
+    }
+
+    @Nullable
+    private SideShot resolveSideShot(
+            WeaponSide side,
+            ServerLevel serverLevel,
+            @Nullable WeaponShotProfile adapter,
+            @Nullable ResolvedProjectileState projectile,
+            AbstractMountedCannonContraption cannon
+    ) {
+        if (side.mount == null
+                || side.mount.getContraption() == null) {
+            return null;
+        }
+        WeaponShotContext context = new WeaponShotContext(
+                serverLevel,
+                side.mount,
+                side.mount.getContraption(),
+                cannon);
+        String fingerprint =
+                shotFingerprint(adapter, projectile, cannon);
+        boolean ready = adapter == null
+                ? CannonUtil.isCannonReadyToFire(side.mount)
+                : adapter.aimMode()
+                != WeaponShotProfile.AimMode.DISABLED
+                && adapter.canTriggerFire();
+        double minimumTolerance = adapter == null
+                ? 0.0
+                : adapter.minimumFiringToleranceDegrees();
+        return new SideShot(
+                context, adapter, fingerprint,
+                ready, minimumTolerance);
+    }
+
+    @Nullable
+    private static String shotFingerprint(
+            @Nullable WeaponShotProfile adapter,
+            @Nullable ResolvedProjectileState projectile,
+            AbstractMountedCannonContraption cannon
+    ) {
+        if (adapter != null) {
+            return adapter.fingerprint();
+        }
+        if (projectile != null) {
+            return projectile.fingerprint();
+        }
+        return CannonUtil.isLaserCannon(cannon)
+                ? "laser:" + cannon.getClass().getName()
+                : null;
+    }
+
     private boolean prepareAdapterShotForFire(
             WeaponShotProfile expected,
             WeaponShotContext context
+    ) {
+        return prepareAdapterShotForFire(
+                expected, context, this.cannonMount);
+    }
+
+    private boolean prepareAdapterShotForFire(
+            WeaponShotProfile expected,
+            WeaponShotContext context,
+            CannonMountContext mount
     ) {
         WeaponShotProfile current = WeaponShotAdapterRegistry.resolve(context);
         if (current == null
@@ -2792,14 +3237,15 @@ public class WeaponFiringControl {
         } catch (RuntimeException exception) {
             LOGGER.error(
                     "Weapon adapter preparation failed for mount={} fingerprint={}",
-                    this.cannonMount.getBlockPos(), expected.fingerprint(), exception);
+                    mount.getBlockPos(), expected.fingerprint(), exception);
             return false;
         }
     }
 
     private void stopFireCannon() {
-        if (this.fireController != null) {
-            this.fireController.setPowered(false);
+        for (FireControllerBlockEntity fire
+                : currentFireControllers()) {
+            fire.setPowered(false);
         }
     }
 
@@ -2809,6 +3255,12 @@ public class WeaponFiringControl {
         }
         if (this.yawController != null) {
             this.yawController.endRadarTracking();
+        }
+        for (WeaponSide side : this.weaponSides) {
+            if (side.yaw != null
+                    && side.yaw != this.yawController) {
+                side.yaw.endRadarTracking();
+            }
         }
     }
 
@@ -2845,6 +3297,71 @@ public class WeaponFiringControl {
         } else {
             return false;
         }
+    }
+
+    private void tryFireCannon(WeaponSide side) {
+        if (side.fire == null || side.mount == null) {
+            return;
+        }
+        if (this.level instanceof ServerLevel serverLevel) {
+            AdvancedProximityFuze.pushLaunchContext(
+                    serverLevel, side.mount.getBlockPos());
+            try {
+                side.fire.setPowered(true);
+            } finally {
+                AdvancedProximityFuze.popLaunchContext();
+            }
+        } else {
+            side.fire.setPowered(true);
+        }
+        LOGGER.debug("firing dual weapon side at {}",
+                side.mount.getBlockPos());
+    }
+
+    private boolean isMountStateOk(CannonMountContext mount) {
+        if (mount == null || mount.isRemoved()) {
+            return false;
+        }
+        PitchOrientedContraptionEntity entity =
+                mount.getContraption();
+        return entity != null && entity.isAlive()
+                && entity.getContraption()
+                instanceof AbstractMountedCannonContraption;
+    }
+
+    private static final class WeaponSide {
+        private final BlockPos mountPos;
+        @Nullable
+        private final CannonMountContext mount;
+        @Nullable
+        private final AutoYawControllerBlockEntity yaw;
+        @Nullable
+        private final FireControllerBlockEntity fire;
+        @Nullable
+        private Double desiredYaw;
+
+        private WeaponSide(
+                BlockPos mountPos,
+                @Nullable CannonMountContext mount,
+                @Nullable AutoYawControllerBlockEntity yaw,
+                @Nullable FireControllerBlockEntity fire
+        ) {
+            this.mountPos = mountPos.immutable();
+            this.mount = mount;
+            this.yaw = yaw;
+            this.fire = fire;
+            this.desiredYaw = yaw == null
+                    ? null : yaw.getTargetAngle();
+        }
+    }
+
+    private static record SideShot(
+            WeaponShotContext context,
+            @Nullable WeaponShotProfile adapter,
+            @Nullable String fingerprint,
+            boolean ready,
+            double minimumTolerance
+    ) {
     }
 
     private static final class LosCache {
@@ -2897,6 +3414,12 @@ public class WeaponFiringControl {
         SOLVED,
         HOLD,
         DIRECT
+    }
+
+    enum DualYawMode {
+        PER_MOUNT,
+        SHARED_STRUCTURAL,
+        INVALID_MIXED
     }
 
     private enum SolverKind {

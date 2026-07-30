@@ -16,7 +16,7 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigFloat controllerPhysbearingMaxSpeed = f(25.0F, 2.0F, 25.0F, "controllerPhysbearingMaxSpeed", "Increases the max Rotational speed of phys bearings controlled by Pitch/Yaw controllers");
     public final ConfigInt binoRaycastRange = i(512, 1, 1000, "binocularRange", "The range at which the binocular can acquire a target");
 
-    public final ConfigGroup chaffConfig = group(2, "chaffConfig", "Firework chaff lock-breaking behavior");
+    public final ConfigGroup chaffConfig = group(3, "chaffConfig", "Firework chaff lock-breaking behavior");
     public final ConfigBool chaffEnabled = b(true, "enabled", "Allow fireworks to temporarily break radar locks");
     public final ConfigFloat chaffRadius = f(8.0F, 0.0F, 64.0F, "radius", "Maximum firework detonation distance from a selected target in blocks");
     public final ConfigInt chaffVolleyWindowTicks = i(40, 1, 1200, "volleyWindowTicks", "Quiet time before nearby firework chaff starts a new probability volley");
@@ -52,7 +52,7 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigBool gearRadarBearingSpeed = b(true, "gearRadarBearingSpeed", "If true, radar bearings will rotate slower the more dishes are connected to them");
     public final ConfigInt radarFOV = i(90, 1, 360, "radarFOV", "Field of view of a radar in degrees");
 
-    public final ConfigGroup skyRadarStats = group(4,"skyRadarStats", "Configs for sky radar");
+    public final ConfigGroup skyRadarStats = group(3,"skyRadarStats", "Configs for sky radar");
     public final ConfigInt maxSkyRadarRange = i(4096, 1, "maxSkyRadarRange", "Maximum horizontal range of a sky radar in blocks");
     //public final ConfigInt skyRadarBaseRange = i(0, 1, "skyRadarBaseRange", "Base horizontal range of a sky radar in blocks");
     public final ConfigInt skyRadarFOV = i(90, 1, 360, "skyRadarFOV", "Field of view of a sky radar in degrees");

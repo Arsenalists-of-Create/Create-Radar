@@ -9,6 +9,7 @@ import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererRende
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 
+import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
@@ -62,6 +63,11 @@ public class ModBlockEntityTypes {
             .blockEntity("auto_pitch_controller", AutoPitchControllerBlockEntity::new)
             .visual(() -> ShaftVisual::new, true)
             .validBlocks(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK)
+            .register();
+
+    public static final BlockEntityEntry<TPitchControllerBlockEntity> T_PITCH_CONTROLLER = REGISTRATE
+            .blockEntity("t_pitch", TPitchControllerBlockEntity::new)
+            .validBlocks(ModBlocks.T_PITCH)
             .register();
 
 

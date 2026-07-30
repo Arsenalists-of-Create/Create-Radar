@@ -75,6 +75,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     private Mount cachedMount = null;
 
     private boolean mountDirty = true;
+    private long mountResolutionTick = Long.MIN_VALUE;
+    @Nullable
+    private BlockPos cachedMountEndpointPos;
 
     private final KineticControllerState kineticControllerState =
             new KineticControllerState(CannonAxis.PITCH);
@@ -105,9 +108,11 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        if (firingControl == null) {
-            getFiringControl();
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel)
+                    .advertiseContactController(this);
         }
+        getFiringControl();
 
         debugSwivelSweep.enforce(targetAngle, this::applyDebugSwivelCommand);
         tickDebugSwivelFollow();
@@ -117,53 +122,79 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        Mount mount = resolveMount();
-        if (mount == null) {
-            isRunning = false;
+        List<CannonMountContext> cbcMounts = resolveControlledCbcMounts();
+        if (Mods.CREATEBIGCANNONS.isLoaded() && !cbcMounts.isEmpty()) {
+            for (CannonMountContext mount : cbcMounts) {
+                cannonHandler.tick(mount);
+            }
             return;
         }
 
-        if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-            cannonHandler.tick(mount.cbc);
-            return;
-        }
-
-        if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
+        Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
+        if (mount != null && mount.kind == MountKind.PHYS
+                && Mods.VS_CLOCKWORK.isLoaded()) {
             physHandler.tick(mount.phys);
+            return;
         }
+
+        isRunning = false;
     }
 
     public void getFiringControl() {
-        if (firingControl != null) {
-            return;
-        }
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
         }
 
         var view = getWeaponGroup();
         if (view == null) {
+            clearFiringControl();
             return;
         }
 
         BlockPos mountPos = view.mountPos();
         if (mountPos == null) {
+            clearFiringControl();
             return;
         }
 
-        BlockEntity be = level.getBlockEntity(mountPos);
-        CannonMountContext mount = CannonMountContext.of(be);
-        if (mount != null) {
-            autoyaw = null;
-            // A compact mount cannot be rotated directly, but its yaw controller may
-            // still aim the complete weapon through a structural swivel bearing.
-            if (view.yawPos() != null
-                    && level.getBlockEntity(view.yawPos()) instanceof AutoYawControllerBlockEntity aYCBE) {
-                autoyaw = aYCBE;
-            }
-            firingControl = new WeaponFiringControl(this, mount, autoyaw);
-            LOGGER.debug("made new Weapon Config!");
+        CannonMountContext mount = resolvePrimaryCbcMount();
+        if (mount == null || !isFiringControlMount(view, mount)
+                || !mount.isCurrent()) {
+            clearFiringControl();
+            return;
         }
+        if (firingControl != null
+                && firingControl.cannonMount.sameMount(mount)
+                && firingControl.cannonMount.isCurrent()) {
+            return;
+        }
+
+        clearFiringControl();
+        autoyaw = null;
+        // A compact mount cannot be rotated directly, but its yaw controller may
+        // still aim the complete weapon through a structural swivel bearing.
+        if (view.yawPos() != null
+                && level.getBlockEntity(view.yawPos()) instanceof AutoYawControllerBlockEntity aYCBE) {
+            autoyaw = aYCBE;
+        }
+        firingControl = new WeaponFiringControl(this, mount, autoyaw);
+        LOGGER.debug("made new Weapon Config!");
+    }
+
+    protected boolean isFiringControlMount(
+            WeaponNetworkRuntime.WeaponGroupView view,
+            CannonMountContext mount
+    ) {
+        return view != null && mount != null
+                && mount.getBlockPos().equals(view.mountPos());
+    }
+
+    private void clearFiringControl() {
+        if (firingControl != null) {
+            firingControl.resetTarget();
+            firingControl = null;
+        }
+        autoyaw = null;
     }
 
     @Nullable
@@ -190,6 +221,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel)
+                    .advertiseContactController(this);
+        }
         setChanged();
     }
 
@@ -440,17 +475,15 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        Mount mount = resolveMount();
-        if (mount == null) {
+        CannonMountContext cbcMount = resolvePrimaryCbcMount();
+        if (cbcMount != null && Mods.CREATEBIGCANNONS.isLoaded()) {
+            cannonHandler.setTarget(cbcMount, targetPos);
             return;
         }
 
-        if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-            cannonHandler.setTarget(mount.cbc, targetPos);
-            return;
-        }
-
-        if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
+        Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
+        if (mount != null && mount.kind == MountKind.PHYS
+                && Mods.VS_CLOCKWORK.isLoaded()) {
             physHandler.setTarget(mount.phys, targetPos);
         }
     }
@@ -485,16 +518,20 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                     targetAngle, DEADBAND_DEG);
         }
 
-        Mount mount = resolveMount();
-        if (mount == null) {
-            return false;
+        List<CannonMountContext> cbcMounts = resolveControlledCbcMounts();
+        if (Mods.CREATEBIGCANNONS.isLoaded() && !cbcMounts.isEmpty()) {
+            for (CannonMountContext mount : cbcMounts) {
+                if (!cannonHandler.atTargetPitch(
+                        mount, lag, minimumToleranceDegrees)) {
+                    return false;
+                }
+            }
+            return true;
         }
 
-        if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-            return cannonHandler.atTargetPitch(mount.cbc, lag, minimumToleranceDegrees);
-        }
-
-        if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
+        Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
+        if (mount != null && mount.kind == MountKind.PHYS
+                && Mods.VS_CLOCKWORK.isLoaded()) {
             return physHandler.atTargetPitch(mount.phys, lag, minimumToleranceDegrees);
         }
 
@@ -522,6 +559,30 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         return kineticControllerState.isAlignedForFiring(
                 resolveKineticMount(), worldPosition, isRunning, targetAngle, tolerance);
+    }
+
+    /**
+     * Evaluates one CBC mount against this controller's shared pitch command.
+     * T-Pitch firing uses this per mount so one side can fire while the other
+     * side is still settling.
+     */
+    public boolean isCbcMountAlignedForFiring(
+            @Nullable CannonMountContext mount,
+            boolean lag,
+            double minimumToleranceDegrees
+    ) {
+        if (level == null || mount == null
+                || debugSwivelSweep.isActive()
+                || debugSwivelFollow.isActive()) {
+            return false;
+        }
+        for (CannonMountContext controlled : resolveControlledCbcMounts()) {
+            if (controlled.sameMount(mount)) {
+                return cannonHandler.atTargetPitch(
+                        controlled, lag, minimumToleranceDegrees);
+            }
+        }
+        return false;
     }
 
     public void setAndAcquireTrack(@Nullable RadarTrack tTrack, TargetingConfig config) {
@@ -612,13 +673,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return 0;
         }
 
-        Mount mount = resolveMount();
-        if (mount == null) {
-            return 0;
-        }
-
-        if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-            return cannonHandler.getMaxEngagementRangeBlocks(mount.cbc, sl);
+        CannonMountContext mount = resolvePrimaryCbcMount();
+        if (mount != null && Mods.CREATEBIGCANNONS.isLoaded()) {
+            return cannonHandler.getMaxEngagementRangeBlocks(mount, sl);
         }
 
         return 0;
@@ -654,16 +711,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return false;
         }
 
-        Mount mount = resolveMount();
-        if (mount == null) {
-            return false;
+        CannonMountContext mount = resolvePrimaryCbcMount();
+        if (mount != null && Mods.CREATEBIGCANNONS.isLoaded()) {
+            return cannonHandler.canEngageTrack(mount, track, requireLos, sl);
         }
 
-        if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-            return cannonHandler.canEngageTrack(mount.cbc, track, requireLos, sl);
-        }
-
-        return firingControl.hasLineOfSightTo(track, requireLos);
+        return supportsPhysBearingMounts()
+                && firingControl.hasLineOfSightTo(track, requireLos);
     }
 
     public boolean canConstrainAutoTargeting() {
@@ -676,17 +730,14 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return false;
         }
 
-        Mount mount = resolveMount();
-        if (mount == null) {
-            return false;
+        CannonMountContext mount = resolvePrimaryCbcMount();
+        if (mount != null && Mods.CREATEBIGCANNONS.isLoaded()) {
+            return mount.getContraption() != null
+                    && mount.getContraption().getContraption()
+                    instanceof AbstractMountedCannonContraption;
         }
 
-        if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-            return mount.cbc.getContraption() != null
-                    && mount.cbc.getContraption().getContraption() instanceof AbstractMountedCannonContraption;
-        }
-
-        return getRayStart() != null;
+        return supportsPhysBearingMounts() && getRayStart() != null;
     }
 
     @Nullable
@@ -719,6 +770,33 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     public void markMountDirtyExternal() {
         mountDirty = true;
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel)
+                    .markContactTopologyDirty();
+        }
+    }
+
+
+    protected List<CannonMountContext> resolveControlledCbcMounts() {
+        Mount mount = resolveMount();
+        if (mount == null || mount.kind != MountKind.CBC || mount.cbc == null) {
+            return List.of();
+        }
+        return List.of(mount.cbc);
+    }
+
+    @Nullable
+    protected CannonMountContext resolvePrimaryCbcMount() {
+        List<CannonMountContext> mounts = resolveControlledCbcMounts();
+        return mounts.isEmpty() ? null : mounts.getFirst();
+    }
+
+    protected boolean supportsPhysBearingMounts() {
+        return true;
+    }
+
+    protected boolean supportsStructuralKineticMounts() {
+        return true;
     }
 
     @Nullable
@@ -727,34 +805,56 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return null;
         }
 
-        if (mountDirty) {
-            refreshMountCache();
+        BlockPos mountPos = getMountPos();
+        long gameTime = level.getGameTime();
+        if (mountDirty || mountResolutionTick != gameTime
+                || !java.util.Objects.equals(cachedMountEndpointPos, mountPos)
+                || (cachedMount != null
+                    && cachedMount.kind == MountKind.CBC
+                    && (cachedMount.cbc == null
+                        || !cachedMount.cbc.isCurrent()))) {
+            refreshMountCache(mountPos);
         }
 
         return cachedMount;
     }
 
-    private void refreshMountCache() {
+    private void refreshMountCache(@Nullable BlockPos mountPos) {
         if (level == null) {
             return;
         }
 
-        BlockPos mountPos = getMountPos();
+        Mount oldMount = cachedMount;
         Mount newMount = null;
 
         if (mountPos != null) {
-            BlockEntity be = level.getBlockEntity(mountPos);
+            BlockEntity be = level.hasChunkAt(mountPos)
+                    ? level.getBlockEntity(mountPos)
+                    : null;
 
-            CannonMountContext cbc = Mods.CREATEBIGCANNONS.isLoaded() ? CannonMountContext.of(be) : null;
+            CannonMountContext cbc = Mods.CREATEBIGCANNONS.isLoaded()
+                    ? CannonMountContext.resolveEndpoint(level, mountPos)
+                    : null;
             if (cbc != null) {
                 newMount = Mount.cbc(cbc);
-            } else if (Mods.VS_CLOCKWORK.isLoaded() && be instanceof PhysBearingBlockEntity phys) {
+            } else if (supportsPhysBearingMounts()
+                    && Mods.VS_CLOCKWORK.isLoaded()
+                    && be instanceof PhysBearingBlockEntity phys) {
                 newMount = Mount.phys(phys);
             }
         }
 
         cachedMount = newMount;
+        cachedMountEndpointPos = mountPos == null ? null : mountPos.immutable();
+        mountResolutionTick = level.getGameTime();
         mountDirty = false;
+
+        if (oldMount != null && !sameMount(oldMount, newMount)) {
+            clearFiringControl();
+            track = null;
+            isRunning = false;
+            lastTargetPos = null;
+        }
 
         if (newMount == null && !hasStructuralKineticSelection()) {
             isRunning = false;
@@ -764,6 +864,18 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         setChanged();
         notifyUpdate();
+    }
+
+    private static boolean sameMount(@Nullable Mount first, @Nullable Mount second) {
+        if (first == second) {
+            return true;
+        }
+        if (first == null || second == null || first.kind != second.kind) {
+            return false;
+        }
+        return first.kind == MountKind.CBC
+                ? first.cbc != null && first.cbc.sameMount(second.cbc)
+                : first.phys == second.phys;
     }
 
     @Nullable
@@ -952,6 +1064,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     private KineticMountAdapterResolution resolveKineticMount() {
+        if (!supportsStructuralKineticMounts()) {
+            return KineticMountAdapterResolution.absent(
+                    "controller_does_not_support_structural_mounts");
+        }
         Direction.Axis axis = getControllerAxis();
         if (lastKineticAxis != axis) {
             lastKineticAxis = axis;
@@ -1140,6 +1256,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     @Override
     public void onChunkUnloaded() {
         if (level != null && !level.isClientSide()) {
+            if (level instanceof ServerLevel serverLevel) {
+                WeaponNetworkRuntime.get(serverLevel)
+                        .unregisterContactController(worldPosition);
+            }
             stopDebugSwivelFollow("controller_chunk_unloaded", false);
             releaseKineticActuator();
         }

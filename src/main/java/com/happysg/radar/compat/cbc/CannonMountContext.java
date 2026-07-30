@@ -9,6 +9,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import rbasamoyai.createbigcannons.cannon_control.ControlPitchContraption;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountExtensionBlock;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountExtensionBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
@@ -42,6 +44,63 @@ public final class CannonMountContext {
             return new CannonMountContext(blockEntity, Kind.CBCMW_COMPACT);
         }
         return null;
+    }
+
+    /**
+     * Resolves either a mount itself or one CBC mount extension that points
+     * directly into a valid mount. The returned context is always anchored to
+     * the real mount block entity, never to the extension.
+     */
+    @Nullable
+    public static CannonMountContext resolveEndpoint(@Nullable BlockEntity endpoint) {
+        if (endpoint == null) {
+            return null;
+        }
+        Level level = endpoint.getLevel();
+        return level == null
+                ? null
+                : resolveEndpoint(level, endpoint.getBlockPos());
+    }
+
+    /**
+     * Chunk-safe position overload for controller and Data Link endpoint
+     * resolution.
+     */
+    @Nullable
+    public static CannonMountContext resolveEndpoint(@Nullable Level level,
+                                                     @Nullable BlockPos endpointPos) {
+        if (level == null || endpointPos == null || !level.hasChunkAt(endpointPos)) {
+            return null;
+        }
+
+        BlockEntity endpoint = level.getBlockEntity(endpointPos);
+        CannonMountContext direct = of(endpoint);
+        if (direct != null) {
+            return direct.isCurrent() ? direct : null;
+        }
+        if (!(endpoint instanceof CannonMountExtensionBlockEntity extension)
+                || !endpoint.getBlockState()
+                .hasProperty(CannonMountExtensionBlock.FACING)) {
+            return null;
+        }
+
+        // CBC's extension resolver reads the block it points into. Guard that
+        // lookup explicitly so a controller at a chunk edge cannot force-load
+        // the neighboring chunk.
+        Direction direction = endpoint.getBlockState()
+                .getValue(CannonMountExtensionBlock.FACING);
+        if (!level.hasChunkAt(endpointPos.relative(direction))) {
+            return null;
+        }
+
+        CannonMountBlockEntity mount = extension.getCannonMount();
+        if (mount == null || mount.getLevel() != level || mount.isRemoved()
+                || !level.hasChunkAt(mount.getBlockPos())
+                || level.getBlockEntity(endpointPos) != endpoint
+                || level.getBlockEntity(mount.getBlockPos()) != mount) {
+            return null;
+        }
+        return of(mount);
     }
 
     public static boolean isCompactMount(@Nullable BlockEntity blockEntity, @Nullable BlockState state) {
@@ -96,6 +155,18 @@ public final class CannonMountContext {
         }
     }
 
+    /**
+     * Attempts a direct yaw write. Compact mounts intentionally reject this;
+     * they may only be yawed through an external structural actuator.
+     */
+    public boolean trySetYaw(float yaw) {
+        if (kind != Kind.CBC) {
+            return false;
+        }
+        ((CannonMountBlockEntity) blockEntity).setYaw(yaw);
+        return true;
+    }
+
     public void notifyUpdate() {
         if (kind == Kind.CBC) {
             ((CannonMountBlockEntity) blockEntity).notifyUpdate();
@@ -106,6 +177,23 @@ public final class CannonMountContext {
 
     public boolean isRemoved() {
         return blockEntity.isRemoved();
+    }
+
+    /**
+     * Returns whether this context still names the live block entity currently
+     * present at the canonical mount position.
+     */
+    public boolean isCurrent() {
+        Level level = getLevel();
+        BlockPos pos = getBlockPos();
+        return level != null
+                && !blockEntity.isRemoved()
+                && level.hasChunkAt(pos)
+                && level.getBlockEntity(pos) == blockEntity;
+    }
+
+    public boolean sameMount(@Nullable CannonMountContext other) {
+        return other != null && blockEntity == other.blockEntity;
     }
 
     public ControlPitchContraption.Block controller() {

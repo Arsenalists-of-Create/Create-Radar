@@ -1,6 +1,9 @@
 package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
+import com.happysg.radar.block.controller.kinetic.CannonMountPlacement;
+import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
@@ -19,7 +22,14 @@ import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
 
 public class AutoPitchControllerBlock extends HorizontalKineticBlock
-        implements IBE<AutoPitchControllerBlockEntity>, ICogWheel {
+        implements IBE<AutoPitchControllerBlockEntity>, ICogWheel,
+        PlacementShaftTarget {
+    private static final Direction[] MOUNT_DIRECTIONS = {
+            Direction.NORTH,
+            Direction.EAST,
+            Direction.SOUTH,
+            Direction.WEST
+    };
 
     public AutoPitchControllerBlock(Properties properties) {
         super(properties);
@@ -36,6 +46,13 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
     }
 
     @Override
+    public boolean hasPlacementShaftTowards(
+            LevelReader world, BlockPos pos, BlockState state, Direction face
+    ) {
+        return face == state.getValue(HORIZONTAL_FACING).getOpposite();
+    }
+
+    @Override
     public boolean isDedicatedCogWheel() {
         // The controller participates in ordinary small-cog propagation, but its
         // item is not a standard cogwheel item: this block uses HORIZONTAL_FACING
@@ -46,6 +63,14 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         boolean crouching = context.getPlayer() != null && context.getPlayer().isCrouching();
+        if (!crouching) {
+            Direction mountDirection = CannonMountPlacement.findPreferredMount(
+                    context, MOUNT_DIRECTIONS);
+            if (mountDirection != null) {
+                return defaultBlockState()
+                        .setValue(HORIZONTAL_FACING, mountDirection);
+            }
+        }
         return this.defaultBlockState()
                 .setValue(HORIZONTAL_FACING, crouching ? context.getHorizontalDirection().getOpposite() : context.getHorizontalDirection());
     }
@@ -67,6 +92,8 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
                 pitch.releaseKineticActuator();
             }
             breakAttachedDataLinks(level, pos);
+            WeaponNetworkRuntime.get(sl)
+                    .unregisterContactController(pos);
             NetworkData.get(sl).onEndpointRemoved(sl, pos);
         }
         super.onRemove(state, level, pos, newState, isMoving);

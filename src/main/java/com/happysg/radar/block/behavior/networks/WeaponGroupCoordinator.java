@@ -46,9 +46,11 @@ public final class WeaponGroupCoordinator {
 
         SableDataLinkRelocation.process(sl);
         WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(sl);
+        runtime.reconcile();
 
         // Ensure each mount group is processed only once per tick
         Set<String> processedMounts = new HashSet<>();
+        Set<BlockPos> processedPitchEndpoints = new HashSet<>();
 
         for (WeaponNetworkRuntime.WeaponGroupView g : runtime.getGroups()) {
             BlockPos mountPos = g.mountPos();
@@ -59,6 +61,7 @@ public final class WeaponGroupCoordinator {
             }
 
             if (g.pitchPos() == null) continue;
+            if (!processedPitchEndpoints.add(g.pitchPos())) continue;
 
             BlockEntity be = sl.getBlockEntity(g.pitchPos());
             if (!(be instanceof AutoPitchControllerBlockEntity pitch)) continue;
