@@ -50,16 +50,21 @@ public class TargetingComputer {
 
    private final class PlaceholderAimSolver implements AimSolver {
       public TargetingResult solve(TargetingSnapshot snapshot, ProjectileModel projectileModel, ObstructionChecker obstructionChecker) {
-         Vec3 toTarget = snapshot.targetPosition().subtract(snapshot.muzzlePosition());
-         double distance = toTarget.length();
-         if (!(distance < 1.0E-6) && !(snapshot.projectileSpeed() <= (double)0.0F)) {
+         Vec3 toTarget = snapshot.targetPosition().subtract(
+                 snapshot.steeringOrigin());
+         if (!(toTarget.lengthSqr() < 1.0E-12)
+                 && !(snapshot.projectileSpeed() <= (double)0.0F)) {
             Vec3 direction = toTarget.normalize();
+            Vec3 launchPosition =
+                    snapshot.launchPosition(direction);
+            double distance = launchPosition.distanceTo(
+                    snapshot.targetPosition());
             double yawDeg = Math.toDegrees(Math.atan2(direction.z, direction.x)) + (double)90.0F;
             double horizontal = Math.sqrt(toTarget.x * toTarget.x + toTarget.z * toTarget.z);
             double pitchDeg = Math.toDegrees(Math.atan2(toTarget.y, Math.max(1.0E-6, horizontal)));
             int estimatedTicks = (int)Math.ceil(distance / Math.max(1.0E-6, snapshot.projectileSpeed()));
             estimatedTicks = Math.max(0, Math.min(snapshot.maxFlightTicks(), estimatedTicks));
-            ProjectileSimulator.SimulationResult trajectory = TargetingComputer.this.projectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), projectileModel, estimatedTicks);
+            ProjectileSimulator.SimulationResult trajectory = TargetingComputer.this.projectileSimulator.simulate(launchPosition, direction, snapshot.inheritedVelocity(), projectileModel, estimatedTicks);
             Vec3 predictedTarget = TargetingComputer.this.targetPredictor.predictPosition(snapshot, (double)estimatedTicks);
             double missDistance = trajectory.endPosition().distanceTo(predictedTarget);
             ObstructionResult obstruction = obstructionChecker.check(snapshot.level(), trajectory, estimatedTicks);

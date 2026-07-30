@@ -20,6 +20,7 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkObservationRefreshKeepsIdentity());
         results.add(checkIdentityChangesInvalidate());
         results.add(checkAimPointRebase());
+        results.add(checkAimDirectionRebase());
         results.add(checkPendingSolveLifetime());
         results.add(checkOrdinaryMotionKeepsPendingSolve());
         results.add(checkFireFreshnessWindow());
@@ -73,6 +74,50 @@ public final class WeaponFiringControlSelfTest {
     }
 
     private static TargetingSolverSelfTest.Result
+    checkAimDirectionRebase() {
+        Vec3 requestedOrigin = Vec3.ZERO;
+        Vec3 originalAimPoint = new Vec3(10.0, 0.0, 1.0);
+        Vec3 originalDirection =
+                new Vec3(10.0, 1.0, 1.0).normalize();
+        Vec3 targetTranslation =
+                new Vec3(0.0, 0.0, 0.2);
+        Vec3 translatedAimPoint =
+                originalAimPoint.add(targetTranslation);
+
+        Vec3 unchanged =
+                WeaponFiringControl.rebaseAimDirection(
+                        originalDirection, originalAimPoint,
+                        requestedOrigin, requestedOrigin,
+                        originalAimPoint);
+        Vec3 rebased =
+                WeaponFiringControl.rebaseAimDirection(
+                        originalDirection, originalAimPoint,
+                        requestedOrigin, requestedOrigin,
+                        translatedAimPoint);
+
+        double rayDistance =
+                requestedOrigin.distanceTo(originalAimPoint);
+        Vec3 correction = requestedOrigin.add(
+                originalDirection.scale(rayDistance))
+                .subtract(originalAimPoint);
+        Vec3 expected = translatedAimPoint.add(correction)
+                .subtract(requestedOrigin).normalize();
+        Vec3 lineOfSight = translatedAimPoint
+                .subtract(requestedOrigin).normalize();
+        boolean passed = unchanged != null && rebased != null
+                && unchanged.distanceToSqr(originalDirection)
+                < 1.0E-12
+                && rebased.distanceToSqr(expected) < 1.0E-12
+                && rebased.y > lineOfSight.y;
+        return result(
+                "async_rebase_preserves_ballistic_correction",
+                passed, "unchanged=" + unchanged
+                        + " rebased=" + rebased
+                        + " expected=" + expected
+                        + " los=" + lineOfSight);
+    }
+
+    private static TargetingSolverSelfTest.Result
     checkPendingSolveLifetime() {
         boolean fresh = WeaponFiringControl.shouldKeepPendingSolve(
                 99L, true, true);
@@ -118,14 +163,14 @@ public final class WeaponFiringControlSelfTest {
         boolean targetMoved =
                 !WeaponFiringControl.isAsyncSolutionFreshForFire(
                         1L, 4.01, 0.0);
-        boolean muzzleMoved =
+        boolean originMoved =
                 !WeaponFiringControl.isAsyncSolutionFreshForFire(
                         1L, 0.0, 1.01);
-        boolean passed = fresh && old && targetMoved && muzzleMoved;
+        boolean passed = fresh && old && targetMoved && originMoved;
         return result("async_fire_freshness_fails_closed", passed,
                 "fresh=" + fresh + " old=" + old
                         + " targetMoved=" + targetMoved
-                        + " muzzleMoved=" + muzzleMoved);
+                        + " originMoved=" + originMoved);
     }
 
     private static TargetingSolverSelfTest.Result

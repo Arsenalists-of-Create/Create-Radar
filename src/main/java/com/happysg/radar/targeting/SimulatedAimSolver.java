@@ -60,7 +60,8 @@ public class SimulatedAimSolver implements AimSolver {
          ));
       }
 
-      Vec3 toTarget = snapshot.targetPosition().subtract(snapshot.muzzlePosition());
+      Vec3 toTarget = snapshot.targetPosition().subtract(
+              snapshot.steeringOrigin());
       if (toTarget.lengthSqr() < 1.0E-8) {
          return TargetingResult.noShot("target too close");
       }
@@ -251,7 +252,14 @@ public class SimulatedAimSolver implements AimSolver {
       debug.add("arcFallbackReason=" + fallbackReason);
       debug.add("pitchConstraint=" + snapshot.pitchConstraint().summary());
       debug.add("pitchConstraintRejections=" + stats.pitchConstraintRejections);
-      debug.add("range=" + snapshot.muzzlePosition().distanceTo(snapshot.targetPosition()));
+      Vec3 selectedLaunch = snapshot.launchPosition(
+              TargetingMath.directionFromYawPitch(
+                      best.yawDeg, best.pitchDeg));
+      debug.add("range=" + selectedLaunch.distanceTo(
+              snapshot.targetPosition()));
+      debug.add("coupledMuzzle=" + snapshot.hasCoupledMuzzle());
+      debug.add("muzzleForwardOffset="
+              + snapshot.muzzleForwardOffset());
       debug.add("candidateEvaluations=" + stats.candidateEvaluations);
       debug.add("simulatedTicks=" + stats.simulatedTicks);
       debug.add("horizonExpansions=" + stats.horizonExpansions);
@@ -284,9 +292,9 @@ public class SimulatedAimSolver implements AimSolver {
                  best.pitchDeg,
                  best.flightTick,
                  best.missDistance,
-                 snapshot.muzzlePosition().distanceTo(snapshot.targetPosition()),
+                 selectedLaunch.distanceTo(snapshot.targetPosition()),
                  snapshot.pitchConstraint().summary(),
-                 snapshot.muzzlePosition(),
+                 selectedLaunch,
                  snapshot.targetPosition()
          );
       }
@@ -334,9 +342,20 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private static int initialHorizon(TargetingSnapshot snapshot, double interceptTicks) {
-      double fallback = snapshot.muzzlePosition().distanceTo(snapshot.targetPosition()) / Math.max(1.0E-6, snapshot.projectileSpeed());
+      double fallback = referenceRange(snapshot)
+              / Math.max(1.0E-6, snapshot.projectileSpeed());
       double base = Double.isFinite(interceptTicks) && interceptTicks > 0.0 ? interceptTicks : fallback;
       return Math.max(1, Math.min(snapshot.maxFlightTicks(), Math.max(40, (int)Math.ceil(base) + HORIZON_MARGIN_TICKS)));
+   }
+
+   private static double referenceRange(TargetingSnapshot snapshot) {
+      if (snapshot == null) {
+         return 0.0;
+      }
+      Vec3 towardTarget = snapshot.targetPosition().subtract(
+              snapshot.steeringOrigin());
+      return snapshot.launchPosition(towardTarget)
+              .distanceTo(snapshot.targetPosition());
    }
 
    private static boolean nearHorizon(Candidate candidate, int horizon) {
@@ -346,9 +365,10 @@ public class SimulatedAimSolver implements AimSolver {
    private InitialGuess initialGuess(TargetingSnapshot snapshot, ProjectileModel projectileModel) {
       double interceptTicks = this.estimateInterceptTicks(snapshot, projectileModel);
       Vec3 aimPoint = this.predictTargetPositionTrusted(snapshot, interceptTicks);
-      Vec3 aimVector = aimPoint.subtract(snapshot.muzzlePosition());
+      Vec3 aimVector = aimPoint.subtract(snapshot.steeringOrigin());
       if (aimVector.lengthSqr() < 1.0E-8) {
-         aimVector = snapshot.targetPosition().subtract(snapshot.muzzlePosition());
+         aimVector = snapshot.targetPosition().subtract(
+                 snapshot.steeringOrigin());
       }
 
       TargetingMath.YawPitch yp = TargetingMath.yawPitchFromDirection(aimVector);
@@ -356,7 +376,10 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private double estimateInterceptTicks(TargetingSnapshot snapshot, ProjectileModel projectileModel) {
-      Vec3 r = snapshot.targetPosition().subtract(snapshot.muzzlePosition());
+      Vec3 towardTarget = snapshot.targetPosition().subtract(
+              snapshot.steeringOrigin());
+      Vec3 launch = snapshot.launchPosition(towardTarget);
+      Vec3 r = snapshot.targetPosition().subtract(launch);
       Vec3 v = snapshot.targetVelocity().subtract(snapshot.inheritedVelocity());
       if (projectileModel.usesCustomDynamics()) {
          double estimate = projectileModel.estimateFlightTicks(r.length());
@@ -387,9 +410,10 @@ public class SimulatedAimSolver implements AimSolver {
          return null;
       }
       Vec3 inherited = snapshot.inheritedVelocity();
-      double px = snapshot.muzzlePosition().x;
-      double py = snapshot.muzzlePosition().y;
-      double pz = snapshot.muzzlePosition().z;
+      Vec3 launchPosition = snapshot.launchPosition(direction);
+      double px = launchPosition.x;
+      double py = launchPosition.y;
+      double pz = launchPosition.z;
       double vx = inherited.x + direction.x * model.muzzleSpeed();
       double vy = inherited.y + direction.y * model.muzzleSpeed();
       double vz = inherited.z + direction.z * model.muzzleSpeed();
@@ -630,7 +654,11 @@ public class SimulatedAimSolver implements AimSolver {
            EvaluationContext context, Candidate seed, int maxIterations,
            double targetPrecisionBlocks, boolean prioritizeMissDistance) {
       TargetingSnapshot snapshot = context.snapshot;
-      double range = Math.max(1.0, snapshot.muzzlePosition().distanceTo(seed.predictedTargetPosition));
+      Vec3 seedDirection = TargetingMath.directionFromYawPitch(
+              seed.yawDeg, seed.pitchDeg);
+      double range = Math.max(1.0,
+              snapshot.launchPosition(seedDirection)
+                      .distanceTo(seed.predictedTargetPosition));
       double targetStep =
               refinementTargetStepDeg(range, targetPrecisionBlocks);
       double step = Math.max(targetStep, Math.min(MAX_REFINEMENT_STEP_DEG, angularStepForBlocks(range, 4.0)));
@@ -686,8 +714,10 @@ public class SimulatedAimSolver implements AimSolver {
    private static boolean warmCandidatesAgree(
            TargetingSnapshot snapshot, Candidate first, Candidate second) {
       double range = Math.max(1.0,
-              snapshot.muzzlePosition().distanceTo(
-                      first.predictedTargetPosition));
+              snapshot.launchPosition(
+                      TargetingMath.directionFromYawPitch(
+                              first.yawDeg, first.pitchDeg))
+                      .distanceTo(first.predictedTargetPosition));
       double angularTolerance = angularStepForBlocks(
               range, WARM_AGREEMENT_TARGET_BLOCKS);
       double yawDelta = TargetingMath.shortestAngleDelta(
@@ -714,7 +744,7 @@ public class SimulatedAimSolver implements AimSolver {
       }
       Vec3 direction = TargetingMath.directionFromYawPitch(candidate.yawDeg, candidate.pitchDeg);
       int materializedTicks = Math.max(1, Math.min(snapshot.maxFlightTicks(), candidate.flightTick + 1));
-      ProjectileSimulator.SimulationResult trajectory = this.projectileSimulator.simulate(snapshot.muzzlePosition(), direction, snapshot.inheritedVelocity(), model, materializedTicks, snapshot.level());
+      ProjectileSimulator.SimulationResult trajectory = this.projectileSimulator.simulate(snapshot.launchPosition(direction), direction, snapshot.inheritedVelocity(), model, materializedTicks, snapshot.level());
       return new Candidate(candidate.yawDeg, candidate.pitchDeg, candidate.flightTick, candidate.flightTime, candidate.missDistance, candidate.predictedTargetPosition, candidate.closestProjectilePosition, trajectory, candidate.obstruction, candidate.confidence, candidate.score);
    }
 
@@ -854,7 +884,9 @@ public class SimulatedAimSolver implements AimSolver {
 
    private static boolean isAcceptableShot(TargetingSnapshot snapshot, Candidate candidate) {
       if (Double.isFinite(candidate.score) && !(candidate.score >= (double)500000.0F)) {
-         if (candidate.confidence < MIN_ACCEPTABLE_CONFIDENCE || candidate.missDistance > acceptableMissDistance(snapshot)) {
+         if (candidate.flightTime <= 1.0E-4
+                 || candidate.confidence < MIN_ACCEPTABLE_CONFIDENCE
+                 || candidate.missDistance > acceptableMissDistance(snapshot)) {
             return false;
          } else if (!candidate.obstruction.blocked()) {
             return true;
@@ -872,7 +904,8 @@ public class SimulatedAimSolver implements AimSolver {
 
    private static double acceptableMissDistance(TargetingSnapshot snapshot) {
       double directTolerance = directTargetHitTolerance(snapshot);
-      double range = snapshot == null ? 0.0 : snapshot.muzzlePosition().distanceTo(snapshot.targetPosition());
+      double range = snapshot == null
+              ? 0.0 : referenceRange(snapshot);
       if (!Double.isFinite(range) || range <= 0.0) {
          return directTolerance;
       }

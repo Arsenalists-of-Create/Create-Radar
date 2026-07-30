@@ -63,6 +63,11 @@ public final class TargetingSolverSelfTest {
       results.add(checkLongRangeMovingSolve());
       results.add(checkLongRangeCbcStyleSolve());
       results.add(checkProjectileSimulatorLongCap());
+      results.add(checkCoupledMuzzleCloseRangeStability());
+      results.add(checkCoupledMuzzleMovingLead());
+      results.add(checkCoupledMuzzleBallisticInvariance());
+      results.add(checkCoupledMuzzleWarmResponsiveness());
+      results.add(checkTargetInsideMuzzleRadiusFailsClosed());
       results.add(checkRankedTrackingSequence());
       results.add(checkWarmStartDoesNotLatch());
       results.add(checkRankedStationarySequence());
@@ -408,6 +413,217 @@ public final class TargetingSolverSelfTest {
       ProjectileSimulator.SimulationResult result = simulator.simulate(Vec3.ZERO, new Vec3(1.0, 0.0, 0.0), Vec3.ZERO, 1.0, 0.0, 0.0, 1500);
       boolean passed = result.ticks() == 1500 && result.samples().size() == 1501;
       return new Result("projectile_simulator_long_cap", passed, "ticks=" + result.ticks() + " samples=" + result.samples().size());
+   }
+
+   private static Result checkCoupledMuzzleCloseRangeStability() {
+      TargetingComputer computer = new TargetingComputer(
+              null, new ProjectileSimulator(),
+              new TargetPredictor(), ObstructionChecker.NONE);
+      double maxYaw = 0.0;
+      double maxMiss = 0.0;
+      for (double range : new double[]{10.0, 6.0}) {
+         for (double physicalYaw : new double[]{
+                 -55.0, -10.0, 0.0, 10.0, 55.0}) {
+            Vec3 physicalDirection =
+                    TargetingMath.directionFromYawPitch(
+                            physicalYaw, 0.0);
+            TargetingSnapshot snapshot =
+                    coupledMuzzleSnapshot(
+                            new Vec3(range, 0.0, 0.0),
+                            Vec3.ZERO,
+                            physicalDirection.scale(5.0),
+                            null);
+            TargetingResult result = computer.solve(snapshot);
+            if (!result.valid() || !result.hasShot()) {
+               return new Result(
+                       "coupled_muzzle_close_range_stability",
+                       false, "range=" + range
+                       + " physicalYaw=" + physicalYaw
+                       + " " + result.debugString());
+            }
+            maxYaw = Math.max(maxYaw,
+                    Math.abs(result.desiredYawDeg()));
+            maxMiss = Math.max(maxMiss,
+                    result.missDistance());
+         }
+      }
+      boolean passed = maxYaw < 0.05 && maxMiss < 0.05;
+      return new Result(
+              "coupled_muzzle_close_range_stability",
+              passed, "maxYaw=" + maxYaw
+              + " maxMiss=" + maxMiss);
+   }
+
+   private static Result checkCoupledMuzzleMovingLead() {
+      TargetingComputer computer = new TargetingComputer(
+              null, new ProjectileSimulator(),
+              new TargetPredictor(), ObstructionChecker.NONE);
+      Vec3 target = new Vec3(10.0, 0.0, 0.0);
+      Vec3 velocity = new Vec3(0.0, 0.0, 0.1);
+      TargetingSnapshot movingSnapshot =
+              coupledMuzzleSnapshot(
+                      target, velocity,
+                      TargetingMath.directionFromYawPitch(
+                              -35.0, 0.0).scale(5.0),
+                      null);
+      TargetingResult moving =
+              computer.solve(movingSnapshot);
+      TargetingResult stationary = computer.solve(
+              coupledMuzzleSnapshot(
+                      target, Vec3.ZERO,
+                      new Vec3(5.0, 0.0, 0.0),
+                      null));
+      Vec3 movingDirection = moving.aimSolution() == null
+              ? Vec3.ZERO
+              : moving.aimSolution().aimDirection();
+      Vec3 launch =
+              movingSnapshot.launchPosition(movingDirection);
+      Vec3 expectedLaunch =
+              movingSnapshot.steeringOrigin().add(
+                      movingDirection.normalize().scale(5.0));
+      boolean passed = moving.valid() && moving.hasShot()
+              && stationary.valid() && stationary.hasShot()
+              && moving.desiredYawDeg()
+              > stationary.desiredYawDeg() + 0.1
+              && moving.missDistance() < 0.05
+              && launch.distanceToSqr(expectedLaunch)
+              < 1.0E-12;
+      return new Result(
+              "coupled_muzzle_preserves_moving_lead",
+              passed, "stationaryYaw="
+              + stationary.desiredYawDeg()
+              + " movingYaw=" + moving.desiredYawDeg()
+              + " miss=" + moving.missDistance()
+              + " launch=" + launch);
+   }
+
+   private static Result checkCoupledMuzzleBallisticInvariance() {
+      TargetingComputer computer = new TargetingComputer(
+              null, new ProjectileSimulator(),
+              new TargetPredictor(), ObstructionChecker.NONE);
+      Vec3 target = new Vec3(80.0, 4.0, 10.0);
+      Vec3 velocity = new Vec3(0.0, 0.0, 0.08);
+      TargetingResult left = computer.solve(
+              coupledBallisticSnapshot(
+                      target, velocity,
+                      TargetingMath.directionFromYawPitch(
+                              -60.0, 20.0).scale(5.0)));
+      TargetingResult right = computer.solve(
+              coupledBallisticSnapshot(
+                      target, velocity,
+                      TargetingMath.directionFromYawPitch(
+                              60.0, -20.0).scale(5.0)));
+      double yawDifference = Math.abs(
+              left.desiredYawDeg() - right.desiredYawDeg());
+      double pitchDifference = Math.abs(
+              left.desiredPitchDeg() - right.desiredPitchDeg());
+      boolean passed = left.valid() && left.hasShot()
+              && right.valid() && right.hasShot()
+              && left.missDistance() < 0.25
+              && right.missDistance() < 0.25
+              && yawDifference < 1.0E-6
+              && pitchDifference < 1.0E-6
+              && left.desiredYawDeg() > 0.1
+              && left.desiredPitchDeg() > 0.1;
+      return new Result(
+              "coupled_muzzle_preserves_gravity_drag",
+              passed, "yaw=" + left.desiredYawDeg()
+              + "/" + right.desiredYawDeg()
+              + " pitch=" + left.desiredPitchDeg()
+              + "/" + right.desiredPitchDeg()
+              + " miss=" + left.missDistance()
+              + "/" + right.missDistance());
+   }
+
+   private static Result checkCoupledMuzzleWarmResponsiveness() {
+      TargetingComputer computer = new TargetingComputer(
+              null, new ProjectileSimulator(),
+              new TargetPredictor(), ObstructionChecker.NONE);
+      Vec3 initialTarget = new Vec3(10.0, 0.0, 0.0);
+      TargetingResult cold = computer.solve(
+              coupledMuzzleSnapshot(
+                      initialTarget, Vec3.ZERO,
+                      TargetingMath.directionFromYawPitch(
+                              30.0, 0.0).scale(5.0),
+                      null));
+      TargetingResult warm = computer.solve(
+              coupledMuzzleSnapshot(
+                      initialTarget.add(0.0, 0.0, 0.02),
+                      Vec3.ZERO,
+                      TargetingMath.directionFromYawPitch(
+                              -30.0, 0.0).scale(5.0),
+                      cold));
+      int coldEvaluations =
+              debugInt(cold, "candidateEvaluations=");
+      int warmEvaluations =
+              debugInt(warm, "candidateEvaluations=");
+      boolean passed = warm.valid() && warm.hasShot()
+              && "warm_dual".equals(
+              debugValue(warm, "path="))
+              && warmEvaluations > 0
+              && warmEvaluations < coldEvaluations
+              && Math.abs(warm.desiredYawDeg()
+              - cold.desiredYawDeg()) < 0.5;
+      return new Result(
+              "coupled_muzzle_warm_responsiveness",
+              passed, "evaluations=" + warmEvaluations
+              + "/" + coldEvaluations
+              + " yaw=" + cold.desiredYawDeg()
+              + "->" + warm.desiredYawDeg()
+              + " " + warm.debugString());
+   }
+
+   private static Result checkTargetInsideMuzzleRadiusFailsClosed() {
+      TargetingResult result = new TargetingComputer(
+              null, new ProjectileSimulator(),
+              new TargetPredictor(), ObstructionChecker.NONE)
+              .solve(coupledMuzzleSnapshot(
+                      new Vec3(4.0, 0.0, 0.0),
+                      Vec3.ZERO,
+                      new Vec3(5.0, 0.0, 0.0),
+                      null));
+      boolean passed = result.valid()
+              && !result.hasShot();
+      return new Result(
+              "coupled_muzzle_inside_radius_fails_closed",
+              passed, result.debugString());
+   }
+
+   private static TargetingSnapshot coupledMuzzleSnapshot(
+           Vec3 target, Vec3 velocity, Vec3 currentMuzzle,
+           TargetingResult preferred) {
+      return TargetingSnapshot.builder(null)
+              .muzzlePosition(currentMuzzle)
+              .launchPivotPosition(Vec3.ZERO)
+              .muzzleForwardOffset(5.0)
+              .targetPosition(target)
+              .targetVelocity(velocity)
+              .projectileSpeed(2.0)
+              .gravity(0.0)
+              .drag(0.0)
+              .maxFlightTicks(40)
+              .preferredYawDeg(preferred == null
+                      ? null : preferred.desiredYawDeg())
+              .preferredPitchDeg(preferred == null
+                      ? null : preferred.desiredPitchDeg())
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
+   }
+
+   private static TargetingSnapshot coupledBallisticSnapshot(
+           Vec3 target, Vec3 velocity, Vec3 currentMuzzle) {
+      return TargetingSnapshot.builder(null)
+              .muzzlePosition(currentMuzzle)
+              .launchPivotPosition(Vec3.ZERO)
+              .muzzleForwardOffset(5.0)
+              .targetPosition(target)
+              .targetVelocity(velocity)
+              .projectileSpeed(8.0)
+              .gravity(-0.05)
+              .drag(0.01)
+              .maxFlightTicks(120)
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
    }
 
    private static Result checkRankedTrackingSequence() {
