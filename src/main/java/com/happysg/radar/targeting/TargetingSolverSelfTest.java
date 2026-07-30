@@ -64,6 +64,7 @@ public final class TargetingSolverSelfTest {
       results.add(checkLongRangeCbcStyleSolve());
       results.add(checkProjectileSimulatorLongCap());
       results.add(checkRankedTrackingSequence());
+      results.add(checkWarmStartDoesNotLatch());
       results.add(checkRankedStationarySequence());
       results.add(checkRankedDirectionReversal());
       results.add(checkHighArcWithinLimits());
@@ -435,7 +436,7 @@ public final class TargetingSolverSelfTest {
             maxEquivalentError = Math.max(maxEquivalentError, equivalentError);
             maxAngularStep = Math.max(maxAngularStep, angularStep);
             maxEvaluations = Math.max(maxEvaluations, evaluations);
-            boolean passed = validRankedShot(ranked, evaluations)
+            boolean passed = validTrackingShot(ranked, evaluations)
                     && yawDelta > 1.0E-9
                     && angularStep <= 0.25
                     && equivalentError <= 0.25;
@@ -539,6 +540,47 @@ public final class TargetingSolverSelfTest {
                       + " second=" + second.endPosition().x);
    }
 
+   private static Result checkWarmStartDoesNotLatch() {
+      TargetingComputer computer = new TargetingComputer(
+              null, new ProjectileSimulator(),
+              new TargetPredictor(), ObstructionChecker.NONE);
+      Vec3 initialPosition = new Vec3(300.0, 0.0, 0.0);
+      TargetingResult previous = computer.solve(
+              rankedTrackingSnapshot(
+                      initialPosition, Vec3.ZERO, null));
+      Vec3 movedPosition = initialPosition.add(0.0, 0.0, 0.02);
+      TargetingResult updated = computer.solve(
+              rankedTrackingSnapshot(
+                      movedPosition, Vec3.ZERO, previous));
+      int coldEvaluations =
+              debugInt(previous, "candidateEvaluations=");
+      int warmEvaluations =
+              debugInt(updated, "candidateEvaluations=");
+      double yawDelta = TargetingMath.shortestAngleDelta(
+              previous.desiredYawDeg(), updated.desiredYawDeg());
+      double oldDirectionMiss =
+              TargetingMath.directionFromYawPitch(
+                      previous.desiredYawDeg(),
+                      previous.desiredPitchDeg())
+                      .scale(initialPosition.length())
+                      .distanceTo(movedPosition);
+      boolean passed = updated.valid() && updated.hasShot()
+              && oldDirectionMiss < 0.05
+              && Math.abs(yawDelta) > 1.0E-6
+              && "warm_dual".equals(
+              debugValue(updated, "path="))
+              && "true".equals(
+              debugValue(updated, "warmAgreed="))
+              && warmEvaluations > 0
+              && warmEvaluations < coldEvaluations;
+      return new Result("warm_start_tracks_inside_hit_tolerance",
+              passed, "oldDirectionMiss=" + oldDirectionMiss
+              + " yawDelta=" + yawDelta
+              + " evaluations=" + warmEvaluations
+              + "/" + coldEvaluations + " "
+              + updated.debugString());
+   }
+
    private static Result checkRankedStationarySequence() {
       TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
       Vec3 position = new Vec3(300.0, 0.0, 25.0);
@@ -560,7 +602,7 @@ public final class TargetingSolverSelfTest {
                          initialYaw, ranked.desiredYawDeg()),
                  ranked.desiredPitchDeg() - initialPitch);
          maxVariation = Math.max(maxVariation, variation);
-         if (!validRankedShot(ranked, evaluations) || variation > 0.05) {
+         if (!validTrackingShot(ranked, evaluations) || variation > 0.05) {
             return new Result("ranked_stationary_stability", false,
                     "tick=" + tick + " evaluations=" + evaluations
                             + " variation=" + variation + " "
@@ -601,7 +643,7 @@ public final class TargetingSolverSelfTest {
          boolean expectedDirection = tick < 6 ? yawDelta > 1.0E-9 : yawDelta < -1.0E-9;
          boolean lowArc = "low".equals(debugValue(ranked, "selectedArc="));
          double allowedAngularStep = tick == 6 ? 1.0 : 0.25;
-         if (!validRankedShot(ranked, evaluations)
+         if (!validTrackingShot(ranked, evaluations)
                  || !expectedDirection || !lowArc
                  || angularStep > allowedAngularStep) {
             return new Result("ranked_direction_reversal", false,
@@ -633,12 +675,20 @@ public final class TargetingSolverSelfTest {
               .build();
    }
 
-   private static boolean validRankedShot(TargetingResult result, int evaluations) {
-      return result.valid()
-              && result.hasShot()
-              && "ranked".equals(debugValue(result, "path="))
-              && "0.25".equals(debugValue(result, "refinementPrecisionBlocks="))
-              && evaluations > 113;
+   private static boolean validTrackingShot(
+           TargetingResult result, int evaluations) {
+      String path = debugValue(result, "path=");
+      String precision =
+              debugValue(result, "refinementPrecisionBlocks=");
+      boolean recognizedPath = "warm_dual".equals(path)
+              || "ranked_fallback".equals(path)
+              || "ranked".equals(path);
+      boolean recognizedPrecision = "warm_dual".equals(path)
+              ? "0.05".equals(precision)
+              : "0.25".equals(precision);
+      return result.valid() && result.hasShot()
+              && recognizedPath && recognizedPrecision
+              && evaluations > 0;
    }
 
    private static double noDragTrackingError(Vec3 targetPosition, Vec3 targetVelocity, double projectileSpeed, TargetingResult result) {
@@ -733,7 +783,8 @@ public final class TargetingSolverSelfTest {
       boolean passed = result.valid()
               && result.hasShot()
               && result.desiredPitchDeg() <= 45.0
-              && "ranked".equals(debugValue(result, "path="))
+              && "ranked_fallback".equals(
+              debugValue(result, "path="))
               && rejections > 0;
       return new Result("preferred_aim_outside_pitch_limits", passed,
               "rejections=" + rejections + " " + result.debugString());

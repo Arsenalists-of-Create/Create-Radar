@@ -19,10 +19,12 @@ public final class WeaponFiringControlSelfTest {
         List<TargetingSolverSelfTest.Result> results = new ArrayList<>();
         results.add(checkObservationRefreshKeepsIdentity());
         results.add(checkIdentityChangesInvalidate());
-        results.add(checkVelocityCompatibility());
+        results.add(checkAimPointRebase());
         results.add(checkPendingSolveLifetime());
-        results.add(checkVelocityChangeSupersedesPendingSolve());
+        results.add(checkOrdinaryMotionKeepsPendingSolve());
+        results.add(checkFireFreshnessWindow());
         results.add(checkAsyncBallisticAimHandoff());
+        results.add(checkSmoothAimKeepsStability());
         results.add(checkDualMountYawConvergence());
         results.add(checkDualFirePolicy());
         results.add(checkDualYawTopologyPolicy());
@@ -58,67 +60,72 @@ public final class WeaponFiringControlSelfTest {
     }
 
     private static TargetingSolverSelfTest.Result
-    checkVelocityCompatibility() {
-        Vec3 cruising = new Vec3(0.25, 0.0, -0.10);
-        boolean unchanged = WeaponFiringControl.isTargetVelocityCompatible(
-                cruising, cruising);
-        boolean smallNoise = WeaponFiringControl.isTargetVelocityCompatible(
-                cruising, cruising.add(0.009, 0.0, 0.0));
-        boolean speedChange = !WeaponFiringControl.isTargetVelocityCompatible(
-                cruising, cruising.add(0.011, 0.0, 0.0));
-        boolean directionChange =
-                !WeaponFiringControl.isTargetVelocityCompatible(
-                        cruising, new Vec3(-0.25, 0.0, -0.10));
-        boolean passed = unchanged && smallNoise
-                && speedChange && directionChange;
-        return result("target_velocity_cache_invalidation", passed,
-                "unchanged=" + unchanged + " smallNoise=" + smallNoise
-                        + " speedChange=" + speedChange
-                        + " directionChange=" + directionChange);
+    checkAimPointRebase() {
+        Vec3 requestedTarget = new Vec3(10.0, 2.0, -4.0);
+        Vec3 solvedAim = new Vec3(15.0, 3.0, -1.0);
+        Vec3 liveTarget = new Vec3(11.0, 2.5, -6.0);
+        Vec3 rebased = WeaponFiringControl.rebaseAimPoint(
+                solvedAim, requestedTarget, liveTarget);
+        Vec3 expected = new Vec3(16.0, 3.5, -3.0);
+        boolean passed = rebased.distanceToSqr(expected) < 1.0E-12;
+        return result("async_cached_aim_rebases_continuously", passed,
+                "rebased=" + rebased + " expected=" + expected);
     }
 
     private static TargetingSolverSelfTest.Result
     checkPendingSolveLifetime() {
-        Vec3 velocity = new Vec3(0.2, 0.0, 0.0);
         boolean fresh = WeaponFiringControl.shouldKeepPendingSolve(
-                3L, true, 4.0, true, velocity, velocity);
+                99L, true, true);
         boolean expired = !WeaponFiringControl.shouldKeepPendingSolve(
-                4L, true, 0.0, true, velocity, velocity);
+                101L, true, true);
         boolean targetChanged = !WeaponFiringControl.shouldKeepPendingSolve(
-                1L, false, 0.0, true, velocity, velocity);
-        boolean targetMoved = !WeaponFiringControl.shouldKeepPendingSolve(
-                1L, true, 4.01, true, velocity, velocity);
+                1L, false, true);
         boolean shotChanged = !WeaponFiringControl.shouldKeepPendingSolve(
-                1L, true, 0.0, false, velocity, velocity);
+                1L, true, false);
         boolean passed = fresh && expired && targetChanged
-                && targetMoved && shotChanged;
-        return result("async_solve_short_lifetime", passed,
+                && shotChanged;
+        return result("async_solve_watchdog_lifetime", passed,
                 "fresh=" + fresh + " expired=" + expired
                         + " targetChanged=" + targetChanged
-                        + " targetMoved=" + targetMoved
                         + " shotChanged=" + shotChanged);
     }
 
     private static TargetingSolverSelfTest.Result
-    checkVelocityChangeSupersedesPendingSolve() {
-        Vec3 requested = new Vec3(0.2, 0.0, 0.0);
-        boolean stableKept = WeaponFiringControl.shouldKeepPendingSolve(
-                1L, true, 0.0, true, requested,
-                requested.add(0.009, 0.0, 0.0));
-        boolean accelerationSupersedes =
-                !WeaponFiringControl.shouldKeepPendingSolve(
-                        1L, true, 0.0, true, requested,
-                        requested.add(0.011, 0.0, 0.0));
-        boolean stopSupersedes =
-                !WeaponFiringControl.shouldKeepPendingSolve(
-                        1L, true, 0.0, true, requested, Vec3.ZERO);
-        boolean passed = stableKept && accelerationSupersedes
-                && stopSupersedes;
-        return result("async_solve_velocity_supersession", passed,
-                "stableKept=" + stableKept
-                        + " accelerationSupersedes="
-                        + accelerationSupersedes
-                        + " stopSupersedes=" + stopSupersedes);
+    checkOrdinaryMotionKeepsPendingSolve() {
+        boolean accelerationKept =
+                WeaponFiringControl.shouldKeepPendingSolve(
+                        1L, true, true);
+        boolean directionChangeKept =
+                WeaponFiringControl.shouldKeepPendingSolve(
+                        4L, true, true);
+        boolean stopKept =
+                WeaponFiringControl.shouldKeepPendingSolve(
+                        8L, true, true);
+        boolean passed = accelerationKept
+                && directionChangeKept && stopKept;
+        return result("async_solve_ordinary_motion_not_cancelled", passed,
+                "acceleration=" + accelerationKept
+                        + " directionChange=" + directionChangeKept
+                        + " stop=" + stopKept);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkFireFreshnessWindow() {
+        boolean fresh = WeaponFiringControl.isAsyncSolutionFreshForFire(
+                4L, 4.0, 1.0);
+        boolean old = !WeaponFiringControl.isAsyncSolutionFreshForFire(
+                5L, 0.0, 0.0);
+        boolean targetMoved =
+                !WeaponFiringControl.isAsyncSolutionFreshForFire(
+                        1L, 4.01, 0.0);
+        boolean muzzleMoved =
+                !WeaponFiringControl.isAsyncSolutionFreshForFire(
+                        1L, 0.0, 1.01);
+        boolean passed = fresh && old && targetMoved && muzzleMoved;
+        return result("async_fire_freshness_fails_closed", passed,
+                "fresh=" + fresh + " old=" + old
+                        + " targetMoved=" + targetMoved
+                        + " muzzleMoved=" + muzzleMoved);
     }
 
     private static TargetingSolverSelfTest.Result
@@ -126,7 +133,7 @@ public final class WeaponFiringControlSelfTest {
         WeaponFiringControl.AimUpdateMode firstSolution =
                 WeaponFiringControl.selectAimUpdateMode(true, true);
         WeaponFiringControl.AimUpdateMode pending =
-                WeaponFiringControl.selectAimUpdateMode(false, true);
+                WeaponFiringControl.selectAimUpdateMode(true, true);
         WeaponFiringControl.AimUpdateMode nextSolution =
                 WeaponFiringControl.selectAimUpdateMode(true, true);
         WeaponFiringControl.AimUpdateMode initialWait =
@@ -136,11 +143,11 @@ public final class WeaponFiringControlSelfTest {
 
         boolean passed =
                 firstSolution == WeaponFiringControl.AimUpdateMode.SOLVED
-                && pending == WeaponFiringControl.AimUpdateMode.HOLD
+                && pending == WeaponFiringControl.AimUpdateMode.SOLVED
                 && nextSolution == WeaponFiringControl.AimUpdateMode.SOLVED
                 && initialWait == WeaponFiringControl.AimUpdateMode.HOLD
                 && intentionalDirect == WeaponFiringControl.AimUpdateMode.DIRECT
-                && !WeaponFiringControl.shouldIssueAimCommand(pending)
+                && WeaponFiringControl.shouldIssueAimCommand(pending)
                 && !WeaponFiringControl.shouldIssueAimCommand(initialWait)
                 && WeaponFiringControl.shouldIssueAimCommand(firstSolution)
                 && WeaponFiringControl.shouldIssueAimCommand(intentionalDirect)
@@ -152,10 +159,29 @@ public final class WeaponFiringControlSelfTest {
                         true, false, false)
                 && WeaponFiringControl.hasFireEligibleAim(
                         false, false, true);
-        return result("async_ballistic_gap_holds_aim", passed,
+        return result("async_ballistic_gap_continues_aim", passed,
                 "timeline=" + firstSolution + "->" + pending + "->"
                         + nextSolution + " initial=" + initialWait
                         + " direct=" + intentionalDirect);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkSmoothAimKeepsStability() {
+        Vec3 previous = Vec3.ZERO;
+        int stableTicks = 0;
+        for (int tick = 1; tick <= 8; ++tick) {
+            Vec3 current = new Vec3(tick * 0.2, 0.0, 0.0);
+            stableTicks = WeaponFiringControl.nextAimStableTicks(
+                    previous, current, stableTicks, 0.5);
+            previous = current;
+        }
+        int jumpReset = WeaponFiringControl.nextAimStableTicks(
+                previous, previous.add(1.0, 0.0, 0.0),
+                stableTicks, 0.5);
+        boolean passed = stableTicks == 8 && jumpReset == 0;
+        return result("smooth_aim_keeps_fire_stability", passed,
+                "smoothTicks=" + stableTicks
+                        + " jumpReset=" + jumpReset);
     }
 
     private static TargetingSolverSelfTest.Result
