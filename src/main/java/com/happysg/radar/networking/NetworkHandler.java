@@ -51,6 +51,21 @@ public final class NetworkHandler {
                 MonitorSelectionPacket::handle
         );
         registrar.playToServer(
+                SetControllerMovementLimitsPacket.TYPE,
+                SetControllerMovementLimitsPacket.STREAM_CODEC,
+                SetControllerMovementLimitsPacket::handle
+        );
+        registrar.playToServer(
+                ControllerCollisionSnapshotRequestPacket.TYPE,
+                ControllerCollisionSnapshotRequestPacket.STREAM_CODEC,
+                ControllerCollisionSnapshotRequestPacket::handle
+        );
+        registrar.playToClient(
+                ControllerCollisionSnapshotPacket.TYPE,
+                ControllerCollisionSnapshotPacket.STREAM_CODEC,
+                ControllerCollisionSnapshotPacket::handle
+        );
+        registrar.playToServer(
                 IDRecordPacket.TYPE,
                 IDRecordPacket.STREAM_CODEC,
                 IDRecordPacket::handle

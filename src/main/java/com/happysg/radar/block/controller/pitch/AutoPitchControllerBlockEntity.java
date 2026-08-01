@@ -12,6 +12,9 @@ import com.happysg.radar.block.controller.kinetic.KineticControllerState;
 import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
 import com.happysg.radar.block.controller.kinetic.KineticMountFrame;
 import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
+import com.happysg.radar.block.controller.limits.ControllerLimitAccess;
+import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
+import com.happysg.radar.block.controller.limits.collision.ControllerCollisionSource;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
@@ -45,15 +48,19 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.UUID;
 
-public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity {
+public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
+        implements ControllerLimitAccess, ControllerCollisionSource {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final double CBC_TOLERANCE = 0.1;
     private static final double PHYS_TOLERANCE_DEG = 0.1;
     private static final double DEADBAND_DEG = 0.25;
+    private static final int MOVEMENT_LIMITS_VERSION = 1;
 
     private double minAngleDeg = -90.0;
     private double maxAngleDeg = 90.0;
+    private double requestedTargetAngle = 0.0;
+    private boolean targetLimitConstrained;
 
     private double targetAngle = 0.0;
     public boolean isRunning = false;
@@ -230,18 +237,34 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     public void setTargetAngle(float angle) {
         kineticControllerState.endContinuousTracking();
-        this.targetAngle = angle;
-        this.isRunning = true;
-        kineticControllerState.onTargetChanged(true, angle, DEADBAND_DEG);
-
-        physHandler.reset();
-
-        notifyUpdate();
-        setChanged();
+        applyTargetRequest(angle, true, true);
     }
 
     public double getTargetAngle() {
         return targetAngle;
+    }
+
+    public double getRequestedTargetAngle() {
+        return requestedTargetAngle;
+    }
+
+    private void applyTargetRequest(double requestedAngle, boolean running,
+                                    boolean resetPhysicalTracking) {
+        if (!Double.isFinite(requestedAngle)) {
+            return;
+        }
+        requestedTargetAngle = requestedAngle;
+        double applied = getMovementLimits().clampControllerTarget(
+                requestedAngle, 0.0);
+        targetLimitConstrained = Math.abs(applied - requestedAngle) > 1.0e-7;
+        targetAngle = applied;
+        isRunning = running;
+        kineticControllerState.onTargetChanged(running, applied, DEADBAND_DEG);
+        if (resetPhysicalTracking) {
+            physHandler.reset();
+        }
+        notifyUpdate();
+        setChanged();
     }
 
     public void stopController() {
@@ -308,9 +331,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         Vec3 origin = worldPosition.relative(adapter.relativeDirection()).getCenter();
         double target = DebugSwivelFollow.pitchTargetDegrees(origin, player.getEyePosition());
-        if (!isDebugFollowPitchAllowed(target)) {
-            return DebugSwivelFollow.ToggleResult.failed(Double.isFinite(target)
-                    ? "player_outside_pitch_limits" : "player_too_close_to_bearing");
+        if (!Double.isFinite(target)) {
+            return DebugSwivelFollow.ToggleResult.failed("player_too_close_to_bearing");
         }
 
         kineticControllerState.release();
@@ -366,12 +388,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     private void applyDebugSwivelCommand(double degrees, boolean running) {
-        targetAngle = degrees;
-        isRunning = running;
-        kineticControllerState.onTargetChanged(running, degrees, DEADBAND_DEG);
-        physHandler.reset();
-        notifyUpdate();
-        setChanged();
+        applyTargetRequest(degrees, running, true);
     }
 
     private void tickDebugSwivelFollow() {
@@ -409,18 +426,11 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         Vec3 origin = worldPosition.relative(adapter.relativeDirection()).getCenter();
         double target = DebugSwivelFollow.pitchTargetDegrees(origin, player.getEyePosition());
-        if (!isDebugFollowPitchAllowed(target)) {
-            stopDebugSwivelFollow(Double.isFinite(target)
-                    ? "player_outside_pitch_limits" : "player_too_close_to_bearing", true);
+        if (!Double.isFinite(target)) {
+            stopDebugSwivelFollow("player_too_close_to_bearing", true);
             return;
         }
         debugSwivelFollow.update(target, this::applyDebugSwivelCommand);
-    }
-
-    private boolean isDebugFollowPitchAllowed(double target) {
-        return Double.isFinite(target)
-                && target >= minAngleDeg - 1.0e-6
-                && target <= maxAngleDeg + 1.0e-6;
     }
 
     private void stopDebugSwivelFollow(String reason, boolean logCancellation) {
@@ -490,14 +500,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     public void returnToZero() {
         kineticControllerState.endContinuousTracking();
-        targetAngle = 0.0;
-        isRunning = true;
-        kineticControllerState.onTargetChanged(true, targetAngle, DEADBAND_DEG);
+        applyTargetRequest(0.0, true, true);
         lastTargetPos = null;
-        physHandler.reset();
-
-        notifyUpdate();
-        setChanged();
     }
 
     public boolean atTargetPitch(boolean lag) {
@@ -505,7 +509,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public boolean atTargetPitch(boolean lag, double minimumToleranceDegrees) {
-        if (level == null) {
+        if (level == null || targetLimitConstrained) {
             return false;
         }
 
@@ -543,7 +547,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public boolean isAlignedForFiring(boolean lag, double minimumToleranceDegrees) {
-        if (level == null || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
+        if (level == null || targetLimitConstrained
+                || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
         if (!hasStructuralKineticSelection()) {
@@ -571,7 +576,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             boolean lag,
             double minimumToleranceDegrees
     ) {
-        if (level == null || mount == null
+        if (level == null || mount == null || targetLimitConstrained
                 || debugSwivelSweep.isActive()
                 || debugSwivelFollow.isActive()) {
             return false;
@@ -789,6 +794,40 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     protected CannonMountContext resolvePrimaryCbcMount() {
         List<CannonMountContext> mounts = resolveControlledCbcMounts();
         return mounts.isEmpty() ? null : mounts.getFirst();
+    }
+
+    /** Server-side mount data used by the controller collision-view snapshot. */
+    @Override
+    public List<CannonMountContext> resolveCollisionCbcMounts() {
+        return resolveControlledCbcMounts();
+    }
+
+    /** Includes an idle/expected mount position when no cannon is assembled. */
+    @Override
+    public List<BlockPos> resolveCollisionMountPositions() {
+        List<CannonMountContext> mounts = resolveControlledCbcMounts();
+        if (!mounts.isEmpty()) {
+            return mounts.stream().map(CannonMountContext::getBlockPos).toList();
+        }
+        BlockPos mountPos = getMountPos();
+        return mountPos == null ? List.of() : List.of(mountPos.immutable());
+    }
+
+    @Override
+    public List<UUID> resolveCollisionSublevelIds() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        KineticMountFrame frame = adapter == null ? null
+                : adapter.frameIdentity();
+        return resolution.hasAdapter() && adapter.isValid()
+                && adapter.isAssembled() && frame != null
+                && frame.assemblyId() != null
+                ? List.of(frame.assemblyId()) : List.of();
+    }
+
+    @Override
+    public Vec3 resolveCollisionCannonForward() {
+        return getStructuralPhysicalWorldDirection();
     }
 
     protected boolean supportsPhysBearingMounts() {
@@ -1039,9 +1078,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return false;
         }
         double target = adapter.controllerTargetForWorldDirection(worldAimDirection);
-        if (!Double.isFinite(target)
-                || target < minAngleDeg - 1.0e-6
-                || target > maxAngleDeg + 1.0e-6) {
+        if (!Double.isFinite(target)) {
             if (continuous) {
                 failClosedRadarAim();
             }
@@ -1053,14 +1090,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         } else {
             kineticControllerState.endContinuousTracking();
         }
-        targetAngle = target;
-        isRunning = true;
-        kineticControllerState.onTargetChanged(true, target, DEADBAND_DEG);
+        applyTargetRequest(target, true, true);
         lastTargetPos = null;
-        physHandler.reset();
-        notifyUpdate();
-        setChanged();
-        return true;
+        return !targetLimitConstrained;
     }
 
     private KineticMountAdapterResolution resolveKineticMount() {
@@ -1125,40 +1157,42 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         return maxAngleDeg;
     }
 
-    public void setMinAngleDeg(double v) {
-        Mount mount = resolveMount();
+    @Override
+    public CannonAxis getControlledAxis() {
+        return CannonAxis.PITCH;
+    }
 
-        if (mount != null && mount.kind == MountKind.PHYS) {
-            minAngleDeg = wrap360(v);
-        } else {
-            minAngleDeg = v;
-            if (minAngleDeg > maxAngleDeg) {
-                double tmp = minAngleDeg;
-                minAngleDeg = maxAngleDeg;
-                maxAngleDeg = tmp;
-            }
+    @Override
+    public ControllerMovementLimits getMovementLimits() {
+        return new ControllerMovementLimits(
+                CannonAxis.PITCH, minAngleDeg, maxAngleDeg);
+    }
+
+    @Override
+    public boolean isTargetLimitConstrained() {
+        return targetLimitConstrained;
+    }
+
+    @Override
+    public boolean setMovementLimits(double minDegrees, double maxDegrees) {
+        var validated = ControllerMovementLimits.validated(
+                CannonAxis.PITCH, minDegrees, maxDegrees);
+        if (validated.isEmpty()) {
+            return false;
         }
+        ControllerMovementLimits limits = validated.get();
+        minAngleDeg = limits.minDegrees();
+        maxAngleDeg = limits.maxDegrees();
+        applyTargetRequest(requestedTargetAngle, isRunning, true);
+        return true;
+    }
 
-        notifyUpdate();
-        setChanged();
+    public void setMinAngleDeg(double v) {
+        setMovementLimits(v, maxAngleDeg);
     }
 
     public void setMaxAngleDeg(double v) {
-        Mount mount = resolveMount();
-
-        if (mount != null && mount.kind == MountKind.PHYS) {
-            maxAngleDeg = wrap360(v);
-        } else {
-            maxAngleDeg = v;
-            if (minAngleDeg > maxAngleDeg) {
-                double tmp = minAngleDeg;
-                minAngleDeg = maxAngleDeg;
-                maxAngleDeg = tmp;
-            }
-        }
-
-        notifyUpdate();
-        setChanged();
+        setMovementLimits(minAngleDeg, v);
     }
 
     public boolean snapping() {
@@ -1173,15 +1207,23 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         targetAngle = compound.getDouble("TargetAngle");
         isRunning = compound.getBoolean("IsRunning");
 
-        minAngleDeg = compound.contains("MinAngleDeg", Tag.TAG_DOUBLE) ? compound.getDouble("MinAngleDeg") : -90.0;
-        maxAngleDeg = compound.contains("MaxAngleDeg", Tag.TAG_DOUBLE) ? compound.getDouble("MaxAngleDeg") : 90.0;
+        double storedMin = compound.contains("MinAngleDeg", Tag.TAG_DOUBLE)
+                ? compound.getDouble("MinAngleDeg") : -90.0;
+        double storedMax = compound.contains("MaxAngleDeg", Tag.TAG_DOUBLE)
+                ? compound.getDouble("MaxAngleDeg") : 90.0;
+        ControllerMovementLimits limits = ControllerMovementLimits.validated(
+                CannonAxis.PITCH, storedMin, storedMax)
+                .orElse(ControllerMovementLimits.defaults(CannonAxis.PITCH));
+        minAngleDeg = limits.minDegrees();
+        maxAngleDeg = limits.maxDegrees();
         targetingTag = compound.contains("Targeting", Tag.TAG_COMPOUND) ? compound.getCompound("Targeting").copy() : defaultTargetingTag();
-
-        if (minAngleDeg > maxAngleDeg) {
-            double tmp = minAngleDeg;
-            minAngleDeg = maxAngleDeg;
-            maxAngleDeg = tmp;
-        }
+        requestedTargetAngle = compound.contains("RequestedTargetAngle", Tag.TAG_DOUBLE)
+                ? compound.getDouble("RequestedTargetAngle") : targetAngle;
+        double constrainedTarget = limits.clampControllerTarget(
+                requestedTargetAngle, 0.0);
+        targetLimitConstrained = Math.abs(
+                constrainedTarget - requestedTargetAngle) > 1.0e-7;
+        targetAngle = constrainedTarget;
 
         lastTargetPos = null;
         physHandler.read(compound);
@@ -1201,8 +1243,11 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                 : debugSwivelFollow.persistentRunning(isRunning);
         compound.putDouble("TargetAngle", storedTarget);
         compound.putBoolean("IsRunning", storedRunning);
+        compound.putInt("MovementLimitsVersion", MOVEMENT_LIMITS_VERSION);
         compound.putDouble("MinAngleDeg", minAngleDeg);
         compound.putDouble("MaxAngleDeg", maxAngleDeg);
+        compound.putDouble("RequestedTargetAngle", requestedTargetAngle);
+        compound.putBoolean("TargetLimitConstrained", targetLimitConstrained);
         compound.put("Targeting", targetingTag.copy());
 
         physHandler.write(compound);
@@ -1240,8 +1285,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     void setInternalTargetAngle(double targetAngle) {
-        this.targetAngle = targetAngle;
-        kineticControllerState.onTargetChanged(isRunning, targetAngle, DEADBAND_DEG);
+        applyTargetRequest(targetAngle, isRunning, false);
     }
 
     void setRunning(boolean running) {

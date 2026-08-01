@@ -16,6 +16,11 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigFloat controllerPhysbearingMaxSpeed = f(25.0F, 2.0F, 25.0F, "controllerPhysbearingMaxSpeed", "Increases the max Rotational speed of phys bearings controlled by Pitch/Yaw controllers");
     public final ConfigInt binoRaycastRange = i(512, 1, 1000, "binocularRange", "The range at which the binocular can acquire a target");
 
+    public final ConfigGroup controllerCollisionViewConfig = group(3, "controllerCollisionViewConfig", "Controller GUI collision snapshot limits");
+    public final ConfigInt controllerCollisionViewMaxHalfSpan = i(64, 5, 256, "maxHalfSpan", "Maximum half-span of a controller collision view in blocks");
+    public final ConfigInt controllerCollisionViewMaxScannedBlocks = i(100000, 500, 1000000, "maxScannedBlocks", "Maximum block positions inspected for one controller collision snapshot");
+    public final ConfigInt controllerCollisionViewMaxBoxes = i(16384, 128, 16384, "maxCollisionBoxes", "Maximum collision boxes returned in one controller collision snapshot");
+
     public final ConfigGroup chaffConfig = group(3, "chaffConfig", "Firework chaff lock-breaking behavior");
     public final ConfigBool chaffEnabled = b(true, "enabled", "Allow fireworks to temporarily break radar locks");
     public final ConfigFloat chaffRadius = f(8.0F, 0.0F, 64.0F, "radius", "Maximum firework detonation distance from a selected target in blocks");

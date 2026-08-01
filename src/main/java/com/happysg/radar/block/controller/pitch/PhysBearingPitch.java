@@ -164,7 +164,8 @@ public class PhysBearingPitch {
             }
         }
 
-        double newAngle = rollAroundFacingDeg(pivot, smoothedTarget, facing);
+        double newAngle = AutoPitchControllerBlockEntity.wrap180(
+                rollAroundFacingDeg(pivot, smoothedTarget, facing));
         if (Math.abs(AutoPitchControllerBlockEntity.shortestDelta(controller.getTargetAngle(), newAngle))
                 < AutoPitchControllerBlockEntity.getDeadbandDeg()) {
             return;

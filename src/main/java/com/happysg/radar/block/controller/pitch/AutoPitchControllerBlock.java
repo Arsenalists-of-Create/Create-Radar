@@ -4,6 +4,7 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.CannonMountPlacement;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
+import com.happysg.radar.block.controller.limits.ControllerLimitsScreen;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
@@ -12,6 +13,8 @@ import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.Block;
@@ -19,6 +22,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.NotNull;
 
 public class AutoPitchControllerBlock extends HorizontalKineticBlock
@@ -33,6 +37,18 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
 
     public AutoPitchControllerBlock(Properties properties) {
         super(properties);
+    }
+
+    @Override
+    protected @NotNull InteractionResult useWithoutItem(
+            @NotNull BlockState state, @NotNull Level level,
+            @NotNull BlockPos pos, @NotNull Player player,
+            @NotNull BlockHitResult hit
+    ) {
+        if (level.isClientSide) {
+            Client.open(pos);
+        }
+        return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
     @Override
@@ -141,6 +157,14 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof AutoPitchControllerBlockEntity pitch) {
             pitch.onRelevantNeighborChanged(fromPos);
+        }
+    }
+
+    @net.neoforged.api.distmarker.OnlyIn(net.neoforged.api.distmarker.Dist.CLIENT)
+    private static final class Client {
+        private static void open(BlockPos pos) {
+            net.minecraft.client.Minecraft.getInstance()
+                    .setScreen(new ControllerLimitsScreen(pos));
         }
     }
 }

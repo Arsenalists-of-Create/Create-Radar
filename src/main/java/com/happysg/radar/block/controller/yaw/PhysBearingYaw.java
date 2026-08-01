@@ -41,9 +41,7 @@ public class PhysBearingYaw {
         double angle = controller.computeYawToTargetDeg(cannonCenter, targetPos);
         double newAngle = AutoYawControllerBlockEntity.wrap360(angle) + 180.0;
 
-        if (hasYawZeroOffset) {
-            newAngle = AutoYawControllerBlockEntity.wrap360(newAngle - yawZeroOffsetDeg);
-        }
+        newAngle = toRelativeControllerAngle(newAngle);
 
         controller.setInternalTargetAngle(newAngle);
         controller.setRunning(true);
@@ -128,9 +126,8 @@ public class PhysBearingYaw {
         yawZeroOffsetDeg = AutoYawControllerBlockEntity.wrap360(newOffset);
         lastYawZeroOffsetDeg = yawZeroOffsetDeg;
 
-        controller.setInternalTargetAngle(AutoYawControllerBlockEntity.wrap360(controller.getTargetAngle() - delta));
-        controller.setInternalMinAngleDeg(AutoYawControllerBlockEntity.wrap360(controller.getMinAngleDeg() - delta));
-        controller.setInternalMaxAngleDeg(AutoYawControllerBlockEntity.wrap360(controller.getMaxAngleDeg() - delta));
+        controller.setInternalTargetAngle(AutoYawControllerBlockEntity.wrap360(
+                controller.getRequestedTargetAngle() - delta));
 
         controller.notifyUpdate();
         controller.setChanged();
@@ -175,7 +172,7 @@ public class PhysBearingYaw {
         double currentCtlDeg = AutoYawControllerBlockEntity.wrap360(360.0 - currentPhysDeg);
         double desiredCtlDeg = controller.getTargetAngle();
 
-        double diffCtl = AutoYawControllerBlockEntity.shortestDelta(currentCtlDeg, desiredCtlDeg);
+        double diffCtl = controller.legalYawDelta(currentCtlDeg, desiredCtlDeg);
         double distCtl = Math.abs(diffCtl);
 
         if (distCtl <= Math.max(AutoYawControllerBlockEntity.getToleranceDeg(), AutoYawControllerBlockEntity.getDeadbandDeg())) {
@@ -203,6 +200,13 @@ public class PhysBearingYaw {
         if (mode != null && mode.getValue() != ContraptionController.LockedMode.FOLLOW_ANGLE.ordinal()) {
             mode.setValue(ContraptionController.LockedMode.FOLLOW_ANGLE.ordinal());
         }
+    }
+
+    double toRelativeControllerAngle(double absoluteControllerAngle) {
+        return hasYawZeroOffset
+                ? AutoYawControllerBlockEntity.wrap360(
+                        absoluteControllerAngle - yawZeroOffsetDeg)
+                : AutoYawControllerBlockEntity.wrap360(absoluteControllerAngle);
     }
 
     private static double controllerYawForCardinalDirection(Direction d) {

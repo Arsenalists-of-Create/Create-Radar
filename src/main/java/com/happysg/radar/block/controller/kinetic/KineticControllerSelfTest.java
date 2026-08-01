@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.kinetic;
 
+import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -28,6 +29,8 @@ public final class KineticControllerSelfTest {
     public static List<String> runChecks() {
         List<String> failures = new ArrayList<>();
         checkAngleMath(failures);
+        checkMovementLimits(failures);
+        checkLimitedKineticPath(failures);
         checkAimFrames(failures);
         checkFrames(failures);
         checkFirstNonzeroAndReadiness(failures);
@@ -51,6 +54,81 @@ public final class KineticControllerSelfTest {
                 KineticAngleMath.isInInclusiveWrappedInterval(10.0, 350.0, 10.0));
         expectFalse(failures, "wrapped_interval_rejects",
                 KineticAngleMath.isInInclusiveWrappedInterval(180.0, 350.0, 10.0));
+    }
+
+    private static void checkMovementLimits(List<String> failures) {
+        expectFalse(failures, "limits_reject_nan",
+                ControllerMovementLimits.validated(
+                        CannonAxis.PITCH, Double.NaN, 10.0).isPresent());
+        expectFalse(failures, "limits_reject_reversed",
+                ControllerMovementLimits.validated(
+                        CannonAxis.YAW, 20.0, -20.0).isPresent());
+        expectFalse(failures, "limits_reject_pitch_out_of_range",
+                ControllerMovementLimits.validated(
+                        CannonAxis.PITCH, -91.0, 90.0).isPresent());
+
+        ControllerMovementLimits pitch = ControllerMovementLimits.validated(
+                CannonAxis.PITCH, -10.0, 45.0).orElseThrow();
+        expectClose(failures, "pitch_clamps_low",
+                pitch.clampControllerTarget(-30.0, 0.0), -10.0);
+        expectClose(failures, "pitch_clamps_high",
+                pitch.clampControllerTarget(60.0, 0.0), 45.0);
+        expectTrue(failures, "pitch_boundary_inclusive",
+                pitch.allowsControllerTarget(45.0, 0.0));
+
+        ControllerMovementLimits forwardArc = ControllerMovementLimits.validated(
+                CannonAxis.YAW, -45.0, 45.0).orElseThrow();
+        expectTrue(failures, "yaw_limits_follow_neutral",
+                forwardArc.allowsControllerTarget(200.0, 180.0));
+        expectFalse(failures, "yaw_limits_reject_outside_neutral",
+                forwardArc.allowsControllerTarget(270.0, 180.0));
+        expectClose(failures, "yaw_clamps_nearest_boundary",
+                forwardArc.clampControllerTarget(270.0, 180.0), 225.0);
+
+        ControllerMovementLimits fullYaw =
+                ControllerMovementLimits.defaults(CannonAxis.YAW);
+        expectTrue(failures, "full_yaw_accepts_back",
+                fullYaw.allowsControllerTarget(180.0, 0.0));
+        expectClose(failures, "full_yaw_uses_shortest_path",
+                fullYaw.legalDelta(350.0, 10.0, 0.0), 20.0);
+
+        ControllerMovementLimits locked = ControllerMovementLimits.validated(
+                CannonAxis.YAW, 0.0, 0.0).orElseThrow();
+        expectFalse(failures, "equal_yaw_limits_are_locked_not_full",
+                locked.allowsControllerTarget(90.0, 0.0));
+        expectClose(failures, "locked_yaw_clamps_to_neutral",
+                locked.clampControllerTarget(90.0, 180.0), 180.0);
+
+        ControllerMovementLimits wideArc = ControllerMovementLimits.validated(
+                CannonAxis.YAW, -170.0, 170.0).orElseThrow();
+        expectClose(failures, "wide_yaw_avoids_forbidden_shortcut",
+                wideArc.legalDelta(160.0, 200.0, 0.0), -320.0);
+        expectClose(failures, "outside_yaw_recovers_inward",
+                wideArc.legalDelta(180.0, 0.0, 0.0), 10.0);
+
+        ControllerMovementLimits positiveBackArc =
+                ControllerMovementLimits.validated(
+                        CannonAxis.YAW, 100.0, 180.0).orElseThrow();
+        expectTrue(failures, "positive_180_endpoint_is_representable",
+                positiveBackArc.allowsControllerTarget(180.0, 0.0));
+    }
+
+    private static void checkLimitedKineticPath(List<String> failures) {
+        ControllerMovementLimits wideArc = ControllerMovementLimits.validated(
+                CannonAxis.YAW, -170.0, 170.0).orElseThrow();
+        FakeRig rig = new FakeRig(CannonAxis.YAW);
+        rig.adapter.targetAngle = 160.0;
+        rig.adapter.physicalAngle = 160.0;
+        KineticControllerState state = new KineticControllerState(CannonAxis.YAW);
+        KineticMountAdapterResolution resolution =
+                KineticMountAdapterResolution.present(rig.adapter);
+        ControllerAngleDelta legalPath = (current, target) ->
+                wideArc.legalDelta(current, target, 0.0);
+
+        tick(state, rig, resolution, true, 200.0, legalPath);
+        tick(state, rig, resolution, true, 200.0, legalPath);
+        expectTrue(failures, "kinetic_yaw_takes_legal_long_path",
+                rig.commandedRpm > 0.0);
     }
 
     private static void checkAimFrames(List<String> failures) {
@@ -618,6 +696,14 @@ public final class KineticControllerSelfTest {
                              boolean running, double target) {
         state.tick(BlockPos.ZERO, resolution, running, target, 0.5,
                 rig.availableInputRpm, true, rig::command);
+    }
+
+    private static void tick(KineticControllerState state, FakeRig rig,
+                             KineticMountAdapterResolution resolution,
+                             boolean running, double target,
+                             ControllerAngleDelta angleDelta) {
+        state.tick(BlockPos.ZERO, resolution, running, target, 0.5,
+                rig.availableInputRpm, true, angleDelta, rig::command);
     }
 
     private static void expectClose(List<String> failures, String name, double actual, double expected) {

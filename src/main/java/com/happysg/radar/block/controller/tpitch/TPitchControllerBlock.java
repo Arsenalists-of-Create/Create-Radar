@@ -3,6 +3,7 @@ package com.happysg.radar.block.controller.tpitch;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
+import com.happysg.radar.block.controller.limits.ControllerLimitsScreen;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.registry.ModBlockEntityTypes;
@@ -12,6 +13,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.StringRepresentable;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
@@ -25,6 +27,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -44,6 +47,18 @@ public class TPitchControllerBlock extends KineticBlock
         super(properties);
         registerDefaultState(defaultBlockState()
                 .setValue(ORIENTATION, Orientation.X_SOUTH));
+    }
+
+    @Override
+    protected @NotNull InteractionResult useWithoutItem(
+            @NotNull BlockState state, @NotNull Level level,
+            @NotNull BlockPos pos, @NotNull Player player,
+            @NotNull BlockHitResult hit
+    ) {
+        if (level.isClientSide) {
+            Client.open(pos);
+        }
+        return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
     @Override
@@ -258,6 +273,14 @@ public class TPitchControllerBlock extends KineticBlock
                 && level.getBlockEntity(pos)
                 instanceof TPitchControllerBlockEntity pitch) {
             pitch.onRelevantNeighborChanged(fromPos);
+        }
+    }
+
+    @net.neoforged.api.distmarker.OnlyIn(net.neoforged.api.distmarker.Dist.CLIENT)
+    private static final class Client {
+        private static void open(BlockPos pos) {
+            net.minecraft.client.Minecraft.getInstance()
+                    .setScreen(new ControllerLimitsScreen(pos));
         }
     }
 

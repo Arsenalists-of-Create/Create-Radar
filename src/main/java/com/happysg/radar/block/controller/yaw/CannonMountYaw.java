@@ -100,7 +100,7 @@ public class CannonMountYaw {
         double currentYaw = AutoYawControllerBlockEntity.wrap360(contraption.yaw);
         double desiredYaw = AutoYawControllerBlockEntity.wrap360(controller.getTargetAngle());
 
-        double yawDiff = AutoYawControllerBlockEntity.shortestDelta(currentYaw, desiredYaw);
+        double yawDiff = controller.legalYawDelta(currentYaw, desiredYaw);
         if (Math.abs(yawDiff) <= AutoYawControllerBlockEntity.getToleranceDeg()) {
             if (!mount.trySetYaw((float) desiredYaw)) {
                 return;

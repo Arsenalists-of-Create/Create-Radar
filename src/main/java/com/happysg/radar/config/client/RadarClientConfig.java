@@ -24,6 +24,7 @@ public class RadarClientConfig extends ConfigBase {
     public ConfigBool useGuiByDefault = b(true,"useGuiByDefault", "If any interaction with the monitor should open up the GUI. if false, uses pre 0.4 behavior");
     public ConfigFloat monitorTextScale = f(0.5f,0,"monitorLabelScale", "The scale of ship names and player usernames as they appear in the monitor GUI");
     public ConfigBool renderSableSilhouettes = b(true, "renderSableSilhouettes", "Render Sable sublevel hull silhouettes on radar monitors when available");
+    public ConfigBool showControllerSurroundings = b(true, "showControllerSurroundings", "Show surrounding collision geometry in controller movement-limit screens");
     public ConfigInt sableSilhouetteMaxRenderDistance = i(2048, 1, "sableSilhouetteMaxRenderDistance", "Maximum target distance from a monitor center for drawing Sable silhouettes");
     public ConfigInt sableSilhouetteMaxRenderedSegments = i(3000, 4, "sableSilhouetteMaxRenderedSegments", "Maximum Sable silhouette line segments rendered per radar contact");
     public ConfigFloat sableSilhouetteCellSize = f(0.35f, 0.1f, "sableSilhouetteCellSize", "Projected grid cell size for Sable radar silhouettes. Lower values make diagonals smoother but cost more render work");

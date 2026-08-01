@@ -245,6 +245,13 @@ tasks.register('tPitchPlacementSelfTest', JavaExec) {
     mainClass = 'com.happysg.radar.block.controller.tpitch.TPitchPlacementSelfTest'
 }
 
+tasks.register('controllerCollisionSelfTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs deterministic controller collision-frame and hidden-line checks.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.happysg.radar.block.controller.limits.collision.ControllerCollisionSelfTest'
+}
+
 tasks.register('weaponNetworkRelocationSelfTest', JavaExec) {
     group = 'verification'
     description = 'Runs deterministic weapon network relocation checks.'
@@ -356,6 +363,7 @@ tasks.register('optionalCbcIsolationCheck') {
 tasks.named('check') {
     dependsOn tasks.named('kineticControllerSelfTest')
     dependsOn tasks.named('tPitchPlacementSelfTest')
+    dependsOn tasks.named('controllerCollisionSelfTest')
     dependsOn tasks.named('targetingSolverSelfTest')
     dependsOn tasks.named('weaponNetworkRelocationSelfTest')
 }

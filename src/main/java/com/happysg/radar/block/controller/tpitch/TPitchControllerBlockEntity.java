@@ -119,6 +119,24 @@ public class TPitchControllerBlockEntity
     }
 
     @Override
+    public List<CannonMountContext> resolveCollisionCbcMounts() {
+        TPitchControllerBlock.Orientation orientation = orientation();
+        if (orientation == null || level == null
+                || !Mods.CREATEBIGCANNONS.isLoaded()) {
+            return List.of();
+        }
+        ensureAdjacentMountsCurrent(orientation.crossbarAxis());
+        return cachedAdjacentMounts.stream()
+                .filter(CannonMountContext::isCurrent)
+                .toList();
+    }
+
+    @Override
+    public List<BlockPos> resolveCollisionMountPositions() {
+        return resolveNetworkMountPositions();
+    }
+
+    @Override
     protected boolean isFiringControlMount(
             WeaponNetworkRuntime.WeaponGroupView view,
             CannonMountContext mount

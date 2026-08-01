@@ -66,7 +66,10 @@ public class BinocularHandler {
             if (pressWasValid) {
                 FirePacket.send(true);
                 RaycastPacket.send();
-                updateCooldown = 5;
+                // This block also runs through the held-key update below, so starting
+                // at 2 prevents a duplicate refresh on the initial press. The next
+                // client tick refreshes normally.
+                updateCooldown = 2;
             }
         }
 
@@ -76,7 +79,7 @@ public class BinocularHandler {
                 FirePacket.send(true);
                 RaycastPacket.send();
 
-                updateCooldown = 2;
+                updateCooldown = 1;
             }
         }
 

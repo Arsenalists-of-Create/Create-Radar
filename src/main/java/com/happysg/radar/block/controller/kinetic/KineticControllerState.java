@@ -72,6 +72,7 @@ public final class KineticControllerState {
     private boolean continuousTracking;
 
     private boolean syncRequested;
+    private ControllerAngleDelta controllerAngleDelta = ControllerAngleDelta.SHORTEST;
 
     public KineticControllerState(CannonAxis axis) {
         this.axis = axis;
@@ -84,8 +85,22 @@ public final class KineticControllerState {
                         double toleranceDegrees,
                         double availableInputRpm,
                         DoubleConsumer commandGenerator) {
+        return tick(controller, resolution, running, controllerTargetDegrees,
+                toleranceDegrees, availableInputRpm,
+                ControllerAngleDelta.SHORTEST, commandGenerator);
+    }
+
+    public boolean tick(KineticBlockEntity controller,
+                        KineticMountAdapterResolution resolution,
+                        boolean running,
+                        double controllerTargetDegrees,
+                        double toleranceDegrees,
+                        double availableInputRpm,
+                        ControllerAngleDelta angleDelta,
+                        DoubleConsumer commandGenerator) {
         return tick(controller.getBlockPos(), resolution, running, controllerTargetDegrees,
-                toleranceDegrees, availableInputRpm, !controller.hasSource(), commandGenerator);
+                toleranceDegrees, availableInputRpm, !controller.hasSource(),
+                angleDelta, commandGenerator);
     }
 
     boolean tick(BlockPos controllerPos,
@@ -96,6 +111,22 @@ public final class KineticControllerState {
                  double availableInputRpm,
                  boolean generatorIsolated,
                  DoubleConsumer commandGenerator) {
+        return tick(controllerPos, resolution, running, controllerTargetDegrees,
+                toleranceDegrees, availableInputRpm, generatorIsolated,
+                ControllerAngleDelta.SHORTEST, commandGenerator);
+    }
+
+    boolean tick(BlockPos controllerPos,
+                 KineticMountAdapterResolution resolution,
+                 boolean running,
+                 double controllerTargetDegrees,
+                 double toleranceDegrees,
+                 double availableInputRpm,
+                 boolean generatorIsolated,
+                 ControllerAngleDelta angleDelta,
+                 DoubleConsumer commandGenerator) {
+        controllerAngleDelta = angleDelta == null
+                ? ControllerAngleDelta.SHORTEST : angleDelta;
         double tolerance = Math.max(0.0, toleranceDegrees);
         onTargetChanged(running, controllerTargetDegrees, tolerance);
 
@@ -210,7 +241,8 @@ public final class KineticControllerState {
             return true;
         }
         desiredBearingTarget = frame.bearingTargetFor(observedTarget);
-        remainingDegrees = KineticAngleMath.shortestDelta(bearingTarget, desiredBearingTarget);
+        remainingDegrees = plannedBearingDelta(
+                bearingTarget, desiredBearingTarget);
 
         observeDriveSign(bearingTarget, tolerance);
         lastBearingAngle = bearingTarget;
@@ -520,7 +552,7 @@ public final class KineticControllerState {
                                double remaining, double maximumRpm) {
         watchdogActive = true;
         watchdogInitialError = Math.max(Math.abs(remaining),
-                Math.abs(KineticAngleMath.shortestDelta(physicalAngle, destination)));
+                Math.abs(plannedBearingDelta(physicalAngle, destination)));
         watchdogDestinationTravel = 0.0;
         watchdogBearingTravel = 0.0;
         watchdogPhysicalTravel = 0.0;
@@ -529,7 +561,7 @@ public final class KineticControllerState {
         watchdogLastDestination = destination;
         watchdogMaxStep = adapter.effectiveDegreesPerTick(maximumRpm);
         watchdogTicks = 0;
-        watchdogLastError = Math.abs(KineticAngleMath.shortestDelta(
+        watchdogLastError = Math.abs(plannedBearingDelta(
                 bearingAngle, destination));
         watchdogStallTicks = 0;
     }
@@ -541,11 +573,11 @@ public final class KineticControllerState {
         }
         double bearingStep = KineticAngleMath.shortestDelta(
                 watchdogLastBearing, bearingAngle);
-        double destinationStep = KineticAngleMath.shortestDelta(
+        double destinationStep = plannedBearingDelta(
                 watchdogLastDestination, destination);
         double physicalStep = KineticAngleMath.shortestDelta(
                 watchdogLastPhysical, physicalAngle);
-        double priorRemaining = KineticAngleMath.shortestDelta(
+        double priorRemaining = plannedBearingDelta(
                 watchdogLastBearing, watchdogLastDestination);
         watchdogBearingTravel += Math.abs(bearingStep);
         watchdogDestinationTravel += Math.abs(destinationStep);
@@ -561,7 +593,7 @@ public final class KineticControllerState {
                 && watchdogPhysicalTravel <= allowance + 1.0e-6;
         if (continuousTracking) {
             double progressThreshold = Math.max(1.0e-4, tolerance * 0.05);
-            double currentError = Math.abs(KineticAngleMath.shortestDelta(
+            double currentError = Math.abs(plannedBearingDelta(
                     bearingAngle, destination));
             boolean movedTowardPriorTarget = Math.abs(bearingStep) > progressThreshold
                     && Math.signum(bearingStep) == Math.signum(priorRemaining);
@@ -579,6 +611,22 @@ public final class KineticControllerState {
         int duration = watchdogMaxStep <= SPEED_EPSILON ? WATCHDOG_GRACE_TICKS
                 : (int) Math.ceil(allowance / watchdogMaxStep) + WATCHDOG_GRACE_TICKS;
         return withinTravelBound && watchdogTicks <= duration;
+    }
+
+    private double plannedBearingDelta(double currentBearingDegrees,
+                                       double destinationBearingDegrees) {
+        if (frame == null || !Double.isFinite(currentBearingDegrees)
+                || !Double.isFinite(destinationBearingDegrees)) {
+            return KineticAngleMath.shortestDelta(
+                    currentBearingDegrees, destinationBearingDegrees);
+        }
+        double currentController = frame.controllerTargetFor(
+                currentBearingDegrees);
+        double destinationController = frame.controllerTargetFor(
+                destinationBearingDegrees);
+        double controllerDelta = controllerAngleDelta.remainingDegrees(
+                currentController, destinationController);
+        return frame.conversionSign() * controllerDelta;
     }
 
     private void failClosed(DoubleConsumer commandGenerator, boolean blockUntilCommandChange) {

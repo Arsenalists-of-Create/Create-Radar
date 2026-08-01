@@ -3,11 +3,14 @@ package com.happysg.radar.block.controller.yaw;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.CannonMountPlacement;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
+import com.happysg.radar.block.controller.limits.ControllerLimitsScreen;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.Block;
@@ -15,6 +18,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 
@@ -28,6 +32,17 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
 
     public AutoYawControllerBlock(Properties properties) {
         super(properties);
+    }
+
+    @Override
+    protected InteractionResult useWithoutItem(
+            BlockState state, Level level, BlockPos pos,
+            Player player, BlockHitResult hit
+    ) {
+        if (level.isClientSide) {
+            Client.open(pos);
+        }
+        return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
     @Override
@@ -143,6 +158,14 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof AutoYawControllerBlockEntity yaw) {
             yaw.onRelevantNeighborChanged(fromPos);
+        }
+    }
+
+    @net.neoforged.api.distmarker.OnlyIn(net.neoforged.api.distmarker.Dist.CLIENT)
+    private static final class Client {
+        private static void open(BlockPos pos) {
+            net.minecraft.client.Minecraft.getInstance()
+                    .setScreen(new ControllerLimitsScreen(pos));
         }
     }
 }

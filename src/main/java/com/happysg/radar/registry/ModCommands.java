@@ -436,8 +436,7 @@ public class  ModCommands {
             min = Mth.clamp(min, -90, 90);
             max = Mth.clamp(max, -90, 90);
 
-            pitch.setMinAngleDeg(min);
-            pitch.setMaxAngleDeg(max);
+            pitch.setMovementLimits(min, max);
 
             be.setChanged();
             level.sendBlockUpdated(pos, be.getBlockState(), be.getBlockState(), 3);
@@ -464,8 +463,7 @@ public class  ModCommands {
             min = Mth.clamp(min, -180, 180);
             max = Mth.clamp(max, -180, 180);
 
-            yaw.setMinAngleDeg(min);
-            yaw.setMaxAngleDeg(max);
+            yaw.setMovementLimits(min, max);
 
             be.setChanged();
             level.sendBlockUpdated(pos, be.getBlockState(), be.getBlockState(), 3);
