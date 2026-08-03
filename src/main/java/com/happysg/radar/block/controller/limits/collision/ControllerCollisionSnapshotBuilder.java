@@ -54,8 +54,14 @@ public final class ControllerCollisionSnapshotBuilder {
         }
 
         CannonAxis axis = controller.getControlledAxis();
-        ControllerMovementLimits movementLimits =
-                controller.getMovementLimits();
+        if (!controller.hasAssembledControlledMount()) {
+            return ControllerCollisionSnapshot.error(
+                    ControllerCollisionSnapshot.Status.NO_MOUNT, axis);
+        }
+        ControllerMovementLimits supportedLimits =
+                controller.getSupportedMovementLimits();
+        ControllerMovementLimits movementLimits = controller
+                .getMovementLimits().constrainedTo(supportedLimits);
         List<CannonMountContext> mounts = collisionMounts(blockEntity);
         List<BlockPos> mountPositions = collisionMountPositions(blockEntity);
         Set<UUID> controlledSublevels = collisionSublevels(blockEntity);
@@ -65,11 +71,17 @@ public final class ControllerCollisionSnapshotBuilder {
         }
         ServerLevel rootLevel = player.serverLevel();
 
-        Vec3 origin = resolveOrigin(blockEntity, mounts,
+        Vec3 resolvedOrigin = resolveOrigin(blockEntity, mounts,
                 mountPositions);
-        Vec3 dialCenterWorld = resolveDialCenter(
-                axis, blockEntity, mounts, mountPositions, origin);
-        BlockEntity frameReference = !mounts.isEmpty()
+        Vec3 requestedOrigin = blockEntity
+                instanceof ControllerCollisionSource source
+                ? source.resolveCollisionViewOrigin() : null;
+        boolean hasRequestedOrigin = finite(requestedOrigin);
+        Vec3 origin = hasRequestedOrigin ? requestedOrigin : resolvedOrigin;
+        Vec3 dialCenterWorld = hasRequestedOrigin ? origin
+                : resolveDialCenter(axis, blockEntity, mounts,
+                mountPositions, origin);
+        BlockEntity frameReference = !hasRequestedOrigin && !mounts.isEmpty()
                 ? mounts.getFirst().blockEntity() : blockEntity;
         Vec3 parentUp = worldDirection(frameReference, new Vec3(0, 1, 0));
         Vec3 fallbackLook = horizontal(player.getLookAngle(), parentUp);
@@ -147,13 +159,14 @@ public final class ControllerCollisionSnapshotBuilder {
                 controlledContraptions, frame, halfSpan, depth,
                 result, budget);
 
-        ControllerCollisionSnapshot.Status status = mountPositions.isEmpty()
-                && mounts.isEmpty()
+        ControllerCollisionSnapshot.Status status = !hasRequestedOrigin
+                && mountPositions.isEmpty() && mounts.isEmpty()
                 ? ControllerCollisionSnapshot.Status.NO_MOUNT
                 : ControllerCollisionSnapshot.Status.OK;
         return new ControllerCollisionSnapshot(status, axis, halfSpan,
                 depth, (float) dialCenter.x, (float) dialCenter.y,
-                dialZeroDegrees, movementLimits.minDegrees(),
+                dialZeroDegrees, supportedLimits.minDegrees(),
+                supportedLimits.maxDegrees(), movementLimits.minDegrees(),
                 movementLimits.maxDegrees(), spanClipped, budget.truncated,
                 trimToLimit(result, limits.maxBoxes));
     }
@@ -298,14 +311,14 @@ public final class ControllerCollisionSnapshotBuilder {
             List<CannonMountContext> mounts, List<CannonData> cannons,
             Vec3 fallback
     ) {
-        if (axis != CannonAxis.YAW) {
-            return fallback;
-        }
         if (controller instanceof ControllerCollisionSource source) {
             Vec3 structural = source.resolveCollisionNeutralForward();
             if (structural != null && structural.lengthSqr() >= EPSILON) {
                 return structural;
             }
+        }
+        if (axis != CannonAxis.YAW) {
+            return fallback;
         }
         if (!cannons.isEmpty()) {
             CannonData cannon = cannons.getFirst();
@@ -325,7 +338,12 @@ public final class ControllerCollisionSnapshotBuilder {
         return fallback;
     }
 
-    private static float dialZeroDegrees(
+    private static boolean finite(Vec3 value) {
+        return value != null && Double.isFinite(value.x)
+                && Double.isFinite(value.y) && Double.isFinite(value.z);
+    }
+
+    static float dialZeroDegrees(
             CannonAxis axis, ControllerCollisionViewFrame frame,
             Vec3 neutralForward
     ) {

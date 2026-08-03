@@ -398,32 +398,38 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     private double getInitialOrientationTargetAngle() {
+        KineticMountAdapterResolution kinetic = resolveKineticMount();
+        if (kinetic.hasAdapter()) {
+            return getLimitNeutralAngleDeg();
+        }
+
         Mount mount = resolveMount();
         if (mount == null) {
             return 0.0;
         }
-
         if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()
                 && mount.cbc.getContraption() != null
-                && mount.cbc.getContraption().getContraption() instanceof AbstractMountedCannonContraption cannon) {
+                && mount.cbc.getContraption().getContraption()
+                instanceof AbstractMountedCannonContraption cannon) {
             Direction initial = cannon.initialOrientation();
             if (initial != null && initial.getAxis().isHorizontal()) {
                 return controllerYawForCardinalDirection(initial);
             }
         }
-
         if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
             physHandler.maybeUpdateYawZeroFromCannonInitialOrientation();
         }
-
         return 0.0;
     }
 
     public double getLimitNeutralAngleDeg() {
         KineticMountAdapterResolution kinetic = resolveKineticMount();
-        if (kinetic.hasAdapter() && kinetic.adapter() != null
-                && kinetic.adapter().frameIdentity() != null) {
-            return kinetic.adapter().frameIdentity().controllerNeutralDegrees();
+        if (kinetic.hasAdapter()) {
+            KineticMountAdapter adapter = kinetic.adapter();
+            KineticMountFrame identity = adapter == null
+                    ? null : adapter.frameIdentity();
+            return identity == null ? 0.0
+                    : identity.controllerNeutralDegrees();
         }
 
         Mount mount = resolveMount();
@@ -706,10 +712,34 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     @Override
+    public Vec3 resolveCollisionViewOrigin() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
+                || level == null) {
+            return null;
+        }
+        return PhysicsHandler.getWorldVec(level,
+                worldPosition.relative(adapter.relativeDirection())
+                        .getCenter());
+    }
+
+    @Override
     public Vec3 resolveCollisionNeutralForward() {
-        KineticAimFrame frame = getStructuralAimFrame();
-        return frame == null ? null
-                : frame.worldDirection(getLimitNeutralAngleDeg(), 0.0);
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null
+                || !adapter.isValid()) {
+            return null;
+        }
+        KineticAimFrame aim = adapter.aimFrame();
+        if (aim == null) {
+            return null;
+        }
+        KineticMountFrame identity = adapter.frameIdentity();
+        double neutral = identity == null ? 0.0
+                : identity.controllerNeutralDegrees();
+        return aim.worldDirection(neutral, 0.0);
     }
 
     private static boolean sameMount(@Nullable Mount first, @Nullable Mount second) {
@@ -944,6 +974,23 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     public ControllerMovementLimits getMovementLimits() {
         return new ControllerMovementLimits(
                 CannonAxis.YAW, minAngleDeg, maxAngleDeg);
+    }
+
+    @Override
+    public boolean hasAssembledControlledMount() {
+        KineticMountAdapterResolution kinetic = resolveKineticMount();
+        if (kinetic.isStructuralSelection()) {
+            KineticMountAdapter adapter = kinetic.adapter();
+            return kinetic.hasAdapter() && adapter != null
+                    && adapter.isValid() && adapter.isAssembled();
+        }
+        if (resolveCollisionCbcMounts().stream()
+                .anyMatch(CannonMountContext::hasAssembledCannon)) {
+            return true;
+        }
+        Mount mount = resolveMount();
+        return mount != null && mount.kind == MountKind.PHYS
+                && mount.phys != null && mount.phys.isRunning();
     }
 
     @Override

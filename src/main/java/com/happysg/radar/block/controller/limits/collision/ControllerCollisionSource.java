@@ -24,6 +24,11 @@ public interface ControllerCollisionSource {
         return null;
     }
 
+    /** Preferred projection and dial center in root-world space. */
+    default @Nullable Vec3 resolveCollisionViewOrigin() {
+        return null;
+    }
+
     /** Fixed controller-neutral forward direction in root-world space. */
     default @Nullable Vec3 resolveCollisionNeutralForward() {
         return null;

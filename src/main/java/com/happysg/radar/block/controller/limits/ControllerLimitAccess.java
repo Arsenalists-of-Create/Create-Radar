@@ -8,6 +8,13 @@ public interface ControllerLimitAccess {
 
     ControllerMovementLimits getMovementLimits();
 
+    default ControllerMovementLimits getSupportedMovementLimits() {
+        return ControllerMovementLimits.defaults(getControlledAxis());
+    }
+
+    default boolean hasAssembledControlledMount() {
+        return false;
+    }
 
     boolean setMovementLimits(double minDegrees, double maxDegrees);
 

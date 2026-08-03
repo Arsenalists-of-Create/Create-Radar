@@ -3,7 +3,7 @@ package com.happysg.radar.block.controller.yaw;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.CannonMountPlacement;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
-import com.happysg.radar.block.controller.limits.ControllerLimitsScreen;
+import com.happysg.radar.networking.packets.OpenControllerLimitsScreenPacket;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.simibubi.create.foundation.block.IBE;
@@ -39,8 +39,9 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
             BlockState state, Level level, BlockPos pos,
             Player player, BlockHitResult hit
     ) {
-        if (level.isClientSide) {
-            Client.open(pos);
+        if (!level.isClientSide) {
+            OpenControllerLimitsScreenPacket.openIfAssembled(
+                    level, pos, player);
         }
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
@@ -161,11 +162,4 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
         }
     }
 
-    @net.neoforged.api.distmarker.OnlyIn(net.neoforged.api.distmarker.Dist.CLIENT)
-    private static final class Client {
-        private static void open(BlockPos pos) {
-            net.minecraft.client.Minecraft.getInstance()
-                    .setScreen(new ControllerLimitsScreen(pos));
-        }
-    }
 }

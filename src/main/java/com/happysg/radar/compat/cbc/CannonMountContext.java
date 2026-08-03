@@ -132,6 +132,28 @@ public final class CannonMountContext {
         return CBCMWMountCompat.getContraption(blockEntity);
     }
 
+    public boolean hasAssembledCannon() {
+        PitchOrientedContraptionEntity entity = getContraption();
+        return entity != null && entity.isAlive()
+                && entity.getContraption()
+                instanceof AbstractMountedCannonContraption;
+    }
+
+    @Nullable
+    public PitchLimits pitchLimits() {
+        PitchOrientedContraptionEntity entity = getContraption();
+        if (entity == null || !entity.isAlive()
+                || !(entity.getContraption()
+                instanceof AbstractMountedCannonContraption cannon)) {
+            return null;
+        }
+        double minimum = -cannon.maximumDepression(controller());
+        double maximum = cannon.maximumElevation(controller());
+        return Double.isFinite(minimum) && Double.isFinite(maximum)
+                && minimum <= maximum
+                ? new PitchLimits(minimum, maximum) : null;
+    }
+
     /**
      * Returns the assembled cannon's neutral horizontal facing. This is the
      * common zero-point needed by external structural yaw actuators.
@@ -220,5 +242,8 @@ public final class CannonMountContext {
 
     public boolean isCompact() {
         return kind == Kind.CBCMW_COMPACT;
+    }
+
+    public record PitchLimits(double minDegrees, double maxDegrees) {
     }
 }

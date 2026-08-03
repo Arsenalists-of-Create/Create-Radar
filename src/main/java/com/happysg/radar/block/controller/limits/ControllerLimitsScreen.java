@@ -53,6 +53,8 @@ public class ControllerLimitsScreen extends Screen {
     private double dialCenterU;
     private double dialCenterV;
     private double dialZeroDegrees;
+    private double supportedMinDegrees = -90.0;
+    private double supportedMaxDegrees = 90.0;
     private double savedMinDegrees = -90.0;
     private double savedMaxDegrees = 90.0;
     private double draftMinDegrees = -90.0;
@@ -116,14 +118,18 @@ public class ControllerLimitsScreen extends Screen {
         if (!controllerPos.equals(position) || sessionNonce != nonce) {
             return;
         }
+        if (snapshot.status() == ControllerCollisionSnapshot.Status.NO_MOUNT) {
+            onClose();
+            return;
+        }
         collisionSnapshot = snapshot;
         dialAxis = snapshot.axis();
         dialCenterU = snapshot.dialCenterU();
         dialCenterV = snapshot.dialCenterV();
         dialZeroDegrees = snapshot.dialZeroDegrees();
-        dialReady = snapshot.status() == ControllerCollisionSnapshot.Status.OK
-                || snapshot.status()
-                == ControllerCollisionSnapshot.Status.NO_MOUNT;
+        supportedMinDegrees = snapshot.supportedMinDegrees();
+        supportedMaxDegrees = snapshot.supportedMaxDegrees();
+        dialReady = snapshot.status() == ControllerCollisionSnapshot.Status.OK;
         if (!limitsDirty && draggedHandle == null) {
             savedMinDegrees = snapshot.minDegrees();
             savedMaxDegrees = snapshot.maxDegrees();
@@ -519,7 +525,9 @@ public class ControllerLimitsScreen extends Screen {
     private void applyDraftLimits() {
         if (!dialReady || !limitsDirty
                 || ControllerMovementLimits.validated(dialAxis,
-                draftMinDegrees, draftMaxDegrees).isEmpty()) {
+                draftMinDegrees, draftMaxDegrees).isEmpty()
+                || draftMinDegrees < supportedMinDegrees
+                || draftMaxDegrees > supportedMaxDegrees) {
             return;
         }
         submitLimits(draftMinDegrees, draftMaxDegrees);
@@ -649,7 +657,8 @@ public class ControllerLimitsScreen extends Screen {
         double value = ControllerLimitDialMath.draggedValue(dialAxis,
                 draggedHandle, mouseX - layout.centerX(),
                 mouseY - layout.centerY(), dialZeroDegrees, current,
-                draftMinDegrees, draftMaxDegrees);
+                draftMinDegrees, draftMaxDegrees,
+                supportedMinDegrees, supportedMaxDegrees);
         if (draggedHandle == ControllerLimitDialMath.Handle.LOWER) {
             draftMinDegrees = value;
         } else {

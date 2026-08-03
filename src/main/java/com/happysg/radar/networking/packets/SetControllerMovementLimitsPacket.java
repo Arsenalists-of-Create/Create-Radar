@@ -2,13 +2,13 @@ package com.happysg.radar.networking.packets;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.controller.limits.ControllerLimitAccess;
+import com.happysg.radar.compat.vs2.SableUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
@@ -56,14 +56,16 @@ public record SetControllerMovementLimitsPacket(
             }
 
             BlockPos pos = packet.controllerPos();
-            if (!player.level().hasChunkAt(pos)
-                    || player.distanceToSqr(Vec3.atCenterOf(pos))
-                    > MAX_INTERACTION_DISTANCE_SQR) {
+            if (!player.level().hasChunkAt(pos)) {
                 return;
             }
 
             if (player.level().getBlockEntity(pos)
-                    instanceof ControllerLimitAccess controller) {
+                    instanceof ControllerLimitAccess controller
+                    && controller instanceof net.minecraft.world.level.block.entity.BlockEntity blockEntity
+                    && controller.hasAssembledControlledMount()
+                    && player.distanceToSqr(SableUtils.getWorldVec(blockEntity))
+                    <= MAX_INTERACTION_DISTANCE_SQR) {
                 controller.setMovementLimits(
                         packet.minDegrees(), packet.maxDegrees());
             }

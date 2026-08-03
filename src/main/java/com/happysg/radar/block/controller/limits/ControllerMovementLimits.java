@@ -37,6 +37,21 @@ public record ControllerMovementLimits(CannonAxis axis, double minDegrees,
                 && maxDegrees >= 180.0 - EPSILON;
     }
 
+    public ControllerMovementLimits constrainedTo(
+            ControllerMovementLimits supported
+    ) {
+        if (supported == null || supported.axis != axis) {
+            return this;
+        }
+        double constrainedMin = clamp(minDegrees,
+                supported.minDegrees, supported.maxDegrees);
+        double constrainedMax = clamp(maxDegrees,
+                supported.minDegrees, supported.maxDegrees);
+        return new ControllerMovementLimits(axis,
+                canonicalZero(constrainedMin),
+                canonicalZero(constrainedMax));
+    }
+
     public boolean allowsControllerTarget(double controllerTargetDegrees,
                                           double neutralControllerDegrees) {
         if (!Double.isFinite(controllerTargetDegrees)

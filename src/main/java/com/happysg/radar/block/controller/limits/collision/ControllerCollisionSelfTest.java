@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.limits.collision;
 
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.limits.ControllerLimitDialMath;
+import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -19,8 +20,11 @@ public final class ControllerCollisionSelfTest {
     public static void main(String[] args) {
         testPitchMirrorsWithPlayerSide();
         testYawUsesCannonForwardAsScreenTop();
+        testSwivelBearingOriginCentersView();
+        testLogicalHomeRayRotatesInsideYawView();
         testLimitDialDirections();
         testLimitDialSnappingAndCrossing();
+        testMovementLimitsConstrainToMountCapability();
         testYawLimitDialKeepsSignedEndpoints();
         testDepthRangeStartsOnViewerSide();
         testSteppedBlockCollapsesToOneEnvelope();
@@ -150,6 +154,27 @@ public final class ControllerCollisionSelfTest {
                 "Yaw depth must progress downward from the top view");
     }
 
+    private static void testSwivelBearingOriginCentersView() {
+        Vec3 bearingCenter = new Vec3(13.5, 42.5, -7.5);
+        ControllerCollisionViewFrame frame =
+                ControllerCollisionViewFrame.yaw(bearingCenter,
+                        new Vec3(0, 1, 0), new Vec3(0, 0, 1))
+                        .withCenteredDepthRange(5.0);
+        Vec3 projected = frame.pointToView(bearingCenter);
+        require(close(projected.x, 0.0) && close(projected.y, 0.0),
+                "A swivel-centered snapshot must place the bearing at the dial center");
+    }
+
+    private static void testLogicalHomeRayRotatesInsideYawView() {
+        ControllerCollisionViewFrame frame =
+                ControllerCollisionViewFrame.yaw(Vec3.ZERO,
+                        new Vec3(0, 1, 0), new Vec3(-1, 0, 0));
+        float dialZero = ControllerCollisionSnapshotBuilder.dialZeroDegrees(
+                CannonAxis.YAW, frame, new Vec3(0, 0, 1));
+        require(close(dialZero, -90.0),
+                "Yaw dial zero must point to logical home while the current barrel remains screen-up");
+    }
+
     private static void testLimitDialDirections() {
         ControllerLimitDialMath.Point pitchZero =
                 ControllerLimitDialMath.direction(
@@ -197,30 +222,52 @@ public final class ControllerCollisionSelfTest {
                 "Dial values must snap to tenths of a degree");
         double lower = ControllerLimitDialMath.draggedValue(
                 CannonAxis.PITCH, ControllerLimitDialMath.Handle.LOWER,
-                -1.0, -1.0, 0.0, -20.0, -20.0, 20.0);
+                -1.0, -1.0, 0.0, -20.0, -20.0, 20.0,
+                -90.0, 90.0);
         double upper = ControllerLimitDialMath.draggedValue(
                 CannonAxis.PITCH, ControllerLimitDialMath.Handle.UPPER,
-                -1.0, 1.0, 0.0, 20.0, -20.0, 20.0);
+                -1.0, 1.0, 0.0, 20.0, -20.0, 20.0,
+                -90.0, 90.0);
         double leftFacing = ControllerLimitDialMath.draggedValue(
                 CannonAxis.PITCH, ControllerLimitDialMath.Handle.UPPER,
-                -1.0, -1.0, 180.0, 20.0, -20.0, 90.0);
+                -1.0, -1.0, 180.0, 20.0, -20.0, 90.0,
+                -90.0, 90.0);
+        double cannonCapped = ControllerLimitDialMath.draggedValue(
+                CannonAxis.PITCH, ControllerLimitDialMath.Handle.UPPER,
+                0.0, -1.0, 0.0, 20.0, -20.0, 20.0,
+                -30.0, 60.0);
         require(close(lower, 20.0),
                 "Lower limit must stop at the upper arm");
         require(close(upper, -20.0),
                 "Upper limit must stop at the lower arm");
         require(close(leftFacing, 45.0),
                 "Dragging a left-facing arm upward must produce positive pitch");
+        require(close(cannonCapped, 60.0),
+                "Pitch arms must stop at the cannon's supported elevation");
     }
 
     private static void testYawLimitDialKeepsSignedEndpoints() {
         double negative = ControllerLimitDialMath.draggedValue(
                 CannonAxis.YAW, ControllerLimitDialMath.Handle.LOWER,
-                0.0, 1.0, 0.0, -180.0, -180.0, 100.0);
+                0.0, 1.0, 0.0, -180.0, -180.0, 100.0,
+                -180.0, 180.0);
         double positive = ControllerLimitDialMath.draggedValue(
                 CannonAxis.YAW, ControllerLimitDialMath.Handle.UPPER,
-                0.0, 1.0, 0.0, 180.0, -100.0, 180.0);
+                0.0, 1.0, 0.0, 180.0, -100.0, 180.0,
+                -180.0, 180.0);
         require(close(negative, -180.0) && close(positive, 180.0),
                 "Coincident yaw endpoints must retain their signed side");
+    }
+
+    private static void testMovementLimitsConstrainToMountCapability() {
+        ControllerMovementLimits requested = new ControllerMovementLimits(
+                CannonAxis.PITCH, -90.0, 90.0);
+        ControllerMovementLimits cannon = new ControllerMovementLimits(
+                CannonAxis.PITCH, -30.0, 60.0);
+        ControllerMovementLimits constrained = requested.constrainedTo(cannon);
+        require(close(constrained.minDegrees(), -30.0)
+                        && close(constrained.maxDegrees(), 60.0),
+                "Controller limits must intersect the mount's physical range");
     }
 
     private static void testDepthRangeStartsOnViewerSide() {
@@ -454,6 +501,7 @@ public final class ControllerCollisionSelfTest {
         return new ControllerCollisionSnapshot(
                 ControllerCollisionSnapshot.Status.OK, CannonAxis.PITCH,
                 5.0f, 5.0f, 0.0f, 0.0f, 0.0f, -90.0, 90.0,
+                -90.0, 90.0,
                 false, false, boxes);
     }
 

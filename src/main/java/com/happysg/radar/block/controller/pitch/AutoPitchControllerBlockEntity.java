@@ -830,6 +830,44 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         return getStructuralPhysicalWorldDirection();
     }
 
+    @Override
+    public Vec3 resolveCollisionViewOrigin() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
+                || level == null) {
+            return null;
+        }
+        return PhysicsHandler.getWorldVec(level,
+                worldPosition.relative(adapter.relativeDirection())
+                        .getCenter());
+    }
+
+    @Override
+    public Vec3 resolveCollisionNeutralForward() {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        if (!resolution.hasAdapter() || adapter == null
+                || !adapter.isValid()) {
+            return null;
+        }
+        KineticAimFrame aim = adapter.aimFrame();
+        if (aim == null) {
+            return null;
+        }
+        KineticMountFrame identity = adapter.frameIdentity();
+        Direction initial = identity == null
+                ? Direction.SOUTH : identity.cannonInitialOrientation();
+        double yaw = switch (initial == null ? Direction.SOUTH : initial) {
+            case SOUTH -> 0.0;
+            case WEST -> 90.0;
+            case NORTH -> 180.0;
+            case EAST -> 270.0;
+            default -> 0.0;
+        };
+        return aim.worldDirection(yaw, 0.0);
+    }
+
     protected boolean supportsPhysBearingMounts() {
         return true;
     }
@@ -1150,11 +1188,11 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public double getMinAngleDeg() {
-        return minAngleDeg;
+        return getMovementLimits().minDegrees();
     }
 
     public double getMaxAngleDeg() {
-        return maxAngleDeg;
+        return getMovementLimits().maxDegrees();
     }
 
     @Override
@@ -1164,8 +1202,54 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     @Override
     public ControllerMovementLimits getMovementLimits() {
-        return new ControllerMovementLimits(
-                CannonAxis.PITCH, minAngleDeg, maxAngleDeg);
+        return new ControllerMovementLimits(CannonAxis.PITCH,
+                minAngleDeg, maxAngleDeg)
+                .constrainedTo(getSupportedMovementLimits());
+    }
+
+    @Override
+    public ControllerMovementLimits getSupportedMovementLimits() {
+        ControllerMovementLimits defaults =
+                ControllerMovementLimits.defaults(CannonAxis.PITCH);
+        KineticMountAdapterResolution kinetic = resolveKineticMount();
+        if (kinetic.isStructuralSelection()) {
+            return defaults;
+        }
+
+        double minimum = defaults.minDegrees();
+        double maximum = defaults.maxDegrees();
+        boolean foundCannonLimits = false;
+        for (CannonMountContext mount : resolveControlledCbcMounts()) {
+            CannonMountContext.PitchLimits limits = mount.pitchLimits();
+            if (limits == null) {
+                continue;
+            }
+            foundCannonLimits = true;
+            minimum = Math.max(minimum, limits.minDegrees());
+            maximum = Math.min(maximum, limits.maxDegrees());
+        }
+        if (!foundCannonLimits) {
+            return defaults;
+        }
+        return ControllerMovementLimits.validated(
+                CannonAxis.PITCH, minimum, maximum).orElse(defaults);
+    }
+
+    @Override
+    public boolean hasAssembledControlledMount() {
+        KineticMountAdapterResolution kinetic = resolveKineticMount();
+        if (kinetic.isStructuralSelection()) {
+            KineticMountAdapter adapter = kinetic.adapter();
+            return kinetic.hasAdapter() && adapter != null
+                    && adapter.isValid() && adapter.isAssembled();
+        }
+        if (resolveControlledCbcMounts().stream()
+                .anyMatch(CannonMountContext::hasAssembledCannon)) {
+            return true;
+        }
+        Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
+        return mount != null && mount.kind == MountKind.PHYS
+                && mount.phys != null && mount.phys.isRunning();
     }
 
     @Override
@@ -1181,6 +1265,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return false;
         }
         ControllerMovementLimits limits = validated.get();
+        limits = limits.constrainedTo(getSupportedMovementLimits());
         minAngleDeg = limits.minDegrees();
         maxAngleDeg = limits.maxDegrees();
         applyTargetRequest(requestedTargetAngle, isRunning, true);

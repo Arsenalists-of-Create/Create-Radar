@@ -38,6 +38,8 @@ public record ControllerCollisionSnapshotPacket(
         buffer.writeFloat(snapshot.dialCenterU());
         buffer.writeFloat(snapshot.dialCenterV());
         buffer.writeFloat(snapshot.dialZeroDegrees());
+        buffer.writeDouble(snapshot.supportedMinDegrees());
+        buffer.writeDouble(snapshot.supportedMaxDegrees());
         buffer.writeDouble(snapshot.minDegrees());
         buffer.writeDouble(snapshot.maxDegrees());
         buffer.writeBoolean(snapshot.spanClipped());
@@ -73,6 +75,8 @@ public record ControllerCollisionSnapshotPacket(
         float dialCenterU = buffer.readFloat();
         float dialCenterV = buffer.readFloat();
         float dialZeroDegrees = buffer.readFloat();
+        double supportedMinDegrees = buffer.readDouble();
+        double supportedMaxDegrees = buffer.readDouble();
         double minDegrees = buffer.readDouble();
         double maxDegrees = buffer.readDouble();
         boolean spanClipped = buffer.readBoolean();
@@ -111,6 +115,7 @@ public record ControllerCollisionSnapshotPacket(
         return new ControllerCollisionSnapshotPacket(position, nonce,
                 new ControllerCollisionSnapshot(status, axis, halfSpan,
                         depth, dialCenterU, dialCenterV, dialZeroDegrees,
+                        supportedMinDegrees, supportedMaxDegrees,
                         minDegrees, maxDegrees,
                         spanClipped, scanTruncated, boxes));
     }

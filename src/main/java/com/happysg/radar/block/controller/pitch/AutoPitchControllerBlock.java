@@ -4,7 +4,7 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.CannonMountPlacement;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
-import com.happysg.radar.block.controller.limits.ControllerLimitsScreen;
+import com.happysg.radar.networking.packets.OpenControllerLimitsScreenPacket;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
@@ -45,8 +45,9 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
             @NotNull BlockPos pos, @NotNull Player player,
             @NotNull BlockHitResult hit
     ) {
-        if (level.isClientSide) {
-            Client.open(pos);
+        if (!level.isClientSide) {
+            OpenControllerLimitsScreenPacket.openIfAssembled(
+                    level, pos, player);
         }
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
@@ -160,11 +161,4 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
         }
     }
 
-    @net.neoforged.api.distmarker.OnlyIn(net.neoforged.api.distmarker.Dist.CLIENT)
-    private static final class Client {
-        private static void open(BlockPos pos) {
-            net.minecraft.client.Minecraft.getInstance()
-                    .setScreen(new ControllerLimitsScreen(pos));
-        }
-    }
 }

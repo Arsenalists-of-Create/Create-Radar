@@ -65,6 +65,11 @@ public final class NetworkHandler {
                 ControllerCollisionSnapshotPacket.STREAM_CODEC,
                 ControllerCollisionSnapshotPacket::handle
         );
+        registrar.playToClient(
+                OpenControllerLimitsScreenPacket.TYPE,
+                OpenControllerLimitsScreenPacket.STREAM_CODEC,
+                OpenControllerLimitsScreenPacket::handle
+        );
         registrar.playToServer(
                 IDRecordPacket.TYPE,
                 IDRecordPacket.STREAM_CODEC,

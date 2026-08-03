@@ -7,6 +7,7 @@ import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
+import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.compat.cbc.CannonMountContext;
@@ -60,6 +61,7 @@ public class  ModCommands {
     private static final Logger LOGGER = LogUtils.getLogger();
     static String DIR_NAME = "create_radar_debug";
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+        PonderStructureCommand.register(dispatcher);
         dispatcher.register(
                 Commands.literal("radar")
                         .then(Commands.literal("debug")
@@ -437,6 +439,9 @@ public class  ModCommands {
             max = Mth.clamp(max, -90, 90);
 
             pitch.setMovementLimits(min, max);
+            ControllerMovementLimits applied = pitch.getMovementLimits();
+            min = applied.minDegrees();
+            max = applied.maxDegrees();
 
             be.setChanged();
             level.sendBlockUpdated(pos, be.getBlockState(), be.getBlockState(), 3);
@@ -445,7 +450,7 @@ public class  ModCommands {
                 double finalMax = max;
                 double finalMin1 = min;
                 source.sendSuccess(
-                        () -> Component.literal("Values clamped to pitch range [-90, 90] now [" + finalMin1 + ", " + finalMax + "]"),
+                        () -> Component.literal("Values clamped to the mounted cannon range; now [" + finalMin1 + ", " + finalMax + "]"),
                         false
                 );
             }else {

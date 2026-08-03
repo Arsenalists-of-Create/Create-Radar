@@ -18,6 +18,8 @@ public record ControllerCollisionSnapshot(
         float dialCenterU,
         float dialCenterV,
         float dialZeroDegrees,
+        double supportedMinDegrees,
+        double supportedMaxDegrees,
         double minDegrees,
         double maxDegrees,
         boolean spanClipped,
@@ -33,8 +35,12 @@ public record ControllerCollisionSnapshot(
         if (!Float.isFinite(dialCenterU)
                 || !Float.isFinite(dialCenterV)
                 || !Float.isFinite(dialZeroDegrees)
+                || ControllerMovementLimits.validated(axis,
+                supportedMinDegrees, supportedMaxDegrees).isEmpty()
                 || ControllerMovementLimits.validated(
-                axis, minDegrees, maxDegrees).isEmpty()) {
+                axis, minDegrees, maxDegrees).isEmpty()
+                || minDegrees < supportedMinDegrees
+                || maxDegrees > supportedMaxDegrees) {
             throw new IllegalArgumentException(
                     "Invalid controller dial limits");
         }
@@ -52,6 +58,7 @@ public record ControllerCollisionSnapshot(
         return new ControllerCollisionSnapshot(status, axis,
                 DEFAULT_HALF_SPAN, DEFAULT_DEPTH,
                 0.0f, 0.0f, 0.0f,
+                limits.minDegrees(), limits.maxDegrees(),
                 limits.minDegrees(), limits.maxDegrees(),
                 false, false, List.of());
     }

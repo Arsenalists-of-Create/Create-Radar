@@ -29,7 +29,8 @@ public final class ControllerLimitDialMath {
             CannonAxis axis, Handle handle,
             double pointerX, double pointerY,
             double dialZeroDegrees, double currentValue,
-            double currentMin, double currentMax
+            double currentMin, double currentMax,
+            double supportedMin, double supportedMax
     ) {
         if (axis == null || handle == null
                 || !Double.isFinite(pointerX)
@@ -51,8 +52,10 @@ public final class ControllerLimitDialMath {
             raw = unwrapNear(wrapped, currentValue);
         }
 
-        double lower = axis == CannonAxis.PITCH ? -90.0 : -180.0;
-        double upper = axis == CannonAxis.PITCH ? 90.0 : 180.0;
+        double axisLower = axis == CannonAxis.PITCH ? -90.0 : -180.0;
+        double axisUpper = axis == CannonAxis.PITCH ? 90.0 : 180.0;
+        double lower = clamp(supportedMin, axisLower, axisUpper);
+        double upper = clamp(supportedMax, lower, axisUpper);
         double candidate = snapTenth(clamp(raw, lower, upper));
         candidate = handle == Handle.LOWER
                 ? Math.min(candidate, currentMax)
