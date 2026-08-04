@@ -2,9 +2,15 @@ package com.happysg.radar.gametest;
 
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlock;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
+import com.happysg.radar.block.behavior.networks.SafeZone;
+import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
+import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
+import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.block.controller.tpitch.TPitchControllerBlock;
 import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
+import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.datalink.DataLinkBlock;
@@ -26,6 +32,7 @@ import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.gametest.framework.GameTestServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -34,16 +41,23 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlock;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountExtensionBlock;
+import rbasamoyai.createbigcannons.cannons.big_cannons.BigCannonBlock;
 import rbasamoyai.createbigcannons.index.CBCBlocks;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Integration coverage for the CBC endpoint contract used by pitch, yaw,
@@ -478,6 +492,24 @@ public final class CbcMountExtensionGameTests {
                             && secondaryYaw.equals(second.yawPos())
                             && secondaryFire.equals(second.firingPos()),
                     "Companion mount did not expose its yaw/fire endpoints");
+
+            if (!(level.getBlockEntity(controllerPos)
+                    instanceof TPitchControllerBlockEntity controller)
+                    || !(level.getBlockEntity(primaryYaw)
+                    instanceof AutoYawControllerBlockEntity primaryYawController)
+                    || !(level.getBlockEntity(secondaryYaw)
+                    instanceof AutoYawControllerBlockEntity secondaryYawController)) {
+                throw new GameTestAssertException(
+                        "T-Pitch dual-yaw controllers were not created");
+            }
+            primaryYawController.setTargetAngle(35.0F);
+            secondaryYawController.setTargetAngle(70.0F);
+            controller.setAndAcquireTrack(null, TargetingConfig.DEFAULT);
+            require(Math.abs(primaryYawController.getTargetAngle()) < 1.0e-6,
+                    "T-Pitch did not home its preferred yaw channel");
+            require(Math.abs(secondaryYawController.getTargetAngle()) < 1.0e-6,
+                    "T-Pitch did not home its companion yaw channel");
+
             require(!runtime.canAttachEndpoint(
                             DataLinkBlockEntity.WeaponEndpointType.PITCH,
                             controllerPos.above(4), secondaryMount),
@@ -495,6 +527,200 @@ public final class CbcMountExtensionGameTests {
                             channel -> channel.mountPos()
                                     .equals(secondaryMount)),
                     "Remaining mount disappeared when the preferred mount was removed");
+        } finally {
+            site.close();
+        }
+        helper.succeed();
+    }
+
+    @PrefixGameTestTemplate(false)
+    @GameTest(templateNamespace = "simulated",
+            template = "extrakineticstest.swivelbearing")
+    public static void tPitchReplaysTargetStateAcrossActiveMountChanges(
+            GameTestHelper helper) {
+        BlockPos controllerPos = new BlockPos(704, FIXTURE_Y, 8);
+        TestSite site = new TestSite(helper.getLevel(), controllerPos, 9);
+        CannonMountBlockEntity primary = null;
+        CannonMountBlockEntity secondary = null;
+        try {
+            site.prepare();
+            ServerLevel level = helper.getLevel();
+            BlockPos primaryMountPos = controllerPos.west();
+            BlockPos secondaryMountPos = controllerPos.east();
+
+            placeMount(level, primaryMountPos);
+            placeMount(level, secondaryMountPos);
+            level.setBlockAndUpdate(controllerPos,
+                    ModBlocks.T_PITCH.getDefaultState()
+                            .setValue(TPitchControllerBlock.ORIENTATION,
+                                    TPitchControllerBlock.Orientation.X_SOUTH));
+            linkController(level, controllerPos, primaryMountPos,
+                    DataLinkBlockEntity.WeaponEndpointType.PITCH);
+
+            if (!(level.getBlockEntity(controllerPos)
+                    instanceof TPitchControllerBlockEntity controller)) {
+                throw new GameTestAssertException(
+                        "T-Pitch controller block entity was not created");
+            }
+
+            TargetingConfig targeting = new TargetingConfig(
+                    true, false, false, false, true,
+                    true, false, true, true);
+            RadarTrack track = new RadarTrack(
+                    UUID.randomUUID().toString(),
+                    Vec3.atCenterOf(controllerPos.north(32)),
+                    new Vec3(0.25D, 0.0D, -0.5D),
+                    level.getGameTime(), TrackCategory.PROJECTILE,
+                    "create_radar:gametest_target", 1.0F);
+            SafeZone safeZone = new SafeZone(
+                    new AABB(controllerPos.getX() - 2,
+                            controllerPos.getY() + 1,
+                            controllerPos.getZ() - 2,
+                            controllerPos.getX() + 3,
+                            controllerPos.getY() + 4,
+                            controllerPos.getZ() + 3), null);
+            List<SafeZone> suppliedSafeZones = new ArrayList<>();
+            suppliedSafeZones.add(safeZone);
+
+            controller.setAndAcquireTrack(track, targeting);
+            controller.setSafeZones(suppliedSafeZones);
+            suppliedSafeZones.clear();
+            controller.getFiringControl();
+            require(controller.firingControl == null,
+                    "T-Pitch created firing control before a cannon was active");
+
+            primary = assembleTestCannon(level, primaryMountPos);
+            controller.markMountDirtyExternal();
+            controller.getFiringControl();
+            WeaponFiringControl initial = controller.firingControl;
+            require(initial != null,
+                    "T-Pitch did not create firing control for its first active cannon");
+            require(initial.cannonMount.getBlockPos().equals(primaryMountPos),
+                    "T-Pitch did not select its preferred active cannon");
+            require(activeRadarTrack(initial) == track,
+                    "Target selected before cannon assembly was not replayed");
+            require(initial.targetingConfig.equals(targeting),
+                    "Targeting configuration was not replayed after cannon assembly");
+            require(initial.safeZones.equals(List.of(safeZone)),
+                    "Safe zones were not replayed from an immutable snapshot");
+
+            secondary = assembleTestCannon(level, secondaryMountPos);
+            disassembleTestCannon(primary);
+            controller.markMountDirtyExternal();
+            controller.getFiringControl();
+            WeaponFiringControl fallback = controller.firingControl;
+            require(fallback != null && fallback != initial,
+                    "T-Pitch did not replace firing control after its active side changed");
+            require(fallback.cannonMount.getBlockPos().equals(secondaryMountPos),
+                    "T-Pitch did not fall back to the remaining active cannon");
+            require(activeRadarTrack(fallback) == track,
+                    "Radar target was lost when firing control changed active sides");
+            require(fallback.targetingConfig.equals(targeting),
+                    "Targeting configuration was lost during firing-control replacement");
+            require(fallback.safeZones.equals(List.of(safeZone)),
+                    "Safe zones were lost during firing-control replacement");
+
+            controller.setAndAcquireTrack(null, TargetingConfig.DEFAULT);
+            primary = assembleTestCannon(level, primaryMountPos);
+            controller.markMountDirtyExternal();
+            controller.getFiringControl();
+            WeaponFiringControl afterClear = controller.firingControl;
+            require(afterClear != null && afterClear != fallback,
+                    "T-Pitch did not return to its reactivated preferred cannon");
+            require(activeRadarTrack(afterClear) == null,
+                    "Explicitly cleared radar target was resurrected after replacement");
+
+            controller.setAndAcquireTrack(track, targeting);
+            require(activeRadarTrack(afterClear) == track,
+                    "Radar target was not restored before binocular takeover");
+            controller.setAndAcquirePos(controllerPos.north(12),
+                    TargetingConfig.DEFAULT, false);
+            require(activeRadarTrack(afterClear) == null,
+                    "Binocular targeting did not take ownership from radar targeting");
+
+            disassembleTestCannon(primary);
+            controller.markMountDirtyExternal();
+            controller.getFiringControl();
+            WeaponFiringControl duringBinocular = controller.firingControl;
+            require(duringBinocular != null && duringBinocular != afterClear,
+                    "T-Pitch did not replace firing control during binocular targeting");
+            require(duringBinocular.cannonMount.getBlockPos()
+                            .equals(secondaryMountPos),
+                    "T-Pitch did not select the active fallback in binocular mode");
+            require(activeRadarTrack(duringBinocular) == null,
+                    "Radar target replay overrode binocular targeting ownership");
+        } finally {
+            disassembleTestCannon(primary);
+            disassembleTestCannon(secondary);
+            site.close();
+        }
+        helper.succeed();
+    }
+
+    @PrefixGameTestTemplate(false)
+    @GameTest(templateNamespace = "simulated",
+            template = "extrakineticstest.swivelbearing")
+    public static void controllerLimitGuiUsesExactInputFaces(
+            GameTestHelper helper) {
+        BlockPos controllerPos = new BlockPos(736, FIXTURE_Y, 8);
+        TestSite site = new TestSite(helper.getLevel(), controllerPos, 3);
+        try {
+            site.prepare();
+            ServerLevel level = helper.getLevel();
+            Player player = helper.makeMockPlayer(GameType.CREATIVE);
+            BlockState state = ModBlocks.T_PITCH.getDefaultState()
+                    .setValue(TPitchControllerBlock.ORIENTATION,
+                            TPitchControllerBlock.Orientation.X_SOUTH);
+            level.setBlockAndUpdate(controllerPos, state);
+            BlockHitResult bodyHit = new BlockHitResult(
+                    Vec3.atCenterOf(controllerPos), Direction.UP,
+                    controllerPos, false);
+
+            player.setItemInHand(InteractionHand.MAIN_HAND,
+                    new ItemStack(Blocks.STONE));
+            require(state.useWithoutItem(level, player, bodyHit)
+                            == InteractionResult.PASS,
+                    "T-Pitch consumed a main-hand block placement interaction");
+
+            player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
+            player.setItemInHand(InteractionHand.OFF_HAND,
+                    new ItemStack(Blocks.STONE));
+            require(state.useWithoutItem(level, player, bodyHit)
+                            == InteractionResult.PASS,
+                    "T-Pitch consumed an off-hand block placement interaction");
+
+            player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
+
+            for (TPitchControllerBlock.Orientation orientation
+                    : TPitchControllerBlock.Orientation.values()) {
+                requireExactControllerInputFace(level, player, controllerPos,
+                        ModBlocks.T_PITCH.getDefaultState()
+                                .setValue(TPitchControllerBlock.ORIENTATION,
+                                        orientation),
+                        orientation.branchDirection(),
+                        "T-Pitch " + orientation.getSerializedName());
+            }
+
+            for (Direction facing : Direction.Plane.HORIZONTAL) {
+                requireExactControllerInputFace(level, player, controllerPos,
+                        ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK
+                                .getDefaultState()
+                                .setValue(HorizontalKineticBlock
+                                                .HORIZONTAL_FACING,
+                                        facing),
+                        facing.getOpposite(),
+                        "Pitch " + facing.getSerializedName());
+            }
+
+            for (Direction facing : Direction.values()) {
+                requireExactControllerInputFace(level, player, controllerPos,
+                        ModBlocks.AUTO_YAW_CONTROLLER_BLOCK
+                                .getDefaultState()
+                                .setValue(DirectionalKineticBlock.FACING,
+                                        facing),
+                        facing,
+                        "Yaw " + facing.getSerializedName());
+            }
         } finally {
             site.close();
         }
@@ -911,6 +1137,75 @@ public final class CbcMountExtensionGameTests {
                 // CBC exposes the horizontal extension shaft perpendicular to
                 // the cannon's horizontal facing.
                 .setValue(CannonMountBlock.HORIZONTAL_FACING, Direction.NORTH));
+    }
+
+    private static CannonMountBlockEntity assembleTestCannon(
+            ServerLevel level, BlockPos mountPos) {
+        BlockPos barrelPos = mountPos.above(2);
+        level.setBlockAndUpdate(barrelPos.south(),
+                CBCBlocks.CAST_IRON_CANNON_END.getDefaultState()
+                        .setValue(BlockStateProperties.FACING,
+                                Direction.SOUTH));
+        level.setBlockAndUpdate(barrelPos,
+                CBCBlocks.CAST_IRON_CANNON_BARREL.getDefaultState()
+                        .setValue(BlockStateProperties.FACING,
+                                Direction.NORTH));
+        BigCannonBlock.onPlace(level, barrelPos.south());
+        BigCannonBlock.onPlace(level, barrelPos);
+        if (!(level.getBlockEntity(mountPos)
+                instanceof CannonMountBlockEntity mount)) {
+            throw new GameTestAssertException(
+                    "CBC cannon mount block entity was not created");
+        }
+        mount.onRedstoneUpdate(true, false, false, false, 0);
+        require(mount.getContraption() != null
+                        && mount.getContraption().isAlive(),
+                "CBC test cannon did not assemble: "
+                        + (mount.getLastAssemblyException() == null
+                        ? "no assembly exception"
+                        : mount.getLastAssemblyException().component.getString()));
+        return mount;
+    }
+
+    private static void requireExactControllerInputFace(
+            ServerLevel level, Player player, BlockPos controllerPos,
+            BlockState state, Direction inputFace, String description) {
+        level.setBlockAndUpdate(controllerPos, state);
+        for (Direction clickedFace : Direction.values()) {
+            BlockHitResult hit = new BlockHitResult(
+                    Vec3.atCenterOf(controllerPos), clickedFace,
+                    controllerPos, false);
+            InteractionResult result = state.useWithoutItem(
+                    level, player, hit);
+            require((result == InteractionResult.PASS)
+                            == (clickedFace == inputFace),
+                    description + " treated "
+                            + clickedFace.getSerializedName()
+                            + (clickedFace == inputFace
+                            ? " as a limits-GUI face"
+                            : " as an input face"));
+        }
+    }
+
+    private static void disassembleTestCannon(
+            CannonMountBlockEntity mount) {
+        if (mount != null && !mount.isRemoved() && mount.isRunning()) {
+            mount.onRedstoneUpdate(false, true, false, false, 0);
+        }
+    }
+
+    private static RadarTrack activeRadarTrack(
+            WeaponFiringControl firingControl) {
+        try {
+            var field = WeaponFiringControl.class
+                    .getDeclaredField("activetrack");
+            field.setAccessible(true);
+            return (RadarTrack) field.get(firingControl);
+        } catch (ReflectiveOperationException exception) {
+            throw new GameTestAssertException(
+                    "Could not inspect firing-control radar target: "
+                            + exception.getMessage());
+        }
     }
 
     private static void placeExtension(ServerLevel level, BlockPos pos,

@@ -55,6 +55,13 @@ public class TPitchControllerBlock extends KineticBlock
             @NotNull BlockPos pos, @NotNull Player player,
             @NotNull BlockHitResult hit
     ) {
+        if (!player.getMainHandItem().isEmpty()
+                || !player.getOffhandItem().isEmpty()
+                || hasPlacementShaftTowards(
+                        level, pos, state, hit.getDirection())) {
+            return InteractionResult.PASS;
+        }
+
         if (!level.isClientSide) {
             OpenControllerLimitsScreenPacket.openIfAssembled(
                     level, pos, player);

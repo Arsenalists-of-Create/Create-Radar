@@ -46,7 +46,9 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
             @NotNull BlockHitResult hit
     ) {
         if (!player.getMainHandItem().isEmpty()
-                || hit.getDirection().getAxis() == getRotationAxis(state)) {
+                || !player.getOffhandItem().isEmpty()
+                || hasPlacementShaftTowards(
+                        level, pos, state, hit.getDirection())) {
             return InteractionResult.PASS;
         }
 

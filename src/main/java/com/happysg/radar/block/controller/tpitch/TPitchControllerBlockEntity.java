@@ -281,6 +281,14 @@ public class TPitchControllerBlockEntity
     }
 
     @Override
+    public Direction getInputShaftDirection() {
+        TPitchControllerBlock.Orientation orientation = orientation();
+        return orientation == null
+                ? Direction.SOUTH
+                : orientation.branchDirection();
+    }
+
+    @Override
     protected boolean supportsPhysBearingMounts() {
         return false;
     }

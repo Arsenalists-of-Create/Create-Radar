@@ -4,12 +4,16 @@ import com.happysg.radar.CreateRadar;
 
 
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
+import com.happysg.radar.block.controller.kinetic.ControllerShaftRenderer;
+import com.happysg.radar.block.controller.kinetic.ControllerShaftVisual;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererRenderer;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 
 import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
+import com.happysg.radar.block.controller.tpitch.TPitchControllerShaftRenderer;
+import com.happysg.radar.block.controller.tpitch.TPitchControllerShaftVisual;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
@@ -22,8 +26,6 @@ import com.happysg.radar.block.radar.skyradar.SkyRadarVisual;
 
 import com.simibubi.create.content.contraptions.bearing.BearingRenderer;
 import com.simibubi.create.content.contraptions.bearing.BearingVisual;
-import com.simibubi.create.content.kinetics.base.ShaftRenderer;
-import com.simibubi.create.content.kinetics.base.ShaftVisual;
 import com.tterrag.registrate.util.entry.BlockEntityEntry;
 
 
@@ -54,20 +56,23 @@ public class ModBlockEntityTypes {
 
     public static final BlockEntityEntry<AutoYawControllerBlockEntity> AUTO_YAW_CONTROLLER = REGISTRATE
             .blockEntity("auto_yaw_controller", AutoYawControllerBlockEntity::new)
-            .visual(() -> ShaftVisual::new, true)
+            .visual(() -> ControllerShaftVisual::new, true)
             .validBlocks(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK)
-            .renderer(() -> ShaftRenderer::new)
+            .renderer(() -> ControllerShaftRenderer::new)
             .register();
 
     public static final BlockEntityEntry<AutoPitchControllerBlockEntity> AUTO_PITCH_CONTROLLER = REGISTRATE
             .blockEntity("auto_pitch_controller", AutoPitchControllerBlockEntity::new)
-            .visual(() -> ShaftVisual::new, true)
+            .visual(() -> ControllerShaftVisual::new, true)
             .validBlocks(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK)
+            .renderer(() -> ControllerShaftRenderer::new)
             .register();
 
     public static final BlockEntityEntry<TPitchControllerBlockEntity> T_PITCH_CONTROLLER = REGISTRATE
             .blockEntity("t_pitch", TPitchControllerBlockEntity::new)
+            .visual(() -> TPitchControllerShaftVisual::new, true)
             .validBlocks(ModBlocks.T_PITCH)
+            .renderer(() -> TPitchControllerShaftRenderer::new)
             .register();
 
 

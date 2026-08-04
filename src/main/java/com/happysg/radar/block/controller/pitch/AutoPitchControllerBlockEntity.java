@@ -4,6 +4,7 @@ import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
+import com.happysg.radar.block.controller.kinetic.ControllerInputShaft;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
 import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
@@ -31,6 +32,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -45,11 +47,14 @@ import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearin
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 
 import javax.annotation.Nullable;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
-        implements ControllerLimitAccess, ControllerCollisionSource {
+        implements ControllerLimitAccess, ControllerCollisionSource,
+        ControllerInputShaft {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final double CBC_TOLERANCE = 0.1;
@@ -70,6 +75,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     @Nullable
     public RadarTrack track;
+    private TargetingConfig radarTargetingConfig = TargetingConfig.DEFAULT;
+    private List<SafeZone> safeZones = List.of();
 
     @Nullable
     private Vec3 lastTargetPos = null;
@@ -185,6 +192,11 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             autoyaw = aYCBE;
         }
         firingControl = new WeaponFiringControl(this, mount, autoyaw);
+        firingControl.setSafeZones(safeZones);
+        if (!binoMode && track != null) {
+            firingControl.setTarget(track.getPosition(), radarTargetingConfig,
+                    track, view);
+        }
         LOGGER.debug("made new Weapon Config!");
     }
 
@@ -606,7 +618,14 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public void setAndAcquireTrack(@Nullable RadarTrack tTrack, TargetingConfig config) {
-        if (level == null || level.isClientSide || binoMode) {
+        if (level == null || level.isClientSide) {
+            return;
+        }
+
+        track = tTrack;
+        radarTargetingConfig = config == null
+                ? TargetingConfig.DEFAULT : config;
+        if (binoMode) {
             return;
         }
 
@@ -617,19 +636,12 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         LOGGER.debug("PITCH setAndAcquireTrack track={} firingControl={}", tTrack == null ? "null" : tTrack.getId(), firingControl != null);
 
         if (tTrack == null) {
-            track = null;
             if (firingControl != null) {
                 firingControl.resetTarget();
             }
             returnToZero();
-            if (autoyaw != null) {
-                autoyaw.returnToInitialOrientation();
-            }
+            returnControlledYawToInitialOrientation();
             return;
-        }
-
-        if (tTrack != track) {
-            track = tTrack;
         }
 
         if (firingControl == null) {
@@ -645,7 +657,35 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        firingControl.setTarget(track.getPosition(), config, tTrack, view);
+        firingControl.setTarget(track.getPosition(), radarTargetingConfig,
+                track, view);
+    }
+
+    private void returnControlledYawToInitialOrientation() {
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.WeaponControlView controlView =
+                    WeaponNetworkRuntime.get(serverLevel)
+                            .getWeaponControlViewFromPitch(worldPosition);
+            if (controlView != null) {
+                Set<BlockPos> visitedYawPositions = new HashSet<>();
+                for (WeaponNetworkRuntime.MountChannelView channel
+                        : controlView.channels()) {
+                    BlockPos yawPos = channel.yawPos();
+                    if (yawPos == null || !visitedYawPositions.add(yawPos)) {
+                        continue;
+                    }
+                    if (level.getBlockEntity(yawPos)
+                            instanceof AutoYawControllerBlockEntity yaw) {
+                        yaw.returnToInitialOrientation();
+                    }
+                }
+                return;
+            }
+        }
+
+        if (autoyaw != null) {
+            autoyaw.returnToInitialOrientation();
+        }
     }
 
     public void setAndAcquirePos(@Nullable BlockPos binoTargetPos, TargetingConfig config, boolean reset) {
@@ -711,11 +751,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public void setSafeZones(List<SafeZone> safeZones) {
+        this.safeZones = safeZones == null || safeZones.isEmpty()
+                ? List.of() : List.copyOf(safeZones);
         if (firingControl == null) {
             return;
         }
 
-        firingControl.setSafeZones(safeZones);
+        firingControl.setSafeZones(this.safeZones);
     }
 
     public boolean canEngageTrack(@Nullable RadarTrack track, boolean requireLos) {
@@ -987,8 +1029,23 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     /** Input power is sampled, never connected to this isolated generator. */
+    @Override
     public double getAvailableInputSpeed() {
         return KineticPowerSource.strongestAdjacentShaftRpm(this, getControllerAxis());
+    }
+
+    @Override
+    public Direction getInputShaftDirection() {
+        BlockState state = getBlockState();
+        return state.hasProperty(HorizontalDirectionalBlock.FACING)
+                ? state.getValue(HorizontalDirectionalBlock.FACING).getOpposite()
+                : Direction.SOUTH;
+    }
+
+    @Override
+    public boolean addToGoggleTooltip(List<Component> tooltip,
+                                      boolean isPlayerSneaking) {
+        return false;
     }
 
     private void initializeIsolatedGenerator() {

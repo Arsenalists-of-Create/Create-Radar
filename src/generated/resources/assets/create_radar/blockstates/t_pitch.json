@@ -1,36 +1,36 @@
 {
   "variants": {
     "orientation=x_down": {
-      "model": "create_radar:block/track_controller",
+      "model": "create_radar:block/t_pitch",
       "x": 270
     },
     "orientation=x_north": {
-      "model": "create_radar:block/track_controller",
+      "model": "create_radar:block/t_pitch",
       "y": 180
     },
     "orientation=x_south": {
-      "model": "create_radar:block/track_controller"
+      "model": "create_radar:block/t_pitch"
     },
     "orientation=x_up": {
-      "model": "create_radar:block/track_controller",
+      "model": "create_radar:block/t_pitch",
       "x": 90
     },
     "orientation=z_down": {
-      "model": "create_radar:block/track_controller",
+      "model": "create_radar:block/t_pitch",
       "x": 270,
       "y": 90
     },
     "orientation=z_east": {
-      "model": "create_radar:block/track_controller",
+      "model": "create_radar:block/t_pitch",
       "y": 270
     },
     "orientation=z_up": {
-      "model": "create_radar:block/track_controller",
+      "model": "create_radar:block/t_pitch",
       "x": 90,
       "y": 90
     },
     "orientation=z_west": {
-      "model": "create_radar:block/track_controller",
+      "model": "create_radar:block/t_pitch",
       "y": 90
     }
   }

@@ -40,7 +40,9 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
             Player player, BlockHitResult hit
     ) {
         if (!player.getMainHandItem().isEmpty()
-                || hit.getDirection().getAxis() == getRotationAxis(state)) {
+                || !player.getOffhandItem().isEmpty()
+                || hasPlacementShaftTowards(
+                        level, pos, state, hit.getDirection())) {
             return InteractionResult.PASS;
         }
 

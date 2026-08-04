@@ -291,7 +291,7 @@ public class ModBlocks {
                                         state.getValue(TPitchControllerBlock.ORIENTATION);
                                 return ConfiguredModel.builder()
                                         .modelFile(p.models().getExistingFile(
-                                                CreateRadar.asResource("block/track_controller")))
+                                                CreateRadar.asResource("block/t_pitch")))
                                         .rotationX(orientation.modelRotationX())
                                         .rotationY(orientation.modelRotationY())
                                         .build();

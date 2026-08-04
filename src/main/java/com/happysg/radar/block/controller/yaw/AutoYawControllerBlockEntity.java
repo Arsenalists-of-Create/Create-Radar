@@ -3,6 +3,7 @@ package com.happysg.radar.block.controller.yaw;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
+import com.happysg.radar.block.controller.kinetic.ControllerInputShaft;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
 import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
@@ -30,6 +31,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
@@ -48,7 +50,8 @@ import org.slf4j.Logger;
 import java.util.List;
 
 public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
-        implements ControllerLimitAccess, ControllerCollisionSource {
+        implements ControllerLimitAccess, ControllerCollisionSource,
+        ControllerInputShaft {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -755,8 +758,23 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     /** Input power is sampled, never connected to this isolated generator. */
+    @Override
     public double getAvailableInputSpeed() {
         return KineticPowerSource.strongestAdjacentShaftRpm(this, Direction.Axis.Y);
+    }
+
+    @Override
+    public Direction getInputShaftDirection() {
+        BlockState state = getBlockState();
+        return state.hasProperty(DirectionalKineticBlock.FACING)
+                ? state.getValue(DirectionalKineticBlock.FACING)
+                : Direction.UP;
+    }
+
+    @Override
+    public boolean addToGoggleTooltip(List<Component> tooltip,
+                                      boolean isPlayerSneaking) {
+        return false;
     }
 
     private void initializeIsolatedGenerator() {
