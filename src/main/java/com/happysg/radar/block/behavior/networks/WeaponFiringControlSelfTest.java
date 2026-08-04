@@ -1,7 +1,10 @@
 package com.happysg.radar.block.behavior.networks;
 
+import com.happysg.radar.block.controller.kinetic.CannonAxis;
+import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
+import com.happysg.radar.targeting.PitchConstraint;
 import com.happysg.radar.targeting.TargetingSolverSelfTest;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +28,10 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkOrdinaryMotionKeepsPendingSolve());
         results.add(checkFireFreshnessWindow());
         results.add(checkAsyncBallisticAimHandoff());
+        results.add(checkDirectAdapterAimGating());
+        results.add(checkSublevelFrameTracksCarrierRotation());
+        results.add(checkLimitBoundaryTrackingFailsClosed());
+        results.add(checkUnavailableSourceFrameFailsClosed());
         results.add(checkSmoothAimKeepsStability());
         results.add(checkDualMountYawConvergence());
         results.add(checkDualFirePolicy());
@@ -230,6 +237,152 @@ public final class WeaponFiringControlSelfTest {
     }
 
     private static TargetingSolverSelfTest.Result
+    checkDirectAdapterAimGating() {
+        boolean adapterHasResolvedAim =
+                WeaponFiringControl.hasResolvedAimForUpdate(
+                        false, false, true, true);
+        boolean laserHasResolvedAim =
+                WeaponFiringControl.hasResolvedAimForUpdate(
+                        false, false, true, false);
+        boolean directIgnoresBallisticSolutions =
+                !WeaponFiringControl.hasResolvedAimForUpdate(
+                        true, true, true, true);
+        WeaponFiringControl.AimUpdateMode adapterMode =
+                WeaponFiringControl.selectAimUpdateMode(
+                        adapterHasResolvedAim, false);
+        boolean unresolvedReady =
+                WeaponFiringControl.isDirectAdapterAimReady(true, false);
+        boolean resolvedReady =
+                WeaponFiringControl.isDirectAdapterAimReady(true, true);
+        boolean nonAdapterReady =
+                WeaponFiringControl.isDirectAdapterAimReady(false, false);
+        boolean firePrivilege =
+                WeaponFiringControl.hasFireEligibleAim(
+                        false, false, true);
+        boolean passed = !adapterHasResolvedAim
+                && laserHasResolvedAim
+                && directIgnoresBallisticSolutions
+                && adapterMode == WeaponFiringControl.AimUpdateMode.DIRECT
+                && !unresolvedReady
+                && resolvedReady
+                && nonAdapterReady
+                && firePrivilege
+                && !(firePrivilege && unresolvedReady)
+                && firePrivilege && resolvedReady;
+        return result("direct_adapter_aim_fails_closed", passed,
+                "mode=" + adapterMode
+                        + " unresolvedReady=" + unresolvedReady
+                        + " resolvedReady=" + resolvedReady
+                        + " laserResolved=" + laserHasResolvedAim);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkSublevelFrameTracksCarrierRotation() {
+        ControllerMovementLimits yawLimits =
+                new ControllerMovementLimits(
+                        CannonAxis.YAW, -45.0, 45.0);
+        WeaponFiringControl.MountAimFrame unrotated = frame(
+                new Vec3(1.0, 0.0, 0.0),
+                new Vec3(0.0, 1.0, 0.0),
+                new Vec3(0.0, 0.0, 1.0),
+                yawLimits, 270.0);
+        WeaponFiringControl.MountAimFrame rotated = frame(
+                new Vec3(0.0, 0.0, -1.0),
+                new Vec3(0.0, 1.0, 0.0),
+                new Vec3(1.0, 0.0, 0.0),
+                yawLimits, 270.0);
+        Vec3 cachedWorldDirection = new Vec3(1.0, 0.0, 0.0);
+        WeaponFiringControl.AimCommandEvaluation before =
+                unrotated.evaluate(cachedWorldDirection);
+        WeaponFiringControl.AimCommandEvaluation after =
+                rotated.evaluate(cachedWorldDirection);
+        double yawChange = Math.abs(shortestDelta(
+                before.requestedControllerYawDeg(),
+                after.requestedControllerYawDeg()));
+        boolean passed = before.fireEligible()
+                && after.valid() && after.yawConstrained()
+                && !after.fireEligible()
+                && close(yawChange, 90.0)
+                && close(after.appliedControllerYawDeg(), 315.0);
+        return result("sublevel_frame_tracks_carrier_rotation", passed,
+                "beforeYaw=" + before.requestedControllerYawDeg()
+                        + " afterYaw="
+                        + after.requestedControllerYawDeg()
+                        + " applied="
+                        + after.appliedControllerYawDeg());
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkLimitBoundaryTrackingFailsClosed() {
+        WeaponFiringControl.MountAimFrame frame = frame(
+                new Vec3(1.0, 0.0, 0.0),
+                new Vec3(0.0, 1.0, 0.0),
+                new Vec3(0.0, 0.0, 1.0),
+                new ControllerMovementLimits(
+                        CannonAxis.YAW, -30.0, 30.0), 270.0,
+                -10.0, 10.0);
+        Vec3 outside = new Vec3(0.0, 1.0, 1.0).normalize();
+        WeaponFiringControl.AimCommandEvaluation evaluation =
+                frame.evaluate(outside);
+        Vec3 boundaryWorld = frame.worldDirection(
+                evaluation.appliedPitchDeg(),
+                evaluation.appliedControllerYawDeg());
+        WeaponFiringControl.AimCommandEvaluation boundary =
+                frame.evaluate(boundaryWorld);
+        boolean passed = evaluation.valid()
+                && evaluation.pitchConstrained()
+                && evaluation.yawConstrained()
+                && !evaluation.fireEligible()
+                && close(evaluation.appliedPitchDeg(), 10.0)
+                && boundary.fireEligible();
+        return result("movement_limits_track_boundary_and_block_fire",
+                passed, "reason=" + evaluation.reason()
+                        + " requested="
+                        + evaluation.requestedPitchDeg() + "/"
+                        + evaluation.requestedControllerYawDeg()
+                        + " applied="
+                        + evaluation.appliedPitchDeg() + "/"
+                        + evaluation.appliedControllerYawDeg());
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkUnavailableSourceFrameFailsClosed() {
+        WeaponFiringControl.MountAimFrame unavailable =
+                new WeaponFiringControl.MountAimFrame(
+                        WeaponFiringControl.MountFrameKind.UNAVAILABLE,
+                        null, PitchConstraint.unconstrained(),
+                        ControllerMovementLimits.defaults(CannonAxis.YAW),
+                        0.0, "source_frame_unavailable");
+        WeaponFiringControl.AimCommandEvaluation evaluation =
+                unavailable.evaluate(new Vec3(1.0, 0.0, 0.0));
+        boolean passed = !evaluation.valid()
+                && !evaluation.fireEligible()
+                && "source_frame_unavailable".equals(
+                evaluation.reason());
+        return result("missing_sublevel_frame_fails_closed", passed,
+                "reason=" + evaluation.reason());
+    }
+
+    private static WeaponFiringControl.MountAimFrame frame(
+            Vec3 right, Vec3 up, Vec3 forward,
+            ControllerMovementLimits yawLimits,
+            double yawNeutral) {
+        return frame(right, up, forward, yawLimits, yawNeutral,
+                -89.0, 89.0);
+    }
+
+    private static WeaponFiringControl.MountAimFrame frame(
+            Vec3 right, Vec3 up, Vec3 forward,
+            ControllerMovementLimits yawLimits,
+            double yawNeutral, double minPitch, double maxPitch) {
+        return new WeaponFiringControl.MountAimFrame(
+                WeaponFiringControl.MountFrameKind.SUBLEVEL,
+                null, new PitchConstraint(
+                minPitch, maxPitch, right, up, forward),
+                yawLimits, yawNeutral, null);
+    }
+
+    private static TargetingSolverSelfTest.Result
     checkDualMountYawConvergence() {
         Vec3 leftOrigin = new Vec3(-2.0, 0.0, 0.0);
         Vec3 rightOrigin = new Vec3(2.0, 0.0, 0.0);
@@ -314,6 +467,10 @@ public final class WeaponFiringControlSelfTest {
 
     private static double shortestDelta(double from, double to) {
         return (to - from + 540.0) % 360.0 - 180.0;
+    }
+
+    private static boolean close(double first, double second) {
+        return Math.abs(first - second) < 1.0E-6;
     }
 
     private static RadarTrack track(String id, TrackCategory category,

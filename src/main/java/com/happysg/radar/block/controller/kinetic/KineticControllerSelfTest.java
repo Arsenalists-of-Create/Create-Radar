@@ -85,6 +85,14 @@ public final class KineticControllerSelfTest {
         expectClose(failures, "yaw_clamps_nearest_boundary",
                 forwardArc.clampControllerTarget(270.0, 180.0), 225.0);
 
+        ControllerMovementLimits preciseArc =
+                ControllerMovementLimits.validated(
+                        CannonAxis.YAW, -12.345678, 44.123456)
+                        .orElseThrow();
+        double floatBoundary = (double) (float) (270.0 + 44.123456);
+        expectTrue(failures, "yaw_float_boundary_round_trip",
+                preciseArc.allowsControllerTarget(floatBoundary, 270.0));
+
         ControllerMovementLimits fullYaw =
                 ControllerMovementLimits.defaults(CannonAxis.YAW);
         expectTrue(failures, "full_yaw_accepts_back",

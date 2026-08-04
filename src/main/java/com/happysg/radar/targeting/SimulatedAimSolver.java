@@ -430,7 +430,15 @@ public class SimulatedAimSolver implements AimSolver {
       double bestToY = py;
       double bestToZ = pz;
       int bestSegmentTick = 0;
-      ProjectileStep customStep = model.usesCustomDynamics() ? new ProjectileStep() : null;
+      boolean usesCustomDynamics = model.usesCustomDynamics();
+      ProjectileDynamics customDynamics = usesCustomDynamics
+              ? model.createDynamics(launchPosition, direction, inherited)
+              : null;
+      if (usesCustomDynamics && customDynamics == null) {
+         return null;
+      }
+      ProjectileStep customStep = usesCustomDynamics
+              ? new ProjectileStep() : null;
 
       ++context.stats.candidateEvaluations;
       for(int tick = 0; tick < context.horizonTicks; ++tick) {
@@ -442,7 +450,9 @@ public class SimulatedAimSolver implements AimSolver {
          double nextPy;
          double nextPz;
          if (customStep != null) {
-            model.step(tick, px, py, pz, vx, vy, vz, snapshot.level(), customStep);
+            customDynamics.step(
+                    tick, px, py, pz, vx, vy, vz,
+                    snapshot.level(), customStep);
             nextPx = customStep.positionX;
             nextPy = customStep.positionY;
             nextPz = customStep.positionZ;

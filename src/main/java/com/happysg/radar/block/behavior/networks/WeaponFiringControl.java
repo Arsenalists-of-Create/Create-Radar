@@ -7,6 +7,7 @@ import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
+import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
@@ -194,6 +195,13 @@ public class WeaponFiringControl {
     private final LosCache losPrefireCache;
     public List<SafeZone> safeZones;
     private long lastTargetTick;
+    private long cachedMountAimFrameTick = Long.MIN_VALUE;
+    @Nullable
+    private MountAimFrame cachedMountAimFrame;
+    @Nullable
+    private UUID lastResolvedSourceSublevelId;
+    @Nullable
+    private AimCommandEvaluation lastAimCommandEvaluation;
 
     private static double clamp01(double v) {
         return v < (double)0.0F ? (double)0.0F : (v > (double)1.0F ? (double)1.0F : v);
@@ -249,6 +257,7 @@ public class WeaponFiringControl {
         this.lastTargetingSteeringProvisional = false;
         this.lastTargetingFireFresh = false;
         this.lastTargetingFreshnessReason = "no_solution";
+        this.lastAimCommandEvaluation = null;
         this.lastCBCMSSolveAttemptTick = Long.MIN_VALUE;
         this.lastCBCMSSolveTargetId = null;
         this.lastCBCMSSolveFingerprint = null;
@@ -264,6 +273,10 @@ public class WeaponFiringControl {
         this.losPrefireCache = new LosCache();
         this.safeZones = new ArrayList<>();
         this.lastTargetTick = -1L;
+        this.cachedMountAimFrameTick = Long.MIN_VALUE;
+        this.cachedMountAimFrame = null;
+        this.lastResolvedSourceSublevelId = null;
+        this.lastAimCommandEvaluation = null;
         this.cannonMount = cannonMount;
         this.pitchController = controller;
         this.yawController = yawController;
@@ -1175,7 +1188,11 @@ public class WeaponFiringControl {
                                             && currentProjectile != null
                                             && currentProjectile.solverKind() != SolverKind.CBCMS_SERVER;
                                     AimUpdateMode aimUpdateMode = selectAimUpdateMode(
-                                            hasNewTargetingSolution || hasLeadSolution || canFireWithoutLead,
+                                            hasResolvedAimForUpdate(
+                                                    hasNewTargetingSolution,
+                                                    hasLeadSolution,
+                                                    canFireWithoutLead,
+                                                    adapterDirectAim),
                                             asyncBallisticAimExpected);
                                     Vec3 offsetAim = hasNewTargetingSolution
                                             && targetingResult.aimSolution().aimPoint() != null
@@ -1187,25 +1204,37 @@ public class WeaponFiringControl {
 
                                     Double desiredPitch = null;
                                     Double desiredYaw = null;
+                                    MountAimFrame mountFrame =
+                                            this.resolveMountAimFrame(cannon);
+                                    AimCommandEvaluation aimEvaluation = null;
                                     Vec3 worldAimDirection = hasNewTargetingSolution
                                             ? targetingResult.aimSolution().aimDirection() : null;
-                                    if (Mods.SABLE.isLoaded() && PhysicsHandler.isBlockInPlotyard(this.level, this.cannonMount.getBlockPos())) {
+                                    boolean sourceUsesSublevelFrame =
+                                            mountFrame.sourceSublevelId()
+                                                    != null;
+                                    if (sourceUsesSublevelFrame) {
                                         if (adapterDirectAim) {
                                             worldAimDirection = directionFromTo(
                                                     cannonMuzzleWorld, solvePos);
-                                            AimCommand command = this.mountAimCommand(
-                                                    cannon, worldAimDirection);
-                                            if (command != null) {
-                                                desiredPitch = command.pitchDeg();
-                                                desiredYaw = command.controllerYawDeg();
+                                            aimEvaluation = mountFrame.evaluate(
+                                                    worldAimDirection);
+                                            if (aimEvaluation.valid()) {
+                                                desiredPitch = aimEvaluation
+                                                        .requestedPitchDeg();
+                                                desiredYaw = aimEvaluation
+                                                        .requestedControllerYawDeg();
                                             } else {
                                                 worldAimDirection = null;
                                             }
                                         } else if (hasNewTargetingSolution) {
-                                            AimCommand command = this.mountAimCommand(cannon, targetingResult.aimSolution().aimDirection());
-                                            if (command != null) {
-                                                desiredPitch = command.pitchDeg();
-                                                desiredYaw = command.controllerYawDeg();
+                                            aimEvaluation = mountFrame.evaluate(
+                                                    targetingResult.aimSolution()
+                                                            .aimDirection());
+                                            if (aimEvaluation.valid()) {
+                                                desiredPitch = aimEvaluation
+                                                        .requestedPitchDeg();
+                                                desiredYaw = aimEvaluation
+                                                        .requestedControllerYawDeg();
                                                 this.cachedSablePitchDeg = desiredPitch;
                                                 this.cachedSableYawDeg = desiredYaw;
                                             } else {
@@ -1230,31 +1259,35 @@ public class WeaponFiringControl {
                                                     if (solved.size() >= 2) {
                                                         this.cachedSableWorldAimDirection =
                                                                 this.worldDirectionFromMountCommand(
+                                                                        mountFrame,
                                                                         solved.get(0), solved.get(1));
                                                     }
                                                 }
                                             }
 
-                                            List<List<Double>> angles = this.cachedSableAngles;
-                                            if (angles != null && !angles.isEmpty()) {
-                                                List<Double> firstAngles = angles.get(0);
-                                                if (!firstAngles.isEmpty()) {
-                                                    desiredPitch = firstAngles.get(0);
-                                                    desiredYaw = firstAngles.get(1);
-                                                    worldAimDirection =
-                                                            this.cachedSableWorldAimDirection;
-                                                    this.cachedSablePitchDeg = desiredPitch;
-                                                    this.cachedSableYawDeg = desiredYaw;
-                                                }
+                                            worldAimDirection =
+                                                    this.cachedSableWorldAimDirection;
+                                            aimEvaluation = mountFrame.evaluate(
+                                                    worldAimDirection);
+                                            if (aimEvaluation.valid()) {
+                                                desiredPitch = aimEvaluation
+                                                        .requestedPitchDeg();
+                                                desiredYaw = aimEvaluation
+                                                        .requestedControllerYawDeg();
+                                                this.cachedSablePitchDeg = desiredPitch;
+                                                this.cachedSableYawDeg = desiredYaw;
                                             }
                                         } else if (aimUpdateMode == AimUpdateMode.DIRECT
                                                 && !rejectCustomDirect) {
-                                            AimCommand command = this.directAimCommand(cannon, cannonMuzzleWorld, solvePos);
-                                            if (command != null) {
-                                                desiredPitch = command.pitchDeg();
-                                                desiredYaw = command.controllerYawDeg();
-                                                worldAimDirection = directionFromTo(
-                                                        cannonMuzzleWorld, solvePos);
+                                            worldAimDirection = directionFromTo(
+                                                    cannonMuzzleWorld, solvePos);
+                                            aimEvaluation = mountFrame.evaluate(
+                                                    worldAimDirection);
+                                            if (aimEvaluation.valid()) {
+                                                desiredPitch = aimEvaluation
+                                                        .requestedPitchDeg();
+                                                desiredYaw = aimEvaluation
+                                                        .requestedControllerYawDeg();
                                             }
                                         }
                                     } else if (hasNewTargetingSolution) {
@@ -1281,7 +1314,55 @@ public class WeaponFiringControl {
                                         }
                                     }
 
-                                    if (aimUpdateMode != AimUpdateMode.HOLD) {
+                                    if (sourceUsesSublevelFrame
+                                            && mountFrame.kind()
+                                            != MountFrameKind.UNAVAILABLE
+                                            && (aimEvaluation == null
+                                            || !aimEvaluation.valid())
+                                            && !hasNewTargetingSolution
+                                            && !hasLeadSolution) {
+                                        Vec3 boundaryDirection = directionFromTo(
+                                                cannonMuzzleWorld, solvePos);
+                                        AimCommandEvaluation boundaryEvaluation =
+                                                mountFrame.evaluate(
+                                                        boundaryDirection);
+                                        aimEvaluation = boundaryEvaluation;
+                                        if (boundaryEvaluation.valid()
+                                                && boundaryEvaluation
+                                                .constrained()) {
+                                            desiredPitch = boundaryEvaluation
+                                                    .requestedPitchDeg();
+                                            desiredYaw = boundaryEvaluation
+                                                    .requestedControllerYawDeg();
+                                            worldAimDirection = boundaryDirection;
+                                            aimUpdateMode = AimUpdateMode.DIRECT;
+                                        }
+                                    }
+                                    if (sourceUsesSublevelFrame
+                                            && aimEvaluation == null
+                                            && mountFrame.kind()
+                                            == MountFrameKind.UNAVAILABLE) {
+                                        aimEvaluation = mountFrame.evaluate(null);
+                                    }
+                                    this.lastAimCommandEvaluation =
+                                            aimEvaluation;
+
+                                    boolean directAdapterAimReady =
+                                            isDirectAdapterAimReady(
+                                                    adapterDirectAim,
+                                                    desiredPitch != null
+                                                            && Double.isFinite(desiredPitch)
+                                                            && desiredYaw != null
+                                                            && Double.isFinite(desiredYaw));
+                                    boolean aimWithinMovementLimits =
+                                            !sourceUsesSublevelFrame
+                                                    || aimEvaluation != null
+                                                    && aimEvaluation
+                                                    .fireEligible();
+                                    if (!directAdapterAimReady) {
+                                        this.aimStableTicks = 0;
+                                        this.lastOffsetAim = null;
+                                    } else if (aimUpdateMode != AimUpdateMode.HOLD) {
                                         this.lastAimPoint = offsetAim;
                                         this.aimStableTicks =
                                                 nextAimStableTicks(
@@ -1388,6 +1469,20 @@ public class WeaponFiringControl {
                                         if (!stableOk) {
                                             LOGGER.debug("WFC BLOCK: aim not stable");
                                         }
+
+                                        if (!directAdapterAimReady) {
+                                            LOGGER.debug("WFC BLOCK: direct adapter aim did not resolve to controller angles");
+                                        }
+
+                                        if (!aimWithinMovementLimits) {
+                                            LOGGER.debug("WFC BLOCK: movement limits reason={} requestedPitch={} appliedPitch={} requestedYaw={} appliedYaw={} frame={} sourceSublevel={}",
+                                                    aimEvaluation == null ? "not_evaluated" : aimEvaluation.reason(),
+                                                    aimEvaluation == null ? null : aimEvaluation.requestedPitchDeg(),
+                                                    aimEvaluation == null ? null : aimEvaluation.appliedPitchDeg(),
+                                                    aimEvaluation == null ? null : aimEvaluation.requestedControllerYawDeg(),
+                                                    aimEvaluation == null ? null : aimEvaluation.appliedControllerYawDeg(),
+                                                    mountFrame.kind(), mountFrame.sourceSublevelId());
+                                        }
                                     }
 
                                     boolean sharedFireGates =
@@ -1396,6 +1491,8 @@ public class WeaponFiringControl {
                                                     hasLeadSolution,
                                                     hasFireEligibleNewTargetingSolution,
                                                     canFireWithoutLead)
+                                            && directAdapterAimReady
+                                            && aimWithinMovementLimits
                                             && structuralAimAccepted
                                             && safeOk && stableOk;
                                     if (isDualNetwork()) {
@@ -2581,6 +2678,44 @@ public class WeaponFiringControl {
                 .steeringOrigin();
     }
 
+    public boolean canYawAimAtTarget(@Nullable Vec3 targetWorld) {
+        PitchOrientedContraptionEntity mounted = this.cannonMount == null
+                ? null : this.cannonMount.getContraption();
+        AbstractMountedCannonContraption cannon = mounted != null
+                && mounted.getContraption()
+                instanceof AbstractMountedCannonContraption c ? c : null;
+        Vec3 direction = directionFromTo(
+                this.resolveSteeringOrigin(cannon), targetWorld);
+        AimCommandEvaluation evaluation = this.resolveMountAimFrame(cannon)
+                .evaluate(direction);
+        return evaluation.valid() && !evaluation.yawConstrained();
+    }
+
+    public boolean usesSublevelAimFrame() {
+        PitchOrientedContraptionEntity mounted = this.cannonMount == null
+                ? null : this.cannonMount.getContraption();
+        AbstractMountedCannonContraption cannon = mounted != null
+                && mounted.getContraption()
+                instanceof AbstractMountedCannonContraption c ? c : null;
+        MountAimFrame frame = this.resolveMountAimFrame(cannon);
+        return frame.kind() == MountFrameKind.SUBLEVEL
+                || frame.sourceSublevelId() != null;
+    }
+
+    public boolean canApplyMountCommand(double pitchDeg,
+                                        double controllerYawDeg) {
+        PitchOrientedContraptionEntity mounted = this.cannonMount == null
+                ? null : this.cannonMount.getContraption();
+        AbstractMountedCannonContraption cannon = mounted != null
+                && mounted.getContraption()
+                instanceof AbstractMountedCannonContraption c ? c : null;
+        MountAimFrame frame = this.resolveMountAimFrame(cannon);
+        Vec3 worldDirection = frame.worldDirection(
+                pitchDeg, controllerYawDeg);
+        AimCommandEvaluation evaluation = frame.evaluate(worldDirection);
+        return evaluation.fireEligible();
+    }
+
     public SolverDebugReport buildSolverDebugReport(ServerLevel serverLevel, int arcTicks) {
         List<String> lines = new ArrayList<>();
         ProjectileSimulator.SimulationResult trajectory = null;
@@ -2632,8 +2767,31 @@ public class WeaponFiringControl {
                 + " fireFresh=" + this.lastTargetingFireFresh
                 + " freshnessReason="
                 + this.lastTargetingFreshnessReason);
-        PitchConstraint effectivePitch = cannon == null ? PitchConstraint.unconstrained() : this.effectivePitchConstraint(cannon);
+        MountAimFrame mountFrame = cannon == null ? null
+                : this.resolveMountAimFrame(cannon);
+        PitchConstraint effectivePitch = mountFrame == null
+                ? PitchConstraint.unconstrained()
+                : mountFrame.pitchConstraint();
         lines.add("effective pitch limits=" + effectivePitch.summary());
+        if (mountFrame != null) {
+            lines.add("mount aim frame=" + mountFrame.kind()
+                    + " sourceSublevel=" + mountFrame.sourceSublevelId()
+                    + " yawNeutral=" + fmt(mountFrame.yawNeutralDeg())
+                    + " yawLimits=[" + fmt(mountFrame.yawLimits().minDegrees())
+                    + "," + fmt(mountFrame.yawLimits().maxDegrees()) + "]"
+                    + " unavailableReason=" + mountFrame.unavailableReason());
+        }
+        if (this.lastAimCommandEvaluation != null) {
+            AimCommandEvaluation evaluation =
+                    this.lastAimCommandEvaluation;
+            lines.add("mount aim evaluation reason=" + evaluation.reason()
+                    + " valid=" + evaluation.valid()
+                    + " constrained=" + evaluation.constrained()
+                    + " requestedPitch=" + fmt(evaluation.requestedPitchDeg())
+                    + " appliedPitch=" + fmt(evaluation.appliedPitchDeg())
+                    + " requestedYaw=" + fmt(evaluation.requestedControllerYawDeg())
+                    + " appliedYaw=" + fmt(evaluation.appliedControllerYawDeg()));
+        }
         lines.add("target=" + fmtVec(targetPos)
                 + " targetDistanceFromMount=" + fmt(rawMuzzlePos != null && targetPos != null ? rawMuzzlePos.distanceTo(targetPos) : Double.NaN)
                 + " targetDistanceFromMuzzle=" + fmt(muzzleWorldPos != null && targetPos != null ? muzzleWorldPos.distanceTo(targetPos) : Double.NaN));
@@ -3137,9 +3295,15 @@ public class WeaponFiringControl {
             return this.estimateStructuralSlewTicks(cannonContraption,
                     solution.aimDirection(), fallbackControllerYaw, fallbackPitch);
         }
-        if (this.isSableMount() && solution != null) {
-            AimCommand command = this.mountAimCommand(cannonContraption, solution.aimDirection());
-            if (command != null) {
+        if (solution != null) {
+            MountAimFrame frame = this.resolveMountAimFrame(
+                    cannonContraption);
+            AimCommandEvaluation evaluation = frame.evaluate(
+                    solution.aimDirection());
+            if ((frame.kind() == MountFrameKind.SUBLEVEL
+                    || frame.sourceSublevelId() != null)
+                    && evaluation.valid()) {
+                AimCommand command = evaluation.appliedCommand();
                 return this.estimateSlewTicks(cannonContraption, command.controllerYawDeg(), command.pitchDeg());
             }
         }
@@ -3204,7 +3368,15 @@ public class WeaponFiringControl {
                 : (int) Math.max(0.0, Math.min(40.0, Math.ceil(ticks)));
     }
 
-    private PitchConstraint effectivePitchConstraint(AbstractMountedCannonContraption cannonContraption) {
+    private MountAimFrame resolveMountAimFrame(
+            AbstractMountedCannonContraption cannonContraption) {
+        long tick = this.level == null ? Long.MIN_VALUE
+                : this.level.getGameTime();
+        if (this.cachedMountAimFrame != null
+                && this.cachedMountAimFrameTick == tick) {
+            return this.cachedMountAimFrame;
+        }
+
         double controllerMin = this.pitchController == null
                 ? PitchConstraint.SOLVER_MIN_PITCH_DEG
                 : this.pitchController.getMinAngleDeg();
@@ -3221,49 +3393,93 @@ public class WeaponFiringControl {
         Vec3 rightAxis = new Vec3(1.0, 0.0, 0.0);
         Vec3 upAxis = new Vec3(0.0, 1.0, 0.0);
         Vec3 forwardAxis = new Vec3(0.0, 0.0, 1.0);
+        MountFrameKind frameKind = MountFrameKind.WORLD;
+        UUID sourceSublevelId = null;
+        String unavailableReason = null;
+        SubLevelAccess mountShip = null;
+        if (Mods.SABLE.isLoaded() && this.level != null) {
+            mountShip = SableCompanion.INSTANCE.getContaining(
+                    this.level, this.cannonMount.getBlockPos());
+            if (mountShip != null) {
+                sourceSublevelId = mountShip.getUniqueId();
+                this.lastResolvedSourceSublevelId = sourceSublevelId;
+            } else if (this.lastResolvedSourceSublevelId != null) {
+                sourceSublevelId = this.lastResolvedSourceSublevelId;
+            }
+        }
         boolean structuralPitch = this.pitchController != null
                 && this.pitchController.hasStructuralKineticSelectionForTargeting();
         if (structuralPitch) {
             KineticAimFrame aimFrame = this.pitchController.getStructuralAimFrame();
-            if (aimFrame == null) {
-                return new PitchConstraint(1.0, -1.0,
-                        rightAxis, upAxis, forwardAxis);
+            if (mountShip == null && sourceSublevelId != null) {
+                unavailableReason = "source_frame_unavailable";
+                frameKind = MountFrameKind.UNAVAILABLE;
+            } else if (aimFrame == null) {
+                unavailableReason = "structural_frame_unavailable";
+                frameKind = MountFrameKind.UNAVAILABLE;
+            } else {
+                rightAxis = aimFrame.rightAxis();
+                upAxis = aimFrame.upAxis();
+                forwardAxis = aimFrame.forwardAxis();
+                frameKind = MountFrameKind.STRUCTURAL;
             }
-            rightAxis = aimFrame.rightAxis();
-            upAxis = aimFrame.upAxis();
-            forwardAxis = aimFrame.forwardAxis();
-        } else if (this.isSableMount()) {
-            SubLevelAccess mountShip = SableCompanion.INSTANCE.getContaining(this.level, this.cannonMount.getBlockPos());
-            if (mountShip != null) {
-                rightAxis = SableUtils.getWorldVecDirectionTransform(rightAxis, mountShip);
-                upAxis = SableUtils.getWorldVecDirectionTransform(upAxis, mountShip);
-                forwardAxis = SableUtils.getWorldVecDirectionTransform(forwardAxis, mountShip);
-            }
+        } else if (mountShip != null) {
+            rightAxis = SableUtils.getWorldVecDirectionTransform(rightAxis, mountShip);
+            upAxis = SableUtils.getWorldVecDirectionTransform(upAxis, mountShip);
+            forwardAxis = SableUtils.getWorldVecDirectionTransform(forwardAxis, mountShip);
+            frameKind = MountFrameKind.SUBLEVEL;
+        } else if (sourceSublevelId != null) {
+            frameKind = MountFrameKind.UNAVAILABLE;
+            unavailableReason = "source_frame_unavailable";
         }
 
-        return PitchConstraint.intersect(controllerMin, controllerMax, cannonMin, cannonMax, rightAxis, upAxis, forwardAxis);
+        PitchConstraint pitchConstraint = frameKind == MountFrameKind.UNAVAILABLE
+                ? new PitchConstraint(1.0, -1.0,
+                rightAxis, upAxis, forwardAxis)
+                : PitchConstraint.intersect(
+                controllerMin, controllerMax, cannonMin, cannonMax,
+                rightAxis, upAxis, forwardAxis);
+        ControllerMovementLimits yawLimits = this.yawController == null
+                ? ControllerMovementLimits.defaults(CannonAxis.YAW)
+                : this.yawController.getMovementLimits();
+        double yawNeutral = this.yawController == null ? 0.0
+                : this.yawController.getLimitNeutralAngleDeg();
+        MountAimFrame frame = new MountAimFrame(
+                frameKind, sourceSublevelId, pitchConstraint,
+                yawLimits, yawNeutral, unavailableReason);
+        this.cachedMountAimFrameTick = tick;
+        this.cachedMountAimFrame = frame;
+        return frame;
+    }
+
+    private PitchConstraint effectivePitchConstraint(
+            AbstractMountedCannonContraption cannonContraption) {
+        return this.resolveMountAimFrame(cannonContraption)
+                .pitchConstraint();
     }
 
     @Nullable
     private Vec3 worldDirectionFromMountCommand(@Nullable Double pitchDeg,
                                                 @Nullable Double controllerYawDeg) {
+        PitchOrientedContraptionEntity mounted = this.cannonMount == null
+                ? null : this.cannonMount.getContraption();
+        AbstractMountedCannonContraption cannon = mounted != null
+                && mounted.getContraption()
+                instanceof AbstractMountedCannonContraption c ? c : null;
+        return this.worldDirectionFromMountCommand(
+                this.resolveMountAimFrame(cannon), pitchDeg,
+                controllerYawDeg);
+    }
+
+    @Nullable
+    private Vec3 worldDirectionFromMountCommand(
+            MountAimFrame frame, @Nullable Double pitchDeg,
+            @Nullable Double controllerYawDeg) {
         if (pitchDeg == null || controllerYawDeg == null
                 || !Double.isFinite(pitchDeg) || !Double.isFinite(controllerYawDeg)) {
             return null;
         }
-        Vec3 local = TargetingMath.directionFromYawPitch(
-                controllerYawDeg - 270.0, pitchDeg);
-        if (local.lengthSqr() < 1.0e-12) {
-            return null;
-        }
-        if (!this.isSableMount()) {
-            return local;
-        }
-        SubLevelAccess mountShip = SableCompanion.INSTANCE.getContaining(
-                this.level, this.cannonMount.getBlockPos());
-        Vec3 world = mountShip == null
-                ? local : SableUtils.getWorldVecDirectionTransform(local, mountShip);
-        return world.lengthSqr() < 1.0e-12 ? null : world.normalize();
+        return frame.worldDirection(pitchDeg, controllerYawDeg);
     }
 
     @Nullable
@@ -3273,16 +3489,6 @@ public class WeaponFiringControl {
         }
         Vec3 direction = target.subtract(origin);
         return direction.lengthSqr() < 1.0e-12 ? null : direction.normalize();
-    }
-
-    @Nullable
-    private AimCommand mountAimCommand(AbstractMountedCannonContraption cannonContraption, @Nullable Vec3 worldAimDirection) {
-        PitchConstraint constraint = this.effectivePitchConstraint(cannonContraption);
-        if (worldAimDirection == null || !constraint.allows(worldAimDirection)) {
-            return null;
-        }
-        TargetingMath.YawPitch mountAngles = constraint.mountYawPitch(worldAimDirection);
-        return new AimCommand(mountAngles.pitchDeg(), wrap360(mountAngles.yawDeg() + 270.0));
     }
 
     @Nullable
@@ -3296,14 +3502,9 @@ public class WeaponFiringControl {
             return null;
         }
 
-        PitchConstraint constraint = this.effectivePitchConstraint(cannonContraption);
-        if (!constraint.hasReachablePitch()) {
-            return null;
-        }
-
-        TargetingMath.YawPitch mountAngles = constraint.mountYawPitch(direction);
-        double pitch = Math.max(constraint.minPitchDeg(), Math.min(constraint.maxPitchDeg(), mountAngles.pitchDeg()));
-        return new AimCommand(pitch, wrap360(mountAngles.yawDeg() + 270.0));
+        AimCommandEvaluation evaluation = this.resolveMountAimFrame(
+                cannonContraption).evaluate(direction);
+        return evaluation.valid() ? evaluation.command() : null;
     }
 
     private int estimateSlewTicks(AbstractMountedCannonContraption cannonContraption, double desiredControllerYaw, double desiredPitch) {
@@ -3830,6 +4031,126 @@ public class WeaponFiringControl {
     private static record AimCommand(double pitchDeg, double controllerYawDeg) {
     }
 
+    static record AimCommandEvaluation(
+            boolean valid,
+            double requestedPitchDeg,
+            double appliedPitchDeg,
+            double requestedControllerYawDeg,
+            double appliedControllerYawDeg,
+            boolean pitchConstrained,
+            boolean yawConstrained,
+            String reason
+    ) {
+        static AimCommandEvaluation invalid(String reason) {
+            return new AimCommandEvaluation(false,
+                    Double.NaN, Double.NaN, Double.NaN, Double.NaN,
+                    false, false, reason);
+        }
+
+        boolean constrained() {
+            return pitchConstrained || yawConstrained;
+        }
+
+        boolean fireEligible() {
+            return valid && !constrained();
+        }
+
+        AimCommand command() {
+            return new AimCommand(requestedPitchDeg,
+                    requestedControllerYawDeg);
+        }
+
+        AimCommand appliedCommand() {
+            return new AimCommand(appliedPitchDeg,
+                    appliedControllerYawDeg);
+        }
+    }
+
+    static record MountAimFrame(
+            MountFrameKind kind,
+            @Nullable UUID sourceSublevelId,
+            PitchConstraint pitchConstraint,
+            ControllerMovementLimits yawLimits,
+            double yawNeutralDeg,
+            @Nullable String unavailableReason
+    ) {
+        AimCommandEvaluation evaluate(@Nullable Vec3 worldAimDirection) {
+            if (kind == MountFrameKind.UNAVAILABLE) {
+                return AimCommandEvaluation.invalid(unavailableReason == null
+                        ? "mount_frame_unavailable" : unavailableReason);
+            }
+            if (!finite(worldAimDirection)
+                    || worldAimDirection.lengthSqr() < 1.0E-12) {
+                return AimCommandEvaluation.invalid("invalid_aim_direction");
+            }
+            if (pitchConstraint == null
+                    || !pitchConstraint.hasReachablePitch()) {
+                return AimCommandEvaluation.invalid(
+                        "no_pitch_limit_intersection");
+            }
+            if (yawLimits == null
+                    || yawLimits.axis() != CannonAxis.YAW
+                    || !Double.isFinite(yawNeutralDeg)) {
+                return AimCommandEvaluation.invalid("invalid_yaw_limits");
+            }
+
+            TargetingMath.YawPitch angles = pitchConstraint
+                    .mountYawPitch(worldAimDirection);
+            double requestedPitch = angles.pitchDeg();
+            double requestedYaw = wrap360(angles.yawDeg() + 270.0);
+            if (!Double.isFinite(requestedPitch)
+                    || !Double.isFinite(requestedYaw)) {
+                return AimCommandEvaluation.invalid("invalid_mount_angles");
+            }
+
+            boolean pitchConstrained = !pitchConstraint
+                    .allows(worldAimDirection);
+            boolean yawConstrained = !yawLimits.allowsControllerTarget(
+                    requestedYaw, yawNeutralDeg);
+            double appliedPitch = Math.max(
+                    pitchConstraint.minPitchDeg(), Math.min(
+                            pitchConstraint.maxPitchDeg(), requestedPitch));
+            double appliedYaw = yawLimits.clampControllerTarget(
+                    requestedYaw, yawNeutralDeg);
+            String reason = pitchConstrained && yawConstrained
+                    ? "pitch_and_yaw_outside_limits"
+                    : pitchConstrained ? "pitch_outside_limits"
+                    : yawConstrained ? "yaw_outside_limits" : "ok";
+            return new AimCommandEvaluation(true,
+                    requestedPitch, appliedPitch,
+                    requestedYaw, appliedYaw,
+                    pitchConstrained, yawConstrained, reason);
+        }
+
+        @Nullable
+        Vec3 worldDirection(double pitchDeg,
+                            double controllerYawDeg) {
+            if (kind == MountFrameKind.UNAVAILABLE
+                    || pitchConstraint == null
+                    || !Double.isFinite(pitchDeg)
+                    || !Double.isFinite(controllerYawDeg)) {
+                return null;
+            }
+            Vec3 local = TargetingMath.directionFromYawPitch(
+                    controllerYawDeg - 270.0, pitchDeg);
+            if (local.lengthSqr() < 1.0E-12) {
+                return null;
+            }
+            Vec3 world = pitchConstraint.rightAxis().scale(local.x)
+                    .add(pitchConstraint.upAxis().scale(local.y))
+                    .add(pitchConstraint.forwardAxis().scale(local.z));
+            return world.lengthSqr() < 1.0E-12
+                    ? null : world.normalize();
+        }
+    }
+
+    enum MountFrameKind {
+        WORLD,
+        SUBLEVEL,
+        STRUCTURAL,
+        UNAVAILABLE
+    }
+
     static AimUpdateMode selectAimUpdateMode(
             boolean hasResolvedAim, boolean asyncBallisticAimExpected) {
         if (hasResolvedAim) {
@@ -3837,6 +4158,22 @@ public class WeaponFiringControl {
         }
         return asyncBallisticAimExpected
                 ? AimUpdateMode.HOLD : AimUpdateMode.DIRECT;
+    }
+
+    static boolean hasResolvedAimForUpdate(
+            boolean hasNewTargetingSolution,
+            boolean hasLeadSolution,
+            boolean canFireWithoutLead,
+            boolean adapterDirectAim) {
+        return !adapterDirectAim
+                && (hasNewTargetingSolution
+                || hasLeadSolution
+                || canFireWithoutLead);
+    }
+
+    static boolean isDirectAdapterAimReady(
+            boolean adapterDirectAim, boolean directAimResolved) {
+        return !adapterDirectAim || directAimResolved;
     }
 
     static boolean shouldIssueAimCommand(AimUpdateMode mode) {

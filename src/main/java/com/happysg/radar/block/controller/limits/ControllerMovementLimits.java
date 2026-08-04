@@ -2,12 +2,14 @@ package com.happysg.radar.block.controller.limits;
 
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.kinetic.KineticAngleMath;
+import com.happysg.radar.targeting.TargetingMath;
 
 import java.util.Optional;
 
 public record ControllerMovementLimits(CannonAxis axis, double minDegrees,
                                        double maxDegrees) {
-    private static final double EPSILON = 1.0e-7;
+    public static final double ANGLE_EPSILON_DEG =
+            TargetingMath.ANGLE_EPSILON_DEG;
 
     public static ControllerMovementLimits defaults(CannonAxis axis) {
         return axis == CannonAxis.PITCH
@@ -33,8 +35,29 @@ public record ControllerMovementLimits(CannonAxis axis, double minDegrees,
 
     public boolean isUnrestrictedYaw() {
         return axis == CannonAxis.YAW
-                && minDegrees <= -180.0 + EPSILON
-                && maxDegrees >= 180.0 - EPSILON;
+                && minDegrees <= -180.0 + ANGLE_EPSILON_DEG
+                && maxDegrees >= 180.0 - ANGLE_EPSILON_DEG;
+    }
+
+    public Optional<ControllerMovementLimits> intersection(
+            ControllerMovementLimits supported
+    ) {
+        if (supported == null || supported.axis != axis) {
+            return Optional.empty();
+        }
+        double constrainedMin = Math.max(minDegrees, supported.minDegrees);
+        double constrainedMax = Math.min(maxDegrees, supported.maxDegrees);
+        if (constrainedMin > constrainedMax + ANGLE_EPSILON_DEG) {
+            return Optional.empty();
+        }
+        if (constrainedMin > constrainedMax) {
+            double boundary = (constrainedMin + constrainedMax) * 0.5;
+            constrainedMin = boundary;
+            constrainedMax = boundary;
+        }
+        return Optional.of(new ControllerMovementLimits(axis,
+                canonicalZero(constrainedMin),
+                canonicalZero(constrainedMax)));
     }
 
     public ControllerMovementLimits constrainedTo(
@@ -43,13 +66,9 @@ public record ControllerMovementLimits(CannonAxis axis, double minDegrees,
         if (supported == null || supported.axis != axis) {
             return this;
         }
-        double constrainedMin = clamp(minDegrees,
-                supported.minDegrees, supported.maxDegrees);
-        double constrainedMax = clamp(maxDegrees,
-                supported.minDegrees, supported.maxDegrees);
-        return new ControllerMovementLimits(axis,
-                canonicalZero(constrainedMin),
-                canonicalZero(constrainedMax));
+        return intersection(supported).orElseThrow(() ->
+                new IllegalArgumentException(
+                        "Movement limits do not overlap supported range"));
     }
 
     public boolean allowsControllerTarget(double controllerTargetDegrees,
@@ -59,16 +78,16 @@ public record ControllerMovementLimits(CannonAxis axis, double minDegrees,
             return false;
         }
         if (axis == CannonAxis.PITCH) {
-            return controllerTargetDegrees >= minDegrees - EPSILON
-                    && controllerTargetDegrees <= maxDegrees + EPSILON;
+            return controllerTargetDegrees >= minDegrees - ANGLE_EPSILON_DEG
+                    && controllerTargetDegrees <= maxDegrees + ANGLE_EPSILON_DEG;
         }
         if (isUnrestrictedYaw()) {
             return true;
         }
         double offset = yawOffsetForRange(
                 neutralControllerDegrees, controllerTargetDegrees);
-        return offset >= minDegrees - EPSILON
-                && offset <= maxDegrees + EPSILON;
+        return offset >= minDegrees - ANGLE_EPSILON_DEG
+                && offset <= maxDegrees + ANGLE_EPSILON_DEG;
     }
 
     public double clampControllerTarget(double controllerTargetDegrees,
@@ -133,9 +152,9 @@ public record ControllerMovementLimits(CannonAxis axis, double minDegrees,
     private double yawOffsetForRange(double neutralDegrees, double angleDegrees) {
         double offset = KineticAngleMath.shortestDelta(neutralDegrees, angleDegrees);
         // +180 and -180 are the same heading
-        if (Math.abs(offset + 180.0) <= EPSILON
-                && minDegrees > -180.0 + EPSILON
-                && maxDegrees >= 180.0 - EPSILON) {
+        if (Math.abs(offset + 180.0) <= ANGLE_EPSILON_DEG
+                && minDegrees > -180.0 + ANGLE_EPSILON_DEG
+                && maxDegrees >= 180.0 - ANGLE_EPSILON_DEG) {
             return 180.0;
         }
         return offset;
@@ -146,6 +165,6 @@ public record ControllerMovementLimits(CannonAxis axis, double minDegrees,
     }
 
     private static double canonicalZero(double value) {
-        return Math.abs(value) <= EPSILON ? 0.0 : value;
+        return Math.abs(value) <= ANGLE_EPSILON_DEG ? 0.0 : value;
     }
 }

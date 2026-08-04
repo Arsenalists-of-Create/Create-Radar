@@ -305,15 +305,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return;
         }
 
-        TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
-        boolean requireLos = cfg.lineOfSight();
-        List<AutoPitchControllerBlockEntity> weaponEndpoints = getTargetConstrainedWeaponEndpoints(sl);
-
-        // Only auto-selections should be affected by cannon engagement checks when usable cannons exist.
-        if (selectedWasAuto && !weaponEndpoints.isEmpty() && !anyCannonCanEngage(sl, selected, requireLos)) {
-            dropOrReselectAuto(sl, data, group);
-            return;
-        }
+        // Once acquired, retain automatic targets while they are outside the
+        // current mount limits. Controllers track the nearest legal boundary
+        // and resume normally when the target re-enters the reachable sector.
 
         TargetingConfig cfg2 = targeting != null ? targeting : TargetingConfig.DEFAULT;
 
@@ -512,11 +506,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             Vec3 origin = pitch.getRayStart();
             if (origin == null) continue;
 
-            if (pitch.autoyaw != null && !pitch.autoyaw.canPossiblyAimAt(origin, target)) {
-                continue;
-            }
-
-            // existing heavier check
             if (pitch.canEngageTrack(track, requireLos)) return true;
         }
         return false;

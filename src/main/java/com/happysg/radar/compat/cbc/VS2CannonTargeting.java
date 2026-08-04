@@ -180,7 +180,11 @@ public class VS2CannonTargeting {
             if (CannonUtil.isCBCATCannon(cannonContraption)) {
                 return null;
             }
-            return directAimToTarget(mountPos, targetPos);
+            SubLevelAccess mountShip = SableCompanion.INSTANCE.getContaining(
+                    level, mountPos);
+            Vec3 localTarget = mountShip == null ? targetPos
+                    : toShipPosition(mountShip, targetPos);
+            return directAimToTarget(mountPos, localTarget);
         }
 
 //        return calculatePitchAndYawVS2(level, chargePower, targetPos, mountPos, barrelLength, initialDirection, drag, gravity);

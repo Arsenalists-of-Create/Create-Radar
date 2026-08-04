@@ -743,17 +743,29 @@ public final class TargetingSolverSelfTest {
       ProjectileSimulator.SimulationResult second = simulator.simulate(
               Vec3.ZERO, new Vec3(1.0, 0.0, 0.0), Vec3.ZERO,
               model, 2, null);
-      boolean passed = factories[0] == 2
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(new Vec3(20.0, 0.0, 0.0))
+              .projectileSpeed(model.muzzleSpeed())
+              .maxFlightTicks(40)
+              .build();
+      TargetingResult solved = new SimulatedAimSolver(
+              simulator, new TargetPredictor()).solve(
+              snapshot, model, ObstructionChecker.NONE);
+      boolean passed = factories[0] > 2
               && close(first.endPosition().x, 3.5)
               && close(second.endPosition().x, 3.5)
               && close(first.endVelocity().x, 2.0)
-              && close(second.endVelocity().x, 2.0);
+              && close(second.endVelocity().x, 2.0)
+              && solved.valid()
+              && solved.hasShot();
       return new Result(
               "stateful_projectile_dynamics_isolation",
               passed,
               "factories=" + factories[0]
                       + " first=" + first.endPosition().x
-                      + " second=" + second.endPosition().x);
+                      + " second=" + second.endPosition().x
+                      + " solve=" + solved.debugString());
    }
 
    private static Result checkWarmStartDoesNotLatch() {

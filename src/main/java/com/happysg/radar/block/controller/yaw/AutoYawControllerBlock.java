@@ -39,6 +39,11 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
             BlockState state, Level level, BlockPos pos,
             Player player, BlockHitResult hit
     ) {
+        if (!player.getMainHandItem().isEmpty()
+                || hit.getDirection().getAxis() == getRotationAxis(state)) {
+            return InteractionResult.PASS;
+        }
+
         if (!level.isClientSide) {
             OpenControllerLimitsScreenPacket.openIfAssembled(
                     level, pos, player);

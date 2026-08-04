@@ -254,9 +254,24 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
         requestedTargetAngle = requestedAngle;
-        double applied = getMovementLimits().clampControllerTarget(
+        ControllerMovementLimits effective = getMovementLimits()
+                .intersection(getSupportedMovementLimits()).orElse(null);
+        if (effective == null) {
+            targetLimitConstrained = true;
+            isRunning = false;
+            kineticControllerState.onTargetChanged(
+                    false, targetAngle, DEADBAND_DEG);
+            if (resetPhysicalTracking) {
+                physHandler.reset();
+            }
+            notifyUpdate();
+            setChanged();
+            return;
+        }
+        double applied = effective.clampControllerTarget(
                 requestedAngle, 0.0);
-        targetLimitConstrained = Math.abs(applied - requestedAngle) > 1.0e-7;
+        targetLimitConstrained = !effective.allowsControllerTarget(
+                requestedAngle, 0.0);
         targetAngle = applied;
         isRunning = running;
         kineticControllerState.onTargetChanged(running, applied, DEADBAND_DEG);
@@ -1202,9 +1217,11 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     @Override
     public ControllerMovementLimits getMovementLimits() {
-        return new ControllerMovementLimits(CannonAxis.PITCH,
-                minAngleDeg, maxAngleDeg)
-                .constrainedTo(getSupportedMovementLimits());
+        ControllerMovementLimits configured =
+                new ControllerMovementLimits(CannonAxis.PITCH,
+                        minAngleDeg, maxAngleDeg);
+        return configured.intersection(getSupportedMovementLimits())
+                .orElse(configured);
     }
 
     @Override
@@ -1265,7 +1282,6 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return false;
         }
         ControllerMovementLimits limits = validated.get();
-        limits = limits.constrainedTo(getSupportedMovementLimits());
         minAngleDeg = limits.minDegrees();
         maxAngleDeg = limits.maxDegrees();
         applyTargetRequest(requestedTargetAngle, isRunning, true);
@@ -1306,8 +1322,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                 ? compound.getDouble("RequestedTargetAngle") : targetAngle;
         double constrainedTarget = limits.clampControllerTarget(
                 requestedTargetAngle, 0.0);
-        targetLimitConstrained = Math.abs(
-                constrainedTarget - requestedTargetAngle) > 1.0e-7;
+        targetLimitConstrained = !limits.allowsControllerTarget(
+                requestedTargetAngle, 0.0);
         targetAngle = constrainedTarget;
 
         lastTargetPos = null;

@@ -4,6 +4,11 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 public final class TargetingMath {
+   // Controller commands cross a float API boundary, whose ULP near 360
+   // degrees is about 3e-5. Keep solver and controller boundary decisions on
+   // the same side of that conversion.
+   public static final double ANGLE_EPSILON_DEG = 1.0E-4;
+
    private TargetingMath() {
    }
 

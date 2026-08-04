@@ -25,6 +25,7 @@ public final class ControllerCollisionSelfTest {
         testLimitDialDirections();
         testLimitDialSnappingAndCrossing();
         testMovementLimitsConstrainToMountCapability();
+        testDisjointMovementLimitsHaveNoIntersection();
         testYawLimitDialKeepsSignedEndpoints();
         testDepthRangeStartsOnViewerSide();
         testSteppedBlockCollapsesToOneEnvelope();
@@ -268,6 +269,15 @@ public final class ControllerCollisionSelfTest {
         require(close(constrained.minDegrees(), -30.0)
                         && close(constrained.maxDegrees(), 60.0),
                 "Controller limits must intersect the mount's physical range");
+    }
+
+    private static void testDisjointMovementLimitsHaveNoIntersection() {
+        ControllerMovementLimits requested = new ControllerMovementLimits(
+                CannonAxis.PITCH, 30.0, 60.0);
+        ControllerMovementLimits cannon = new ControllerMovementLimits(
+                CannonAxis.PITCH, -45.0, 20.0);
+        require(requested.intersection(cannon).isEmpty(),
+                "Disjoint configured and physical pitch ranges must be unreachable");
     }
 
     private static void testDepthRangeStartsOnViewerSide() {

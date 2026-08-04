@@ -61,7 +61,12 @@ public final class ControllerCollisionSnapshotBuilder {
         ControllerMovementLimits supportedLimits =
                 controller.getSupportedMovementLimits();
         ControllerMovementLimits movementLimits = controller
-                .getMovementLimits().constrainedTo(supportedLimits);
+                .getMovementLimits().intersection(supportedLimits)
+                .orElse(null);
+        if (movementLimits == null) {
+            return ControllerCollisionSnapshot.error(
+                    ControllerCollisionSnapshot.Status.INVALID_REQUEST, axis);
+        }
         List<CannonMountContext> mounts = collisionMounts(blockEntity);
         List<BlockPos> mountPositions = collisionMountPositions(blockEntity);
         Set<UUID> controlledSublevels = collisionSublevels(blockEntity);

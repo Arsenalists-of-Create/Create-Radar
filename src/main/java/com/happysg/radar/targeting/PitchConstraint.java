@@ -15,7 +15,8 @@ public record PitchConstraint(
 ) {
     public static final double SOLVER_MIN_PITCH_DEG = -89.0;
     public static final double SOLVER_MAX_PITCH_DEG = 89.0;
-    private static final double EPSILON_DEG = 1.0E-6;
+    private static final double EPSILON_DEG =
+            TargetingMath.ANGLE_EPSILON_DEG;
     private static final Vec3 WORLD_RIGHT = new Vec3(1.0, 0.0, 0.0);
     private static final Vec3 WORLD_UP = new Vec3(0.0, 1.0, 0.0);
     private static final Vec3 WORLD_FORWARD = new Vec3(0.0, 0.0, 1.0);

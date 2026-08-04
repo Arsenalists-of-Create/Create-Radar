@@ -45,6 +45,11 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
             @NotNull BlockPos pos, @NotNull Player player,
             @NotNull BlockHitResult hit
     ) {
+        if (!player.getMainHandItem().isEmpty()
+                || hit.getDirection().getAxis() == getRotationAxis(state)) {
+            return InteractionResult.PASS;
+        }
+
         if (!level.isClientSide) {
             OpenControllerLimitsScreenPacket.openIfAssembled(
                     level, pos, player);

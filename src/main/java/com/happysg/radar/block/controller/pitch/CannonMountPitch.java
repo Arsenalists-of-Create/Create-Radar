@@ -7,7 +7,6 @@ import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
-import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.config.server.RadarServerConfig;
 import com.mojang.logging.LogUtils;
@@ -104,28 +103,38 @@ public class CannonMountPitch {
         if (!controller.firingControl.canAimAtFixedYaw(p)) {
             return false;
         }
+        if (!controller.firingControl.canYawAimAtTarget(p)) {
+            return false;
+        }
 
         double max = controller.getMaxEngagementRangeBlocks();
         if (max > 0.0) {
             Vec3 start = controller.firingControl.getCannonRayStart();
-            if (Mods.SABLE.isLoaded() && PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
-                start = PhysicsHandler.getWorldVec(controller.getLevel(), start);
-            }
             if (start.distanceToSqr(p) > (max * max)) {
                 return false;
             }
         }
 
-        if (Mods.SABLE.isLoaded() && PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
-            Vec3 mountPos = SableUtils.getWorldVec(controller.getLevel(), mount.getBlockPos().getCenter());
+        if (Mods.SABLE.isLoaded()
+                && controller.firingControl.usesSublevelAimFrame()) {
             List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, p, sl);
-            if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
+            boolean hasLegalAngles = angles != null && angles.stream()
+                    .anyMatch(candidate -> candidate != null
+                            && candidate.size() >= 2
+                            && controller.firingControl.canApplyMountCommand(
+                            candidate.get(0), candidate.get(1)));
+            if (!hasLegalAngles) {
                 return false;
             }
         } else {
             Vec3 origin = controller.getRayStart();
             List<Double> pitches = CannonTargeting.calculatePitch(mount, origin, p, sl);
-            if (pitches == null || pitches.isEmpty()) {
+            var effectivePitch = controller.getMovementLimits()
+                    .intersection(controller.getSupportedMovementLimits())
+                    .orElse(null);
+            if (effectivePitch == null || pitches == null
+                    || pitches.stream().noneMatch(pitch -> pitch != null
+                    && effectivePitch.allowsControllerTarget(pitch, 0.0))) {
                 return false;
             }
         }
