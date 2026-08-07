@@ -20,6 +20,7 @@ import com.dsvv.cbcat.cannon.twin_autocannon.TwinAutocannonBlock;
 import com.dsvv.cbcat.cannon.twin_autocannon.contraption.MountedTwinAutocannonContraption;
 import com.dsvv.cbcat.registry.DataComponentRegistry;
 import com.happysg.radar.compat.cbc.CannonUtil;
+import com.happysg.radar.debug.DiagnosticRecorder;
 import com.happysg.radar.mixin.CBCATQuickFireBreechAccessor;
 import com.happysg.radar.targeting.ProjectileModel;
 import com.mojang.logging.LogUtils;
@@ -271,6 +272,9 @@ public final class CBCATCannonCompat {
             return new ShotState(kind, speed, ballistics, model, fuelTicks, maxFlightTicks,
                     ammunitionId, fingerprint, reason);
         } catch (Throwable throwable) {
+            DiagnosticRecorder.warn("cbc_at", "resolve_shot_state",
+                    "next_shot_resolution_failed", throwable, level, null,
+                    "cbc_at", "createbigcannons");
             if (RESOLUTION_WARNING_LOGGED.compareAndSet(false, true)) {
                 LOGGER.warn("Could not resolve CBC:AT 0.1.4c next-shot state; affected cannon will not receive an approximate solution", throwable);
             }

@@ -12,6 +12,10 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.debug.DiagnosticReportCoordinator;
+import com.happysg.radar.debug.InspectorSessionManager;
+import com.happysg.radar.debug.ConflictTraceRecorder;
+import com.happysg.radar.debug.ConflictTraceSessionManager;
 import com.happysg.radar.targeting.Trajectory;
 import com.happysg.radar.targeting.TargetingSolverSelfTest;
 import com.mojang.brigadier.CommandDispatcher;
@@ -20,46 +24,29 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.logging.LogUtils;
 import net.minecraft.ChatFormatting;
-import net.minecraft.commands.CommandSource;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
-import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.fml.ModList;
-import net.neoforged.fml.loading.FMLPaths;
-import net.neoforged.fml.loading.FMLLoader;
-import net.neoforged.neoforge.internal.versions.neoforge.NeoForgeVersion;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
 
 import javax.annotation.Nullable;
-import java.awt.*;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 
 public class  ModCommands {
     private static final Logger LOGGER = LogUtils.getLogger();
-    static String DIR_NAME = "create_radar_debug";
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         PonderStructureCommand.register(dispatcher);
         dispatcher.register(
@@ -167,10 +154,49 @@ public class  ModCommands {
                         .then(Commands.literal("debug")
                                 .requires(src -> src.hasPermission(2))
                                 .then(Commands.literal("gen_debug_file")
-                                        .executes(ctx -> {
-                                            genDebugFile(ctx.getSource());
-                                            return 1;
-                                        })
+                                        .executes(ctx ->
+                                                DiagnosticReportCoordinator
+                                                        .startOverall(
+                                                                ctx.getSource()))
+                                )
+                                .then(Commands.literal("report")
+                                        .executes(ctx ->
+                                                DiagnosticReportCoordinator
+                                                        .startOverall(
+                                                                ctx.getSource()))
+                                )
+                                .then(Commands.literal("inspect")
+                                        .executes(ctx -> toggleInspector(
+                                                ctx.getSource(), null))
+                                        .then(Commands.literal("on")
+                                                .executes(ctx ->
+                                                        toggleInspector(
+                                                                ctx.getSource(),
+                                                                true)))
+                                        .then(Commands.literal("off")
+                                                .executes(ctx ->
+                                                        toggleInspector(
+                                                                ctx.getSource(),
+                                                                false)))
+                                        .then(Commands.literal("dump")
+                                                .executes(ctx ->
+                                                        DiagnosticReportCoordinator
+                                                                .dumpInspectedBlock(
+                                                                        ctx.getSource())))
+                                )
+                                .then(Commands.literal("conflicts")
+                                        .executes(ctx -> conflictTraceStatus(
+                                                ctx.getSource()))
+                                        .then(Commands.literal("on")
+                                                .executes(ctx ->
+                                                        setConflictTrace(
+                                                                ctx.getSource(),
+                                                                true)))
+                                        .then(Commands.literal("off")
+                                                .executes(ctx ->
+                                                        setConflictTrace(
+                                                                ctx.getSource(),
+                                                                false)))
                                 )
                         )
         );
@@ -193,6 +219,56 @@ public class  ModCommands {
         );
 
 
+    }
+
+    private static int toggleInspector(CommandSourceStack source,
+                                       @Nullable Boolean requestedState) {
+        ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendFailure(Component.literal(
+                    "A player is required to use inspection mode."));
+            return 0;
+        }
+        boolean enabled = requestedState == null
+                ? InspectorSessionManager.toggle(player)
+                : InspectorSessionManager.setEnabled(player, requestedState);
+        source.sendSuccess(() -> Component.literal(
+                "Create Radar inspection mode: "
+                        + (enabled ? "ON" : "OFF"))
+                .withStyle(enabled ? ChatFormatting.GREEN
+                        : ChatFormatting.GRAY), false);
+        return 1;
+    }
+
+    private static int setConflictTrace(CommandSourceStack source,
+                                        boolean enabled) {
+        ConflictTraceRecorder.State state = enabled
+                ? ConflictTraceSessionManager.enable(source.getServer(),
+                source.getPlayer())
+                : ConflictTraceSessionManager.disable(source.getServer());
+        source.sendSuccess(() -> Component.literal(
+                "Create Radar conflict trace: "
+                        + (state.enabled() ? "ON" : "OFF")
+                        + " | session=" + state.sessionId()
+                        + " | retained=" + state.retainedEvents()
+                        + " | dropped=" + state.droppedEvents())
+                .withStyle(state.enabled() ? ChatFormatting.GREEN
+                        : ChatFormatting.GRAY), false);
+        return 1;
+    }
+
+    private static int conflictTraceStatus(CommandSourceStack source) {
+        ConflictTraceRecorder.State state = ConflictTraceRecorder.state();
+        source.sendSuccess(() -> Component.literal(
+                "Create Radar conflict trace: "
+                        + (state.enabled() ? "ON" : "OFF")
+                        + " | session=" + state.sessionId()
+                        + " | retained=" + state.retainedEvents()
+                        + " | queued=" + state.queuedWrites()
+                        + " | dropped=" + state.droppedEvents())
+                .withStyle(state.enabled() ? ChatFormatting.GREEN
+                        : ChatFormatting.GRAY), false);
+        return 1;
     }
 
     private static int targetingSelfTest(CommandSourceStack source) {
@@ -765,216 +841,6 @@ public class  ModCommands {
         );
 
         return 1;
-    }
-
-    private static void genDebugFile(CommandSourceStack source) {
-        MinecraftServer server = source.getServer();
-        ServerLevel level = source.getLevel();
-            Path dir = FMLPaths.GAMEDIR.get().resolve(DIR_NAME);
-            String fileName = "debug_" + System.currentTimeMillis() + ".txt";
-            Path file = dir.resolve(fileName);
-
-            List<String> out = new ArrayList<>();
-
-            // i wrote this so dumps are easy to spot and compare
-            out.add("=== Create Radar Debug Dump ===");
-            out.add("Generated: " + Instant.now());
-            if(source.getPlayer()!= null){
-                String sender =  source.getPlayer().toString();
-                out.add("Generated by:" + sender);
-            }else{
-                out.add("Generated by: Sender unknown, likely server");
-            }
-            out.add("");
-
-            addServerType(server, out);
-            addEnvironment(out);
-            addVersions(server, out);
-            addPackHeuristics(out);
-            addWorldInfo(level, out);
-            addModList(out);
-
-            out.add("");
-            out.add("=== Radar Output ===");
-            out.add("");
-            out.add("=== radar list_ship_ids ===");
-            out.addAll(runAndCapture(source, "radar debug list_ship_ids"));
-            out.add("");
-
-            out.add("=== radar dump_links ===");
-            out.addAll(runAndCapture(source, "radar debug dump_links"));
-            out.add("");
-
-            out.add("=== radar list_active_filters ===");
-            out.addAll(runAndCapture(source, "radar debug list_active_filters"));
-            out.add("");
-
-
-
-            out.add("=== radar debug weapon_endpoints ===");
-            out.addAll(runAndCapture(source, "radar debug weapon_endpoints"));
-            out.add("");
-
-
-
-        try {
-                Files.createDirectories(dir);
-                Files.write(file, out, StandardCharsets.UTF_8);
-
-                sendDumpSuccess(source, file, dir);
-            } catch (Exception e) {
-                source.sendFailure(Component.literal("Failed to write debug dump: " + e.getMessage()));
-            }
-        }
-
-        private static void addServerType(MinecraftServer server, List<String> out) {
-            // i wrote this to confirm if they're on a dedicated server jar or integrated singleplayer
-            out.add("Dedicated server: " + server.isDedicatedServer());
-            out.add("Online mode: " + server.usesAuthentication());
-            out.add("Server port: " + server.getPort());
-            out.add("");
-        }
-
-        private static void addEnvironment(List<String> out) {
-            // i wrote this to capture the system runtime since java/os differences can cause one-user bugs
-            out.add("OS: " + System.getProperty("os.name") + " " + System.getProperty("os.version") + " (" + System.getProperty("os.arch") + ")");
-            out.add("Java: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")");
-            out.add("");
-        }
-
-        private static void addVersions(MinecraftServer server, List<String> out) {
-            // i wrote this so i can verify minecraft/forge are exactly what i expect
-            out.add("Minecraft: " + server.getServerVersion());
-            out.add("NeoForge: " + NeoForgeVersion.getVersion());
-            out.add("");
-        }
-
-        private static void addPackHeuristics(List<String> out) {
-            try {
-                Path gameDir = FMLPaths.GAMEDIR.get();
-
-                // i wrote this to guess whether this instance came from a curseforge/modrinth pack export
-                boolean hasCurseManifest = Files.exists(gameDir.resolve("manifest.json"));
-                boolean hasModrinthIndex = Files.exists(gameDir.resolve("modrinth.index.json"));
-
-                out.add("GameDir: " + gameDir.toAbsolutePath());
-                out.add("manifest.json present: " + hasCurseManifest);
-                out.add("modrinth.index.json present: " + hasModrinthIndex);
-
-                String guessed = hasModrinthIndex ? "modrinth-pack-likely"
-                        : hasCurseManifest ? "curseforge-pack-likely"
-                        : "unknown";
-                out.add("Pack source guess: " + guessed);
-            } catch (Exception e) {
-                out.add("Pack heuristics: ERROR " + e.getMessage());
-            }
-            out.add("");
-        }
-
-        private static void addWorldInfo(ServerLevel level, List<String> out) {
-            try {
-                Path root = level.getServer().getWorldPath(LevelResource.ROOT);
-                Path levelDat = root.resolve("level.dat");
-
-                // i wrote this so i can approximate world creation time (best effort)
-                if (Files.exists(levelDat)) {
-                    BasicFileAttributes attrs = Files.readAttributes(levelDat, BasicFileAttributes.class);
-                    out.add("World folder: " + root.toAbsolutePath());
-                    out.add("level.dat created: " + attrs.creationTime());
-                    out.add("level.dat modified: " + attrs.lastModifiedTime());
-                } else {
-                    out.add("World folder: " + root.toAbsolutePath());
-                    out.add("level.dat: missing");
-                }
-
-                out.add("Dimension: " + level.dimension().location());
-                out.add("GameTime: " + level.getGameTime());
-            } catch (Exception e) {
-                out.add("World info: ERROR " + e.getMessage());
-            }
-            out.add("");
-        }
-
-        private static void addModList(List<String> out) {
-            // i wrote this so i can see exactly what mod versions they actually have loaded
-            out.add("=== Loaded Mods ===");
-            ModList.get().getMods().forEach(mod ->
-                    out.add(mod.getModId() + " " + mod.getVersion())
-            );
-            out.add("");
-        }
-
-        private static void sendDumpSuccess(CommandSourceStack source, Path file, Path dir) {
-            Component fileLine = Component.literal("Create Radar debug generated: ")
-                    .append(Component.literal(file.getFileName().toString())
-                            .withStyle(style -> style
-                                    .withUnderlined(true)
-                                    .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, file.toAbsolutePath().toString()))
-                                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Click to copy file path")))
-                            ));
-
-
-            Component copyFolder = Component.literal("[Copy folder path]")
-                    .withStyle(style -> style
-                            .withUnderlined(true)
-                            .withColor(ChatFormatting.AQUA)
-                            .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, dir.toAbsolutePath().toString()))
-                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Click to copy the folder path")))
-                    );
-
-            source.sendSuccess(() -> fileLine, false);
-            source.sendSuccess(() -> Component.literal("").append(copyFolder), false);
-        }
-
-        // --- OPTIONAL: execute other commands and capture their chat output into the file ---
-
-        private static List<String> runAndCapture(CommandSourceStack original, String command) {
-            List<String> captured = new ArrayList<>();
-
-            // i wrote this to capture anything the command tries to print to chat
-            CommandSource capturingSource = new CommandSource() {
-                @Override
-                public void sendSystemMessage(Component component) {
-                    captured.add(component.getString());
-                }
-
-                @Override
-                public boolean acceptsSuccess() {
-                    return true;
-                }
-
-                @Override
-                public boolean acceptsFailure() {
-                    return true;
-                }
-
-                @Override
-                public boolean shouldInformAdmins() {
-                    return false;
-                }
-            };
-
-            // i wrote this so the executed command still has the same context (level, pos, entity, permissions)
-            CommandSourceStack stack = new CommandSourceStack(
-                    capturingSource,
-                    original.getPosition(),
-                    original.getRotation(),
-                    original.getLevel(),
-                    2,
-                    original.getTextName(),
-                    original.getDisplayName(),
-                    original.getServer(),
-                    original.getEntity()
-            );
-
-            try {
-                original.getServer().getCommands().getDispatcher().execute(command, stack);
-            } catch (Exception e) {
-                captured.add("ERROR executing '" + command + "': " + e.getMessage());
-            }
-
-            return captured;
-
     }
 
 }

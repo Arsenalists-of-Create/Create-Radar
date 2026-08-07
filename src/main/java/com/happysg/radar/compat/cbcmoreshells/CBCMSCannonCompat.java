@@ -10,6 +10,7 @@ import com.cainiao1053.cbcmoreshells.munitions.dual_cannon.AbstractDualCannonPro
 import com.cainiao1053.cbcmoreshells.munitions.dual_cannon.DualCannonProjectileBlock;
 import com.cainiao1053.cbcmoreshells.munitions.dual_cannon.config.DualCannonProperties;
 import com.happysg.radar.compat.cbc.CannonUtil;
+import com.happysg.radar.debug.DiagnosticRecorder;
 import com.happysg.radar.targeting.ProjectileModel;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -75,8 +76,12 @@ public final class CBCMSCannonCompat {
         try {
             if (cannon instanceof MountedDualCannonContraption dual) return resolveDual(dual, level);
             if (cannon instanceof MountedBigCannonContraption big) return resolveBigCannonTorpedo(big, level);
-        } catch (Throwable ignored) {
+        } catch (Throwable failure) {
             // Compatibility must fail closed when an optional mod changes shape.
+            DiagnosticRecorder.warn("cbc_more_shells",
+                    "resolve_shot_state", "compatibility_resolution_failed",
+                    failure, level, null, "cbcmoreshells",
+                    "createbigcannons");
         }
         return null;
     }

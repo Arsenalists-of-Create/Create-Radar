@@ -33,6 +33,10 @@ import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.debug.DiagnosticSeverity;
+import com.happysg.radar.debug.DiagnosticRecorder;
+import com.happysg.radar.debug.DiagnosticSnapshotBuilder;
+import com.happysg.radar.debug.ConflictTraceRecorder;
 import com.happysg.radar.item.radarproxfuze.AdvancedProximityFuze;
 import com.happysg.radar.targeting.AimSolution;
 import com.happysg.radar.targeting.ObstructionChecker;
@@ -315,6 +319,60 @@ public class WeaponFiringControl {
 
     public Vec3 getCannonRayStart() {
         return getCannonRayStart(this.cannonMount);
+    }
+
+    public void appendDiagnosticInfo(DiagnosticSnapshotBuilder builder) {
+        builder.add("Weapon control", "mount", cannonMount.getBlockPos())
+                .add("Weapon control", "mode",
+                        binoMode ? "binocular" : activetrack != null
+                                ? "radar track" : "idle")
+                .add("Weapon control", "target present", target != null)
+                .add("Weapon control", "aim stable ticks", aimStableTicks)
+                .add("Weapon control", "safe zones", safeZones.size())
+                .add("Weapon control", "fire controller",
+                        fireController == null ? "missing"
+                                : fireController.getBlockPos())
+                .add("Weapon control", "fire powered",
+                        fireController != null && fireController.isPowered())
+                .add("Weapon control", "async submitted", asyncSolveSubmitted)
+                .add("Weapon control", "async completed", asyncSolveCompleted)
+                .add("Weapon control", "async timed out", asyncSolveTimedOut,
+                        asyncSolveTimedOut > 0 ? DiagnosticSeverity.WARN
+                                : DiagnosticSeverity.INFO)
+                .add("Weapon control", "async rejected", asyncSolveRejected,
+                        asyncSolveRejected > 0 ? DiagnosticSeverity.WARN
+                                : DiagnosticSeverity.INFO)
+                .add("Weapon control", "solution freshness",
+                        lastTargetingFreshnessReason);
+        if (activetrack != null) {
+            builder.add("Weapon control", "track category",
+                            activetrack.trackCategory())
+                    .add("Weapon control", "track id",
+                            shortIdentifier(activetrack.id()));
+        }
+        if (cachedTargetingResult != null) {
+            builder.add("Targeting", "valid", cachedTargetingResult.valid())
+                    .add("Targeting", "has shot",
+                            cachedTargetingResult.hasShot())
+                    .add("Targeting", "reason",
+                            cachedTargetingResult.reason(),
+                            cachedTargetingResult.hasShot()
+                                    ? DiagnosticSeverity.INFO
+                                    : DiagnosticSeverity.WARN)
+                    .add("Targeting", "confidence",
+                            cachedTargetingResult.confidence())
+                    .add("Targeting", "predicted ticks",
+                            cachedTargetingResult.predictedFlightTicks())
+                    .add("Targeting", "miss distance",
+                            cachedTargetingResult.missDistance());
+        } else {
+            builder.warn("Targeting", "solution", "none cached");
+        }
+    }
+
+    private static String shortIdentifier(String value) {
+        if (value == null || value.isBlank()) return "none";
+        return "id#" + Integer.toUnsignedString(value.hashCode(), 16);
     }
 
     @Nullable
@@ -1798,6 +1856,12 @@ public class WeaponFiringControl {
                             .steeringOrigin(),
                     asyncResult.request().solvePos(), solvePos);
         } catch (Throwable throwable) {
+            ConflictTraceRecorder.mark("targeting", "async_result",
+                    "FAILED", this.level, this.cannonMount.getBlockPos(), 0L,
+                    Map.of("exception", throwable.getClass().getSimpleName()));
+            DiagnosticRecorder.warn("targeting", "async_result",
+                    "async_targeting_result_failed", throwable, this.level,
+                    this.cannonMount.getBlockPos(), "createbigcannons");
             LOGGER.warn("WFC TargetingComputer async solve failed", throwable);
             return null;
         }
@@ -3864,6 +3928,13 @@ public class WeaponFiringControl {
         try {
             return current.firePreparation().prepare(context);
         } catch (RuntimeException exception) {
+            ConflictTraceRecorder.mark("weapon_adapter", "prepare_fire",
+                    "FAILED", this.level, mount.getBlockPos(), 0L,
+                    Map.of("fingerprint", expected.fingerprint(),
+                            "exception", exception.getClass().getSimpleName()));
+            DiagnosticRecorder.error("weapon_adapter", "prepare_fire",
+                    "adapter_preparation_failed", exception, this.level,
+                    mount.getBlockPos(), "createbigcannons");
             LOGGER.error(
                     "Weapon adapter preparation failed for mount={} fingerprint={}",
                     mount.getBlockPos(), expected.fingerprint(), exception);

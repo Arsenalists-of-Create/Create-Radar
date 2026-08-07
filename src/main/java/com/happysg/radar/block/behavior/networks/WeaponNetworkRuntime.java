@@ -63,6 +63,11 @@ public final class WeaponNetworkRuntime {
         return BY_LEVEL.computeIfAbsent(level, WeaponNetworkRuntime::new);
     }
 
+    @Nullable
+    public static WeaponNetworkRuntime peek(ServerLevel level) {
+        return BY_LEVEL.get(level);
+    }
+
     public static void clear(ServerLevel level) {
         WeaponNetworkRuntime runtime = BY_LEVEL.remove(level);
         if (runtime != null) {

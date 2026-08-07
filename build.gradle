@@ -259,6 +259,38 @@ tasks.register('weaponNetworkRelocationSelfTest', JavaExec) {
     mainClass = 'com.happysg.radar.block.behavior.networks.WeaponNetworkRelocationSelfTest'
 }
 
+tasks.register('diagnosticRecorderSelfTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs bounded diagnostic recorder and redaction checks.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.happysg.radar.debug.DiagnosticRecorderSelfTest'
+}
+
+tasks.register('conflictDiagnosticsSelfTest', JavaExec) {
+    group = 'verification'
+    description = 'Runs conflict tracing, Mixin parsing, log filtering, and report comparison checks.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.happysg.radar.debug.ConflictDiagnosticsSelfTest'
+}
+
+tasks.register('compareDiagnosticReports', JavaExec) {
+    group = 'diagnostics'
+    description = 'Compares a known-good and broken-pack Create Radar report.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.happysg.radar.debug.DiagnosticReportComparator'
+    doFirst {
+        def baseline = project.findProperty('baselineReport')
+        def problem = project.findProperty('problemReport')
+        if (baseline == null || problem == null) {
+            throw new GradleException(
+                    'Provide -PbaselineReport=<working.zip> and -PproblemReport=<broken.zip>')
+        }
+        args baseline.toString(), problem.toString()
+        def output = project.findProperty('comparisonOutput')
+        if (output != null) args output.toString()
+    }
+}
+
 tasks.register('optionalCbcIsolationCheck') {
     group = 'verification'
     description = 'Checks CBC:MS, CBC:AT, and CBC:MW class-loading isolation without those mods present.'
@@ -366,6 +398,8 @@ tasks.named('check') {
     dependsOn tasks.named('controllerCollisionSelfTest')
     dependsOn tasks.named('targetingSolverSelfTest')
     dependsOn tasks.named('weaponNetworkRelocationSelfTest')
+    dependsOn tasks.named('diagnosticRecorderSelfTest')
+    dependsOn tasks.named('conflictDiagnosticsSelfTest')
 }
 
 idea {

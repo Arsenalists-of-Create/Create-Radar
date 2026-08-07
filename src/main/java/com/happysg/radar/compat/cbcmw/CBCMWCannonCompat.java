@@ -1,6 +1,7 @@
 package com.happysg.radar.compat.cbcmw;
 
 import com.happysg.radar.compat.cbc.CannonUtil;
+import com.happysg.radar.debug.DiagnosticRecorder;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -81,6 +82,10 @@ public final class CBCMWCannonCompat {
                 return resolveRotaryShot(cannon, level);
             }
         } catch (RuntimeException | LinkageError error) {
+            DiagnosticRecorder.warn("cbc_modern_warfare",
+                    "resolve_shot_state", "compatibility_resolution_failed",
+                    error, level, null, "cbcmodernwarfare",
+                    "createbigcannons");
             LOGGER.warn("Could not resolve CBC Modern Warfare cannon shot state for {}",
                     cannon.getClass().getName(), error);
         }

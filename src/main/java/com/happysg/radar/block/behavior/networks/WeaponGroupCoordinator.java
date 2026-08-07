@@ -3,6 +3,8 @@ package com.happysg.radar.block.behavior.networks;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
+import com.happysg.radar.debug.DiagnosticRecorder;
+import com.happysg.radar.debug.ConflictTraceRecorder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -70,22 +72,36 @@ public final class WeaponGroupCoordinator {
             if (pitch.firingControl == null) {
                 pitch.getFiringControl();
             }
-            if (pitch.firingControl == null) continue;
+            if (pitch.firingControl == null) {
+                ConflictTraceRecorder.invariant(false, "weapon_network",
+                        "controller_resolution", "firing_control_missing",
+                        sl, g.pitchPos());
+                continue;
+            }
 
             // Keep controller refs fresh (yaw/pitch/fire)
+            ConflictTraceRecorder.Scope trace = ConflictTraceRecorder.begin(
+                    "weapon_network", "coordinator_tick", sl, mountPos,
+                    Map.of("pitch", g.pitchPos().toShortString()));
             try {
                 if (sl.getGameTime() % REFRESH_EVERY_TICKS == 0) {
                     pitch.firingControl.refreshControllers();
                 }
                 pitch.firingControl.tick();
             } catch (RuntimeException exception) {
+                trace.failed(exception.getClass().getSimpleName());
                 pitch.firingControl.resetTarget();
+                DiagnosticRecorder.error("weapon_network", "coordinator_tick",
+                        "network_tick_failed_and_firing_stopped", exception,
+                        sl, mountPos, "createbigcannons", "sable");
                 long now = sl.getGameTime();
                 long last = LAST_ERROR_LOG.getOrDefault(mountKey, Long.MIN_VALUE);
                 if (last == Long.MIN_VALUE || now - last >= ERROR_LOG_INTERVAL_TICKS) {
                     LAST_ERROR_LOG.put(mountKey, now);
                     LOGGER.error("Weapon network at {} failed; firing was stopped and other networks will continue", mountPos, exception);
                 }
+            } finally {
+                trace.close();
             }
         }
     }

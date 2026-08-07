@@ -7,6 +7,8 @@ import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
 import com.happysg.radar.compat.cbcmw.CBCMWMountCompat;
 import com.happysg.radar.mixin.AbstractCannonAccessor;
 import com.happysg.radar.mixin.AutoCannonAccessor;
+import com.happysg.radar.debug.DiagnosticRecorder;
+import com.happysg.radar.debug.ConflictTraceRecorder;
 import com.happysg.radar.targeting.ProjectileSimulator;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
@@ -170,6 +172,9 @@ public class CannonUtil {
             }
         } catch (Throwable t) {
             LOGGER.warn("Could not resolve loaded autocannon projectile ballistics for {}", stack, t);
+            DiagnosticRecorder.warn("weapon_adapter",
+                    "autocannon_projectile", "projectile_resolution_failed",
+                    t, level, null, "createbigcannons", "cbc_at");
         }
 
         return null;
@@ -330,6 +335,9 @@ public class CannonUtil {
         try {
             return CBCATCompat.resolveBigCannonPhysics(cannon, level);
         } catch (Throwable throwable) {
+            DiagnosticRecorder.warn("weapon_adapter", "cbc_at_physics",
+                    "cbc_at_physics_fallback", throwable, level, null,
+                    "cbc_at");
             if (CBC_AT_BIG_CANNON_LINKAGE_WARNING_LOGGED.compareAndSet(false, true)) {
                 LOGGER.warn("Could not load CBC:AT big cannon physics compatibility; falling back to CBC charge power", throwable);
             }
@@ -352,6 +360,9 @@ public class CannonUtil {
             LOGGER.warn("Could not read HE shell fallback ballistics: missing shell properties or ballistics; using last-resort fallback {}", BIG_CANNON_LAST_RESORT_FALLBACK);
         } catch (Throwable t) {
             LOGGER.warn("Could not read HE shell fallback ballistics; using last-resort fallback {}", BIG_CANNON_LAST_RESORT_FALLBACK, t);
+            DiagnosticRecorder.warn("weapon_adapter", "fallback_ballistics",
+                    "fallback_ballistics_failed", t, null, null,
+                    "createbigcannons");
         }
 
         return BIG_CANNON_LAST_RESORT_FALLBACK;
@@ -492,8 +503,14 @@ public class CannonUtil {
                 }
                 if (t > 0) return t;
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable failure) {
             LOGGER.debug("Mixin maybe didnt apply?");
+            DiagnosticRecorder.warn("mixin_accessor",
+                    "autocannon_lifetime", "autocannon_accessor_failed",
+                    failure, null, null, "createbigcannons");
+            ConflictTraceRecorder.invariant(false, "mixin_accessor",
+                    "autocannon_lifetime", "autocannon_accessor_failed",
+                    null, null, "createbigcannons");
         }
 
         return 100;
@@ -731,8 +748,14 @@ public class CannonUtil {
         if (isAutoCannon(cannon)) {
             try {
                 return ((AutoCannonAccessor) cannon).getMaterial();
-            } catch (Throwable ignored) {
+            } catch (Throwable failure) {
                 LOGGER.debug("Mixin maybe didnt apply?");
+                DiagnosticRecorder.warn("mixin_accessor",
+                        "autocannon_material", "autocannon_accessor_failed",
+                        failure, null, null, "createbigcannons");
+                ConflictTraceRecorder.invariant(false, "mixin_accessor",
+                        "autocannon_material", "autocannon_accessor_failed",
+                        null, null, "createbigcannons");
                 return null;
             }
         }

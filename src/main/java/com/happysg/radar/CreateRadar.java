@@ -13,6 +13,7 @@ import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.datagen.ModDataGenerators;
 import com.happysg.radar.ponder.RadarPonderPlugin;
 import com.happysg.radar.registry.*;
+import com.happysg.radar.mixin.diagnostic.EarlyDiagnosticJournal;
 import com.mojang.logging.LogUtils;
 
 import com.simibubi.create.api.stress.BlockStressValues;
@@ -46,6 +47,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 
 import java.util.Arrays;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Mod(CreateRadar.MODID)
@@ -61,6 +63,7 @@ public class CreateRadar {
                             .andThen(TooltipModifier.mapNull(KineticStats.create(item))));
 
     public CreateRadar(IEventBus modEventBus, ModContainer container) {
+        EarlyDiagnosticJournal.record("MOD_CONSTRUCTOR", "BEGIN", Map.of());
         getLogger().info("Initializing Create Radar!");
 
         NeoForge.EVENT_BUS.register(this);
@@ -93,6 +96,7 @@ public class CreateRadar {
 
         if (Mods.COMPUTERCRAFT.isLoaded())
             CCCompatRegister.registerPeripherals();
+        EarlyDiagnosticJournal.record("MOD_CONSTRUCTOR", "COMPLETE", Map.of());
     }
 
     @SubscribeEvent
@@ -142,6 +146,7 @@ public class CreateRadar {
     }
 
     public static void onLoadComplete(FMLLoadCompleteEvent event) {
+        EarlyDiagnosticJournal.record("MOD_LOAD", "COMPLETE", Map.of());
     }
 
     public static void onLoadWorld(LevelEvent.Load event) {
@@ -152,6 +157,7 @@ public class CreateRadar {
     }
 
     public static void init(FMLCommonSetupEvent event) {
+        EarlyDiagnosticJournal.record("COMMON_SETUP", "QUEUED", Map.of());
         event.enqueueWork(() -> {
             ModDisplayBehaviors.register();
             AllDataBehaviors.registerDefaults();
@@ -165,6 +171,7 @@ public class CreateRadar {
             BlockStressValues.IMPACTS.register(ModBlocks.RADAR_DISH_BLOCK.get(), () -> 0d);
             BlockStressValues.IMPACTS.register(ModBlocks.RADAR_PLATE_BLOCK.get(), () -> 0d);
             BlockStressValues.IMPACTS.register(ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.get(), () -> 0d);
+            EarlyDiagnosticJournal.record("COMMON_SETUP", "COMPLETE", Map.of());
         });
     }
 

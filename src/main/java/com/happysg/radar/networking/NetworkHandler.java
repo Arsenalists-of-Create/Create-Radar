@@ -111,6 +111,37 @@ public final class NetworkHandler {
                 RwrEngagedSoundPacket.STREAM_CODEC,
                 RwrEngagedSoundPacket::handle
         );
+
+        registrar.playToServer(
+                InspectorRequestPacket.TYPE,
+                InspectorRequestPacket.STREAM_CODEC,
+                InspectorRequestPacket::handle
+        );
+        registrar.playToClient(
+                InspectorSnapshotPacket.TYPE,
+                InspectorSnapshotPacket.STREAM_CODEC,
+                InspectorSnapshotPacket::handle
+        );
+        registrar.playToClient(
+                InspectorStatePacket.TYPE,
+                InspectorStatePacket.STREAM_CODEC,
+                InspectorStatePacket::handle
+        );
+        registrar.playToClient(
+                ClientDiagnosticRequestPacket.TYPE,
+                ClientDiagnosticRequestPacket.STREAM_CODEC,
+                ClientDiagnosticRequestPacket::handle
+        );
+        registrar.playToServer(
+                ClientDiagnosticResponsePacket.TYPE,
+                ClientDiagnosticResponsePacket.STREAM_CODEC,
+                ClientDiagnosticResponsePacket::handle
+        );
+        registrar.playToClient(
+                ConflictTraceStatePacket.TYPE,
+                ConflictTraceStatePacket.STREAM_CODEC,
+                ConflictTraceStatePacket::handle
+        );
     }
 
     public static void sendToServer(CustomPacketPayload payload) {

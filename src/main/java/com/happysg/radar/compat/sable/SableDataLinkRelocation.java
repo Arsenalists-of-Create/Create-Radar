@@ -8,6 +8,7 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
+import com.happysg.radar.debug.DiagnosticRecorder;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -93,6 +94,9 @@ public final class SableDataLinkRelocation {
             try {
                 processMove(level, move);
             } catch (RuntimeException exception) {
+                DiagnosticRecorder.error("sable", "datalink_relocation",
+                        "topology_migration_failed", exception, level,
+                        move.newDataLink(), "sable");
                 LOGGER.error("Failed to migrate DataLink topology from {} to {}",
                         move.oldDataLink(), move.newDataLink(), exception);
             } finally {
