@@ -260,7 +260,7 @@ public class ModBlocks {
             .initialProperties(SharedProperties::softMetal)
             .properties(p -> p.noOcclusion())
             .properties(p -> p.strength(0.8f))
-            .blockstate((c, p) -> p.simpleBlock(c.getEntry(),
+            .blockstate((c, p) -> p.horizontalBlock(c.getEntry(),
                     p.models().getExistingFile(CreateRadar.asResource("block/sky_radar_mount"))))
             .transform(axeOrPickaxe())
             .item()

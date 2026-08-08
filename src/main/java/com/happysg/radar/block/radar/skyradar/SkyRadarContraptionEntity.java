@@ -65,19 +65,19 @@ public class SkyRadarContraptionEntity extends ControlledContraptionEntity {
     protected void writeAdditional(CompoundTag compound, HolderLookup.Provider registries, boolean spawnPacket) {
         super.writeAdditional(compound, registries, spawnPacket);
         compound.putFloat("Pitch", pitch);
-        compound.putInt("ReceiverFacing", receiverFacing.get3DDataValue());
+        compound.putInt("ReceiverFacing", getSafeReceiverFacing().get3DDataValue());
         compound.putBoolean("TargetLocked", targetLocked);
     }
 
     @Override
     public ContraptionRotationState getRotationState() {
         ContraptionRotationState state = super.getRotationState();
-        if (targetLocked) {
-            state.xRotation = getTargetPitchDegrees();
-        } else if (getTiltAxis() == Axis.X) {
-            state.xRotation = getFormedTiltDegrees();
+        Axis tiltAxis = getTiltAxis();
+        float tiltDegrees = getTiltDegrees();
+        if (tiltAxis == Axis.X) {
+            state.xRotation = tiltDegrees;
         } else {
-            state.zRotation = getFormedTiltDegrees();
+            state.zRotation = tiltDegrees;
         }
         return state;
     }
@@ -85,16 +85,12 @@ public class SkyRadarContraptionEntity extends ControlledContraptionEntity {
     @Override
     public Vec3 applyRotation(Vec3 localPos, float partialTicks) {
         localPos = super.applyRotation(localPos, partialTicks);
-        return targetLocked
-                ? VecHelper.rotate(localPos, getTargetPitchDegrees(partialTicks), Axis.X)
-                : VecHelper.rotate(localPos, getFormedTiltDegrees(partialTicks), getTiltAxis());
+        return VecHelper.rotate(localPos, getTiltDegrees(partialTicks), getTiltAxis());
     }
 
     @Override
     public Vec3 reverseRotation(Vec3 localPos, float partialTicks) {
-        localPos = targetLocked
-                ? VecHelper.rotate(localPos, -getTargetPitchDegrees(partialTicks), Axis.X)
-                : VecHelper.rotate(localPos, -getFormedTiltDegrees(partialTicks), getTiltAxis());
+        localPos = VecHelper.rotate(localPos, -getTiltDegrees(partialTicks), getTiltAxis());
         return super.reverseRotation(localPos, partialTicks);
     }
 
@@ -121,7 +117,7 @@ public class SkyRadarContraptionEntity extends ControlledContraptionEntity {
     }
 
     public Direction getReceiverFacing() {
-        return receiverFacing;
+        return getSafeReceiverFacing();
     }
 
     @Override
@@ -148,22 +144,22 @@ public class SkyRadarContraptionEntity extends ControlledContraptionEntity {
                 .nudge(getId())
                 .center()
                 .rotateYDegrees(getAngle(partialTicks))
-                .rotateDegrees(targetLocked ? getTargetPitchDegrees(partialTicks) : getFormedTiltDegrees(partialTicks), targetLocked ? Axis.X : getTiltAxis())
+                .rotateDegrees(getTiltDegrees(partialTicks), getTiltAxis())
                 .uncenter();
     }
 
     private Axis getTiltAxis() {
-        Direction facing = receiverFacing.getAxis().isHorizontal() ? receiverFacing : Direction.NORTH;
+        Direction facing = getSafeReceiverFacing();
         return facing.getAxis() == Axis.Z ? Axis.X : Axis.Z;
     }
 
-    private float getFormedTiltDegrees() {
-        return getFormedTiltDegrees(1);
+    private float getTiltDegrees() {
+        return getTiltDegrees(1);
     }
 
-    private float getFormedTiltDegrees(float partialTicks) {
+    private float getTiltDegrees(float partialTicks) {
         float interpolatedPitch = getInterpolatedPitch(partialTicks);
-        Direction facing = receiverFacing.getAxis().isHorizontal() ? receiverFacing : Direction.NORTH;
+        Direction facing = getSafeReceiverFacing();
         return switch (facing) {
             case NORTH, EAST -> -interpolatedPitch;
             case SOUTH, WEST -> interpolatedPitch;
@@ -171,12 +167,11 @@ public class SkyRadarContraptionEntity extends ControlledContraptionEntity {
         };
     }
 
-    private float getTargetPitchDegrees() {
-        return getTargetPitchDegrees(1);
-    }
-
-    private float getTargetPitchDegrees(float partialTicks) {
-        return -getInterpolatedPitch(partialTicks);
+    private Direction getSafeReceiverFacing() {
+        Direction facing = receiverFacing;
+        return facing != null && facing.getAxis().isHorizontal()
+                ? facing
+                : Direction.NORTH;
     }
 
     private float getInterpolatedPitch(float partialTicks) {

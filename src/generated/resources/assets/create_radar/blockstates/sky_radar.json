@@ -1,7 +1,19 @@
 {
   "variants": {
-    "": {
+    "facing=east": {
+      "model": "create_radar:block/sky_radar_mount",
+      "y": 90
+    },
+    "facing=north": {
       "model": "create_radar:block/sky_radar_mount"
+    },
+    "facing=south": {
+      "model": "create_radar:block/sky_radar_mount",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "create_radar:block/sky_radar_mount",
+      "y": 270
     }
   }
 }

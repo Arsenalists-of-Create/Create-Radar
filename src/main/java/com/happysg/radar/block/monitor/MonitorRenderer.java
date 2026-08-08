@@ -59,14 +59,21 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     private static final float DEPTH_ARAD_CONTACT = 0.948f;
     private static final float DEPTH_TRACK_BASE = 0.95f;
     private static final float DEPTH_TRACK_INCREMENT = 0.0001f;
+    private static final float PONDER_RING_DEPTH_OFFSET = 0.03f;
+    private static final float PONDER_CONTACT_DEPTH_OFFSET = 0.05f;
+    private static final float PONDER_CONTACT_HALO_SCALE = 1.25f;
+    private static final float PONDER_CONTACT_HALO_DEPTH_GAP = 0.001f;
+    private static final Color PONDER_CONTACT_HALO_COLOR = new Color(0x07100a);
     private static final float LABEL_SCALE = 0.003f;
     private static final float LABEL_Z_OFFSET = 0.03f;
     private static final float LABEL_DEPTH_NUDGE = 0.00025f;
     // Alpha values for different elements
     private static final float ALPHA_BACKGROUND = 0.6f;
     private static final float ARAD_RING_ALPHA = 0.45f;
+    private static final float PONDER_ARAD_RING_ALPHA = 0.35f;
     private static final float ALPHA_GRID = 0.5f;
     private static final float ALPHA_SWEEP = 0.8f;
+    private static final float ARAD_RING_WIDTH_SCALE = 0.012f;
     private static final int PLANE_SWEEP_CYCLE_TICKS = 20;
     private static final float PLANE_SWEEP_RADIUS_SCALE = 0.81f;
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -163,13 +170,20 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
 
     private void renderAradDisplay(MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource) {
         MonitorProjection.DisplayPoint center = new MonitorProjection.DisplayPoint(0f, 0f);
-        renderAradCircle(blockEntity, ms, bufferSource, center, 1.0f, DEPTH_BACKGROUND);
-        renderAradCircle(blockEntity, ms, bufferSource, center, 2f / 3f, DEPTH_BACKGROUND + 0.0002f);
-        renderAradCircle(blockEntity, ms, bufferSource, center, 0.25f, DEPTH_BACKGROUND + 0.0004f);
-        renderAradContacts(blockEntity, ms, bufferSource);
+        float ringDepthOffset = blockEntity.isPonderRwrVisual() ? PONDER_RING_DEPTH_OFFSET : 0.0f;
+        float contactDepthOffset = blockEntity.isPonderRwrVisual() ? PONDER_CONTACT_DEPTH_OFFSET : 0.0f;
+        if (blockEntity.isPonderRwrVisual() && blockEntity.shouldRenderPonderRwrRings()) {
+            renderAradRings(blockEntity, ms, bufferSource, center, DEPTH_BACKGROUND + ringDepthOffset);
+        } else if (!blockEntity.isPonderRwrVisual()) {
+            renderAradCircle(blockEntity, ms, bufferSource, center, 1.0f, DEPTH_BACKGROUND);
+            renderAradCircle(blockEntity, ms, bufferSource, center, 2f / 3f, DEPTH_BACKGROUND + 0.0002f);
+            renderAradCircle(blockEntity, ms, bufferSource, center, 0.25f, DEPTH_BACKGROUND + 0.0004f);
+        }
+        renderAradContacts(blockEntity, ms, bufferSource, contactDepthOffset);
     }
 
-    private void renderAradContacts(MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource) {
+    private void renderAradContacts(MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource,
+                                    float depthOffset) {
         int size = blockEntity.getSize();
         Matrix4f m = ms.last().pose();
         Matrix3f n = ms.last().normal();
@@ -181,24 +195,41 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             }
             Color color = aradContactColor(contact);
             MonitorProjection.DisplayPoint point = AradMonitorGeometry.point(blockEntity, contact);
-            MonitorProjection.Quad quad = AradMonitorGeometry.contactQuad(point, size);
-            renderVertices(getBuffer(bufferSource, spriteFor(contact)), m, n, color, 1.0f, DEPTH_ARAD_CONTACT,
+            float scaleMultiplier = blockEntity.getRwrContactScaleMultiplier();
+            MonitorSprite contactSprite = spriteFor(contact);
+            if (blockEntity.isPonderRwrVisual() && blockEntity.shouldRenderPonderRwrRings()) {
+                MonitorProjection.Quad haloQuad = AradMonitorGeometry.contactQuad(
+                        point,
+                        size,
+                        scaleMultiplier * PONDER_CONTACT_HALO_SCALE
+                );
+                renderVertices(getRwrContactBuffer(bufferSource, contactSprite, blockEntity),
+                        m, n, PONDER_CONTACT_HALO_COLOR, 1.0f,
+                        DEPTH_ARAD_CONTACT + depthOffset - PONDER_CONTACT_HALO_DEPTH_GAP,
+                        haloQuad.minX(), haloQuad.minZ(), haloQuad.maxX(), haloQuad.maxZ());
+            }
+            MonitorProjection.Quad quad = AradMonitorGeometry.contactQuad(point, size, scaleMultiplier);
+            renderVertices(getRwrContactBuffer(bufferSource, contactSprite, blockEntity), m, n, color, 1.0f,
+                    DEPTH_ARAD_CONTACT + depthOffset,
                     quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
             if (hasThreatOverlay(contact)) {
-                MonitorProjection.Quad threatQuad = AradMonitorGeometry.threatQuad(point, size);
-                renderVertices(getBuffer(bufferSource, MonitorSprite.RWR_PRIMARY_THREAT), m, n, color, 1.0f,
-                        DEPTH_ARAD_CONTACT + DEPTH_TRACK_INCREMENT,
+                MonitorProjection.Quad threatQuad = AradMonitorGeometry.threatQuad(point, size, scaleMultiplier);
+                renderVertices(getRwrContactBuffer(bufferSource, MonitorSprite.RWR_PRIMARY_THREAT, blockEntity),
+                        m, n, color, 1.0f,
+                        DEPTH_ARAD_CONTACT + depthOffset + DEPTH_TRACK_INCREMENT,
                         threatQuad.minX(), threatQuad.minZ(), threatQuad.maxX(), threatQuad.maxZ());
             }
             MonitorProjection.Quad selectionQuad = AradMonitorGeometry.selectionQuad(point, size);
             if (contact.sourceId().equals(blockEntity.getHoveredRwrSource())) {
                 renderVertices(getBuffer(bufferSource, MonitorSprite.TARGET_HOVERED),
-                        m, n, new Color(255, 255, 0), 1.0f, DEPTH_ARAD_CONTACT - DEPTH_TRACK_INCREMENT,
+                        m, n, new Color(255, 255, 0), 1.0f,
+                        DEPTH_ARAD_CONTACT + depthOffset - DEPTH_TRACK_INCREMENT,
                         selectionQuad.minX(), selectionQuad.minZ(), selectionQuad.maxX(), selectionQuad.maxZ());
             }
             if (contact.sourceId().equals(blockEntity.getSelectedRwrSource())) {
                 renderVertices(getBuffer(bufferSource, MonitorSprite.TARGET_SELECTED),
-                        m, n, new Color(255, 0, 0), 1.0f, DEPTH_ARAD_CONTACT - DEPTH_TRACK_INCREMENT * 2,
+                        m, n, new Color(255, 0, 0), 1.0f,
+                        DEPTH_ARAD_CONTACT + depthOffset - DEPTH_TRACK_INCREMENT * 2,
                         selectionQuad.minX(), selectionQuad.minZ(), selectionQuad.maxX(), selectionQuad.maxZ());
             }
         }
@@ -229,13 +260,53 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     private void renderAradCircle(MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource,
                                   MonitorProjection.DisplayPoint center, float scale, float depth) {
         int size = blockEntity.getSize();
-        Matrix4f m = ms.last().pose();
-        Matrix3f n = ms.last().normal();
+        Matrix4f matrix = ms.last().pose();
+        Matrix3f normal = ms.last().normal();
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
         MonitorProjection.Quad quad = MonitorProjection.scaledQuad(center, size, scale);
 
-        renderVertices(getBuffer(bufferSource, MonitorSprite.RADAR_BG_CIRCLE), m, n, color, ARAD_RING_ALPHA, depth,
+        renderVertices(getBuffer(bufferSource, MonitorSprite.RADAR_BG_CIRCLE), matrix, normal,
+                color, ARAD_RING_ALPHA, depth,
                 quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
+    }
+
+    private void renderAradRings(MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource,
+                                 MonitorProjection.DisplayPoint center, float depth) {
+        int size = blockEntity.getSize();
+        float centerX = 1f - size / 2f + center.xOffset() * size;
+        float centerZ = 1f - size / 2f + center.zOffset() * size;
+        float ringWidth = size * ARAD_RING_WIDTH_SCALE;
+        int segments = Math.max(64, size * 32);
+        VertexConsumer buffer = getSolidBuffer(bufferSource);
+        Matrix4f matrix = ms.last().pose();
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
+
+        renderAradRing(buffer, matrix, color, centerX, centerZ,
+                size * AradMonitorGeometry.OUTER_RING_RADIUS, ringWidth, segments, depth);
+        renderAradRing(buffer, matrix, color, centerX, centerZ,
+                size * AradMonitorGeometry.MIDDLE_RING_RADIUS, ringWidth, segments, depth);
+        renderAradRing(buffer, matrix, color, centerX, centerZ,
+                size * AradMonitorGeometry.INNER_RING_RADIUS, ringWidth, segments, depth);
+    }
+
+    private void renderAradRing(VertexConsumer buffer, Matrix4f matrix, Color color,
+                                float centerX, float centerZ, float radius, float width, int segments, float depth) {
+        float innerRadius = Math.max(0.0f, radius - width * 0.5f);
+        float outerRadius = radius + width * 0.5f;
+        for (int segment = 0; segment < segments; segment++) {
+            double firstAngle = Math.PI * 2.0 * segment / segments;
+            double secondAngle = Math.PI * 2.0 * (segment + 1) / segments;
+            float firstCos = (float) Math.cos(firstAngle);
+            float firstSin = (float) Math.sin(firstAngle);
+            float secondCos = (float) Math.cos(secondAngle);
+            float secondSin = (float) Math.sin(secondAngle);
+
+            renderSolidVertices(buffer, matrix, color, PONDER_ARAD_RING_ALPHA, depth,
+                    centerX + firstCos * outerRadius, centerZ + firstSin * outerRadius,
+                    centerX + secondCos * outerRadius, centerZ + secondSin * outerRadius,
+                    centerX + secondCos * innerRadius, centerZ + secondSin * innerRadius,
+                    centerX + firstCos * innerRadius, centerZ + firstSin * innerRadius);
+        }
     }
 
     /**
@@ -645,6 +716,14 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
      */
     private VertexConsumer getBuffer(MultiBufferSource bufferSource, MonitorSprite sprite) {
         return bufferSource.getBuffer(ModRenderTypes.polygonOffset(sprite.getTexture()));
+    }
+
+    private VertexConsumer getRwrContactBuffer(MultiBufferSource bufferSource, MonitorSprite sprite,
+                                               MonitorBlockEntity blockEntity) {
+        if (blockEntity.isPonderRwrVisual()) {
+            return bufferSource.getBuffer(RenderType.entityCutoutNoCull(sprite.getTexture()));
+        }
+        return getBuffer(bufferSource, sprite);
     }
 
     private VertexConsumer getSolidBuffer(MultiBufferSource bufferSource) {

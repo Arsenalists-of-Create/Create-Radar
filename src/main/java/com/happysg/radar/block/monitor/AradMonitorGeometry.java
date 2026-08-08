@@ -48,11 +48,27 @@ public final class AradMonitorGeometry {
     }
 
     public static MonitorProjection.Quad contactQuad(MonitorProjection.DisplayPoint point, int monitorSize) {
-        return scaledQuad(point, monitorSize, CONTACT_SCALE);
+        return contactQuad(point, monitorSize, 1.0f);
+    }
+
+    public static MonitorProjection.Quad contactQuad(
+            MonitorProjection.DisplayPoint point,
+            int monitorSize,
+            float scaleMultiplier
+    ) {
+        return scaledQuad(point, monitorSize, CONTACT_SCALE * scaleMultiplier);
     }
 
     public static MonitorProjection.Quad threatQuad(MonitorProjection.DisplayPoint point, int monitorSize) {
-        return scaledQuad(point, monitorSize, PRIMARY_THREAT_SCALE);
+        return threatQuad(point, monitorSize, 1.0f);
+    }
+
+    public static MonitorProjection.Quad threatQuad(
+            MonitorProjection.DisplayPoint point,
+            int monitorSize,
+            float scaleMultiplier
+    ) {
+        return scaledQuad(point, monitorSize, PRIMARY_THREAT_SCALE * scaleMultiplier);
     }
 
     public static MonitorProjection.Quad selectionQuad(MonitorProjection.DisplayPoint point, int monitorSize) {

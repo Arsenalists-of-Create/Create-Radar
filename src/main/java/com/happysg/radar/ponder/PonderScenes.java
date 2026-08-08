@@ -1,14 +1,18 @@
 package com.happysg.radar.ponder;
 
+import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlocks;
 
+import com.happysg.radar.registry.ModSounds;
 import net.createmod.ponder.api.PonderPalette;
 import net.createmod.ponder.api.element.*;
 import net.createmod.ponder.api.scene.SceneBuilder;
 import net.createmod.ponder.api.scene.SceneBuildingUtil;
 import net.createmod.ponder.api.scene.Selection;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.EntityType;
@@ -173,6 +177,258 @@ public class PonderScenes {
 
 
 
+
+
+
+    }
+
+    public static void rwrPonder(SceneBuilder scene, SceneBuildingUtil util){
+        scene.title("rwr_ponder", "rwr");
+        scene.scaleSceneView(0.75f);
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(40);
+        Selection monitor = util.select().fromTo(3, 1, 6, 5, 3, 6);
+        Selection firstRwr = util.select().position(0, 1, 2);
+        Selection secondRwr = util.select().position(2, 1, 6);
+        Selection dataLink = util.select().position(3, 4, 6);
+
+        scene.world().showSection(firstRwr,Direction.DOWN);
+        scene.overlay().showText(80)
+                .text("The Radar Warning Receiver passively detects and report nearby radar sources")
+                .pointAt(firstRwr.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.world().showSection(monitor,Direction.DOWN);
+        scene.idle(100);
+        scene.overlay().showText(80)
+                .text("It can be linked to a monitor using datalinks...")
+                .pointAt(dataLink.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, firstRwr, new AABB(new BlockPos(0,1,2)), 60);
+        scene.idle(20);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, monitor, new AABB(3, 1, 6, 6, 4, 7), 60);
+        scene.idle(20);
+        scene.world().showSection(dataLink,Direction.DOWN);
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::beginPonderRwrVisual
+        );
+        scene.idle(40);
+        scene.world().hideSection(dataLink,Direction.UP);
+        scene.world().hideSection(firstRwr,Direction.UP);
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::endPonderRwrVisual
+        );
+        scene.idle(40);
+        scene.world().showSection(secondRwr,Direction.DOWN);
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::beginPonderRwrVisual
+        );
+        scene.overlay().showText(80)
+                .text("Or by direct contact with the monitor")
+                .pointAt(secondRwr.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(90);
+
+        scene.overlay().showText(90)
+                .text("The monitor is used to determine the type, threat level, and approximate bearings of nearby radar sources")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(100);
+        scene.scaleSceneView(1.2f);
+        scene.overlay().showText(80)
+                .text("The rings of the display the threat level of the contact, not distance")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(90);
+
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderFriendlyOuterRingContact
+        );
+        scene.overlay().showText(80)
+                .text("When a contact first enters the RWR's detection range, this sound will play")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(15);
+        scene.addInstruction(ponderScene ->
+                Minecraft.getInstance().getSoundManager().play(
+                        SimpleSoundInstance.forUI(ModSounds.RWR_IN_RANGE.get(), 1.0f,5)
+                )
+        );
+        scene.idle(90-15);
+
+        scene.overlay().showText(110)
+                .text("A radar contact on the outer ring indicates that the RWR's sublevel is 1-1.5x of the radar's effective range, It can not see the Sublevel")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(120);
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderCenterRingContacts
+        );
+        scene.overlay().showText(100)
+                .text("A radar contact on the Center ring indicates that the sublevel is within range of the radar. The sublevel is now visible")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(110);
+        scene.overlay().showText(100)
+                .text("The RWR will now begin to emit a redstone signal, scaling with the sublevels proximity to the radar, from 1-14")
+                .pointAt(secondRwr.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(110);
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderInnerRingHighThreatContact
+        );
+        scene.overlay().showText(110)
+                .text("When the radar locks on to the RWR's sublevel, the contact will move to the inner ring and become red, and the RWR will play this sound")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(30);
+        scene.addInstruction(ponderScene ->
+                Minecraft.getInstance().getSoundManager().play(
+                        SimpleSoundInstance.forUI(ModSounds.RWR_LOCK.get(), 1.0f,5)
+                )
+        );
+        scene.addInstruction(ponderScene ->
+                Minecraft.getInstance().getSoundManager().play(
+                        SimpleSoundInstance.forUI(ModSounds.RWR_LOCK.get(), 1.0f,5)
+                )
+        );
+        scene.idle(80);
+        scene.overlay().showText(70)
+                .text("The RWR will also produce a redstone strength of 15")
+                .pointAt(secondRwr.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(80);
+
+
+
+
+    }
+
+    public static void rwrContactsPonder(SceneBuilder scene, SceneBuildingUtil util) {
+        scene.title("rwr_contacts_ponder", "Reading RWR Contacts");
+        scene.scaleSceneView(0.75f);
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(20);
+
+        Selection monitor = util.select().fromTo(3, 1, 6, 5, 3, 6);
+        Selection secondRwr = util.select().position(2, 1, 6);
+        Selection planeRadar = util.select().position(6, 1, 1);
+        Selection bearingRadar = util.select().fromTo(6, 1, 0, 6, 3, 0);
+        Selection skyRadar = util.select().fromTo(6, 1, 2, 6, 4, 2);
+
+        scene.world().showSection(monitor, Direction.DOWN);
+        scene.world().showSection(secondRwr, Direction.DOWN);
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::beginPonderRwrVisual
+        );
+        scene.idle(40);
+
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderGroundRadarIcon
+        );
+        scene.world().showSection(bearingRadar,Direction.DOWN);
+        scene.overlay().showText(60)
+                .text("This icon designates a standard radar contact")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(70);
+        scene.world().hideSection(bearingRadar, Direction.UP);
+        scene.idle(10);
+        scene.world().showSection(planeRadar,Direction.DOWN);
+
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderAirborneRadarIcon
+        );
+        scene.overlay().showText(60)
+                .text("A plane radar contact")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(70);
+        scene.world().hideSection(planeRadar, Direction.UP);
+        scene.idle(10);
+        scene.world().showSection(skyRadar,Direction.DOWN);
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderSkyRadarIcon
+        );
+        scene.overlay().showText(80)
+                .text("and a Sky radar contact")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(90);
+
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderFriendlySkyRadarIcon
+        );
+        scene.overlay().showText(100)
+                .text("If a radar shares the same code in its Identification Filter as the RWR's Sublevel, Its icon will be shown in blue. ")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(110);
+
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderHighThreatSkyRadarIcon
+        );
+        scene.overlay().showText(80)
+                .text("The Highest threat contact will be highlighted")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(90);
+
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderLockingSkyRadarIcon
+        );
+        scene.overlay().showText(90)
+                .text("When a radar locks on to the sublevel, it will be shown in red")
+                .pointAt(monitor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(90);
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::endPonderRwrVisual
+        );
 
 
 
@@ -372,8 +628,6 @@ public class PonderScenes {
     }
 
     public static void sonarSetup(SceneBuilder scene, SceneBuildingUtil util){}
-
-    public static void aRADSetup(SceneBuilder scene, SceneBuildingUtil util){}
 
     public static void jammerSetup(SceneBuilder scene, SceneBuildingUtil util){}
 

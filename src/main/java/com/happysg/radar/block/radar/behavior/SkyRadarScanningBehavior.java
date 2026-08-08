@@ -413,16 +413,17 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
 
     private void scanForSableTracks() {
         if (blockEntity.getLevel() == null || !Mods.SABLE.isLoaded()) return;
-        RadarScanningBlockBehavior.splitAABB(getRadarAABB(), 1024).forEach(aabb ->
+        double passiveRange = range * RWR_PASSIVE_RANGE_MULTIPLIER;
+        RadarScanningBlockBehavior.splitAABB(getRadarAABB(passiveRange), 1024).forEach(aabb ->
                 SableUtils.getLoadedShips(blockEntity.getLevel(), aabb).forEach(scannedShips::add));
 
         scannedShips.remove(SableUtils.getShipManagingPos(blockEntity));
     }
 
-    private AABB getRadarAABB() {
+    private AABB getRadarAABB(double horizontalRange) {
         return new AABB(
-                scanPos.x - range, scanPos.y, scanPos.z - range,
-                scanPos.x + range, Math.max(scanPos.y + 1, SKY_SCAN_MAX_Y), scanPos.z + range
+                scanPos.x - horizontalRange, scanPos.y, scanPos.z - horizontalRange,
+                scanPos.x + horizontalRange, Math.max(scanPos.y + 1, SKY_SCAN_MAX_Y), scanPos.z + horizontalRange
         );
     }
 

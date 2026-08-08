@@ -44,7 +44,7 @@ public class SkyRadarVisual extends AbstractBlockEntityVisual<SkyRadarBlockEntit
 
     private void applyYaw(float partialTick) {
         boolean unlocked = blockEntity.isVisualUnlocked();
-        float yaw = unlocked ? blockEntity.getInterpolatedYaw(partialTick) : 0.0f;
+        float yaw = blockEntity.getInterpolatedVisualYaw(partialTick);
         float shaftSpeed = unlocked ? blockEntity.getSpeed() * RotatingInstance.SPEED_MULTIPLIER : 0.0f;
         mount.setIdentityTransform()
                 .translate(visualPos.getX(), visualPos.getY() + 1, visualPos.getZ())

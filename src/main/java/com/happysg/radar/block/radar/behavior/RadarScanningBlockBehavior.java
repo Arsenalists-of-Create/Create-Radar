@@ -369,7 +369,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         boolean scanAll =
                 scanPlayers && scanContraptions && scanMobs && scanAnimals && scanProjectiles && scanItems;
 
-        for (AABB aabb : splitAABB(getRadarAABB(), 256)) {
+        for (AABB aabb : splitAABB(getRadarAABB(range), 256)) {
 
 
             if (scanPlayers)
@@ -416,12 +416,13 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
     private void scanForSableTracks() {
         if (blockEntity.getLevel() == null || !Mods.SABLE.isLoaded()) return;
-        splitAABB(getRadarAABB(), 256).forEach(aabb ->
+        double passiveRange = range * RWR_PASSIVE_RANGE_MULTIPLIER;
+        splitAABB(getRadarAABB(passiveRange), 256).forEach(aabb ->
                 SableUtils.getLoadedShips(blockEntity.getLevel(), aabb).forEach(scannedShips::add));
 
         scannedShips.remove(SableUtils.getShipManagingPos(blockEntity));
     }
-    private AABB getRadarAABB() {
+    private AABB getRadarAABB(double horizontalRange) {
         Vec3 radarPos = PhysicsHandler.getWorldVec(blockEntity);
         double x = radarPos.x;
         double y = radarPos.y;
@@ -433,8 +434,8 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         double maxY = level != null ? Math.min(y + yScan, level.getMaxBuildHeight()) : y + yScan;
 
         return new AABB(
-                x - range, minY, z - range,
-                x + range, maxY, z + range
+                x - horizontalRange, minY, z - horizontalRange,
+                x + horizontalRange, maxY, z + horizontalRange
         );
     }
 

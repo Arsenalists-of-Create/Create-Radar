@@ -40,7 +40,7 @@ public class SkyRadarRenderer extends SafeBlockEntityRenderer<SkyRadarBlockEntit
             return;
 
         boolean unlocked = be.isVisualUnlocked();
-        float yaw = unlocked ? be.getInterpolatedYaw(partialTick) : 0.0f;
+        float yaw = be.getInterpolatedVisualYaw(partialTick);
         float speed = unlocked ? be.getSpeed() : 0.0f;
 
         // Mirrors the usual Create kinetic angular-speed convention.

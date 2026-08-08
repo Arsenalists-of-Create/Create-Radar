@@ -44,6 +44,7 @@ import java.util.UUID;
 
 public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, IControlContraption {
     private static final float SKY_RADAR_ROTATION_SCALE = 0.125f;
+    private static final int ORIENTATION_VERSION = 1;
 
     private SkyRadarScanningBehavior scanningBehavior;
     private float yawDeg;
@@ -58,6 +59,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     private float targetPitchDeg = SkyRadarContraptionEntity.PITCH_DEGREES;
     private boolean autoDisassembledForAltitude;
     private UUID emitterId = UUID.randomUUID();
+    private boolean orientationMigrated = true;
 
     public SkyRadarBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -72,6 +74,8 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     @Override
     public void tick() {
         super.tick();
+
+        migrateLegacyOrientation();
 
         if (level instanceof ServerLevel serverLevel) {
             ARADTargeting.heartbeatNativeRadar(serverLevel, this);
@@ -171,7 +175,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
 
     @Override
     public float getGlobalAngle() {
-        return yawDeg;
+        return wrap360(getReceiverYawOffset() + yawDeg);
     }
 
 
@@ -310,7 +314,8 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         Vec3 radarPos = PhysicsHandler.getWorldVec(this);
         Vec3 diff = ownedTarget.targetPos().subtract(radarPos);
         double horizontal = Math.sqrt(diff.x * diff.x + diff.z * diff.z);
-        float targetYaw = wrap360((float) Math.toDegrees(Math.atan2(diff.x, diff.z)));
+        float targetGlobalYaw = wrap360((float) Math.toDegrees(Math.atan2(diff.x, diff.z)));
+        float targetYaw = wrap360(targetGlobalYaw - getReceiverYawOffset());
         float targetPitch = (float) Math.toDegrees(Math.atan2(diff.y, horizontal));
         float maxStep = Math.abs(getEffectiveAngularSpeed());
         float newYaw = moveTowardWrapped(yawDeg, targetYaw, maxStep);
@@ -422,7 +427,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     }
 
     public Direction getReceiverFacing() {
-        return receiverFacing;
+        return getSafeReceiverFacing();
     }
 
     public boolean isVisualUnlocked() {
@@ -437,6 +442,17 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
 
         float delta = Mth.wrapDegrees(yawDeg - prevYawDeg);
         return wrap360(prevYawDeg + delta * partialTick);
+    }
+
+    public float getInterpolatedVisualYaw(float partialTick) {
+        if (!isVisualUnlocked()) {
+            BlockState state = getBlockState();
+            Direction facing = state.hasProperty(SkyRadarBlock.FACING)
+                    ? state.getValue(SkyRadarBlock.FACING)
+                    : Direction.NORTH;
+            return wrap360(facing.toYRot() + 180.0f);
+        }
+        return wrap360(getReceiverYawOffset() + getInterpolatedYaw(partialTick));
     }
     public boolean isAssembled() {
         return running;
@@ -522,7 +538,10 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         }
         if (compound.contains("ReceiverFacing", Tag.TAG_INT)) {
             receiverFacing = Direction.from3DDataValue(compound.getInt("ReceiverFacing"));
+        } else {
+            receiverFacing = Direction.NORTH;
         }
+        orientationMigrated = compound.getInt("OrientationVersion") >= ORIENTATION_VERSION;
     }
 
     @Override
@@ -537,7 +556,8 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         compound.putBoolean("AutoDisassembledForAltitude", autoDisassembledForAltitude);
         compound.putBoolean("HasOwnedTarget", hasOwnedTarget);
         compound.putFloat("TargetPitchDeg", targetPitchDeg);
-        compound.putInt("ReceiverFacing", receiverFacing.get3DDataValue());
+        compound.putInt("ReceiverFacing", getSafeReceiverFacing().get3DDataValue());
+        compound.putInt("OrientationVersion", ORIENTATION_VERSION);
     }
 
     private static float wrap360(float deg) {
@@ -546,6 +566,39 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
             deg += 360.0f;
         }
         return deg;
+    }
+
+    private float getReceiverYawOffset() {
+        Direction facing = getSafeReceiverFacing();
+        float receiverAngle = (float) Math.toDegrees(Math.atan2(
+                facing.getStepX(), facing.getStepZ()));
+        return wrap360(receiverAngle + 180.0f);
+    }
+
+    private Direction getSafeReceiverFacing() {
+        Direction facing = receiverFacing;
+        return facing != null && facing.getAxis().isHorizontal()
+                ? facing
+                : Direction.NORTH;
+    }
+
+    private void migrateLegacyOrientation() {
+        if (orientationMigrated || level == null || level.isClientSide) {
+            return;
+        }
+
+        orientationMigrated = true;
+        BlockState state = level.getBlockState(getBlockPos());
+        if (state.getBlock() instanceof SkyRadarBlock
+                && state.hasProperty(SkyRadarBlock.FACING)) {
+            Direction migratedFacing = getSafeReceiverFacing();
+            if (state.getValue(SkyRadarBlock.FACING) != migratedFacing) {
+                level.setBlockAndUpdate(getBlockPos(),
+                        state.setValue(SkyRadarBlock.FACING, migratedFacing));
+            }
+        }
+        setChanged();
+        notifyUpdate();
     }
 
     private void resetAssembledAim() {
@@ -612,7 +665,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
 
     @Override
     public Direction getradarDirection() {
-        return receiverFacing;
+        return getSafeReceiverFacing();
     }
 
     @Override

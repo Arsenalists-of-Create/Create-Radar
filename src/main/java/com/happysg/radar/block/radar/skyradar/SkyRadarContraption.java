@@ -31,6 +31,7 @@ public class SkyRadarContraption extends BearingContraption {
 
     @Override
     public boolean assemble(Level world, BlockPos pos) throws AssemblyException {
+        Direction mountFacing = world.getBlockState(pos).getValue(SkyRadarBlock.FACING);
         BlockPos start = pos.relative(facing, 2);
         BlockState firstState = world.getBlockState(start);
         if (!isSkyRadarPart(firstState)) {
@@ -40,8 +41,6 @@ public class SkyRadarContraption extends BearingContraption {
         if (!searchMovedStructure(world, start, null)) {
             return false;
         }
-        startMoving(world);
-        expandBoundsAroundAxis(facing.getAxis());
         if (blocks.isEmpty()) {
             return false;
         }
@@ -49,6 +48,13 @@ public class SkyRadarContraption extends BearingContraption {
         if (!hasReceiver()) {
             throw new AssemblyException(Component.translatable(CreateRadar.MODID + ".radar.no_receiver"));
         }
+        if (!receiverFacing.getAxis().isHorizontal()
+                || receiverFacing.getAxis() != mountFacing.getAxis()) {
+            throw new AssemblyException(Component.translatable(
+                    CreateRadar.MODID + ".radar.sky_radar_receiver_misaligned"));
+        }
+        startMoving(world);
+        expandBoundsAroundAxis(facing.getAxis());
         return true;
     }
 
@@ -79,7 +85,7 @@ public class SkyRadarContraption extends BearingContraption {
             dishCount++;
         }
 
-        if (state.getBlock() instanceof RadarReceiverBlock) {
+        if (!hasReceiver && state.getBlock() instanceof RadarReceiverBlock) {
             hasReceiver = true;
             receiverFacing = state.getValue(RadarReceiverBlock.FACING);
         }

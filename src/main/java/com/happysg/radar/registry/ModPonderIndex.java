@@ -37,7 +37,9 @@ public class ModPonderIndex implements PonderPlugin {
         HELPER.forComponents(ModBlocks.SKY_RADAR)
                 .addStoryBoard("sky_radar_ponder",PonderScenes::skyRadarSetup)
                 .addStoryBoard("radar_network",PonderScenes::networkSetup,ModPonderTags.RADAR_NETWORK);
-
+        HELPER.forComponents(ModBlocks.RWR_BLOCK)
+                .addStoryBoard("rwr_ponder",PonderScenes::rwrPonder)
+                .addStoryBoard("rwr_ponder",PonderScenes::rwrContactsPonder);
 
 
 //        HELPER.addStoryBoard(ModBlocks.RWR_BLOCK,"rwr_ponder",PonderScenes::controllerLinking,ModPonderTags.RADAR_COMPONENT);

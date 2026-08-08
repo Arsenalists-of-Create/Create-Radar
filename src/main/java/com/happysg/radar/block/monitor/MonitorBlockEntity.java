@@ -78,6 +78,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     boolean reset = false;
     protected BlockPos mountBlock;
     private boolean aradLinked = false;
+    private boolean ponderRwrVisualOverride = false;
+    private boolean ponderRwrVisualActive = false;
+    private boolean ponderRwrIconEnlarged = false;
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -784,11 +787,160 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
     }
     public boolean isLinked() {
+        if (ponderRwrVisualOverride) {
+            return ponderRwrVisualActive;
+        }
         return aradLinked || !radarInfos.isEmpty() || getRadarCenterPos() != null;
     }
 
     public boolean isAradLinked() {
-        return aradLinked;
+        return ponderRwrVisualOverride ? ponderRwrVisualActive : aradLinked;
+    }
+
+    public boolean isPonderRwrVisual() {
+        return ponderRwrVisualOverride;
+    }
+
+    public boolean shouldRenderPonderRwrRings() {
+        return !ponderRwrIconEnlarged;
+    }
+
+    public void beginPonderRwrVisual() {
+        activatePonderRwrVisual();
+        ponderRwrIconEnlarged = false;
+        rwrInfos = List.of();
+    }
+
+    public void endPonderRwrVisual() {
+        ponderRwrVisualOverride = true;
+        ponderRwrVisualActive = false;
+        ponderRwrIconEnlarged = false;
+        rwrInfos = List.of();
+    }
+
+    public void showPonderGroundRadarIcon() {
+        showPonderRwrIcon(RadarType.GROUND, false, false, false);
+    }
+
+    public void showPonderAirborneRadarIcon() {
+        showPonderRwrIcon(RadarType.AIRBORNE, false, false, false);
+    }
+
+    public void showPonderSkyRadarIcon() {
+        showPonderRwrIcon(RadarType.SKY, false, false, false);
+    }
+
+    public void showPonderFriendlySkyRadarIcon() {
+        showPonderRwrIcon(RadarType.SKY, true, false, false);
+    }
+
+    public void showPonderHighThreatSkyRadarIcon() {
+        showPonderRwrIcon(RadarType.SKY, false, true, false);
+    }
+
+    public void showPonderLockingSkyRadarIcon() {
+        showPonderRwrIcon(RadarType.SKY, false, false, true);
+    }
+
+    public void showPonderCenterRingContacts() {
+        activatePonderRwrVisual();
+        ponderRwrIconEnlarged = false;
+        rwrInfos = List.of(
+                new RwrDisplayInfo(
+                        "ponder_center_contact",
+                        RadarType.GROUND,
+                        90.0f,
+                        0.0f,
+                        true,
+                        false,
+                        false,
+                        false,
+                        false
+                ),
+                new RwrDisplayInfo(
+                        "ponder_center_high_threat",
+                        RadarType.GROUND,
+                        270.0f,
+                        0.0f,
+                        true,
+                        false,
+                        true,
+                        false,
+                        false
+                )
+        );
+    }
+
+    public void showPonderFriendlyOuterRingContact() {
+        activatePonderRwrVisual();
+        ponderRwrIconEnlarged = false;
+        rwrInfos = List.of(new RwrDisplayInfo(
+                "ponder_outer_friendly",
+                RadarType.SKY,
+                0.0f,
+                0.0f,
+                false,
+                false,
+                false,
+                false,
+                true
+        ));
+    }
+
+    public void showPonderInnerRingHighThreatContact() {
+        activatePonderRwrVisual();
+        ponderRwrIconEnlarged = false;
+        rwrInfos = List.of(new RwrDisplayInfo(
+                "ponder_inner_high_threat",
+                RadarType.GROUND,
+                180.0f,
+                0.0f,
+                true,
+                true,
+                true,
+                false,
+                false
+        ));
+    }
+
+    private void showPonderRwrIcon(
+            RadarType radarType,
+            boolean friendly,
+            boolean primaryThreat,
+            boolean exactLocked
+    ) {
+        activatePonderRwrVisual();
+        ponderRwrIconEnlarged = true;
+        boolean withinRadarRange = primaryThreat || exactLocked;
+        float ringRadius = exactLocked
+                ? AradMonitorGeometry.INNER_RING_RADIUS
+                : withinRadarRange
+                ? AradMonitorGeometry.MIDDLE_RING_RADIUS
+                : AradMonitorGeometry.OUTER_RING_RADIUS;
+        rwrInfos = List.of(new RwrDisplayInfo(
+                "ponder_rwr_icon",
+                radarType,
+                0.0f,
+                -ringRadius,
+                withinRadarRange,
+                exactLocked,
+                primaryThreat,
+                false,
+                friendly
+        ));
+    }
+
+    private void activatePonderRwrVisual() {
+        ponderRwrVisualOverride = true;
+        ponderRwrVisualActive = true;
+        controller = worldPosition;
+    }
+
+    public float getRwrContactScaleMultiplier() {
+        if (ponderRwrIconEnlarged) {
+            return 4.5f;
+        }
+        return ponderRwrVisualOverride ? 1.25f : 1.0f;
     }
 
     public List<RwrDisplayInfo> getRwrInfos() {
