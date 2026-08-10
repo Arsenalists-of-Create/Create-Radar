@@ -8,7 +8,6 @@ import com.happysg.radar.networking.packets.OpenControllerLimitsScreenPacket;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
-import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -26,8 +25,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.NotNull;
 
 public class AutoPitchControllerBlock extends HorizontalKineticBlock
-        implements IBE<AutoPitchControllerBlockEntity>, ICogWheel,
-        PlacementShaftTarget {
+        implements IBE<AutoPitchControllerBlockEntity>, PlacementShaftTarget {
     private static final Direction[] MOUNT_DIRECTIONS = {
             Direction.NORTH,
             Direction.EAST,
@@ -74,14 +72,6 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
             LevelReader world, BlockPos pos, BlockState state, Direction face
     ) {
         return face == state.getValue(HORIZONTAL_FACING).getOpposite();
-    }
-
-    @Override
-    public boolean isDedicatedCogWheel() {
-        // The controller participates in ordinary small-cog propagation, but its
-        // item is not a standard cogwheel item: this block uses HORIZONTAL_FACING
-        // instead of the AXIS property required by Create's cog placement helper.
-        return false;
     }
 
     @Override

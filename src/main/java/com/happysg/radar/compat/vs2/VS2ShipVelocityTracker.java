@@ -26,15 +26,23 @@ public class VS2ShipVelocityTracker {
         return getShipVelocityPerTick(ship, level, ship.boundingBox().center(new Vector3d()));
     }
 
-    public static Vec3 getShipVelocityPerTick(SubLevelAccess ship, Level level, Vec3 samplePos) {
-        return getShipVelocityPerTick(ship, level, new Vector3d(samplePos.x, samplePos.y, samplePos.z));
+    public static Vec3 getShipVelocityPerTick(SubLevelAccess ship, Level level, Vec3 worldSamplePos) {
+        return getShipVelocityPerTick(ship, level,
+                new Vector3d(worldSamplePos.x, worldSamplePos.y, worldSamplePos.z));
     }
 
-    public static Vec3 getShipVelocityPerTick(SubLevelAccess ship, Level level, Vector3dc samplePos) {
-        if (ship == null || level == null || samplePos == null) return Vec3.ZERO;
+    public static Vec3 getShipVelocityPerTick(SubLevelAccess ship, Level level, Vector3dc worldSamplePos) {
+        if (ship == null || level == null || worldSamplePos == null) return Vec3.ZERO;
 
-        Vector3d mutableSamplePos = new Vector3d(samplePos);
-        Vec3 velocity = toVec3(SableCompanion.INSTANCE.getVelocity(level, mutableSamplePos)).scale(1.0 / 20.0);
+        // The explicit-sublevel Sable overload expects a point in that sublevel's
+        // local coordinates. The position-only overload instead tries to infer a
+        // sublevel from plot-grid coordinates, so passing a global bounding-box
+        // position to it resolves no sublevel and returns zero.
+        Vector3d localSamplePos = ship.logicalPose()
+                .transformPositionInverse(new Vector3d(worldSamplePos));
+        Vector3d velocityPerSecond = SableCompanion.INSTANCE.getVelocity(
+                level, ship, localSamplePos, new Vector3d());
+        Vec3 velocity = toVec3(velocityPerSecond).scale(1.0 / 20.0);
         LAST_VEL_TICK.put(ship.getUniqueId(), velocity);
         return velocity;
     }

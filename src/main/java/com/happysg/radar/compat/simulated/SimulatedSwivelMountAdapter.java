@@ -190,6 +190,11 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
     }
 
     @Override
+    public boolean isKineticEndpoint(KineticBlockEntity candidate) {
+        return candidate == endpoint;
+    }
+
+    @Override
     public boolean isAssembled() {
         return isValid()
                 && bearing.getBlockState().hasProperty(SwivelBearingBlock.ASSEMBLED)

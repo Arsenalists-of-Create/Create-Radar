@@ -20,11 +20,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
-import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 
 public class AutoYawControllerBlock extends DirectionalKineticBlock
-        implements IBE<AutoYawControllerBlockEntity>, ICogWheel,
-        PlacementShaftTarget {
+        implements IBE<AutoYawControllerBlockEntity>, PlacementShaftTarget {
     private static final Direction[] MOUNT_DIRECTIONS = {
             Direction.UP,
             Direction.DOWN
@@ -70,13 +68,6 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
         return face == state.getValue(FACING);
     }
 
-    @Override
-    public boolean isDedicatedCogWheel() {
-        // The controller participates in ordinary small-cog propagation, but its
-        // item is not a standard cogwheel item: this block uses FACING instead of
-        // the AXIS property required by Create's cog placement helper.
-        return false;
-    }
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         boolean crouching = context.getPlayer() != null && context.getPlayer().isCrouching();

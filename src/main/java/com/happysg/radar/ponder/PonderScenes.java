@@ -537,94 +537,150 @@ public class PonderScenes {
 
     }
 
-    public static void weaponSimpleWeaponSetup(@NotNull SceneBuilder scene, SceneBuildingUtil util){
-        scene.title("weapon_setup", "Creating A Radar Network");
-        scene.configureBasePlate(0, 0, 5);
+    public static void weaponSimpleWeaponSetup(@NotNull SceneBuilder scene, SceneBuildingUtil util) {
+        scene.title("weapon_setup", "Automatic Weapon Setup");
+        scene.configureBasePlate(0, 0, 8);
+
+        Selection lowerYawController = util.select().position(3, 1, 2);
+        Selection yawControllerLink = util.select().position(3, 1, 3);
+        Selection upperYawController = util.select().position(3, 1, 4);
+        Selection networkController = util.select().position(7, 1, 6);
+
+        Selection lowerCannonMount = util.select().position(3, 2, 2);
+        Selection lowerPitchController = util.select().position(4, 2, 2);
+        Selection upperMountBaseExtension = util.select().position(3, 2, 4);
+        Selection upperCannonMount = util.select().position(3, 3, 4);
+        Selection upperMountSideExtension = util.select().position(4, 3, 4);
+        Selection upperPitchController = util.select().position(5, 3, 4);
+
+        Selection lowerPitchDataLink = util.select().position(4, 3, 2);
+        Selection upperPitchControllerLink = util.select().position(5, 3, 3);
+        Selection upperPitchDataLink = util.select().position(5, 4, 4);
+
+        Selection lowerCannon = util.select().fromTo(3, 4, 1, 3, 4, 3);
+        Selection upperCannon = util.select().fromTo(3, 5, 2, 3, 5, 5);
+
         scene.world().showSection(util.select().layer(0), Direction.DOWN);
         scene.idle(10);
-        scene.world().showSection(util.select().layer(1), Direction.DOWN);
-        scene.idle(20);
-        Selection yawController = util.select().position(2, 2, 2);
-        scene.world().showSection(yawController, Direction.DOWN);
 
-        Vec3 yawControllerSide = util.vector().blockSurface(new BlockPos(2, 2, 2), Direction.EAST);
-        Selection cannonMount = util.select().position(2, 3, 2);
-        Selection networkController = util.select().position(4,1,4);
-        BlockPos networkControllerPos = util.grid().at(4,1,4);
-        scene.idle(40);
-        scene.world().showSection(cannonMount, Direction.DOWN);
-        scene.idle(5);
-        scene.overlay().showText(40)
-                .text("Yaw Controller is placed under the turret mount")
-                .pointAt(yawControllerSide)
-                .attachKeyFrame()
-                .placeNearTarget();
-        scene.idle(60);
+        showSelection(scene, networkController);
 
+        showSelection(scene, lowerYawController);
+        showSelection(scene, yawControllerLink);
+        showSelection(scene, lowerCannonMount);
+        showSelection(scene, lowerPitchController);
+        showSelection(scene, lowerPitchDataLink);
+        showSelection(scene, lowerCannon);
 
-        BlockPos link = util.grid().at(1, 2, 2);
-        scene.world().showSection(util.select().position(link), Direction.EAST);
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, cannonMount, new AABB(new BlockPos(2,3,2)), 60);
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, link, new AABB(link).contract(-.5f, 0, 0), 60);
+        showSelection(scene, upperYawController);
+        showSelection(scene, upperMountBaseExtension);
+        showSelection(scene, upperCannonMount);
+        showSelection(scene, upperMountSideExtension);
+        showSelection(scene, upperPitchController);
+        showSelection(scene, upperPitchControllerLink);
+        showSelection(scene, upperPitchDataLink);
+        showSelection(scene, upperCannon);
+
+        scene.idle(10);
+        scene.markAsFinished();
+    }
+
+    public static void tPitchSetup(@NotNull SceneBuilder scene, SceneBuildingUtil util) {
+        scene.title("t_pitch_ponder", "Using a T-Pitch Controller");
+        scene.configureBasePlate(0, 0, 8);
+
+        Selection leftYawController = util.select().position(2, 1, 4);
+        Selection leftYawControllerLink = util.select().position(2, 1, 3);
+        Selection rightYawController = util.select().position(4, 1, 4);
+        Selection rightYawControllerLink = util.select().position(4, 1, 3);
+        Selection networkController = util.select().position(6, 1, 2);
+
+        Selection leftCannonMount = util.select().position(2, 2, 4);
+        Selection leftCannon =
+                util.select().fromTo(2, 4, 2, 2, 4, 5);
+        Selection tPitchController = util.select().position(3, 2, 4);
+        Selection rightCannonMount = util.select().position(4, 2, 4);
+        Selection rightCannon =
+                util.select().fromTo(4, 4, 2, 4, 4, 5);
+        Selection tPitchControllerLink = util.select().position(3, 2, 5);
+        Selection tPitchDataLink = util.select().position(3, 3, 4);
+
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(10);
+
+        showSelection(scene, networkController);
+        showSelection(scene, rightYawController);
+        showSelection(scene, rightCannonMount);
+        showSelection(scene, rightCannon);
+        scene.idle(10);
+        showSelection(scene, rightYawControllerLink);
+//
+        showSelection(scene, tPitchController);
+//        showSelection(scene, tPitchControllerLink);
+//        showSelection(scene, tPitchDataLink);
         scene.overlay().showText(60)
-                .text("Link using Data Links")
-                .pointAt(link.getCenter())
+                .text("The T-Pitch Controller is a dual-output alternative to the Auto Pitch Controller")
+                .pointAt(tPitchController.getCenter())
                 .attachKeyFrame()
-                .colored(PonderPalette.OUTPUT)
-                .placeNearTarget();
-        scene.idle(50);
-        Selection pitchController = util.select().position(2,3,1);
-        scene.idle(60);
-
-        scene.world().showSection(pitchController,Direction.SOUTH);
-        Vec3 pitchControllerSide = util.vector().blockSurface(new BlockPos(2,3,1), Direction.EAST);
-        BlockPos link2 = util.grid().at(1, 3, 1);
-        scene.world().showSection(util.select().position(link2), Direction.EAST);
-        scene.overlay().showText(60)
-                .text("Repeat for pitch Controller")
-                .pointAt(pitchControllerSide)
-                .attachKeyFrame()
-                .placeNearTarget();
-        scene.idle(60);
-        scene.rotateCameraY(90);
-        scene.idle(60);
-
-
-        Selection firingcontrol =util.select().position(3,3,2);
-        Selection link3 = util.select().position(3,3,3);
-        scene.world().showSection(firingcontrol,Direction.WEST);
-        scene.overlay().showText(60)
-                .text("The fire control block emits redstone when the cannon is in the correct position")
-                .pointAt(firingcontrol.getCenter())
-                .attachKeyFrame()
-                .colored(PonderPalette.OUTPUT)
-                .placeNearTarget();
-        scene.idle(50);
-        scene.rotateCameraY(90);
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, cannonMount, new AABB(new BlockPos(2,3,2)), 60);
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, link3, new AABB(new BlockPos (3,3,3)).contract(0, 0, .5f), 60);
-        scene.idle(20);
-        scene.world().showSection(link3, Direction.SOUTH);
-        scene.idle(50);
-        scene.rotateCameraY(-90);
-        Selection link4 = util.select().position(2,4,1);
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, link4, new AABB(new BlockPos(2,4,1)).contract(0, .5, 0), 60);
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(networkControllerPos).contract(0, .5, 0), 60);
-        scene.idle(20);
-        scene.world().showSection(link4,Direction.DOWN);
-        scene.overlay().showText(60)
-                .text("")
-                .pointAt(networkControllerPos.getCenter())
-                .attachKeyFrame()
-                .colored(PonderPalette.OUTPUT)
                 .placeNearTarget();
         scene.idle(70);
         scene.overlay().showText(60)
-                .text("")
-                .pointAt(networkControllerPos.getCenter())
+                .text("It can support 2 cannon mounts at the same time")
+                .pointAt(tPitchController.getCenter())
                 .attachKeyFrame()
-                .colored(PonderPalette.OUTPUT)
                 .placeNearTarget();
+        scene.idle(5);
+        showSelection(scene, leftYawController);
+        showSelection(scene, leftYawControllerLink);
+        showSelection(scene, leftCannonMount);
+        showSelection(scene, leftCannon);
+        scene.idle(65);
+        scene.rotateCameraY(180);
+
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, leftCannonMount, new AABB(new BlockPos(2, 2, 4)), 60);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, tPitchController, new AABB(new BlockPos(12,1,4)), 60);
+        scene.idle(40);
+        showSelection(scene,tPitchControllerLink);
+        scene.overlay().showText(60)
+                .text("")
+                .pointAt(tPitchController.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+        scene.idle(70);
+        scene.markAsFinished();
+    }
+
+    public static void swivelSetup(@NotNull SceneBuilder scene, SceneBuildingUtil util) {
+        scene.title("swivel_ponder", "Using Swivel Bearings");
+        scene.configureBasePlate(0, 0, 7);
+
+        Selection networkController = util.select().position(0, 1, 1);
+
+        Selection mountedYawSwivel = util.select().position(2, 1, 4);
+        Selection mountedYawController = util.select().position(3, 1, 4);
+        Selection mountedYawControllerLink = util.select().position(3, 1, 5);
+        Selection mountedCannonMount = util.select().position(2, 2, 4);
+        Selection mountedPitchController = util.select().position(1, 2, 4);
+        Selection mountedPitchControllerLink = util.select().position(1, 2, 5);
+        Selection mountedNetworkDataLink = util.select().position(1, 3, 4);
+
+        Selection dualYawSwivel = util.select().position(3, 1, 2);
+        Selection dualYawController = util.select().position(4, 1, 2);
+        Selection dualYawControllerLink = util.select().position(4, 1, 1);
+        Selection dualPitchController = util.select().position(3, 2, 2);
+        Selection dualNetworkDataLink = util.select().position(3, 2, 3);
+        Selection dualPitchSwivel = util.select().position(3, 3, 2);
+        Selection dualCannonMount = util.select().position(2, 3, 2);
+
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(10);
+
+
+    }
+
+    private static void showSelection(SceneBuilder scene, Selection selection) {
+        scene.world().showSection(selection, Direction.DOWN);
+        scene.idle(5);
     }
 
     public static void sonarSetup(SceneBuilder scene, SceneBuildingUtil util){}

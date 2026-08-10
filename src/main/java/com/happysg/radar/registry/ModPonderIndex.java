@@ -31,8 +31,13 @@ public class ModPonderIndex implements PonderPlugin {
 
         HELPER.addStoryBoard(ModBlocks.MONITOR, "radar_network", PonderScenes::networkSetup, ModPonderTags.RADAR_COMPONENT);
         HELPER.addStoryBoard(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK, "weapon_setup", PonderScenes::weaponSimpleWeaponSetup, ModPonderTags.WEAPON_NETWORK);
+        HELPER.addStoryBoard(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK, "t-pitch_ponder", PonderScenes::tPitchSetup, ModPonderTags.WEAPON_NETWORK);
+        HELPER.addStoryBoard(ModBlocks.AUTO_YAW_CONTROLLER_BLOCK, "swivel_ponder", PonderScenes::swivelSetup, ModPonderTags.WEAPON_NETWORK);
         HELPER.addStoryBoard(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK, "weapon_setup", PonderScenes::weaponSimpleWeaponSetup, ModPonderTags.WEAPON_NETWORK);
+        HELPER.addStoryBoard(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK, "t-pitch_ponder", PonderScenes::tPitchSetup, ModPonderTags.WEAPON_NETWORK);
+        HELPER.addStoryBoard(ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK, "swivel_ponder", PonderScenes::swivelSetup, ModPonderTags.WEAPON_NETWORK);
         HELPER.addStoryBoard(ModBlocks.RADAR_LINK,"weapon_setup", PonderScenes::weaponSimpleWeaponSetup, ModPonderTags.WEAPON_NETWORK);
+        HELPER.addStoryBoard(ModBlocks.T_PITCH, "t-pitch_ponder", PonderScenes::tPitchSetup, ModPonderTags.WEAPON_NETWORK);
 
         HELPER.forComponents(ModBlocks.SKY_RADAR)
                 .addStoryBoard("sky_radar_ponder",PonderScenes::skyRadarSetup)

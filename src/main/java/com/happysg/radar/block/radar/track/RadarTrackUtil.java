@@ -1,6 +1,6 @@
 package com.happysg.radar.block.radar.track;
 
-import dev.ryanhcode.sable.companion.SableCompanion;
+import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -8,9 +8,6 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
-import org.joml.Vector3dc;
-import org.joml.Vector3f;
-import org.joml.Vector3fc;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -33,15 +30,7 @@ public class RadarTrackUtil {
 
 
     public static Vec3 getVelocity(SubLevelAccess subLevel, Level level) {
-        Object velocity = SableCompanion.INSTANCE.getVelocity(level, subLevel.boundingBox().center());
-
-        if (velocity instanceof Vector3dc vec)
-            return new Vec3(vec.x(), vec.y(), vec.z());
-
-        if (velocity instanceof Vector3fc vec)
-            return new Vec3(vec.x(), vec.y(), vec.z());
-
-        return Vec3.ZERO;
+        return VS2ShipVelocityTracker.getShipVelocityPerTick(subLevel, level);
     }
 
     public static Vec3 getPosition(SubLevelAccess serverShip) {

@@ -158,9 +158,9 @@ public final class WeaponNetworkRuntime {
     }
 
     private boolean canRegister(LinkEntry entry, @Nullable LinkEntry previous) {
-        LinkEntry endpointOwner = explicitLinkForEndpoint(
+        List<LinkEntry> endpointLinks = explicitLinksForEndpoint(
                 entry.endpointPos(), previous);
-        if (endpointOwner != null) {
+        if (!canShareExplicitEndpoint(entry, endpointLinks)) {
             return false;
         }
 
@@ -191,14 +191,30 @@ public final class WeaponNetworkRuntime {
     }
 
     /**
-     * Returns only Controller-style Data Link ownership. Contact assignments
-     * never participate in placement validation through this query.
+     * Compatibility query for Controller-style Data Link ownership. If a
+     * T-Pitch has two explicit targets, this returns the first mount in stable
+     * position order. Contact assignments never participate in this query.
      */
     @Nullable
     public BlockPos getExplicitMountForController(BlockPos controllerPos) {
+        List<BlockPos> mounts = getExplicitMountsForController(controllerPos);
+        return mounts.isEmpty() ? null : mounts.getFirst();
+    }
+
+    /**
+     * Returns every canonical mount explicitly targeted by Controller-style
+     * Data Links attached to this endpoint. Ordinary controllers have at most
+     * one entry; a T-Pitch may have one entry for each crossbar side.
+     */
+    public List<BlockPos> getExplicitMountsForController(
+            BlockPos controllerPos
+    ) {
         pruneStaleInputs();
-        LinkEntry entry = explicitLinkForEndpoint(controllerPos, null);
-        return entry == null ? null : entry.mountPos();
+        return explicitLinksForEndpoint(controllerPos, null).stream()
+                .map(LinkEntry::mountPos)
+                .distinct()
+                .sorted(STABLE_POSITION)
+                .toList();
     }
 
     @Nullable
@@ -289,9 +305,14 @@ public final class WeaponNetworkRuntime {
             return false;
         }
 
-        LinkEntry endpointOwner = explicitLinkForEndpoint(endpointPos, null);
-        if (endpointOwner != null
-                && !endpointOwner.mountPos().equals(mountPos)) {
+        LinkEntry candidate = new LinkEntry(
+                BlockPos.ZERO,
+                endpointPos.immutable(),
+                mountPos.immutable(),
+                type);
+        List<LinkEntry> endpointLinks = explicitLinksForEndpoint(
+                endpointPos, null);
+        if (!canShareExplicitEndpoint(candidate, endpointLinks)) {
             return false;
         }
 
@@ -303,11 +324,6 @@ public final class WeaponNetworkRuntime {
             }
         }
 
-        LinkEntry candidate = new LinkEntry(
-                BlockPos.ZERO,
-                endpointPos.immutable(),
-                mountPos.immutable(),
-                type);
         return !hasAnyPitchReservationConflict(candidate, null);
     }
 
@@ -439,7 +455,7 @@ public final class WeaponNetworkRuntime {
     }
 
     private RuntimeSnapshot buildSnapshot() {
-        Map<BlockPos, LinkEntry> explicitByEndpoint = new HashMap<>();
+        Map<BlockPos, List<LinkEntry>> explicitByEndpoint = new HashMap<>();
         Set<BlockPos> targetedMounts = new HashSet<>();
         Map<BlockPos, GroupBuilder> groups = new HashMap<>();
 
@@ -448,8 +464,9 @@ public final class WeaponNetworkRuntime {
                         LinkEntry::dataLinkPos, STABLE_POSITION))
                 .toList();
         for (LinkEntry link : explicitLinks) {
-            explicitByEndpoint.putIfAbsent(
-                    link.endpointPos(), link);
+            explicitByEndpoint.computeIfAbsent(
+                    link.endpointPos(), ignored -> new ArrayList<>())
+                    .add(link);
             targetedMounts.add(link.mountPos());
             GroupBuilder builder = group(groups, link.mountPos());
             builder.dataLinks.add(link.dataLinkPos());
@@ -624,7 +641,8 @@ public final class WeaponNetworkRuntime {
                     instanceof TPitchControllerBlockEntity) {
                 buildTPitchControlView(
                         pitchPos,
-                        explicitByEndpoint.get(pitchPos),
+                        explicitByEndpoint.getOrDefault(
+                                pitchPos, List.of()),
                         targetedMounts,
                         explicitClaims,
                         immutableGroups,
@@ -653,7 +671,8 @@ public final class WeaponNetworkRuntime {
                     instanceof TPitchControllerBlockEntity) {
                 buildTPitchControlView(
                         link.endpointPos(),
-                        link,
+                        explicitByEndpoint.getOrDefault(
+                                link.endpointPos(), List.of()),
                         targetedMounts,
                         explicitClaims,
                         immutableGroups,
@@ -700,7 +719,7 @@ public final class WeaponNetworkRuntime {
 
     private void buildTPitchControlView(
             BlockPos pitchPos,
-            @Nullable LinkEntry explicitLink,
+            List<LinkEntry> explicitLinks,
             Set<BlockPos> targetedMounts,
             Map<Slot, LinkedHashSet<BlockPos>> explicitClaims,
             Map<BlockPos, Group> groups,
@@ -729,9 +748,12 @@ public final class WeaponNetworkRuntime {
             return;
         }
 
+        Set<BlockPos> explicitMounts = new HashSet<>();
+        for (LinkEntry link : explicitLinks) {
+            explicitMounts.add(link.mountPos());
+        }
         BlockPos dominant = selectDominantMount(
-                retained, targetedMounts,
-                explicitLink == null ? null : explicitLink.mountPos());
+                retained, targetedMounts, explicitMounts);
         retained.sort((first, second) -> {
             if (first.equals(dominant)) {
                 return second.equals(dominant) ? 0 : -1;
@@ -762,7 +784,7 @@ public final class WeaponNetworkRuntime {
         endpointToMount.put(pitchPos, dominant);
         endpointOrigins.put(
                 pitchPos,
-                explicitLink == null
+                explicitLinks.isEmpty()
                         ? EndpointOrigin.CONTACT
                         : EndpointOrigin.DATALINK);
         controlViews.put(pitchPos, new WeaponControlView(
@@ -777,18 +799,21 @@ public final class WeaponNetworkRuntime {
     private BlockPos selectDominantMount(
             List<BlockPos> mounts,
             Set<BlockPos> targetedMounts,
-            @Nullable BlockPos tPitchDataLinkMount
+            Set<BlockPos> tPitchDataLinkMounts
     ) {
+        List<BlockPos> explicitlyLinked = mounts.stream()
+                .filter(tPitchDataLinkMounts::contains)
+                .sorted(STABLE_POSITION)
+                .toList();
+        if (!explicitlyLinked.isEmpty()) {
+            return explicitlyLinked.getFirst();
+        }
+
         List<BlockPos> targeted = mounts.stream()
                 .filter(targetedMounts::contains)
                 .toList();
         if (targeted.size() == 1) {
             return targeted.getFirst();
-        }
-        if (targeted.size() > 1
-                && tPitchDataLinkMount != null
-                && mounts.contains(tPitchDataLinkMount)) {
-            return tPitchDataLinkMount;
         }
         return mounts.stream().min(STABLE_POSITION)
                 .orElseThrow();
@@ -949,18 +974,46 @@ public final class WeaponNetworkRuntime {
                 immutable, GroupBuilder::new);
     }
 
-    @Nullable
-    private LinkEntry explicitLinkForEndpoint(
+    private List<LinkEntry> explicitLinksForEndpoint(
             BlockPos endpointPos,
             @Nullable LinkEntry ignored
     ) {
+        List<LinkEntry> entries = new ArrayList<>();
         for (LinkEntry entry : linksByDataLink.values()) {
             if (!entry.equals(ignored)
                     && entry.endpointPos().equals(endpointPos)) {
-                return entry;
+                entries.add(entry);
             }
         }
-        return null;
+        entries.sort(Comparator
+                .comparing(LinkEntry::mountPos, STABLE_POSITION)
+                .thenComparing(LinkEntry::dataLinkPos, STABLE_POSITION));
+        return List.copyOf(entries);
+    }
+
+    private boolean canShareExplicitEndpoint(
+            LinkEntry candidate,
+            List<LinkEntry> existing
+    ) {
+        if (existing.isEmpty()) {
+            return true;
+        }
+        if (candidate.type()
+                != DataLinkBlockEntity.WeaponEndpointType.PITCH
+                || !(level.getBlockEntity(candidate.endpointPos())
+                instanceof TPitchControllerBlockEntity tPitch)
+                || existing.size() >= 2
+                || !tPitch.canLinkMount(candidate.mountPos())) {
+            return false;
+        }
+        for (LinkEntry link : existing) {
+            if (link.type()
+                    != DataLinkBlockEntity.WeaponEndpointType.PITCH
+                    || link.mountPos().equals(candidate.mountPos())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Set<BlockPos> acceptedDataLinkTargets(
@@ -1183,11 +1236,15 @@ public final class WeaponNetworkRuntime {
                 unregister(movedLink.getBlockPos());
                 return false;
             }
-            BlockPos mappedMount =
-                    getExplicitMountForController(endpoint);
-            if (mappedMount != null
-                    && !mappedMount.equals(oldMount)
-                    && !mappedMount.equals(newMount)) {
+            boolean sharedTPitch = type
+                    == DataLinkBlockEntity.WeaponEndpointType.PITCH
+                    && level.getBlockEntity(endpoint)
+                    instanceof TPitchControllerBlockEntity;
+            boolean mappedElsewhere = getExplicitMountsForController(endpoint)
+                    .stream()
+                    .anyMatch(mappedMount -> !mappedMount.equals(oldMount)
+                            && !mappedMount.equals(newMount));
+            if (mappedElsewhere && !sharedTPitch) {
                 unregister(movedLink.getBlockPos());
                 return false;
             }

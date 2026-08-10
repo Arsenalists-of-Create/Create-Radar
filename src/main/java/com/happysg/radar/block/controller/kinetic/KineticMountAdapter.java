@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.kinetic;
 
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
@@ -9,7 +10,8 @@ import javax.annotation.Nullable;
 /**
  * Mod-neutral feedback from a kinetic cannon mount. Controller generators
  * never assign the mount endpoint's speed, source, network, or sequence
- * context; ordinary Create cog propagation owns that lifecycle. The only
+ * context. Create propagation owns the selected mount endpoint's lifecycle;
+ * the adapter only identifies that endpoint and reports its state. The only
  * physical-side request is waking an already assembled body while it settles.
  */
 public interface KineticMountAdapter {
@@ -20,6 +22,14 @@ public interface KineticMountAdapter {
     boolean isValid();
 
     boolean hasSameEndpoint(KineticMountAdapter other);
+
+    /**
+     * True only for the kinetic endpoint this controller is allowed to drive.
+     * Adapters without a kinetic endpoint remain disconnected by default.
+     */
+    default boolean isKineticEndpoint(KineticBlockEntity candidate) {
+        return false;
+    }
 
     boolean isAssembled();
 

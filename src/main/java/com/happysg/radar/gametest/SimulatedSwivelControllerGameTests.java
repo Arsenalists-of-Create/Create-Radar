@@ -10,8 +10,10 @@ import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.happysg.radar.registry.ModBlocks;
 import com.simibubi.create.AllBlocks;
+import com.simibubi.create.content.kinetics.RotationPropagator;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
 import dev.simulated_team.simulated.content.blocks.swivel_bearing.SwivelBearingBlockEntity;
 import dev.simulated_team.simulated.service.SimConfigService;
 import net.minecraft.core.BlockPos;
@@ -21,11 +23,17 @@ import net.minecraft.gametest.framework.GameTestAssertException;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.gametest.framework.GameTestServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
@@ -120,9 +128,29 @@ public final class SimulatedSwivelControllerGameTests {
             throw new GameTestAssertException(
                     "Reference-style Swivel drive unexpectedly acquired sequence context");
         }
-        if (fixture.controller().isCustomConnection(endpoint, fixture.controller().getBlockState(),
-                endpoint.getBlockState())) {
-            throw new GameTestAssertException("Swivel drive unexpectedly exposed a custom kinetic edge");
+        if (ICogWheel.isSmallCog(fixture.controller().getBlockState())) {
+            throw new GameTestAssertException(
+                    "Controller still advertised itself as a small cogwheel");
+        }
+        if (!adapter.isKineticEndpoint(endpoint)
+                || adapter.isKineticEndpoint(fixture.decoyCog())) {
+            throw new GameTestAssertException(
+                    "Swivel adapter did not identify only its selected kinetic endpoint");
+        }
+        if (!fixture.controller().isCustomConnection(endpoint,
+                fixture.controller().getBlockState(), endpoint.getBlockState())) {
+            throw new GameTestAssertException(
+                    "Swivel drive did not expose its mount-only kinetic edge");
+        }
+        if (fixture.controller().isCustomConnection(fixture.decoyCog(),
+                fixture.controller().getBlockState(),
+                fixture.decoyCog().getBlockState())
+                || RotationPropagator.isConnected(
+                fixture.controller(), fixture.decoyCog())
+                || RotationPropagator.isConnected(
+                fixture.decoyCog(), fixture.controller())) {
+            throw new GameTestAssertException(
+                    "Adjacent cogwheel connected to the controller generator");
         }
 
         double generatedRpm = fixture.controller().getGeneratedSpeed();
@@ -160,7 +188,7 @@ public final class SimulatedSwivelControllerGameTests {
             if (Math.abs(generatedRpm) > 0.1
                     && Math.abs(endpointRpm + generatedRpm)
                     <= Math.max(0.01, Math.abs(generatedRpm) * 0.01)) {
-                samples.sawOrdinaryCogRatio = true;
+                samples.sawSelectedMountRatio = true;
             }
             if (samples.forcedNetworkRebuild) {
                 samples.sawPostRebuildDrive = true;
@@ -274,10 +302,10 @@ public final class SimulatedSwivelControllerGameTests {
         }
 
         if (!samples.sawGeneratedDrive || !samples.sawPoweredEndpoint
-                || !samples.sawOrdinaryCogRatio || !samples.sawPhysicalMovement) {
+                || !samples.sawSelectedMountRatio || !samples.sawPhysicalMovement) {
             throw new GameTestAssertException("Swivel never demonstrated reference drive: generator="
                     + samples.sawGeneratedDrive + " endpoint=" + samples.sawPoweredEndpoint
-                    + " cogRatio=" + samples.sawOrdinaryCogRatio
+                    + " mountRatio=" + samples.sawSelectedMountRatio
                     + " physicalMovement=" + samples.sawPhysicalMovement);
         }
         if (!samples.forcedNetworkRebuild) {
@@ -400,14 +428,39 @@ public final class SimulatedSwivelControllerGameTests {
         BlockPos motorPos = controllerPos.relative(motorSide);
         BlockState motorState = AllBlocks.CREATIVE_MOTOR.getDefaultState()
                 .setValue(DirectionalKineticBlock.FACING, motorSide.getOpposite());
+        BlockPos decoyCogPos = controllerPos.relative(controllerSide);
         ServerLevel level = helper.getLevel();
         level.setBlockAndUpdate(controllerPos, controllerState);
         level.setBlockAndUpdate(motorPos, motorState);
 
+        var player = helper.makeMockPlayer(GameType.CREATIVE);
+        ItemStack cogwheel = AllBlocks.COGWHEEL.asStack();
+        player.setItemInHand(InteractionHand.MAIN_HAND, cogwheel);
+        Vec3 clickLocation = Vec3.atCenterOf(controllerPos)
+                .add(Vec3.atLowerCornerOf(controllerSide.getNormal()).scale(0.5));
+        UseOnContext cogUse = new UseOnContext(player,
+                InteractionHand.MAIN_HAND,
+                new BlockHitResult(clickLocation, controllerSide,
+                        controllerPos, false));
+        InteractionResult helperResult = cogwheel.onItemUseFirst(cogUse);
+        if (helperResult != InteractionResult.PASS) {
+            throw new GameTestAssertException(
+                    "Controller intercepted normal cogwheel placement with a placement helper");
+        }
+        InteractionResult placementResult = cogwheel.useOn(cogUse);
+        if (!placementResult.consumesAction()
+                || !AllBlocks.COGWHEEL.has(level.getBlockState(decoyCogPos))) {
+            throw new GameTestAssertException(
+                    "Cogwheel was not placed normally against the controller face");
+        }
+
         KineticBlockEntity controller = (KineticBlockEntity) level.getBlockEntity(controllerPos);
         KineticBlockEntity motor = (KineticBlockEntity) level.getBlockEntity(motorPos);
+        KineticBlockEntity decoyCog =
+                (KineticBlockEntity) level.getBlockEntity(decoyCogPos);
         SwivelBearingBlockEntity bearing = (SwivelBearingBlockEntity) level.getBlockEntity(bearingPos);
-        if (controller == null || motor == null || bearing == null) {
+        if (controller == null || motor == null || decoyCog == null
+                || bearing == null) {
             throw new GameTestAssertException("Kinetic fixture block entities were not created");
         }
         double startingSetpoint = bearing.getTargetAngleDegrees();
@@ -416,7 +469,8 @@ public final class SimulatedSwivelControllerGameTests {
                     -Math.sin(Math.toRadians(COMMAND_DEGREES)),
                     0.0,
                     Math.cos(Math.toRadians(COMMAND_DEGREES)));
-            return new Fixture(controller, motor, bearing, startingSetpoint,
+            return new Fixture(controller, motor, decoyCog, bearing,
+                    startingSetpoint,
                     () -> {
                         if (!yaw.setRadarAimDirection(worldAim)) {
                             throw new GameTestAssertException(
@@ -430,7 +484,8 @@ public final class SimulatedSwivelControllerGameTests {
                     Math.cos(Math.toRadians(COMMAND_DEGREES)),
                     Math.sin(Math.toRadians(COMMAND_DEGREES)),
                     0.0);
-            return new Fixture(controller, motor, bearing, startingSetpoint,
+            return new Fixture(controller, motor, decoyCog, bearing,
+                    startingSetpoint,
                     () -> {
                         if (!pitch.setRadarAimDirection(worldAim)) {
                             throw new GameTestAssertException(
@@ -498,9 +553,12 @@ public final class SimulatedSwivelControllerGameTests {
         return resolution.adapter();
     }
 
-    private record Fixture(KineticBlockEntity controller, KineticBlockEntity motor,
-                           SwivelBearingBlockEntity bearing, double startingSetpoint,
-                           Runnable command, BooleanSupplier atTarget) {
+    private record Fixture(KineticBlockEntity controller,
+                           KineticBlockEntity motor,
+                           KineticBlockEntity decoyCog,
+                           SwivelBearingBlockEntity bearing,
+                           double startingSetpoint, Runnable command,
+                           BooleanSupplier atTarget) {
     }
 
     private record TestSite(BlockPos bearingPos, boolean previouslyForced) {
@@ -519,7 +577,7 @@ public final class SimulatedSwivelControllerGameTests {
         private boolean sawGeneratedDrive;
         private boolean sawPoweredEndpoint;
         private int activeEndpointSamples;
-        private boolean sawOrdinaryCogRatio;
+        private boolean sawSelectedMountRatio;
         private boolean sawPhysicalMovement;
         private boolean forcedNetworkRebuild;
         private boolean sawObservedDisconnect;

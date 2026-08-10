@@ -12,9 +12,9 @@ import java.util.UUID;
 import java.util.function.DoubleConsumer;
 
 /**
- * Fail-closed closed-loop control for the isolated cog generator used by a
- * kinetic cannon controller. Endpoint attachment is deliberately absent here:
- * ordinary Create propagation owns the Swivel's extra kinetic endpoint.
+ * Fail-closed closed-loop control for the isolated generator used by a kinetic
+ * cannon controller. Endpoint attachment is deliberately absent here: Create
+ * propagation owns the adapter-selected Swivel endpoint.
  */
 public final class KineticControllerState {
     private static final String NBT_KEY = "KineticController";

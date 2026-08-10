@@ -50,6 +50,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlock;
 
 import javax.annotation.Nullable;
+import java.util.List;
 
 public class DataLinkBlockItem extends BlockItem {
     private static final String SELECTED_MOUNT_POS = "SelectedMountPos";
@@ -223,9 +224,14 @@ public class DataLinkBlockItem extends BlockItem {
         }
 
         WeaponNetworkRuntime weaponRuntime = WeaponNetworkRuntime.get(serverLevel);
-        BlockPos existingMount =
-                weaponRuntime.getExplicitMountForController(use.clickedPos());
-        if (existingMount != null) {
+        List<BlockPos> existingMounts =
+                weaponRuntime.getExplicitMountsForController(
+                        use.clickedPos());
+        boolean secondTPitchLink = use.be()
+                instanceof TPitchControllerBlockEntity
+                && existingMounts.size() == 1
+                && !existingMounts.contains(mountPos);
+        if (!existingMounts.isEmpty() && !secondTPitchLink) {
             sendError(use.player(), DATA_LINK_CONTROLLER_ALREADY_LINKED);
             clearLinkTag(use.stack());
             return InteractionResult.FAIL;

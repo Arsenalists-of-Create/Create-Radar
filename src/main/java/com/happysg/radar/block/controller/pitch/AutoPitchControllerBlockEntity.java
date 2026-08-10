@@ -1220,6 +1220,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                 : KineticMountAdapterResolution.absent("simulated_not_loaded");
     }
 
+    private boolean isSelectedKineticMountEndpoint(KineticBlockEntity candidate) {
+        KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        return resolution.hasAdapter() && adapter != null && adapter.isValid()
+                && adapter.isKineticEndpoint(candidate);
+    }
+
     private Direction.Axis getControllerAxis() {
         BlockState state = getBlockState();
         return state.hasProperty(HorizontalDirectionalBlock.FACING)
@@ -1416,6 +1423,27 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     @Override
     protected void copySequenceContextFrom(KineticBlockEntity sourceBE) {
         sequenceContext = null;
+    }
+
+    @Override
+    public float propagateRotationTo(
+            KineticBlockEntity target, BlockState stateFrom,
+            BlockState stateTo, BlockPos diff, boolean connectedViaAxes,
+            boolean connectedViaCogs
+    ) {
+        if (isSelectedKineticMountEndpoint(target)) {
+            return -1.0f;
+        }
+        return super.propagateRotationTo(target, stateFrom, stateTo, diff,
+                connectedViaAxes, connectedViaCogs);
+    }
+
+    @Override
+    public boolean isCustomConnection(
+            KineticBlockEntity other, BlockState state, BlockState otherState
+    ) {
+        return isSelectedKineticMountEndpoint(other)
+                || super.isCustomConnection(other, state, otherState);
     }
 
     @Override

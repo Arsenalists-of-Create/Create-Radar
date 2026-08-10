@@ -37,6 +37,7 @@ import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
@@ -411,6 +412,115 @@ public final class CbcMountExtensionGameTests {
             placeMount(level, extendedMountPos);
             require(controller.canLinkMount(extendedMountPos),
                     "T-Pitch retained a stale canonical mount after replacement");
+        } finally {
+            site.close();
+        }
+        helper.succeed();
+    }
+
+    @PrefixGameTestTemplate(false)
+    @GameTest(templateNamespace = "simulated",
+            template = "extrakineticstest.swivelbearing")
+    public static void tPitchAcceptsTwoExplicitExtensionLinks(
+            GameTestHelper helper) {
+        BlockPos controllerPos = new BlockPos(768, FIXTURE_Y, 8);
+        TestSite site = new TestSite(helper.getLevel(), controllerPos, 5);
+        try {
+            site.prepare();
+            ServerLevel level = helper.getLevel();
+            BlockPos westExtension = controllerPos.west();
+            BlockPos westMount = westExtension.west();
+            BlockPos eastExtension = controllerPos.east();
+            BlockPos eastMount = eastExtension.east();
+
+            placeExtension(level, westExtension, Direction.WEST);
+            placeMount(level, westMount);
+            placeExtension(level, eastExtension, Direction.EAST);
+            placeMount(level, eastMount);
+            level.setBlockAndUpdate(controllerPos,
+                    ModBlocks.T_PITCH.getDefaultState()
+                            .setValue(TPitchControllerBlock.ORIENTATION,
+                                    TPitchControllerBlock
+                                            .Orientation.X_SOUTH));
+
+            Player player = helper.makeMockPlayer(GameType.CREATIVE);
+            ItemStack westLink = ModBlocks.RADAR_LINK.asStack();
+            require(useItemOn(player, westLink, westMount, Direction.UP)
+                            .consumesAction(),
+                    "First T-Pitch mount selection failed");
+            require(useItemOn(player, westLink, controllerPos,
+                            Direction.DOWN).consumesAction(),
+                    "First T-Pitch Data Link placement failed");
+
+            WeaponNetworkRuntime runtime =
+                    WeaponNetworkRuntime.get(level);
+            require(runtime.canAttachEndpoint(
+                            DataLinkBlockEntity.WeaponEndpointType.PITCH,
+                            controllerPos, eastMount),
+                    "T-Pitch rejected a second distinct crossbar mount");
+
+            ItemStack eastLink = ModBlocks.RADAR_LINK.asStack();
+            require(useItemOn(player, eastLink, eastMount, Direction.UP)
+                            .consumesAction(),
+                    "Second T-Pitch mount selection failed");
+            require(useItemOn(player, eastLink, controllerPos,
+                            Direction.UP).consumesAction(),
+                    "Second T-Pitch Data Link placement failed");
+
+            runtime.reconcile();
+            require(runtime.getExplicitMountsForController(controllerPos)
+                            .equals(List.of(westMount, eastMount)),
+                    "T-Pitch did not retain both explicit mount links");
+            WeaponNetworkRuntime.WeaponControlView dual =
+                    runtime.getWeaponControlViewFromPitch(controllerPos);
+            require(dual != null && dual.validTopology()
+                            && dual.channels().size() == 2
+                            && dual.channelForMount(westMount) != null
+                            && dual.channelForMount(eastMount) != null
+                            && westMount.equals(dual.preferredMountPos()),
+                    "Two explicit T-Pitch links did not build a stable dual view");
+
+            ItemStack duplicate = ModBlocks.RADAR_LINK.asStack();
+            require(useItemOn(player, duplicate, eastMount, Direction.UP)
+                            .consumesAction(),
+                    "Duplicate-link mount selection failed");
+            require(useItemOn(player, duplicate, controllerPos,
+                            Direction.NORTH) == InteractionResult.FAIL,
+                    "T-Pitch accepted a duplicate link to the same mount");
+
+            BlockPos ordinaryPitchPos = controllerPos.north(3);
+            BlockPos ordinaryFirstMount = ordinaryPitchPos.west();
+            BlockPos ordinarySecondMount = ordinaryPitchPos.east();
+            placeMount(level, ordinaryFirstMount);
+            placeMount(level, ordinarySecondMount);
+            level.setBlockAndUpdate(ordinaryPitchPos,
+                    ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK
+                            .getDefaultState());
+            linkController(level, ordinaryPitchPos, ordinaryFirstMount,
+                    DataLinkBlockEntity.WeaponEndpointType.PITCH);
+            require(!runtime.canAttachEndpoint(
+                            DataLinkBlockEntity.WeaponEndpointType.PITCH,
+                            ordinaryPitchPos, ordinarySecondMount),
+                    "Ordinary pitch controller accepted a second explicit link");
+
+            level.destroyBlock(controllerPos.below(), false);
+            runtime.reconcile();
+            WeaponNetworkRuntime.WeaponControlView remaining =
+                    runtime.getWeaponControlViewFromPitch(controllerPos);
+            require(remaining != null
+                            && remaining.channels().size() == 1
+                            && remaining.channelForMount(eastMount) != null
+                            && runtime.getExplicitMountsForController(
+                            controllerPos).equals(List.of(eastMount)),
+                    "Removing one T-Pitch link removed or retained the wrong channel");
+
+            level.destroyBlock(controllerPos.above(), false);
+            runtime.reconcile();
+            require(runtime.getWeaponControlViewFromPitch(controllerPos)
+                            == null
+                            && runtime.getExplicitMountsForController(
+                            controllerPos).isEmpty(),
+                    "Removing both T-Pitch links left an extension channel active");
         } finally {
             site.close();
         }
@@ -1232,6 +1342,21 @@ public final class CbcMountExtensionGameTests {
                         Direction.UP,
                         placementPos,
                         false));
+    }
+
+    private static InteractionResult useItemOn(
+            Player player,
+            ItemStack stack,
+            BlockPos position,
+            Direction face
+    ) {
+        player.setItemInHand(InteractionHand.MAIN_HAND, stack);
+        Vec3 location = Vec3.atCenterOf(position)
+                .add(Vec3.atLowerCornerOf(face.getNormal()).scale(0.5));
+        return stack.useOn(new UseOnContext(
+                player,
+                InteractionHand.MAIN_HAND,
+                new BlockHitResult(location, face, position, false)));
     }
 
     private static void linkController(
