@@ -60,6 +60,8 @@ public class ModCreativeTabs {
         pOutput.accept(ModBlocks.MONITOR);
         pOutput.accept(ModBlocks.RADAR_LINK);
         pOutput.accept(ModBlocks.RADAR_BEARING_BLOCK);
+        pOutput.accept(ModBlocks.SONAR_BEARING);
+        pOutput.accept(ModBlocks.SONAR_PANEL);
         pOutput.accept(ModBlocks.RADAR_RECEIVER_BLOCK);
         pOutput.accept(ModBlocks.RADAR_PLATE_BLOCK);
         pOutput.accept(ModBlocks.RADAR_DISH_BLOCK);
@@ -80,9 +82,6 @@ public class ModCreativeTabs {
         //sheild jammer
         //directional jammer
         //siren
-        //sonar bearing
-        //sonar plate thing
-        //
         if (Mods.TRACKWORK.isLoaded()) {
 
         }

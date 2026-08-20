@@ -1192,6 +1192,20 @@ public final class WeaponNetworkRuntime {
             DataLinkBlockEntity movedLink,
             BlockPos movedEndpoint
     ) {
+        return relocateMountGroup(oldMount, newMount,
+                Map.of(movedLink, movedEndpoint));
+    }
+
+    /**
+     * Atomically relocates every supplied link together with any still-live
+     * links that retain the old mount. No block-entity or runtime entry is
+     * retained if validation or registration fails.
+     */
+    public boolean relocateMountGroup(
+            BlockPos oldMount,
+            BlockPos newMount,
+            Map<DataLinkBlockEntity, BlockPos> movedEndpoints
+    ) {
         pruneStaleInputs();
 
         List<DataLinkBlockEntity> linksToMove = new ArrayList<>();
@@ -1206,9 +1220,11 @@ public final class WeaponNetworkRuntime {
                 linksToMove.add(dataLink);
             }
         }
-        if (linksToMove.stream().noneMatch(link ->
-                link.getBlockPos().equals(movedLink.getBlockPos()))) {
-            linksToMove.add(movedLink);
+        for (DataLinkBlockEntity movedLink : movedEndpoints.keySet()) {
+            if (linksToMove.stream().noneMatch(link ->
+                    link.getBlockPos().equals(movedLink.getBlockPos()))) {
+                linksToMove.add(movedLink);
+            }
         }
 
         EnumMap<DataLinkBlockEntity.WeaponEndpointType, BlockPos> desired =
@@ -1227,13 +1243,11 @@ public final class WeaponNetworkRuntime {
                     == DataLinkBlockEntity.WeaponEndpointType.NONE) {
                 continue;
             }
-            BlockPos endpoint = link.getBlockPos().equals(
-                    movedLink.getBlockPos())
-                    ? movedEndpoint : link.getSourcePosition();
+            BlockPos endpoint = movedEndpoints.getOrDefault(
+                    link, link.getSourcePosition());
             BlockPos existing =
                     desired.putIfAbsent(type, endpoint);
             if (existing != null && !existing.equals(endpoint)) {
-                unregister(movedLink.getBlockPos());
                 return false;
             }
             boolean sharedTPitch = type
@@ -1245,19 +1259,47 @@ public final class WeaponNetworkRuntime {
                     .anyMatch(mappedMount -> !mappedMount.equals(oldMount)
                             && !mappedMount.equals(newMount));
             if (mappedElsewhere && !sharedTPitch) {
-                unregister(movedLink.getBlockPos());
                 return false;
             }
         }
 
+        Map<BlockPos, LinkEntry> originalEntries =
+                new HashMap<>(linksByDataLink);
+        Map<DataLinkBlockEntity, BlockPos> originalTargets =
+                new HashMap<>();
         for (DataLinkBlockEntity link : linksToMove) {
-            link.finishAssemblyRelocation(newMount);
-            if (!register(link)) {
-                return false;
+            originalTargets.put(link,
+                    link.getTargetPosition().immutable());
+        }
+
+        try {
+            for (DataLinkBlockEntity link : linksToMove) {
+                link.finishAssemblyRelocation(newMount);
+                if (!register(link)) {
+                    restoreMountRelocation(originalEntries,
+                            originalTargets);
+                    return false;
+                }
             }
+        } catch (RuntimeException exception) {
+            restoreMountRelocation(originalEntries, originalTargets);
+            throw exception;
         }
         topologyDirty = true;
         return true;
+    }
+
+    private void restoreMountRelocation(
+            Map<BlockPos, LinkEntry> originalEntries,
+            Map<DataLinkBlockEntity, BlockPos> originalTargets
+    ) {
+        for (Map.Entry<DataLinkBlockEntity, BlockPos> entry
+                : originalTargets.entrySet()) {
+            entry.getKey().finishAssemblyRelocation(entry.getValue());
+        }
+        linksByDataLink.clear();
+        linksByDataLink.putAll(originalEntries);
+        topologyDirty = true;
     }
 
     private static BlockPos stableFirst(Collection<BlockPos> positions) {

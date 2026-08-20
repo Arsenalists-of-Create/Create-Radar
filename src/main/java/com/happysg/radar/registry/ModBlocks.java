@@ -30,6 +30,7 @@ import com.tterrag.registrate.util.entry.BlockEntry;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.MapColor;
@@ -94,6 +95,29 @@ public class ModBlocks {
                     .item()
                     .model(AssetLookup.customBlockItemModel("_", "item"))
                     .build()
+                    .register();
+
+    public static final BlockEntry<Block> SONAR_BEARING =
+            REGISTRATE.block("sonar_bearing", Block::new)
+                    .lang("Sonar Bearing")
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(BlockBehaviour.Properties::noOcclusion)
+                    .properties(p -> p.strength(0.8f))
+                    .blockstate((c, p) -> p.simpleBlock(c.getEntry(),
+                            p.models().getExistingFile(c.getId())))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
+                    .register();
+
+    public static final BlockEntry<Block> SONAR_PANEL =
+            REGISTRATE.block("sonar_panel", Block::new)
+                    .lang("Sonar Panel")
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.strength(0.8f))
+                    .blockstate((c, p) -> p.simpleBlock(c.getEntry(),
+                            p.models().getExistingFile(c.getId())))
+                    .transform(axeOrPickaxe())
+                    .simpleItem()
                     .register();
 
 

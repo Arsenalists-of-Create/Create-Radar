@@ -5,6 +5,7 @@ import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
+import com.happysg.radar.compat.cbc.DirectCbcMountMotion;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
@@ -23,6 +24,8 @@ public class CannonMountPitch {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private final AutoPitchControllerBlockEntity controller;
+    private final DirectCbcMountMotion.State motionState =
+            new DirectCbcMountMotion.State();
 
     public CannonMountPitch(AutoPitchControllerBlockEntity controller) {
         this.controller = controller;
@@ -42,6 +45,13 @@ public class CannonMountPitch {
 
     public boolean atTargetPitch(CannonMountContext mount, boolean lag,
                                  double minimumToleranceDegrees) {
+        return atTargetPitch(mount, lag, minimumToleranceDegrees,
+                Double.POSITIVE_INFINITY);
+    }
+
+    public boolean atTargetPitch(CannonMountContext mount, boolean lag,
+                                 double minimumToleranceDegrees,
+                                 double maximumToleranceDegrees) {
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null) {
             return false;
@@ -56,6 +66,7 @@ public class CannonMountPitch {
             tol += RadarConfig.server().targetLoosenAmount.get();
         }
         tol = Math.max(tol, sanitizeTolerance(minimumToleranceDegrees));
+        tol = Math.min(tol, sanitizeMaximumTolerance(maximumToleranceDegrees));
 
         double currentPitch = contraption.pitch;
         int invert = -cannonContraption.initialOrientation().getStepX() + cannonContraption.initialOrientation().getStepZ();
@@ -66,6 +77,11 @@ public class CannonMountPitch {
 
     private static double sanitizeTolerance(double tolerance) {
         return Double.isFinite(tolerance) ? Math.max(0.0, tolerance) : 0.0;
+    }
+
+    private static double sanitizeMaximumTolerance(double tolerance) {
+        return Double.isFinite(tolerance)
+                ? Math.max(0.0, tolerance) : Double.POSITIVE_INFINITY;
     }
 
     public double getMaxEngagementRangeBlocks(CannonMountContext mount, ServerLevel sl) {
@@ -96,7 +112,8 @@ public class CannonMountPitch {
             return false;
         }
 
-        Vec3 p = track.position();
+        Vec3 p = controller.firingControl.resolveEngagementAimPoint(
+                sl, track, requireLos);
         if (p == null) {
             return false;
         }
@@ -139,21 +156,25 @@ public class CannonMountPitch {
             }
         }
 
-        return controller.firingControl.hasLineOfSightTo(track, requireLos);
+        return !requireLos || "Sable:ship".equals(track.entityType())
+                || controller.firingControl.hasLineOfSightTo(track, true);
     }
 
     private void rotateCBC(CannonMountContext mount) {
         if (!controller.isRunningController()) {
+            motionState.reset();
             LOGGER.debug("PITCH.rotateCBC aborted: isRunning=false");
             return;
         }
 
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null) {
+            motionState.reset();
             return;
         }
 
         if (!(contraption.getContraption() instanceof AbstractMountedCannonContraption cannonContraption)) {
+            motionState.reset();
             return;
         }
 
@@ -163,42 +184,24 @@ public class CannonMountPitch {
 
         double diff = controller.getTargetAngle() - currentPitch;
 
-        double nearDeadbandDeg = AutoPitchControllerBlockEntity.getCbcTolerance();
-        if (controller.firingControl != null) {
-            Vec3 muzzle = controller.firingControl.getCannonRayStart();
-            Vec3 target = controller.getLastTargetPos();
-            if (target != null) {
-                double dist = muzzle.distanceTo(target);
-                if (dist <= 10.0) {
-                    nearDeadbandDeg = 6.0;
-                }
-            }
-        }
-
         LOGGER.debug(
-                "PITCH.rotateCBC current={} target={} diff={} speed={} deadband={}",
+                "PITCH.rotateCBC current={} target={} diff={} speed={}",
                 currentPitch,
                 controller.getTargetAngle(),
                 diff,
-                controller.getAvailableInputSpeed(),
-                nearDeadbandDeg
+                controller.getAvailableInputSpeed()
         );
-
-        if (Math.abs(diff) <= nearDeadbandDeg) {
-            mount.setPitch((float) controller.getTargetAngle());
-            mount.notifyUpdate();
-            return;
-        }
 
         double rpm = Math.abs(controller.getAvailableInputSpeed());
         if (rpm <= 0.0) {
+            motionState.reset();
             return;
         }
 
-
-
-        double stepDeg = rpm / 12.0;
-        double move = Math.signum(diff) * Math.min(Math.abs(diff), stepDeg);
+        double move = motionState.nextStep(diff, rpm);
+        if (Math.abs(move) <= 1.0E-9) {
+            return;
+        }
         double nextCtl = currentPitch + move;
 
         mount.setPitch((float) nextCtl);

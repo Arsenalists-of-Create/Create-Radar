@@ -4,11 +4,15 @@ import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
+import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.targeting.PitchConstraint;
+import com.happysg.radar.targeting.ProjectileModel;
 import com.happysg.radar.targeting.TargetingSolverSelfTest;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
+import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
 
 /**
  * Deterministic checks for the target and async-solve lifecycle. These run as
@@ -25,6 +29,7 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkAimPointRebase());
         results.add(checkAimDirectionRebase());
         results.add(checkPendingSolveLifetime());
+        results.add(checkBigCannonFingerprintTracksLiveProperties());
         results.add(checkOrdinaryMotionKeepsPendingSolve());
         results.add(checkFireFreshnessWindow());
         results.add(checkAsyncBallisticAimHandoff());
@@ -36,6 +41,7 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkDualMountYawConvergence());
         results.add(checkDualFirePolicy());
         results.add(checkDualYawTopologyPolicy());
+        results.add(checkRangeAwareFiringTolerance());
         return List.copyOf(results);
     }
 
@@ -78,6 +84,34 @@ public final class WeaponFiringControlSelfTest {
         boolean passed = rebased.distanceToSqr(expected) < 1.0E-12;
         return result("async_cached_aim_rebases_continuously", passed,
                 "rebased=" + rebased + " expected=" + expected);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkRangeAwareFiringTolerance() {
+        WeaponFiringControl.FiringAlignmentTolerance dual =
+                WeaponFiringControl.firingAlignmentTolerance(
+                        1000.0, 2.0, 2);
+        WeaponFiringControl.FiringAlignmentTolerance single =
+                WeaponFiringControl.firingAlignmentTolerance(
+                        1000.0, 2.0, 1);
+        double dualCombinedLateralError = Math.sqrt(2.0) * 1000.0
+                * Math.tan(Math.toRadians(dual.maximumDegrees()));
+        double singleLateralError = 1000.0
+                * Math.tan(Math.toRadians(single.maximumDegrees()));
+        double invalidTolerance = WeaponFiringControl
+                .firingAlignmentTolerance(Double.NaN, 2.0, 2)
+                .maximumDegrees();
+        boolean passed = Math.abs(dualCombinedLateralError - 2.0) < 1.0E-9
+                && Math.abs(singleLateralError - 2.0) < 1.0E-9
+                && dual.maximumDegrees() < 2.9
+                && dual.axisCount() == 2
+                && invalidTolerance == 0.0;
+        return result("range_aware_firing_tolerance",
+                passed,
+                "dualDegrees=" + dual.maximumDegrees()
+                        + " dualCombinedError=" + dualCombinedLateralError
+                        + " singleDegrees=" + single.maximumDegrees()
+                        + " singleError=" + singleLateralError);
     }
 
     private static TargetingSolverSelfTest.Result
@@ -234,6 +268,53 @@ public final class WeaponFiringControlSelfTest {
         return result("smooth_aim_keeps_fire_stability", passed,
                 "smoothTicks=" + stableTicks
                         + " jumpReset=" + jumpReset);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkBigCannonFingerprintTracksLiveProperties() {
+        BallisticPropertiesComponent baselineBallistics =
+                new BallisticPropertiesComponent(
+                        -0.05, 0.01, false,
+                        2.0F, 1.0F, 1.0F, 0.7F);
+        BallisticPropertiesComponent changedBallistics =
+                new BallisticPropertiesComponent(
+                        -0.08, 0.02, true,
+                        2.0F, 1.0F, 1.0F, 0.7F);
+        CannonUtil.BigCannonShotState baseline = bigCannonShot(
+                2.0F, baselineBallistics, 2.0F);
+        CannonUtil.BigCannonShotState changedPropellant = bigCannonShot(
+                10.0F, baselineBallistics, 10.0F);
+        CannonUtil.BigCannonShotState changedProjectile = bigCannonShot(
+                2.0F, changedBallistics, 2.0F);
+
+        String baselineFingerprint = WeaponFiringControl.bigCannonShotFingerprint(
+                ProjectileModel.cbc(2.0, -0.05, 0.01, 1.0, false),
+                baseline);
+        String propellantFingerprint = WeaponFiringControl.bigCannonShotFingerprint(
+                ProjectileModel.cbc(10.0, -0.05, 0.01, 1.0, false),
+                changedPropellant);
+        String projectileFingerprint = WeaponFiringControl.bigCannonShotFingerprint(
+                ProjectileModel.cbc(2.0, -0.08, 0.02, 1.0, true),
+                changedProjectile);
+        boolean passed = !baselineFingerprint.equals(propellantFingerprint)
+                && !baselineFingerprint.equals(projectileFingerprint)
+                && !WeaponFiringControl.shouldKeepPendingSolve(
+                1L, true, baselineFingerprint.equals(propellantFingerprint));
+        return result("big_cannon_live_properties_invalidate_solve", passed,
+                "baseline=" + baselineFingerprint
+                        + " propellant=" + propellantFingerprint
+                        + " projectile=" + projectileFingerprint);
+    }
+
+    private static CannonUtil.BigCannonShotState bigCannonShot(
+            float speed,
+            BallisticPropertiesComponent ballistics,
+            float propellantPower
+    ) {
+        return new CannonUtil.BigCannonShotState(
+                speed, ballistics, "test.Projectile", BlockPos.ZERO,
+                BlockPos.ZERO, 0.0, 1, propellantPower,
+                0.0F, "loaded_projectile");
     }
 
     private static TargetingSolverSelfTest.Result

@@ -10,6 +10,7 @@ import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.compat.cbc.CannonMountContext;
+import com.simibubi.create.content.kinetics.RotationPropagator;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import dev.simulated_team.simulated.content.blocks.swivel_bearing.SwivelBearingBlock;
@@ -17,6 +18,7 @@ import dev.simulated_team.simulated.content.blocks.swivel_bearing.SwivelBearingB
 import dev.simulated_team.simulated.content.blocks.swivel_bearing.link_block.SwivelBearingPlateBlock;
 import dev.simulated_team.simulated.service.SimConfigService;
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.api.physics.PhysicsPipeline;
 import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
@@ -33,7 +35,6 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 
-import java.util.Objects;
 import java.util.UUID;
 
 
@@ -148,6 +149,28 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
 
         return KineticMountAdapterResolution.present(new SimulatedSwivelMountAdapter(
                 controller, rotationAxis, selectedDirection, selectedBearing));
+    }
+
+    /**
+     * Used by the Simulated compatibility mixin to make the selected custom
+     * kinetic edge report the same ratio in both propagation directions.
+     */
+    public static boolean isSelectedEndpoint(KineticBlockEntity controller,
+                                             KineticBlockEntity candidate) {
+        Direction.Axis axis;
+        if (controller instanceof AutoYawControllerBlockEntity) {
+            axis = Direction.Axis.Y;
+        } else if (controller instanceof AutoPitchControllerBlockEntity
+                && controller.getBlockState().hasProperty(HorizontalDirectionalBlock.FACING)) {
+            axis = controller.getBlockState()
+                    .getValue(HorizontalDirectionalBlock.FACING).getAxis();
+        } else {
+            return false;
+        }
+        KineticMountAdapterResolution resolution = resolve(controller, axis);
+        KineticMountAdapter adapter = resolution.adapter();
+        return resolution.hasAdapter() && adapter != null && adapter.isValid()
+                && adapter.isKineticEndpoint(candidate);
     }
 
     @Override
@@ -355,16 +378,13 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
 
     @Override
     public boolean isDrivenBy(BlockPos controllerPos) {
-        return controller.getBlockPos().equals(controllerPos)
-                && !controller.hasSource() && controller.isSource()
+        return isValid()
+                && controller.getBlockPos().equals(controllerPos)
+                && !controller.hasSource()
                 && endpoint.hasSource() && controllerPos.equals(endpoint.source)
-                && controller.network != null && endpoint.network != null
-                && Objects.equals(controller.network, endpoint.network)
-                && Double.isFinite(endpoint.getTheoreticalSpeed())
-                && Math.abs(endpoint.getTheoreticalSpeed()) > SPEED_EPSILON
-                && Double.isFinite(endpoint.getSpeed())
-                && Math.abs(endpoint.getSpeed()) > SPEED_EPSILON
-                && !endpoint.isOverStressed();
+                && RotationPropagator.isConnected(controller, endpoint)
+                && controller.sequenceContext == null
+                && endpoint.sequenceContext == null;
     }
 
     @Override
@@ -502,9 +522,12 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         if (mount == null) {
             return CannonCalibration.missing();
         }
-        SubLevel containing = requireDirectAttachment
-                ? Sable.HELPER.getContaining(candidate) : null;
-        if (requireDirectAttachment && containing != attached) {
+        SubLevel containing = Sable.HELPER.getContaining(candidate);
+        boolean connected = requireDirectAttachment
+                ? containing == attached
+                : containing != null
+                && SubLevelHelper.getConnectedChain(attached).contains(containing);
+        if (!connected) {
             return CannonCalibration.blockedWithMount();
         }
         Direction initial = mount.initialOrientation();

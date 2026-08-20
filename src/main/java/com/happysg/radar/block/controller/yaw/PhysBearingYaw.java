@@ -16,7 +16,6 @@ import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContr
 public class PhysBearingYaw {
 
     private static final double MIN_MOVE_PER_TICK = 0.02;
-    private static final double MAX_MOVE_PER_TICK = RadarConfig.server().controllerPhysbearingMaxSpeed.get();
     private static final double SNAP_DISTANCE = 37.0;
 
     private final AutoYawControllerBlockEntity controller;
@@ -55,6 +54,13 @@ public class PhysBearingYaw {
 
     public boolean atTargetYaw(PhysBearingBlockEntity mount, boolean lag,
                                double minimumToleranceDegrees) {
+        return atTargetYaw(mount, lag, minimumToleranceDegrees,
+                Double.POSITIVE_INFINITY);
+    }
+
+    public boolean atTargetYaw(PhysBearingBlockEntity mount, boolean lag,
+                               double minimumToleranceDegrees,
+                               double maximumToleranceDegrees) {
         Double actualRad = mount.getActualAngle();
         if (actualRad == null) {
             return false;
@@ -66,16 +72,25 @@ public class PhysBearingYaw {
         }
         effectiveTolerance = Math.max(
                 effectiveTolerance, sanitizeTolerance(minimumToleranceDegrees));
+        effectiveTolerance = Math.max(
+                effectiveTolerance, AutoYawControllerBlockEntity.getDeadbandDeg());
+        effectiveTolerance = Math.min(effectiveTolerance,
+                sanitizeMaximumTolerance(maximumToleranceDegrees));
 
         double currentDeg = AutoYawControllerBlockEntity.wrap360(Math.toDegrees(actualRad));
         double desiredDeg = AutoYawControllerBlockEntity.wrap360(360.0 - controller.getTargetAngle());
 
         return Math.abs(AutoYawControllerBlockEntity.shortestDelta(currentDeg, desiredDeg))
-                < Math.max(effectiveTolerance, AutoYawControllerBlockEntity.getDeadbandDeg());
+                < effectiveTolerance;
     }
 
     private static double sanitizeTolerance(double tolerance) {
         return Double.isFinite(tolerance) ? Math.max(0.0, tolerance) : 0.0;
+    }
+
+    private static double sanitizeMaximumTolerance(double tolerance) {
+        return Double.isFinite(tolerance)
+                ? Math.max(0.0, tolerance) : Double.POSITIVE_INFINITY;
     }
 
     public void maybeUpdateYawZeroFromCannonInitialOrientation() {
@@ -231,7 +246,10 @@ public class PhysBearingYaw {
         double radPerTick = degPerTick * (Math.PI / 180.0);
 
         double maxStep = range * radPerTick;
-        maxStep = Math.max(MIN_MOVE_PER_TICK, Math.min(MAX_MOVE_PER_TICK, maxStep));
+        double configuredMaxMovePerTick =
+                RadarConfig.server().controllerPhysbearingMaxSpeed.get();
+        maxStep = Math.max(MIN_MOVE_PER_TICK,
+                Math.min(configuredMaxMovePerTick, maxStep));
 
         return Math.min(dist, maxStep);
     }

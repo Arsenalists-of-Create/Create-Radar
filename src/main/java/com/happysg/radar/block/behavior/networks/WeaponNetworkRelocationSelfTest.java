@@ -13,6 +13,7 @@ public final class WeaponNetworkRelocationSelfTest {
 
     public static void main(String[] args) {
         movesEveryWeaponIndexAtomically();
+        movesStationaryControllersWithTheirAssembledMount();
         refusesForeignOwnershipWithoutPartialMutation();
         reportsMissingEndpointsWithoutCreatingState();
         System.out.println("PASS weapon network relocation self-test");
@@ -66,6 +67,77 @@ public final class WeaponNetworkRelocationSelfTest {
                         Level.OVERWORLD, oldController, newController, oldMount, newMount)
                         == NetworkData.WeaponRelocationResult.UPDATED,
                 "idempotent relocation did not recognize the committed state");
+
+        expect(data.relocateWeaponEndpoint(
+                        Level.OVERWORLD, newController, oldController, newMount, oldMount)
+                        == NetworkData.WeaponRelocationResult.UPDATED,
+                "weapon relocation could not be rolled back");
+        expect(group.weaponEndpoints.contains(oldController)
+                        && !group.weaponEndpoints.contains(newController),
+                "rollback retained the relocated controller");
+        expect(group.usedWeaponMounts.contains(oldMount)
+                        && !group.usedWeaponMounts.contains(newMount),
+                "rollback retained the relocated mount");
+        expect(oldMount.equals(data.getWeaponMountForController(
+                        Level.OVERWORLD, oldController)),
+                "rollback did not restore the controller-to-mount index");
+        expect(oldController.equals(data.peekEndpointForDataLink(
+                        Level.OVERWORLD, newDataLink)),
+                "rollback did not restore the DataLink endpoint index");
+    }
+
+    private static void movesStationaryControllersWithTheirAssembledMount() {
+        NetworkData data = new NetworkData();
+        BlockPos filterer = new BlockPos(1, 4, 1);
+        BlockPos worldYaw = new BlockPos(10, 4, 10);
+        BlockPos oldPitch = new BlockPos(11, 4, 10);
+        BlockPos movedPitch = new BlockPos(111, 104, 110);
+        BlockPos oldMount = new BlockPos(12, 4, 10);
+        BlockPos movedMount = new BlockPos(112, 104, 110);
+        BlockPos yawLink = new BlockPos(10, 3, 10);
+        BlockPos pitchLink = new BlockPos(11, 3, 10);
+
+        NetworkData.Group group = data.getOrCreateGroup(
+                Level.OVERWORLD, filterer);
+        data.attachWeaponEndpoint(group, worldYaw, oldMount);
+        data.addDataLinkToGroup(group, yawLink, worldYaw);
+        data.attachWeaponEndpoint(group, oldPitch, oldMount);
+        data.addDataLinkToGroup(group, pitchLink, oldPitch);
+
+        expect(data.relocateWeaponEndpoint(
+                        Level.OVERWORLD, oldPitch, movedPitch,
+                        oldMount, movedMount)
+                        == NetworkData.WeaponRelocationResult.UPDATED,
+                "assembled pitch endpoint was not relocated");
+        NetworkData.WeaponMountReferenceRelocation stationary =
+                data.relocateWeaponMountReferences(
+                        Level.OVERWORLD, oldMount, movedMount);
+        expect(stationary.result()
+                        == NetworkData.WeaponRelocationResult.UPDATED,
+                "world-space yaw mapping was not relocated with its mount");
+        expect(movedMount.equals(data.getWeaponMountForController(
+                        Level.OVERWORLD, worldYaw)),
+                "world-space yaw retained the pre-assembly mount coordinate");
+        expect(movedMount.equals(data.getWeaponMountForController(
+                        Level.OVERWORLD, movedPitch)),
+                "moved pitch did not share the relocated yaw mount");
+        expect(filterer.equals(data.getFiltererForWeaponMount(
+                        Level.OVERWORLD, movedMount))
+                        && data.getFiltererForWeaponMount(
+                        Level.OVERWORLD, oldMount) == null,
+                "stationary and moved controllers left split mount ownership");
+
+        data.rollbackWeaponMountReferences(stationary);
+        expect(data.relocateWeaponEndpoint(
+                        Level.OVERWORLD, movedPitch, oldPitch,
+                        movedMount, oldMount)
+                        == NetworkData.WeaponRelocationResult.UPDATED,
+                "assembled pitch rollback failed");
+        expect(oldMount.equals(data.getWeaponMountForController(
+                        Level.OVERWORLD, worldYaw))
+                        && oldMount.equals(data.getWeaponMountForController(
+                        Level.OVERWORLD, oldPitch)),
+                "mount transaction rollback did not restore both controllers");
     }
 
     private static void refusesForeignOwnershipWithoutPartialMutation() {

@@ -3,6 +3,7 @@ package com.happysg.radar.block.controller.yaw;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.CannonMountPlacement;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.networking.packets.OpenControllerLimitsScreenPacket;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
@@ -103,11 +104,16 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
             if (level.getBlockEntity(pos) instanceof AutoYawControllerBlockEntity yaw) {
                 yaw.releaseKineticActuator();
             }
-            breakAttachedDataLinks(level, pos);
             if (level instanceof net.minecraft.server.level.ServerLevel
                     serverLevel) {
+                if (!SableDataLinkRelocation.isRelocatingEndpoint(
+                        serverLevel, pos)) {
+                    breakAttachedDataLinks(level, pos);
+                }
                 WeaponNetworkRuntime.get(serverLevel)
                         .unregisterContactController(pos);
+            } else {
+                breakAttachedDataLinks(level, pos);
             }
         }
         super.onRemove(state, level, pos, newState, isMoving);

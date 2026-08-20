@@ -12,10 +12,12 @@ import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.compat.cbc.CannonMountContext;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.registry.ModBlocks;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.kinetics.RotationPropagator;
@@ -1236,6 +1238,116 @@ public final class CbcMountExtensionGameTests {
             runtime.reconcile();
             require(!fire.isPowered(),
                     "Multi-mount fire ambiguity remained powered");
+        } finally {
+            site.close();
+        }
+        helper.succeed();
+    }
+
+    @PrefixGameTestTemplate(false)
+    @GameTest(templateNamespace = "simulated",
+            template = "extrakineticstest.swivelbearing")
+    public static void sableAssemblyKeepsWorldYawWithMovedPitch(
+            GameTestHelper helper) {
+        BlockPos center = new BlockPos(832, FIXTURE_Y, 8);
+        TestSite site = new TestSite(helper.getLevel(), center, 12);
+        try {
+            site.prepare();
+            ServerLevel level = helper.getLevel();
+            BlockPos worldYaw = center.west(4);
+            BlockPos yawLinkPos = worldYaw.below();
+            BlockPos oldPitch = center.west();
+            BlockPos oldPitchLink = oldPitch.below();
+            BlockPos oldMount = center.east(2);
+            BlockPos assemblyDelta = new BlockPos(0, 0, 8);
+            BlockPos movedPitch = oldPitch.offset(assemblyDelta);
+            BlockPos movedPitchLink = oldPitchLink.offset(assemblyDelta);
+            BlockPos movedMount = oldMount.offset(assemblyDelta);
+            BlockPos filterer = center.west(6);
+
+            level.setBlockAndUpdate(worldYaw,
+                    ModBlocks.AUTO_YAW_CONTROLLER_BLOCK.getDefaultState());
+            level.setBlockAndUpdate(oldPitch,
+                    ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK.getDefaultState());
+            placeMount(level, oldMount);
+            linkController(level, worldYaw, oldMount,
+                    DataLinkBlockEntity.WeaponEndpointType.YAW);
+            linkController(level, oldPitch, oldMount,
+                    DataLinkBlockEntity.WeaponEndpointType.PITCH);
+
+            NetworkData data = NetworkData.get(level);
+            NetworkData.Group group = data.getOrCreateGroup(
+                    level.dimension(), filterer);
+            data.attachWeaponEndpoint(group, worldYaw, oldMount);
+            data.addDataLinkToGroup(group, yawLinkPos, worldYaw);
+            data.attachWeaponEndpoint(group, oldPitch, oldMount);
+            data.addDataLinkToGroup(group, oldPitchLink, oldPitch);
+
+            level.setBlockAndUpdate(movedPitch,
+                    ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK.getDefaultState());
+            placeMount(level, movedMount);
+            level.setBlockAndUpdate(movedPitchLink,
+                    ModBlocks.RADAR_LINK.getDefaultState()
+                            .setValue(DataLinkBlock.FACING, Direction.DOWN)
+                            .setValue(DataLinkBlock.LINK_STYLE,
+                                    DataLinkBlock.LinkStyle.CONTROLLER));
+            require(level.getBlockEntity(oldPitchLink)
+                            instanceof DataLinkBlockEntity,
+                    "Pre-assembly pitch Data Link disappeared");
+            if (!(level.getBlockEntity(movedPitchLink)
+                    instanceof DataLinkBlockEntity movedLink)) {
+                throw new GameTestAssertException(
+                        "Assembled pitch Data Link was not created");
+            }
+
+            SableDataLinkRelocation.capture(level, level,
+                    oldPitchLink, movedPitchLink);
+            level.setBlockAndUpdate(oldPitchLink,
+                    Blocks.AIR.defaultBlockState());
+            level.setBlockAndUpdate(oldPitch,
+                    Blocks.AIR.defaultBlockState());
+            level.setBlockAndUpdate(oldMount,
+                    Blocks.AIR.defaultBlockState());
+            movedLink.target(movedMount);
+            movedLink.setWeaponEndpointType(
+                    DataLinkBlockEntity.WeaponEndpointType.PITCH);
+
+            SableDataLinkRelocation.process(level);
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(level);
+            runtime.reconcile();
+
+            require(level.getBlockEntity(worldYaw)
+                            instanceof AutoYawControllerBlockEntity,
+                    "World-space yaw controller moved with the assembly");
+            require(movedMount.equals(data.getWeaponMountForController(
+                            level.dimension(), worldYaw)),
+                    "Saved world-space yaw mapping retained the old mount");
+            require(movedMount.equals(data.getWeaponMountForController(
+                            level.dimension(), movedPitch)),
+                    "Saved pitch mapping did not move into the plot");
+            require(data.getFiltererForWeaponMount(
+                            level.dimension(), oldMount) == null
+                            && filterer.equals(data.getFiltererForWeaponMount(
+                            level.dimension(), movedMount)),
+                    "Saved pitch/yaw mount ownership remained split");
+            require(movedMount.equals(runtime.getMountForController(worldYaw)),
+                    "Runtime world-space yaw mapping retained the old mount");
+            require(movedMount.equals(runtime.getMountForController(movedPitch)),
+                    "Runtime pitch mapping did not move into the plot");
+            require(level.getBlockEntity(yawLinkPos)
+                            instanceof DataLinkBlockEntity yawLink
+                            && movedMount.equals(yawLink.getTargetPosition()),
+                    "Stationary yaw Data Link was not rebased to the moved mount");
+            require(movedMount.equals(movedLink.getTargetPosition()),
+                    "Moved pitch Data Link did not target the moved mount");
+
+            level.setBlockAndUpdate(movedPitchLink,
+                    Blocks.AIR.defaultBlockState());
+            require(movedMount.equals(data.getWeaponMountForController(
+                            level.dimension(), worldYaw))
+                            && filterer.equals(data.getFiltererForWeaponMount(
+                            level.dimension(), movedMount)),
+                    "Removing one shared link released the yaw controller's mount");
         } finally {
             site.close();
         }

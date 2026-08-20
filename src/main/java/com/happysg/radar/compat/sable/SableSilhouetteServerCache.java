@@ -50,6 +50,18 @@ public final class SableSilhouetteServerCache {
         return entry == null ? null : entry.silhouette;
     }
 
+    /**
+     * Returns one coherent view of the cached hull data for server-side users
+     * such as weapon targeting. Unlike a client sync request, this follows the
+     * normal refresh/debounce policy instead of forcing a rebuild.
+     */
+    public static Snapshot getSnapshot(ServerLevel level, UUID id) {
+        Entry entry = getOrBuild(level, id, false);
+        return entry == null
+                ? new Snapshot(null, -1, SableSilhouetteStatus.NONE)
+                : new Snapshot(entry.silhouette, entry.revision, entry.status);
+    }
+
     public static int getRevision(ServerLevel level, UUID id) {
         Entry entry = entries(level).get(id);
         return entry == null ? -1 : entry.revision;
@@ -175,5 +187,13 @@ public final class SableSilhouetteServerCache {
         private long lastBuildTick;
         private long nextBuildTick;
         private long nextRefreshTick;
+    }
+
+    public record Snapshot(SubLevelSilhouette silhouette, int revision,
+                           byte status) {
+        public boolean hasDetailedHull() {
+            return status == SableSilhouetteStatus.READY
+                    && silhouette != null && !silhouette.isEmpty();
+        }
     }
 }

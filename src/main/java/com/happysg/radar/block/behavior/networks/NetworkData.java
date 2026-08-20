@@ -44,6 +44,42 @@ public class NetworkData extends SavedData {
     public enum Mountkind { NORMAL, FIXED, COMPACT}
     public enum LinkOrigin { DATALINK, CONTACT }
     public enum WeaponRelocationResult { UPDATED, NOT_FOUND, CONFLICT }
+
+    /**
+     * Exact set of stationary controller mappings changed while their shared
+     * weapon mount moved around them. The handle is retained only long enough
+     * for the caller to commit the corresponding runtime relocation or roll
+     * these mappings back.
+     */
+    public static final class WeaponMountReferenceRelocation {
+        private final WeaponRelocationResult result;
+        private final ResourceKey<Level> dimension;
+        private final String filtererKey;
+        private final BlockPos oldMount;
+        private final BlockPos newMount;
+        private final List<BlockPos> controllers;
+
+        private WeaponMountReferenceRelocation(
+                WeaponRelocationResult result,
+                ResourceKey<Level> dimension,
+                String filtererKey,
+                BlockPos oldMount,
+                BlockPos newMount,
+                List<BlockPos> controllers
+        ) {
+            this.result = result;
+            this.dimension = dimension;
+            this.filtererKey = filtererKey;
+            this.oldMount = oldMount == null ? null : oldMount.immutable();
+            this.newMount = newMount == null ? null : newMount.immutable();
+            this.controllers = List.copyOf(controllers);
+        }
+
+        public WeaponRelocationResult result() {
+            return result;
+        }
+    }
+
     private static final String DATA_NAME = "network_data";
 
     // radarPos -> filtererKey
@@ -1058,6 +1094,164 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         return WeaponRelocationResult.UPDATED;
     }
 
+    /**
+     * Moves the remaining controller-to-mount mappings when a shared mount is
+     * assembled but some of its controllers stay in world space. Endpoint
+     * relocation is deliberately handled separately: callers first move the
+     * controllers carried by the assembly, then call this method to rebase the
+     * stationary controllers onto the same new mount coordinate.
+     */
+    public WeaponMountReferenceRelocation relocateWeaponMountReferences(
+            ResourceKey<Level> dim,
+            BlockPos oldMount,
+            BlockPos newMount
+    ) {
+        if (dim == null || oldMount == null || newMount == null
+                || oldMount.equals(newMount)) {
+            return weaponMountReferenceResult(
+                    WeaponRelocationResult.NOT_FOUND, dim, null,
+                    oldMount, newMount, List.of());
+        }
+
+        String oldMountKey = key(dim, oldMount);
+        String newMountKey = key(dim, newMount);
+        String oldOwner = weaponMountToFilterer.get(oldMountKey);
+        String newOwner = weaponMountToFilterer.get(newMountKey);
+        if (oldOwner != null && newOwner != null
+                && !oldOwner.equals(newOwner)) {
+            return weaponMountReferenceResult(
+                    WeaponRelocationResult.CONFLICT, dim, null,
+                    oldMount, newMount, List.of());
+        }
+
+        String filtererKey = oldOwner != null ? oldOwner : newOwner;
+        Group group = filtererKey == null
+                ? null : groupsByFilterer.get(filtererKey);
+        if (group == null) {
+            return weaponMountReferenceResult(
+                    WeaponRelocationResult.NOT_FOUND, dim, filtererKey,
+                    oldMount, newMount, List.of());
+        }
+
+        List<BlockPos> controllers = group.weaponEndpoints.stream()
+                .filter(controller -> oldMountKey.equals(
+                        controllerToWeaponMount.get(key(dim, controller))))
+                .map(BlockPos::immutable)
+                .toList();
+        if (controllers.isEmpty()) {
+            return weaponMountReferenceResult(
+                    WeaponRelocationResult.NOT_FOUND, dim, filtererKey,
+                    oldMount, newMount, List.of());
+        }
+
+        for (BlockPos controller : controllers) {
+            String endpointOwner = endpointToFilterer.get(
+                    key(dim, controller));
+            if (!filtererKey.equals(endpointOwner)) {
+                return weaponMountReferenceResult(
+                        WeaponRelocationResult.CONFLICT, dim, filtererKey,
+                        oldMount, newMount, List.of());
+            }
+        }
+
+        for (BlockPos controller : controllers) {
+            controllerToWeaponMount.put(
+                    key(dim, controller), newMountKey);
+        }
+        group.usedWeaponMounts.add(newMount.immutable());
+        weaponMountToFilterer.put(newMountKey, filtererKey);
+        if (!groupReferencesMount(group, dim, oldMountKey)) {
+            group.usedWeaponMounts.remove(oldMount);
+            if (filtererKey.equals(
+                    weaponMountToFilterer.get(oldMountKey))) {
+                weaponMountToFilterer.remove(oldMountKey);
+            }
+        }
+        setDirty();
+        return weaponMountReferenceResult(
+                WeaponRelocationResult.UPDATED, dim, filtererKey,
+                oldMount, newMount, controllers);
+    }
+
+    /** Restores only the mappings changed by the supplied relocation handle. */
+    public void rollbackWeaponMountReferences(
+            WeaponMountReferenceRelocation relocation
+    ) {
+        if (relocation == null
+                || relocation.result != WeaponRelocationResult.UPDATED) {
+            return;
+        }
+        Group group = groupsByFilterer.get(relocation.filtererKey);
+        if (group == null) {
+            throw new IllegalStateException(
+                    "Weapon group disappeared during mount relocation rollback");
+        }
+
+        String oldMountKey = key(
+                relocation.dimension, relocation.oldMount);
+        String newMountKey = key(
+                relocation.dimension, relocation.newMount);
+        String oldOwner = weaponMountToFilterer.get(oldMountKey);
+        if (oldOwner != null
+                && !relocation.filtererKey.equals(oldOwner)) {
+            throw new IllegalStateException(
+                    "Old mount acquired foreign ownership during rollback");
+        }
+        for (BlockPos controller : relocation.controllers) {
+            String controllerKey = key(relocation.dimension, controller);
+            if (!newMountKey.equals(
+                    controllerToWeaponMount.get(controllerKey))) {
+                throw new IllegalStateException(
+                        "Stationary controller mount changed during rollback: "
+                                + controller);
+            }
+        }
+
+        for (BlockPos controller : relocation.controllers) {
+            controllerToWeaponMount.put(
+                    key(relocation.dimension, controller), oldMountKey);
+        }
+        group.usedWeaponMounts.add(relocation.oldMount);
+        weaponMountToFilterer.put(
+                oldMountKey, relocation.filtererKey);
+        if (!groupReferencesMount(
+                group, relocation.dimension, newMountKey)) {
+            group.usedWeaponMounts.remove(relocation.newMount);
+            if (relocation.filtererKey.equals(
+                    weaponMountToFilterer.get(newMountKey))) {
+                weaponMountToFilterer.remove(newMountKey);
+            }
+        }
+        setDirty();
+    }
+
+    private static WeaponMountReferenceRelocation weaponMountReferenceResult(
+            WeaponRelocationResult result,
+            ResourceKey<Level> dimension,
+            String filtererKey,
+            BlockPos oldMount,
+            BlockPos newMount,
+            List<BlockPos> controllers
+    ) {
+        return new WeaponMountReferenceRelocation(
+                result, dimension, filtererKey, oldMount, newMount,
+                controllers);
+    }
+
+    private boolean groupReferencesMount(
+            Group group,
+            ResourceKey<Level> dimension,
+            String mountKey
+    ) {
+        for (BlockPos controller : group.weaponEndpoints) {
+            if (mountKey.equals(controllerToWeaponMount.get(
+                    key(dimension, controller)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public CompoundTag writeSchematicSnapshot(Group group, Function<BlockPos, CompoundTag> encoder) {
         CompoundTag tag = new CompoundTag();
         tag.putInt("SchemaVersion", SCHEMATIC_SNAPSHOT_VERSION);
@@ -1317,7 +1511,8 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
                 // If you use controllerToWeaponMount, free it deterministically
                 String mountKey = controllerToWeaponMount.remove(endpointKey);
-                if (mountKey != null) {
+                if (mountKey != null
+                        && !groupReferencesMount(group, dim, mountKey)) {
                     BlockPos mp = posFromKey(mountKey);
                     group.usedWeaponMounts.remove(mp);
                     weaponMountToFilterer.remove(mountKey);
@@ -1404,7 +1599,8 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
             endpointOrigins.remove(endpointKey);
 
             String mountKey = controllerToWeaponMount.remove(endpointKey);
-            if (mountKey != null) {
+            if (mountKey != null
+                    && !groupReferencesMount(group, dim, mountKey)) {
                 BlockPos mp = posFromKey(mountKey);
                 group.usedWeaponMounts.remove(mp);
                 weaponMountToFilterer.remove(mountKey);

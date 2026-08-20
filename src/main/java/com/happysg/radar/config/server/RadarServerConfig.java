@@ -6,6 +6,7 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigInt monitorMaxSize = i(9, 1, "monitorMaxSize", "Maximum size of monitor MultiBlock");
     public final ConfigFloat targetLoosenThreshold = f(3.0F, 0.0F, "targetLoosenThreshold", "how fast a target must be moving before looser firing conditions are applied (value is in m/s)");
     public final ConfigInt targetLoosenAmount = i(15, 0, 180, "targetLoosenAmount", "increases the tolerance used to determine if cannons are pointing at the target (degrees)");
+    public final ConfigFloat autoFireMaxLateralErrorBlocks = f(2.0F, 0.1F, 64.0F, "autoFireMaxLateralErrorBlocks", "Maximum lateral pointing error allowed for automatic fire (blocks); the budget is shared across yaw and pitch");
     public final ConfigBool useNewTargetingComputer = b(true, "useNewTargetingComputer", "Use the new simulated targeting computer as the primary CBC auto aiming path");
     public final ConfigBool forceLegacyCannonLeadSolver = b(false, "forceLegacyCannonLeadSolver", "Force CBC auto aiming to use the legacy lead solver instead of the new targeting computer");
     public final ConfigFloat sprintJumpMinHorizontalSpeed = f(0.16F, 0.0F, "sprintJumpMinHorizontalSpeed", "Minimum horizontal target speed in blocks per tick for sprint-jump movement to count as erratic");
@@ -23,6 +24,7 @@ public class RadarServerConfig extends ConfigBase {
 
     public final ConfigGroup chaffConfig = group(3, "chaffConfig", "Firework chaff lock-breaking behavior");
     public final ConfigBool chaffEnabled = b(true, "enabled", "Allow fireworks to temporarily break radar locks");
+    public final ConfigBool chaffDebugChat = b(false, "debugChat", "Broadcast chaff roll debug details to all players");
     public final ConfigFloat chaffRadius = f(8.0F, 0.0F, 64.0F, "radius", "Maximum firework detonation distance from a selected target in blocks");
     public final ConfigInt chaffVolleyWindowTicks = i(40, 1, 1200, "volleyWindowTicks", "Quiet time before nearby firework chaff starts a new probability volley");
     public final ConfigFloat chaffMinChance = f(0.20F, 0.0F, 1.0F, "minChance", "Lock-break chance for one small firework star");

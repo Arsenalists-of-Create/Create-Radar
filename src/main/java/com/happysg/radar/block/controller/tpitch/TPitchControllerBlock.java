@@ -3,6 +3,7 @@ package com.happysg.radar.block.controller.tpitch;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.networking.packets.OpenControllerLimitsScreenPacket;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.compat.cbc.CannonMountContext;
@@ -225,10 +226,18 @@ public class TPitchControllerBlock extends KineticBlock
                     instanceof TPitchControllerBlockEntity pitch) {
                 pitch.releaseKineticActuator();
             }
-            breakAttachedDataLinks(level, pos);
+            boolean assemblyMove =
+                    SableDataLinkRelocation.isRelocatingEndpoint(
+                            serverLevel, pos);
+            if (!assemblyMove) {
+                breakAttachedDataLinks(level, pos);
+            }
             WeaponNetworkRuntime.get(serverLevel)
                     .unregisterContactController(pos);
-            NetworkData.get(serverLevel).onEndpointRemoved(serverLevel, pos);
+            if (!assemblyMove) {
+                NetworkData.get(serverLevel).onEndpointRemoved(
+                        serverLevel, pos);
+            }
         }
         super.onRemove(state, level, pos, newState, isMoving);
     }

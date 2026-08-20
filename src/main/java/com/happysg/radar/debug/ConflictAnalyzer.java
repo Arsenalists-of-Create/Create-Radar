@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -50,6 +51,7 @@ public final class ConflictAnalyzer {
             LinkedHashSet<String> relevant = relevantClasses(events,
                     ownership);
             MixinResult mixins = inspectMixins(relevant, ownership, warnings);
+            validateMixinAudit(mixins.audit(), warnings);
             relevant.addAll(mixins.targets());
             ArrayList<ClassOwnership> classOwnership = new ArrayList<>();
             for (String className : relevant) {
@@ -95,21 +97,76 @@ public final class ConflictAnalyzer {
     private static MixinResult inspectMixins(Set<String> targets,
                                              ModClassOwnershipIndex ownership,
                                              List<String> warnings) {
+        LinkedHashSet<String> discoveryClasses = new LinkedHashSet<>(
+                ownership.knownClasses());
+        discoveryClasses.addAll(targets);
+        for (EarlyDiagnosticJournal.EarlyEvent event
+                : EarlyDiagnosticJournal.snapshot()) {
+            String mixin = event.details().get("mixin");
+            if (mixin != null && !mixin.isBlank()) {
+                discoveryClasses.add(normalizeClassName(mixin));
+            }
+        }
+        return inspectMixins(targets, discoveryClasses, ownership::modIds,
+                Mixins::getMixinsForClass, warnings);
+    }
+
+    static MixinResult inspectMixins(
+            Set<String> targets,
+            Collection<String> discoveryClasses,
+            Function<String, List<String>> ownerMods,
+            AppliedMixinLookup lookup,
+            List<String> warnings) {
         ArrayList<MixinAuditEntry> audit = new ArrayList<>();
         LinkedHashMap<String, List<MixinAuditEntry>> byTarget =
                 new LinkedHashMap<>();
-        LinkedHashSet<String> allTargets = new LinkedHashSet<>(targets);
-        for (String target : List.copyOf(allTargets)) {
+        LinkedHashSet<String> allTargets = targets.stream()
+                .map(ConflictAnalyzer::normalizeClassName)
+                .collect(java.util.stream.Collectors.toCollection(
+                        LinkedHashSet::new));
+        LinkedHashMap<String, IMixinInfo> appliedMixins =
+                new LinkedHashMap<>();
+        for (String discoveryClass : discoveryClasses) {
             Set<IMixinInfo> applied;
             try {
-                applied = Mixins.getMixinsForClass(target);
+                applied = lookup.find(normalizeClassName(discoveryClass));
             } catch (RuntimeException | LinkageError failure) {
-                warnings.add("Unable to inspect applied mixins for " + target
+                warnings.add("Unable to inspect applied mixins for "
+                        + discoveryClass
                         + ": " + failure.getClass().getSimpleName());
                 continue;
             }
+            if (applied == null) continue;
             for (IMixinInfo info : applied) {
-                MixinAuditEntry entry = auditEntry(target, info, ownership,
+                try {
+                    String identity = info.getConfig().getName() + '\u0000'
+                            + info.getClassName();
+                    appliedMixins.putIfAbsent(identity, info);
+                } catch (RuntimeException | LinkageError failure) {
+                    warnings.add("Unable to identify applied mixin from "
+                            + discoveryClass + ": "
+                            + failure.getClass().getSimpleName());
+                }
+            }
+        }
+
+        for (IMixinInfo info : appliedMixins.values()) {
+            List<String> declaredTargets;
+            try {
+                declaredTargets = info.getTargetClasses();
+            } catch (RuntimeException | LinkageError failure) {
+                warnings.add("Unable to inspect targets for mixin "
+                        + safeMixinName(info) + ": "
+                        + failure.getClass().getSimpleName());
+                continue;
+            }
+            LinkedHashSet<String> uniqueTargets = declaredTargets.stream()
+                    .map(ConflictAnalyzer::normalizeClassName)
+                    .collect(java.util.stream.Collectors.toCollection(
+                            LinkedHashSet::new));
+            for (String target : uniqueTargets) {
+                if (!allTargets.contains(target)) continue;
+                MixinAuditEntry entry = auditEntry(target, info, ownerMods,
                         warnings);
                 audit.add(entry);
                 byTarget.computeIfAbsent(target,
@@ -127,7 +184,7 @@ public final class ConflictAnalyzer {
             List<MixinAuditEntry> foreign = entries.stream()
                     .filter(entry -> !entry.createRadarMixin()).toList();
             for (MixinAuditEntry other : foreign) {
-                if (ours.isEmpty() && ownership.modIds(target)
+                if (ours.isEmpty() && ownerMods.apply(target)
                         .contains("create_radar")) {
                     overlaps.add(targetOwnedOverlap(target, other));
                 }
@@ -147,7 +204,7 @@ public final class ConflictAnalyzer {
     }
 
     private static MixinAuditEntry auditEntry(String target, IMixinInfo info,
-                                              ModClassOwnershipIndex ownership,
+                                              Function<String, List<String>> ownerMods,
                                               List<String> warnings) {
         ArrayList<MixinAuditEntry.Injection> injections = new ArrayList<>();
         try {
@@ -163,11 +220,56 @@ public final class ConflictAnalyzer {
             warnings.add("Unable to inspect mixin " + info.getClassName()
                     + ": " + failure.getClass().getSimpleName());
         }
-        boolean ours = info.getClassName().startsWith(CREATE_RADAR_PREFIX);
+        List<String> mixinOwners = ownerMods.apply(info.getClassName());
+        boolean ours = mixinOwners.contains("create_radar")
+                || info.getClassName().startsWith(CREATE_RADAR_PREFIX);
         return new MixinAuditEntry(target, info.getClassName(),
-                info.getConfig().getName(), ownership.modIds(
-                info.getClassName()), info.getPriority(), ours,
-                ownership.modIds(target).contains("create_radar"), injections);
+                info.getConfig().getName(), mixinOwners, info.getPriority(),
+                ours, ownerMods.apply(target).contains("create_radar"),
+                injections);
+    }
+
+    private static String safeMixinName(IMixinInfo info) {
+        try {
+            return info.getClassName();
+        } catch (RuntimeException | LinkageError ignored) {
+            return "<unknown>";
+        }
+    }
+
+    private static String normalizeClassName(String className) {
+        return className == null ? "" : className.replace('/', '.');
+    }
+
+    static void validateMixinAudit(List<MixinAuditEntry> audit,
+                                   List<String> warnings) {
+        Set<String> actual = audit.stream()
+                .map(entry -> mixinApplicationKey(entry.targetClass(),
+                        entry.mixinClass()))
+                .collect(java.util.stream.Collectors.toSet());
+        LinkedHashSet<String> expected = new LinkedHashSet<>();
+        for (EarlyDiagnosticJournal.EarlyEvent event
+                : EarlyDiagnosticJournal.snapshot()) {
+            if (!event.stage().equals("MIXIN_APPLY")
+                    || !event.status().equals("POST_APPLY")) continue;
+            String target = event.details().getOrDefault("target", "");
+            String mixin = event.details().getOrDefault("mixin", "");
+            if (!target.isBlank() && !mixin.isBlank()) {
+                expected.add(mixinApplicationKey(target, mixin));
+            }
+        }
+        long missing = expected.stream().filter(key -> !actual.contains(key))
+                .count();
+        if (missing > 0) {
+            warnings.add("Mixin audit omitted " + missing + " of "
+                    + expected.size()
+                    + " successful Create Radar mixin applications");
+        }
+    }
+
+    private static String mixinApplicationKey(String target, String mixin) {
+        return normalizeClassName(target) + '\u0000'
+                + normalizeClassName(mixin);
     }
 
     private static void collectAnnotations(MethodNode method,
@@ -415,9 +517,14 @@ public final class ConflictAnalyzer {
     private record StackFrame(String className, String methodName) {
     }
 
-    private record MixinResult(List<MixinAuditEntry> audit,
-                               List<MixinOverlap> overlaps,
-                               Set<String> targets) {
+    @FunctionalInterface
+    interface AppliedMixinLookup {
+        Set<IMixinInfo> find(String className);
+    }
+
+    record MixinResult(List<MixinAuditEntry> audit,
+                       List<MixinOverlap> overlaps,
+                       Set<String> targets) {
     }
 
     private static final class CandidateBuilder {

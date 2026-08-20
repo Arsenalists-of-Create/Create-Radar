@@ -7,6 +7,7 @@ import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.SableUtils;
+import com.happysg.radar.config.RadarConfig;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
@@ -183,6 +184,10 @@ public final class ChaffManager {
 
     private static void printRollToChat(ServerLevel level, Fireworks fireworks, ChaffProfile profile,
                                         ChaffRollSummary summary) {
+        if (!RadarConfig.server().chaffDebugChat.get()) {
+            return;
+        }
+
         int starCount = fireworks.explosions().size();
         String chance = String.format(Locale.ROOT, "%.1f%%", profile.chance() * 100.0D);
         String duration = summary.succeeded()

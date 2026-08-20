@@ -2,10 +2,12 @@ package com.happysg.radar.targeting;
 
 import com.happysg.radar.block.behavior.networks.WeaponFiringControlSelfTest;
 import com.happysg.radar.compat.cbc.CannonTargeting;
+import com.happysg.radar.compat.cbc.CbcMotionSelfTest;
 import com.happysg.radar.compat.cbc_at.CBCATLaunchMath;
 import com.happysg.radar.compat.cbc_at.CBCATRocketAimSolver;
 import com.happysg.radar.compat.cbc_at.CBCATRocketProjectileModel;
 import com.happysg.radar.compat.cbcmoreshells.CBCMSTorpedoProjectileModel;
+import com.happysg.radar.compat.sable.SubLevelAimResolverSelfTest;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
@@ -80,6 +82,8 @@ public final class TargetingSolverSelfTest {
       results.add(checkPreferredAimOutsideLimits());
       results.add(checkPitchConstraintIntersections());
       results.add(checkRotatedMountPitchConstraint());
+      results.addAll(CbcMotionSelfTest.runChecks());
+      results.addAll(SubLevelAimResolverSelfTest.runChecks());
       results.addAll(WeaponFiringControlSelfTest.runChecks());
       return List.copyOf(results);
    }

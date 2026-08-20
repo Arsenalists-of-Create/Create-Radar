@@ -12,6 +12,8 @@ public final class ModBlockData {
                 ModBlocks.MONITOR,
                 ModBlocks.RADAR_LINK,
                 ModBlocks.RADAR_BEARING_BLOCK,
+                ModBlocks.SONAR_BEARING,
+                ModBlocks.SONAR_PANEL,
                 ModBlocks.RADAR_RECEIVER_BLOCK,
                 ModBlocks.RADAR_DISH_BLOCK,
                 ModBlocks.RADAR_PLATE_BLOCK,

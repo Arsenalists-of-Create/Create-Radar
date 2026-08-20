@@ -46,6 +46,7 @@ import java.util.function.BooleanSupplier;
 public final class SimulatedSwivelControllerGameTests {
     private static final BlockPos BEARING_POS = new BlockPos(2, 3, 2);
     private static final double COMMAND_DEGREES = 5.0;
+    private static final double SETPOINT_COMPENSATION_BUDGET_DEGREES = 5.0;
     private static final int SAMPLE_TICKS = 700;
     private static final long PHYSICS_TICK_NANOS = 45_000_000L;
     private static long lastPacedGameTick = Long.MIN_VALUE;
@@ -173,57 +174,89 @@ public final class SimulatedSwivelControllerGameTests {
         if (Math.abs(generatedRpm) > 1.0e-5) {
             samples.sawGeneratedDrive = true;
         }
+        if (Math.abs(endpointRpm) <= 1.0e-5
+                || Math.abs(generatedRpm) > 1.0e-5) {
+            samples.staleEndpointSamples = 0;
+        }
         if (Math.abs(endpointRpm) > 1.0e-5) {
-            samples.sawPoweredEndpoint = true;
-            samples.activeEndpointSamples++;
+            if (Math.abs(generatedRpm) <= 1.0e-5
+                    && ++samples.staleEndpointSamples >= 5) {
+                throw new GameTestAssertException(
+                        "Swivel endpoint remained powered while its controller was stopped: "
+                                + kineticStatus(fixture.controller())
+                                + " endpointSource=" + endpoint.hasSource()
+                                + " endpointNetwork=" + endpoint.hasNetwork()
+                                + " endpointTheoretical=" + endpointRpm
+                                + " endpointSpeed=" + endpoint.getSpeed()
+                                + " overstressed=" + endpoint.isOverStressed());
+            }
+            samples.sawPoweredEndpoint |= Math.abs(endpoint.getSpeed()) > 1.0e-5;
             samples.maxActiveStep = Math.max(samples.maxActiveStep,
                     adapter.effectiveDegreesPerTick(endpointRpm));
             if (!endpoint.hasSource() || !fixture.controller().getBlockPos().equals(endpoint.source)) {
                 throw new GameTestAssertException("Powered Swivel endpoint lacked ordinary controller source");
             }
-            if (endpoint.network == null || fixture.controller().network == null
-                    || !endpoint.network.equals(fixture.controller().network)) {
-                throw new GameTestAssertException("Powered Swivel endpoint had a mismatched output network");
-            }
-            if (Math.abs(generatedRpm) > 0.1
-                    && Math.abs(endpointRpm + generatedRpm)
-                    <= Math.max(0.01, Math.abs(generatedRpm) * 0.01)) {
-                samples.sawSelectedMountRatio = true;
-            }
-            if (samples.forcedNetworkRebuild) {
-                samples.sawPostRebuildDrive = true;
-            }
-        }
-        if (Math.abs(endpointRpm) > 1.0e-5 && samples.activeEndpointSamples >= 2
-                && !samples.forcedNetworkRebuild) {
-            if (fixture.controller().sequenceContext != null || endpoint.sequenceContext != null) {
-                throw new GameTestAssertException("Sequence context existed before forced rebuild");
-            }
-            samples.rebuildSetpoint = adapter.getTargetAngleDegrees();
-            endpoint.onSpeedChanged(endpoint.getSpeed()); // unchanged-RPM regression path
-            fixture.controller().detachKinetics();
-            endpoint.detachKinetics();
-            if (endpoint.hasSource() || endpoint.hasNetwork() || endpoint.isSource()
-                    || Math.abs(endpoint.getSpeed()) > 1.0e-5
-                    || Math.abs(endpoint.getTheoreticalSpeed()) > 1.0e-5) {
+            if (!adapter.isDrivenBy(fixture.controller().getBlockPos())) {
                 throw new GameTestAssertException(
-                        "Forced detach did not produce an observed disconnected topology: controllerNetwork="
-                                + fixture.controller().hasNetwork() + " endpointSource="
-                                + endpoint.hasSource() + " endpointNetwork=" + endpoint.hasNetwork()
-                                + " endpointIsSource=" + endpoint.isSource() + " endpointSpeed="
-                                + endpoint.getSpeed() + " endpointTheoretical="
-                                + endpoint.getTheoreticalSpeed());
+                        "Powered Swivel endpoint failed direct drive ownership verification: "
+                                + "controllerSource=" + fixture.controller().hasSource()
+                                + " controllerIsSource=" + fixture.controller().isSource()
+                                + " controllerTheoretical=" + fixture.controller().getTheoreticalSpeed()
+                                + " generated=" + generatedRpm
+                                + " endpointSource=" + endpoint.hasSource()
+                                + " sourceMatches=" + fixture.controller().getBlockPos().equals(endpoint.source)
+                                + " connected=" + RotationPropagator.isConnected(fixture.controller(), endpoint)
+                                + " endpointTheoretical=" + endpointRpm
+                                + " endpointSpeed=" + endpoint.getSpeed()
+                                + " overstressed=" + endpoint.isOverStressed());
             }
-            samples.sawObservedDisconnect = true;
-            if (fixture.controller().sequenceContext != null || endpoint.sequenceContext != null) {
-                throw new GameTestAssertException("Sequence context appeared during forced detach");
+            double controllerRpm = fixture.controller().getTheoreticalSpeed();
+            boolean verifiedDriveSample = Math.abs(generatedRpm) > 0.1
+                    && fixture.controller().isSource()
+                    && Math.abs(controllerRpm - generatedRpm)
+                    <= Math.max(0.01, Math.abs(generatedRpm) * 0.01)
+                    && Math.abs(endpointRpm + generatedRpm)
+                    <= Math.max(0.01, Math.abs(generatedRpm) * 0.01)
+                    && Math.abs(endpoint.getSpeed()) > 0.1
+                    && !endpoint.isOverStressed();
+            if (verifiedDriveSample) {
+                samples.sawSelectedMountRatio = true;
+                samples.activeEndpointSamples++;
+                if (samples.forcedNetworkRebuild) {
+                    samples.sawPostRebuildDrive = true;
+                }
             }
-            fixture.controller().attachKinetics();
-            endpoint.attachKinetics();
-            if (fixture.controller().sequenceContext != null || endpoint.sequenceContext != null) {
-                throw new GameTestAssertException("Sequence context appeared during forced reattach");
+            if (verifiedDriveSample && samples.activeEndpointSamples >= 2
+                    && !samples.forcedNetworkRebuild) {
+                if (fixture.controller().sequenceContext != null || endpoint.sequenceContext != null) {
+                    throw new GameTestAssertException("Sequence context existed before forced rebuild");
+                }
+                samples.rebuildSetpoint = adapter.getTargetAngleDegrees();
+                endpoint.onSpeedChanged(endpoint.getSpeed()); // unchanged-RPM regression path
+                fixture.controller().detachKinetics();
+                endpoint.detachKinetics();
+                if (endpoint.hasSource() || endpoint.hasNetwork() || endpoint.isSource()
+                        || Math.abs(endpoint.getSpeed()) > 1.0e-5
+                        || Math.abs(endpoint.getTheoreticalSpeed()) > 1.0e-5) {
+                    throw new GameTestAssertException(
+                            "Forced detach did not produce an observed disconnected topology: controllerNetwork="
+                                    + fixture.controller().hasNetwork() + " endpointSource="
+                                    + endpoint.hasSource() + " endpointNetwork=" + endpoint.hasNetwork()
+                                    + " endpointIsSource=" + endpoint.isSource() + " endpointSpeed="
+                                    + endpoint.getSpeed() + " endpointTheoretical="
+                                    + endpoint.getTheoreticalSpeed());
+                }
+                samples.sawObservedDisconnect = true;
+                if (fixture.controller().sequenceContext != null || endpoint.sequenceContext != null) {
+                    throw new GameTestAssertException("Sequence context appeared during forced detach");
+                }
+                fixture.controller().attachKinetics();
+                endpoint.attachKinetics();
+                if (fixture.controller().sequenceContext != null || endpoint.sequenceContext != null) {
+                    throw new GameTestAssertException("Sequence context appeared during forced reattach");
+                }
+                samples.forcedNetworkRebuild = true;
             }
-            samples.forcedNetworkRebuild = true;
         }
 
         double setpoint = adapter.getTargetAngleDegrees();
@@ -232,9 +265,19 @@ public final class SimulatedSwivelControllerGameTests {
             samples.lastSetpoint = fixture.startingSetpoint();
         }
         if (Double.isFinite(samples.lastSetpoint) && Double.isFinite(setpoint)) {
-            samples.unwrappedSetpointTravel += Math.abs(KineticAngleMath.shortestDelta(
-                    samples.lastSetpoint, setpoint));
+            double step = KineticAngleMath.shortestDelta(samples.lastSetpoint, setpoint);
+            samples.unwrappedSetpointTravel += Math.abs(step);
+            if (Math.abs(step) > 1.0e-4) {
+                int sign = (int) Math.signum(step);
+                if (samples.lastSetpointStepSign != 0
+                        && sign != samples.lastSetpointStepSign) {
+                    samples.setpointReversals++;
+                }
+                samples.lastSetpointStepSign = sign;
+            }
         }
+        samples.minimumSetpoint = Math.min(samples.minimumSetpoint, setpoint);
+        samples.maximumSetpoint = Math.max(samples.maximumSetpoint, setpoint);
         samples.lastSetpoint = setpoint;
         if (samples.forcedNetworkRebuild && Double.isFinite(samples.rebuildSetpoint)
                 && Math.abs(KineticAngleMath.shortestDelta(samples.rebuildSetpoint, setpoint)) > 1.0e-4) {
@@ -322,13 +365,20 @@ public final class SimulatedSwivelControllerGameTests {
                 samples.initialSetpoint, expected));
         double physicalTravel = Math.abs(KineticAngleMath.shortestDelta(
                 samples.initialPhysical, expected));
-        double allowedSetpointTravel = setpointTravel
-                + 2.0 * Math.max(samples.maxActiveStep, 0.5) + 0.5;
-        double allowedPhysicalTravel = physicalTravel
-                + 2.0 * Math.max(samples.maxActiveStep, 0.5) + 0.5;
+        double asynchronousStepBudget = 3.0 * Math.max(samples.maxActiveStep, 0.5);
+        double compensationTravelBudget = 2.0 * SETPOINT_COMPENSATION_BUDGET_DEGREES;
+        double allowedSetpointTravel = setpointTravel + asynchronousStepBudget
+                + compensationTravelBudget + 0.5;
+        double allowedPhysicalTravel = physicalTravel + asynchronousStepBudget
+                + compensationTravelBudget + 0.5;
         if (samples.unwrappedSetpointTravel > allowedSetpointTravel) {
             throw new GameTestAssertException("Swivel setpoint overshot: travel="
-                    + samples.unwrappedSetpointTravel + "/" + allowedSetpointTravel);
+                    + samples.unwrappedSetpointTravel + "/" + allowedSetpointTravel
+                    + " range=" + samples.minimumSetpoint + ".." + samples.maximumSetpoint
+                    + " reversals=" + samples.setpointReversals
+                    + " finalSetpoint=" + adapter.getTargetAngleDegrees()
+                    + " finalPhysical=" + physical + " expected=" + expected
+                    + " " + kineticStatus(fixture.controller()));
         }
         int fullRevolutionTicks = samples.maxActiveStep <= 1.0e-6 ? SAMPLE_TICKS
                 : (int) Math.ceil(360.0 / samples.maxActiveStep);
@@ -553,6 +603,18 @@ public final class SimulatedSwivelControllerGameTests {
         return resolution.adapter();
     }
 
+    private static String kineticStatus(KineticBlockEntity controller) {
+        if (controller instanceof AutoYawControllerBlockEntity yaw) {
+            return "lifecycle=" + yaw.getKineticLifecycle()
+                    + " blockedReason=" + yaw.getKineticBlockedReason();
+        }
+        if (controller instanceof AutoPitchControllerBlockEntity pitch) {
+            return "lifecycle=" + pitch.getKineticLifecycle()
+                    + " blockedReason=" + pitch.getKineticBlockedReason();
+        }
+        return "lifecycle=unknown";
+    }
+
     private record Fixture(KineticBlockEntity controller,
                            KineticBlockEntity motor,
                            KineticBlockEntity decoyCog,
@@ -570,6 +632,10 @@ public final class SimulatedSwivelControllerGameTests {
         private double lastPhysical = Double.NaN;
         private double initialPhysical = Double.NaN;
         private double unwrappedSetpointTravel;
+        private double minimumSetpoint = Double.POSITIVE_INFINITY;
+        private double maximumSetpoint = Double.NEGATIVE_INFINITY;
+        private int lastSetpointStepSign;
+        private int setpointReversals;
         private double unwrappedPhysicalTravel;
         private double maxActiveStep;
         private int physicalSamples;
@@ -577,6 +643,7 @@ public final class SimulatedSwivelControllerGameTests {
         private boolean sawGeneratedDrive;
         private boolean sawPoweredEndpoint;
         private int activeEndpointSamples;
+        private int staleEndpointSamples;
         private boolean sawSelectedMountRatio;
         private boolean sawPhysicalMovement;
         private boolean forcedNetworkRebuild;

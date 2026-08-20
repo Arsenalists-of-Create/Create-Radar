@@ -80,6 +80,10 @@ public final class ModClassOwnershipIndex {
         return createRadarClasses;
     }
 
+    Set<String> knownClasses() {
+        return ownersByClass.keySet();
+    }
+
     public ClassOwnership describe(String className) {
         List<ClassOwnership.Owner> owners = owners(className);
         return new ClassOwnership(normalize(className), owners,

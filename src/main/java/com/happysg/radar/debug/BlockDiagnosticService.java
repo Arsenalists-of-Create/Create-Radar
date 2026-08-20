@@ -172,6 +172,20 @@ public final class BlockDiagnosticService {
                             pitch.getGeneratedSpeed())
                     .add("Pitch controller", "available input",
                             pitch.getAvailableInputSpeed())
+                    .add("Pitch controller", "kinetic lifecycle",
+                            pitch.getKineticLifecycle())
+                    .add("Pitch controller", "bearing target",
+                            pitch.getKineticDesiredBearingTarget())
+                    .add("Pitch controller", "bearing setpoint",
+                            pitch.getKineticBearingSetpoint())
+                    .add("Pitch controller", "physical bearing",
+                            pitch.getKineticPhysicalBearing())
+                    .add("Pitch controller", "setpoint compensation",
+                            pitch.getKineticSetpointCompensation())
+                    .add("Pitch controller", "physical error",
+                            pitch.getKineticRemainingDegrees())
+                    .add("Pitch controller", "blocked reason",
+                            pitch.getKineticBlockedReason())
                     .add("Pitch controller", "assembled mount",
                             pitch.hasAssembledControlledMount())
                     .add("Pitch controller", "track",
@@ -195,6 +209,20 @@ public final class BlockDiagnosticService {
                             yaw.getGeneratedSpeed())
                     .add("Yaw controller", "available input",
                             yaw.getAvailableInputSpeed())
+                    .add("Yaw controller", "kinetic lifecycle",
+                            yaw.getKineticLifecycle())
+                    .add("Yaw controller", "bearing target",
+                            yaw.getKineticDesiredBearingTarget())
+                    .add("Yaw controller", "bearing setpoint",
+                            yaw.getKineticBearingSetpoint())
+                    .add("Yaw controller", "physical bearing",
+                            yaw.getKineticPhysicalBearing())
+                    .add("Yaw controller", "setpoint compensation",
+                            yaw.getKineticSetpointCompensation())
+                    .add("Yaw controller", "physical error",
+                            yaw.getKineticRemainingDegrees())
+                    .add("Yaw controller", "blocked reason",
+                            yaw.getKineticBlockedReason())
                     .add("Yaw controller", "assembled mount",
                             yaw.hasAssembledControlledMount())
                     .add("Yaw controller", "upside down",

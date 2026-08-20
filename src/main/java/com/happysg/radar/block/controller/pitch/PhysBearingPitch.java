@@ -62,6 +62,13 @@ public class PhysBearingPitch {
 
     public boolean atTargetPitch(PhysBearingBlockEntity mount, boolean lag,
                                  double minimumToleranceDegrees) {
+        return atTargetPitch(mount, lag, minimumToleranceDegrees,
+                Double.POSITIVE_INFINITY);
+    }
+
+    public boolean atTargetPitch(PhysBearingBlockEntity mount, boolean lag,
+                                 double minimumToleranceDegrees,
+                                 double maximumToleranceDegrees) {
         Double actualRad = mount.getActualAngle();
         if (actualRad == null) {
             return false;
@@ -72,16 +79,23 @@ public class PhysBearingPitch {
             tol += 0.15;
         }
         tol = Math.max(tol, sanitizeTolerance(minimumToleranceDegrees));
+        tol = Math.max(tol, AutoPitchControllerBlockEntity.getDeadbandDeg());
+        tol = Math.min(tol, sanitizeMaximumTolerance(maximumToleranceDegrees));
 
         double currentDeg = AutoPitchControllerBlockEntity.wrap360(Math.toDegrees(actualRad));
         double desiredDeg = AutoPitchControllerBlockEntity.wrap360(controller.getTargetAngle());
 
         return Math.abs(AutoPitchControllerBlockEntity.shortestDelta(currentDeg, desiredDeg))
-                < Math.max(tol, AutoPitchControllerBlockEntity.getDeadbandDeg());
+                < tol;
     }
 
     private static double sanitizeTolerance(double tolerance) {
         return Double.isFinite(tolerance) ? Math.max(0.0, tolerance) : 0.0;
+    }
+
+    private static double sanitizeMaximumTolerance(double tolerance) {
+        return Double.isFinite(tolerance)
+                ? Math.max(0.0, tolerance) : Double.POSITIVE_INFINITY;
     }
 
     public void reset() {

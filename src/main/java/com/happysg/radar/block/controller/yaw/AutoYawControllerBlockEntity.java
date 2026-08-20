@@ -57,6 +57,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private static final double TOLERANCE_DEG = 0.15;
     private static final double DEADBAND_DEG = 0.5;
+    private static final double KINETIC_TRACKING_TOLERANCE_DEG = 0.05;
     private static final int MOVEMENT_LIMITS_VERSION = 1;
 
     private double targetAngle = 0.0;
@@ -157,7 +158,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
                 requestedTargetAngle, neutral);
         targetAngle = applied;
         isRunning = running;
-        kineticControllerState.onTargetChanged(running, applied, DEADBAND_DEG);
+        kineticControllerState.onTargetChanged(
+                running, applied, KINETIC_TRACKING_TOLERANCE_DEG);
         if (notify) {
             notifyUpdate();
             setChanged();
@@ -480,6 +482,12 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public boolean atTargetYaw(boolean lag, double minimumToleranceDegrees) {
+        return atTargetYaw(lag, minimumToleranceDegrees,
+                Double.POSITIVE_INFINITY);
+    }
+
+    public boolean atTargetYaw(boolean lag, double minimumToleranceDegrees,
+                               double maximumToleranceDegrees) {
         if (level == null || targetLimitConstrained) {
             return false;
         }
@@ -490,7 +498,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
         if (hasStructuralKineticSelection()) {
             return kineticControllerState.isReady(resolveKineticMount(), isRunning,
-                    targetAngle, DEADBAND_DEG);
+                    targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         }
 
         Mount mount = resolveMount();
@@ -499,11 +507,15 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-            return cannonHandler.atTargetYaw(mount.cbc, lag, minimumToleranceDegrees);
+            return cannonHandler.atTargetYaw(
+                    mount.cbc, lag, minimumToleranceDegrees,
+                    maximumToleranceDegrees);
         }
 
         if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
-            return physHandler.atTargetYaw(mount.phys, lag, minimumToleranceDegrees);
+            return physHandler.atTargetYaw(
+                    mount.phys, lag, minimumToleranceDegrees,
+                    maximumToleranceDegrees);
         }
 
         return false;
@@ -514,12 +526,20 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public boolean isAlignedForFiring(boolean lag, double minimumToleranceDegrees) {
+        return isAlignedForFiring(lag, minimumToleranceDegrees,
+                Double.POSITIVE_INFINITY);
+    }
+
+    public boolean isAlignedForFiring(boolean lag,
+                                      double minimumToleranceDegrees,
+                                      double maximumToleranceDegrees) {
         if (level == null || targetLimitConstrained
                 || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
         if (!hasStructuralKineticSelection()) {
-            return atTargetYaw(lag, minimumToleranceDegrees);
+            return atTargetYaw(
+                    lag, minimumToleranceDegrees, maximumToleranceDegrees);
         }
 
         double tolerance = DEADBAND_DEG;
@@ -528,6 +548,10 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         if (Double.isFinite(minimumToleranceDegrees)) {
             tolerance = Math.max(tolerance, Math.max(0.0, minimumToleranceDegrees));
+        }
+        if (Double.isFinite(maximumToleranceDegrees)) {
+            tolerance = Math.min(tolerance,
+                    Math.max(0.0, maximumToleranceDegrees));
         }
         return kineticControllerState.isAlignedForFiring(
                 resolveKineticMount(), worldPosition, isRunning, targetAngle, tolerance);
@@ -620,7 +644,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         if (oldMount != null && !sameMount(oldMount, newMount)) {
             isRunning = false;
             hasLastCbcYawWritten = false;
-            kineticControllerState.onTargetChanged(false, targetAngle, DEADBAND_DEG);
+            kineticControllerState.onTargetChanged(
+                    false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         }
 
         if (newMount == null && !hasStructuralKineticSelection()) {
@@ -820,7 +845,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         ControllerMovementLimits limits = getMovementLimits();
         double neutral = getLimitNeutralAngleDeg();
         boolean consumed = kineticControllerState.tick(
-                this, resolution, isRunning, targetAngle, DEADBAND_DEG,
+                this, resolution, isRunning, targetAngle,
+                KINETIC_TRACKING_TOLERANCE_DEG,
                 getAvailableInputSpeed(),
                 (current, target) -> limits.legalDelta(
                         current, target, neutral),
@@ -897,7 +923,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     public void failClosedRadarAim() {
         kineticControllerState.endContinuousTracking();
         isRunning = false;
-        kineticControllerState.onTargetChanged(false, targetAngle, DEADBAND_DEG);
+        kineticControllerState.onTargetChanged(
+                false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         commandGeneratedSpeed(0.0);
         flushKineticStateSync();
         notifyUpdate();
@@ -1205,7 +1232,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     void setRunning(boolean running) {
         this.isRunning = running;
-        kineticControllerState.onTargetChanged(running, targetAngle, DEADBAND_DEG);
+        kineticControllerState.onTargetChanged(
+                running, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
     }
 
     boolean isRunningController() {
@@ -1249,6 +1277,35 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     public static double getToleranceDeg() {
         return TOLERANCE_DEG;
+    }
+
+    public double getKineticDesiredBearingTarget() {
+        return kineticControllerState.getDesiredBearingTarget();
+    }
+
+    public double getKineticBearingSetpoint() {
+        return kineticControllerState.getBearingSetpointDegrees();
+    }
+
+    public double getKineticPhysicalBearing() {
+        return kineticControllerState.getPhysicalBearingDegrees();
+    }
+
+    public double getKineticSetpointCompensation() {
+        return kineticControllerState.getSetpointCompensationDegrees();
+    }
+
+    public double getKineticRemainingDegrees() {
+        return kineticControllerState.getRemainingDegrees();
+    }
+
+    public String getKineticLifecycle() {
+        return kineticControllerState.getLifecycleName();
+    }
+
+    @Nullable
+    public String getKineticBlockedReason() {
+        return kineticControllerState.getBlockedReason();
     }
 
     static double getDeadbandDeg() {

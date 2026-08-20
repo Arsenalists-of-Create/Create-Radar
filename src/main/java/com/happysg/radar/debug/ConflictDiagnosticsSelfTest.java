@@ -7,8 +7,11 @@ import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodNode;
 import com.happysg.radar.mixin.diagnostic.EarlyDiagnosticJournal;
+import org.spongepowered.asm.mixin.extensibility.IMixinConfig;
+import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 
 import java.io.IOException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,9 +19,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
-import java.util.zip.ZipEntry;
 
 public final class ConflictDiagnosticsSelfTest {
     private ConflictDiagnosticsSelfTest() {
@@ -33,6 +36,8 @@ public final class ConflictDiagnosticsSelfTest {
             testConfidence();
             testEarlyJournal();
             testMixinParser();
+            testAppliedMixinDiscovery();
+            testMixinAuditConsistency();
             testTraceBounds();
             testLogFiltering(temporary);
             testComparator(temporary);
@@ -98,6 +103,121 @@ public final class ConflictDiagnosticsSelfTest {
         require(parsed.stream().anyMatch(value ->
                         value.kind().equals("Redirect")),
                 "redirect kind parsed");
+    }
+
+    private static void testAppliedMixinDiscovery() {
+        String target = "example.Target";
+        String secondTarget = "example.SecondTarget";
+        String ownClass = "com.happysg.radar.mixin.TestOwnMixin";
+        String foreignClass = "foreign.mixin.TestForeignMixin";
+        IMixinInfo own = fakeMixin(ownClass, "create_radar.mixins.json",
+                List.of(target, secondTarget), injectionNode(
+                        "createRadar$handler", "fireShot"));
+        IMixinInfo foreign = fakeMixin(foreignClass,
+                "foreign.mixins.json", List.of(target), injectionNode(
+                        "foreign$handler", "fireShot"));
+        Map<String, List<String>> owners = Map.of(
+                ownClass, List.of("create_radar"),
+                foreignClass, List.of("foreign_mod"));
+        ArrayList<String> warnings = new ArrayList<>();
+
+        ConflictAnalyzer.MixinResult result = ConflictAnalyzer.inspectMixins(
+                Set.of(target, secondTarget),
+                List.of(ownClass, "duplicate.discovery.Key", foreignClass),
+                className -> owners.getOrDefault(className, List.of()),
+                className -> switch (className) {
+                    case "com.happysg.radar.mixin.TestOwnMixin",
+                         "duplicate.discovery.Key" -> Set.of(own);
+                    case "foreign.mixin.TestForeignMixin" -> Set.of(foreign);
+                    default -> Set.of();
+                }, warnings);
+
+        require(warnings.isEmpty(), "mixin discovery has no warnings");
+        require(result.audit().size() == 3,
+                "mixin discovery deduplicates and expands real targets");
+        require(result.audit().stream().noneMatch(entry ->
+                        entry.targetClass().equals(entry.mixinClass())),
+                "mixin discovery does not label lookup key as target");
+        require(result.audit().stream().anyMatch(entry ->
+                        entry.targetClass().equals(target)
+                                && entry.mixinClass().equals(foreignClass)
+                                && entry.ownerMods().contains("foreign_mod")),
+                "foreign mixin retained on real target");
+        require(result.overlaps().size() == 1,
+                "shared target and method produce one overlap");
+        MixinOverlap overlap = result.overlaps().getFirst();
+        require(overlap.targetClass().equals(target)
+                        && overlap.createRadarMixin().equals(ownClass)
+                        && overlap.foreignMixin().equals(foreignClass)
+                        && overlap.sharedMethods().equals(List.of("fireShot")),
+                "overlap uses mapped target and method");
+    }
+
+    private static void testMixinAuditConsistency() {
+        String target = "example.JournalTarget";
+        String mixin = "com.happysg.radar.mixin.JournalMixin";
+        EarlyDiagnosticJournal.record("MIXIN_APPLY", "POST_APPLY", Map.of(
+                "target", target, "mixin", mixin));
+        ArrayList<String> warnings = new ArrayList<>();
+        ConflictAnalyzer.validateMixinAudit(List.of(), warnings);
+        require(warnings.stream().anyMatch(value ->
+                        value.contains("Mixin audit omitted 1 of 1")),
+                "missing successful mixin application marks partial audit");
+
+        warnings.clear();
+        ConflictAnalyzer.validateMixinAudit(List.of(new MixinAuditEntry(
+                target, mixin, "create_radar.mixins.json",
+                List.of("create_radar"), 1000, true, false, List.of())),
+                warnings);
+        require(warnings.isEmpty(),
+                "matching successful mixin application passes audit");
+    }
+
+    private static ClassNode injectionNode(String handler, String target) {
+        ClassNode node = new ClassNode();
+        MethodNode method = new MethodNode(Opcodes.ACC_PRIVATE, handler,
+                "()V", null, null);
+        AnnotationNode annotation = new AnnotationNode(
+                "Lorg/spongepowered/asm/mixin/injection/Inject;");
+        annotation.values = new ArrayList<>(List.of(
+                "method", List.of(target)));
+        method.visibleAnnotations = new ArrayList<>(List.of(annotation));
+        node.methods.add(method);
+        return node;
+    }
+
+    private static IMixinInfo fakeMixin(String className, String configName,
+                                        List<String> targets,
+                                        ClassNode classNode) {
+        IMixinConfig config = (IMixinConfig) Proxy.newProxyInstance(
+                ConflictDiagnosticsSelfTest.class.getClassLoader(),
+                new Class<?>[]{IMixinConfig.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getName" -> configName;
+                    case "getTargets" -> Set.copyOf(targets);
+                    case "getPriority" -> 1000;
+                    case "isRequired" -> false;
+                    case "toString" -> configName;
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == arguments[0];
+                    default -> null;
+                });
+        return (IMixinInfo) Proxy.newProxyInstance(
+                ConflictDiagnosticsSelfTest.class.getClassLoader(),
+                new Class<?>[]{IMixinInfo.class},
+                (proxy, method, arguments) -> switch (method.getName()) {
+                    case "getConfig" -> config;
+                    case "getName", "getClassName" -> className;
+                    case "getClassRef" -> className.replace('.', '/');
+                    case "getClassNode" -> classNode;
+                    case "getTargetClasses" -> targets;
+                    case "getPriority" -> 1000;
+                    case "isDetachedSuper" -> false;
+                    case "toString" -> className;
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == arguments[0];
+                    default -> null;
+                });
     }
 
     private static void testTraceBounds() {

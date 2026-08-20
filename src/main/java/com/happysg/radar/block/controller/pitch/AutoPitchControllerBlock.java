@@ -4,6 +4,7 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.CannonMountPlacement;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.networking.packets.OpenControllerLimitsScreenPacket;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
@@ -105,10 +106,16 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
             if (level.getBlockEntity(pos) instanceof AutoPitchControllerBlockEntity pitch) {
                 pitch.releaseKineticActuator();
             }
-            breakAttachedDataLinks(level, pos);
+            boolean assemblyMove =
+                    SableDataLinkRelocation.isRelocatingEndpoint(sl, pos);
+            if (!assemblyMove) {
+                breakAttachedDataLinks(level, pos);
+            }
             WeaponNetworkRuntime.get(sl)
                     .unregisterContactController(pos);
-            NetworkData.get(sl).onEndpointRemoved(sl, pos);
+            if (!assemblyMove) {
+                NetworkData.get(sl).onEndpointRemoved(sl, pos);
+            }
         }
         super.onRemove(state, level, pos, newState, isMoving);
 

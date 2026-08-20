@@ -60,6 +60,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     private static final double CBC_TOLERANCE = 0.1;
     private static final double PHYS_TOLERANCE_DEG = 0.1;
     private static final double DEADBAND_DEG = 0.25;
+    private static final double KINETIC_TRACKING_TOLERANCE_DEG = 0.05;
     private static final int MOVEMENT_LIMITS_VERSION = 1;
 
     private double minAngleDeg = -90.0;
@@ -272,7 +273,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             targetLimitConstrained = true;
             isRunning = false;
             kineticControllerState.onTargetChanged(
-                    false, targetAngle, DEADBAND_DEG);
+                    false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
             if (resetPhysicalTracking) {
                 physHandler.reset();
             }
@@ -286,7 +287,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                 requestedAngle, 0.0);
         targetAngle = applied;
         isRunning = running;
-        kineticControllerState.onTargetChanged(running, applied, DEADBAND_DEG);
+        kineticControllerState.onTargetChanged(
+                running, applied, KINETIC_TRACKING_TOLERANCE_DEG);
         if (resetPhysicalTracking) {
             physHandler.reset();
         }
@@ -297,7 +299,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public void stopController() {
         kineticControllerState.endContinuousTracking();
         isRunning = false;
-        kineticControllerState.onTargetChanged(false, targetAngle, DEADBAND_DEG);
+        kineticControllerState.onTargetChanged(
+                false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         notifyUpdate();
         setChanged();
     }
@@ -536,6 +539,12 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public boolean atTargetPitch(boolean lag, double minimumToleranceDegrees) {
+        return atTargetPitch(lag, minimumToleranceDegrees,
+                Double.POSITIVE_INFINITY);
+    }
+
+    public boolean atTargetPitch(boolean lag, double minimumToleranceDegrees,
+                                 double maximumToleranceDegrees) {
         if (level == null || targetLimitConstrained) {
             return false;
         }
@@ -546,14 +555,15 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         if (hasStructuralKineticSelection()) {
             return kineticControllerState.isReady(resolveKineticMount(), isRunning,
-                    targetAngle, DEADBAND_DEG);
+                    targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         }
 
         List<CannonMountContext> cbcMounts = resolveControlledCbcMounts();
         if (Mods.CREATEBIGCANNONS.isLoaded() && !cbcMounts.isEmpty()) {
             for (CannonMountContext mount : cbcMounts) {
                 if (!cannonHandler.atTargetPitch(
-                        mount, lag, minimumToleranceDegrees)) {
+                        mount, lag, minimumToleranceDegrees,
+                        maximumToleranceDegrees)) {
                     return false;
                 }
             }
@@ -563,7 +573,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
         if (mount != null && mount.kind == MountKind.PHYS
                 && Mods.VS_CLOCKWORK.isLoaded()) {
-            return physHandler.atTargetPitch(mount.phys, lag, minimumToleranceDegrees);
+            return physHandler.atTargetPitch(
+                    mount.phys, lag, minimumToleranceDegrees,
+                    maximumToleranceDegrees);
         }
 
         return false;
@@ -574,12 +586,20 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public boolean isAlignedForFiring(boolean lag, double minimumToleranceDegrees) {
+        return isAlignedForFiring(lag, minimumToleranceDegrees,
+                Double.POSITIVE_INFINITY);
+    }
+
+    public boolean isAlignedForFiring(boolean lag,
+                                      double minimumToleranceDegrees,
+                                      double maximumToleranceDegrees) {
         if (level == null || targetLimitConstrained
                 || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
         if (!hasStructuralKineticSelection()) {
-            return atTargetPitch(lag, minimumToleranceDegrees);
+            return atTargetPitch(
+                    lag, minimumToleranceDegrees, maximumToleranceDegrees);
         }
 
         double tolerance = DEADBAND_DEG;
@@ -588,6 +608,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         if (Double.isFinite(minimumToleranceDegrees)) {
             tolerance = Math.max(tolerance, Math.max(0.0, minimumToleranceDegrees));
+        }
+        if (Double.isFinite(maximumToleranceDegrees)) {
+            tolerance = Math.min(tolerance,
+                    Math.max(0.0, maximumToleranceDegrees));
         }
         return kineticControllerState.isAlignedForFiring(
                 resolveKineticMount(), worldPosition, isRunning, targetAngle, tolerance);
@@ -603,6 +627,17 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             boolean lag,
             double minimumToleranceDegrees
     ) {
+        return isCbcMountAlignedForFiring(
+                mount, lag, minimumToleranceDegrees,
+                Double.POSITIVE_INFINITY);
+    }
+
+    public boolean isCbcMountAlignedForFiring(
+            @Nullable CannonMountContext mount,
+            boolean lag,
+            double minimumToleranceDegrees,
+            double maximumToleranceDegrees
+    ) {
         if (level == null || mount == null || targetLimitConstrained
                 || debugSwivelSweep.isActive()
                 || debugSwivelFollow.isActive()) {
@@ -611,7 +646,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         for (CannonMountContext controlled : resolveControlledCbcMounts()) {
             if (controlled.sameMount(mount)) {
                 return cannonHandler.atTargetPitch(
-                        controlled, lag, minimumToleranceDegrees);
+                        controlled, lag, minimumToleranceDegrees,
+                        maximumToleranceDegrees);
             }
         }
         return false;
@@ -1089,7 +1125,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     private boolean tickKineticActuator() {
         KineticMountAdapterResolution resolution = resolveKineticMount();
         boolean consumed = kineticControllerState.tick(
-                this, resolution, isRunning, targetAngle, DEADBAND_DEG,
+                this, resolution, isRunning, targetAngle,
+                KINETIC_TRACKING_TOLERANCE_DEG,
                 getAvailableInputSpeed(), this::commandGeneratedSpeed);
         flushKineticStateSync();
         return consumed;
@@ -1158,7 +1195,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public void failClosedRadarAim() {
         kineticControllerState.endContinuousTracking();
         isRunning = false;
-        kineticControllerState.onTargetChanged(false, targetAngle, DEADBAND_DEG);
+        kineticControllerState.onTargetChanged(
+                false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         commandGeneratedSpeed(0.0);
         flushKineticStateSync();
         notifyUpdate();
@@ -1476,7 +1514,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     void setRunning(boolean running) {
         this.isRunning = running;
-        kineticControllerState.onTargetChanged(running, targetAngle, DEADBAND_DEG);
+        kineticControllerState.onTargetChanged(
+                running, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
     }
 
     boolean isRunningController() {
@@ -1515,6 +1554,35 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     static double getPhysToleranceDeg() {
         return PHYS_TOLERANCE_DEG;
+    }
+
+    public double getKineticDesiredBearingTarget() {
+        return kineticControllerState.getDesiredBearingTarget();
+    }
+
+    public double getKineticBearingSetpoint() {
+        return kineticControllerState.getBearingSetpointDegrees();
+    }
+
+    public double getKineticPhysicalBearing() {
+        return kineticControllerState.getPhysicalBearingDegrees();
+    }
+
+    public double getKineticSetpointCompensation() {
+        return kineticControllerState.getSetpointCompensationDegrees();
+    }
+
+    public double getKineticRemainingDegrees() {
+        return kineticControllerState.getRemainingDegrees();
+    }
+
+    public String getKineticLifecycle() {
+        return kineticControllerState.getLifecycleName();
+    }
+
+    @Nullable
+    public String getKineticBlockedReason() {
+        return kineticControllerState.getBlockedReason();
     }
 
     static double getDeadbandDeg() {

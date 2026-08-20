@@ -60,6 +60,7 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String SELECTED_FIRING_POS = "SelectedFiringPos";
     private static final String SELECTED_RWR_POS = "SelectedRwrPos";
     private static final String SELECTED_POS = "SelectedPos";
+    private static final String SELECTED_DIMENSION = "SelectedDimension";
 
     private static final String DISPLAY_CLEAR = "display_link.clear";
     private static final String DISPLAY_SUCCESS = "display_link.success";
@@ -70,6 +71,7 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String DATA_LINK_FILTER_ATTACH_DENIED = CreateRadar.MODID + ".data_link.filter_attach_denied";
     private static final String DATA_LINK_FILTERER_SET = CreateRadar.MODID + ".data_link.filterer_set";
     private static final String DATA_LINK_INVALID_FILTER_TARGET = CreateRadar.MODID + ".data_link.invalid_filter_target";
+    private static final String DATA_LINK_INVALID_SELECTION = CreateRadar.MODID + ".data_link.invalid_selection";
     private static final String DATA_LINK_MOUNT_SET = CreateRadar.MODID + ".data_link.mount_set";
     private static final String DATA_LINK_RWR_SET = CreateRadar.MODID + ".data_link.rwr_set";
     private static final String DATA_LINK_ARAD_MONITOR_CONFLICT = CreateRadar.MODID + ".data_link.arad_monitor_conflict";
@@ -144,6 +146,7 @@ public class DataLinkBlockItem extends BlockItem {
         if (selectedMount != null) {
             if (!use.level().isClientSide) {
                 use.tag().put(SELECTED_MOUNT_POS, NbtUtils.writeBlockPos(selectedMount));
+                rememberSelectionDimension(use);
                 use.tag().remove(SELECTED_FILTERER_POS);
                 use.tag().remove(SELECTED_RWR_POS);
                 clearControllerSelections(use.tag());
@@ -156,6 +159,7 @@ public class DataLinkBlockItem extends BlockItem {
         if (use.clickedState().getBlock() instanceof NetworkFiltererBlock) {
             if (!use.level().isClientSide) {
                 use.tag().put(SELECTED_FILTERER_POS, NbtUtils.writeBlockPos(use.clickedPos()));
+                rememberSelectionDimension(use);
                 use.tag().remove(SELECTED_MOUNT_POS);
                 use.tag().remove(SELECTED_RWR_POS);
                 clearControllerSelections(use.tag());
@@ -168,6 +172,7 @@ public class DataLinkBlockItem extends BlockItem {
         if (use.be() instanceof RadarWarningReceiverBlockEntity) {
             if (!use.level().isClientSide) {
                 use.tag().put(SELECTED_RWR_POS, NbtUtils.writeBlockPos(use.clickedPos()));
+                rememberSelectionDimension(use);
                 use.tag().remove(SELECTED_MOUNT_POS);
                 use.tag().remove(SELECTED_FILTERER_POS);
                 clearControllerSelections(use.tag());
@@ -207,15 +212,13 @@ public class DataLinkBlockItem extends BlockItem {
             return InteractionResult.FAIL;
 
         BlockPos mountPos = readSelectedPos(use.tag(), SELECTED_MOUNT_POS);
-        if (mountPos == null) {
-            clearLinkTag(use.stack());
-            return InteractionResult.FAIL;
-        }
+        if (mountPos == null || !selectionDimensionMatches(use.tag(), serverLevel))
+            return invalidSelection(use);
         CannonMountContext selectedMount =
                 CannonMountContext.resolveEndpoint(serverLevel, mountPos);
-        if (selectedMount != null) {
-            mountPos = selectedMount.getBlockPos().immutable();
-        }
+        if (selectedMount == null)
+            return invalidSelection(use);
+        mountPos = selectedMount.getBlockPos().immutable();
         if (use.be() instanceof TPitchControllerBlockEntity tPitch
                 && !tPitch.canLinkMount(mountPos)) {
             sendError(use.player(), DATA_LINK_T_PITCH_INVALID_MOUNT);
@@ -290,10 +293,10 @@ public class DataLinkBlockItem extends BlockItem {
             return InteractionResult.FAIL;
 
         BlockPos rwrPos = readSelectedPos(use.tag(), SELECTED_RWR_POS);
-        if (rwrPos == null) {
-            clearLinkTag(use.stack());
-            return InteractionResult.FAIL;
-        }
+        if (rwrPos == null || !selectionDimensionMatches(use.tag(), serverLevel)
+                || !(serverLevel.getBlockEntity(rwrPos)
+                instanceof RadarWarningReceiverBlockEntity))
+            return invalidSelection(use);
 
         BlockPos monitorPos = monitor.getControllerPos();
         if (monitorPos == null) monitorPos = use.clickedPos();
@@ -342,10 +345,10 @@ public class DataLinkBlockItem extends BlockItem {
             return InteractionResult.FAIL;
 
         BlockPos filtererPos = readSelectedPos(use.tag(), SELECTED_FILTERER_POS);
-        if (filtererPos == null) {
-            clearLinkTag(use.stack());
-            return InteractionResult.FAIL;
-        }
+        if (filtererPos == null || !selectionDimensionMatches(use.tag(), serverLevel)
+                || !(serverLevel.getBlockEntity(filtererPos)
+                instanceof NetworkFiltererBlockEntity))
+            return invalidSelection(use);
 
         BlockPos placedPos = getPlacementPos(use);
         NetworkData filterData = NetworkData.get(serverLevel);
@@ -448,6 +451,24 @@ public class DataLinkBlockItem extends BlockItem {
 
     private static void clearLinkTag(ItemStack stack) {
         stack.remove(DataComponents.CUSTOM_DATA);
+    }
+
+    private static void rememberSelectionDimension(LinkUse use) {
+        use.tag().putString(SELECTED_DIMENSION,
+                use.level().dimension().location().toString());
+    }
+
+    private static boolean selectionDimensionMatches(CompoundTag tag,
+                                                     ServerLevel level) {
+        return tag.contains(SELECTED_DIMENSION)
+                && level.dimension().location().toString()
+                .equals(tag.getString(SELECTED_DIMENSION));
+    }
+
+    private static InteractionResult invalidSelection(LinkUse use) {
+        sendError(use.player(), DATA_LINK_INVALID_SELECTION);
+        clearLinkTag(use.stack());
+        return InteractionResult.FAIL;
     }
 
     private record LinkUse(

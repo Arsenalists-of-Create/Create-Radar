@@ -22,6 +22,7 @@ import com.happysg.radar.compat.cbc.CannonLead;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
+import com.happysg.radar.compat.cbc.DirectCbcMountMotion;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.compat.cbc.VelocityTracker;
 import com.happysg.radar.compat.cbc_at.CBCATCannonCompat;
@@ -29,6 +30,8 @@ import com.happysg.radar.compat.cbc_at.CBCATRocketAimSolver;
 import com.happysg.radar.compat.cbcmoreshells.CBCMSAimSolver;
 import com.happysg.radar.compat.cbcmoreshells.CBCMSCannonCompat;
 import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
+import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
+import com.happysg.radar.compat.sable.SubLevelAimResolver;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
@@ -55,6 +58,7 @@ import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -83,6 +87,7 @@ import net.minecraft.world.level.ClipContext.Block;
 import net.minecraft.world.level.ClipContext.Fluid;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.HitResult.Type;
@@ -135,6 +140,12 @@ public class WeaponFiringControl {
     @Nullable
     private Vec3 cachedSableWorldAimDirection;
     private static final int SABLE_SOLVE_INTERVAL = 3;
+    private static final int SUBLEVEL_AIM_REACQUIRE_TICKS = 10;
+    private static final int SUBLEVEL_AIM_CANDIDATE_LIMIT = 64;
+    @Nullable
+    private CachedSublevelAim cachedSublevelAim;
+    @Nullable
+    private ResolvedSublevelAim currentSublevelAim;
     private final Map<Integer, VisCache> visCache;
     double maxSimDistanceBlocks;
     private static final double NEW_SOLVER_MIN_CONFIDENCE = 0.05;
@@ -145,8 +156,11 @@ public class WeaponFiringControl {
     private static final int ASYNC_TARGETING_FIRE_FRESH_TICKS = 4;
     private static final int ASYNC_TARGETING_TASK_TIMEOUT_TICKS = 100;
     private static final int ASYNC_TARGETING_REFRESH_TICKS = 2;
+    private static final long TARGET_MOTION_HISTORY_MAX_GAP_TICKS = 2L;
     private static final double ASYNC_STEERING_MAX_DIVERGENCE_COS =
             Math.cos(Math.toRadians(10.0));
+    @Nullable
+    private FiringAlignmentTolerance lastFiringAlignmentTolerance;
     private static final int TARGETING_EXECUTOR_THREADS = Math.max(1, Math.min(2, Runtime.getRuntime().availableProcessors() - 1));
     private static final int TARGETING_EXECUTOR_QUEUE_CAPACITY = 16;
     private static final ExecutorService TARGETING_EXECUTOR = createTargetingExecutor();
@@ -242,6 +256,8 @@ public class WeaponFiringControl {
         this.cachedSableSolveTick = -1L;
         this.cachedSablePitchDeg = null;
         this.cachedSableYawDeg = null;
+        this.cachedSublevelAim = null;
+        this.currentSublevelAim = null;
         this.visCache = new HashMap<>();
         this.maxSimDistanceBlocks = (double)8192.0F;
         this.mainThreadObstructionChecker = new ObstructionChecker();
@@ -344,6 +360,16 @@ public class WeaponFiringControl {
                                 : DiagnosticSeverity.INFO)
                 .add("Weapon control", "solution freshness",
                         lastTargetingFreshnessReason);
+        if (lastFiringAlignmentTolerance != null) {
+            builder.add("Weapon control", "alignment range blocks",
+                            lastFiringAlignmentTolerance.distanceBlocks())
+                    .add("Weapon control", "alignment error budget blocks",
+                            lastFiringAlignmentTolerance.lateralErrorBudgetBlocks())
+                    .add("Weapon control", "alignment axes",
+                            lastFiringAlignmentTolerance.axisCount())
+                    .add("Weapon control", "alignment tolerance degrees",
+                            lastFiringAlignmentTolerance.maximumDegrees());
+        }
         if (activetrack != null) {
             builder.add("Weapon control", "track category",
                             activetrack.trackCategory())
@@ -649,6 +675,10 @@ public class WeaponFiringControl {
         } else if (track == null) {
             return false;
         } else {
+            if (isSableTrack(track) && this.level instanceof ServerLevel sl) {
+                Vec3 aim = this.resolveEngagementAimPoint(sl, track, true);
+                return aim != null && this.isPointInShootableRange(aim);
+            }
             Vec3 p = track.position();
             if (p == null) {
                 return false;
@@ -753,6 +783,7 @@ public class WeaponFiringControl {
 
     public void clearBinoTarget() {
         this.visCache.clear();
+        this.clearSublevelAimCache();
         this.binoMode = false;
         this.binoTargetPos = null;
         this.target = null;
@@ -1054,8 +1085,30 @@ public class WeaponFiringControl {
                                     Vec3 targetAccel;
                                     Vec3 rawTargetPos;
                                     UUID targetMotionId = null;
+                                    this.currentSublevelAim = null;
                                     if (this.targetSublevel != null) {
-                                        rawTargetPos = RadarTrackUtil.getPosition(this.targetSublevel);
+                                        Vec3 sublevelAimOrigin = finite(
+                                                cannonMuzzleWorld)
+                                                ? cannonMuzzleWorld
+                                                : this.getCannonRayStart();
+                                        if (!finite(sublevelAimOrigin)) {
+                                            this.stopFireCannon();
+                                            return;
+                                        }
+                                        ResolvedSublevelAim sublevelAim =
+                                                this.resolveSublevelAim(
+                                                        serverLevel,
+                                                        this.targetSublevel,
+                                                        sublevelAimOrigin,
+                                                        this.targetingConfig
+                                                                .lineOfSight(),
+                                                        true);
+                                        if (sublevelAim == null) {
+                                            this.stopFireCannon();
+                                            return;
+                                        }
+                                        this.currentSublevelAim = sublevelAim;
+                                        rawTargetPos = sublevelAim.worldPoint();
                                         this.target = this.toWorldPosition(serverLevel, rawTargetPos, this.targetSublevel);
                                         Vec3 authoritativeMotionVelocity =
                                                 this.toWorldVelocity(
@@ -1068,13 +1121,20 @@ public class WeaponFiringControl {
                                                         this.target,
                                                         serverLevel.getGameTime(),
                                                         authoritativeMotionVelocity);
-                                        targetAccel = AccelerationTracker.getAccelerationPerTick2(this.targetSublevel.getUniqueId(), targetVel);
+                                        targetAccel = AccelerationTracker.getAccelerationPerTick2(
+                                                this.sublevelMotionSampleId(
+                                                        this.targetSublevel
+                                                                .getUniqueId()),
+                                                targetVel,
+                                                serverLevel.getGameTime());
                                         targetMotionId = this.targetSublevel.getUniqueId();
                                     } else if (!this.binoMode && this.targetEntity != null) {
                                         rawTargetPos = this.getEntityAimPoint(this.targetEntity);
                                         this.target = this.toWorldPosition(serverLevel, rawTargetPos, this.targetEntity);
                                         targetVel = VelocityTracker.getEstimatedVelocityPerTick(this.targetEntity);
-                                        targetAccel = AccelerationTracker.getAccelerationPerTick2(this.targetEntity.getUUID(), targetVel);
+                                        targetAccel = AccelerationTracker.getAccelerationPerTick2(
+                                                this.targetEntity.getUUID(), targetVel,
+                                                serverLevel.getGameTime());
                                         targetMotionId = this.targetEntity.getUUID();
                                     } else {
                                         if (!this.binoMode || this.binoTargetPos == null) {
@@ -1231,7 +1291,11 @@ public class WeaponFiringControl {
                                     }
 
                                     boolean newSolverOk = targetingResult != null && targetingResult.valid() && targetingResult.hasShot() && targetingResult.confidence() >= motion.minConfidence();
-                                    if (forceLegacyLead && !rejectCustomLegacy && !CannonUtil.isLaserCannon(cannon) && dist > noLeadDist) {
+                                    if (forceLegacyLead
+                                            && currentProjectile != null
+                                            && !rejectCustomLegacy
+                                            && !CannonUtil.isLaserCannon(cannon)
+                                            && dist > noLeadDist) {
                                         lead = CannonLead.solveLeadPerTickConstantVelocity(this.cannonMount, cannon, serverLevel, shooterVel, solvePos, targetVel, (Integer)RadarConfig.server().leadFiringDelay.get() + trackingLeadTicks, this.maxSimDistanceBlocks, this.targetingConfig.preferHighArc());
                                     }
 
@@ -1242,16 +1306,15 @@ public class WeaponFiringControl {
                                                     && targetingResultFreshForFire;
                                     boolean canFireWithoutLead =
                                             CannonUtil.isLaserCannon(cannon) || adapterDirectAim;
-                                    boolean asyncBallisticAimExpected = useNewSolver
-                                            && currentProjectile != null
-                                            && currentProjectile.solverKind() != SolverKind.CBCMS_SERVER;
+                                    boolean ballisticAimExpected =
+                                            !canFireWithoutLead;
                                     AimUpdateMode aimUpdateMode = selectAimUpdateMode(
                                             hasResolvedAimForUpdate(
                                                     hasNewTargetingSolution,
                                                     hasLeadSolution,
                                                     canFireWithoutLead,
                                                     adapterDirectAim),
-                                            asyncBallisticAimExpected);
+                                            ballisticAimExpected);
                                     Vec3 offsetAim = hasNewTargetingSolution
                                             && targetingResult.aimSolution().aimPoint() != null
                                             ? targetingResult.aimSolution().aimPoint()
@@ -1300,7 +1363,7 @@ public class WeaponFiringControl {
                                                 worldAimDirection = null;
                                                 aimUpdateMode = selectAimUpdateMode(
                                                         hasLeadSolution || canFireWithoutLead,
-                                                        asyncBallisticAimExpected);
+                                                        ballisticAimExpected);
                                             }
                                         } else if (hasLeadSolution || canFireWithoutLead) {
                                             long now = this.level.getGameTime();
@@ -1373,6 +1436,7 @@ public class WeaponFiringControl {
                                     }
 
                                     if (sourceUsesSublevelFrame
+                                            && aimUpdateMode != AimUpdateMode.HOLD
                                             && mountFrame.kind()
                                             != MountFrameKind.UNAVAILABLE
                                             && (aimEvaluation == null
@@ -1488,9 +1552,18 @@ public class WeaponFiringControl {
 
                                     double minimumFiringTolerance = adapterShot == null
                                             ? 0.0 : adapterShot.minimumFiringToleranceDegrees();
+                                    FiringAlignmentTolerance firingTolerance =
+                                            firingAlignmentTolerance(
+                                                    dist,
+                                                    RadarConfig.server()
+                                                            .autoFireMaxLateralErrorBlocks
+                                                            .get(),
+                                                    this.activeAlignmentAxisCount());
+                                    this.lastFiringAlignmentTolerance = firingTolerance;
                                     boolean auto = this.targetingConfig.autoFire();
                                     boolean yawPitchOk = this.hasCorrectYawPitch(
-                                            lag, minimumFiringTolerance);
+                                            lag, minimumFiringTolerance,
+                                            firingTolerance.maximumDegrees());
                                     boolean safeOk = !this.passesSafeZone();
                                     boolean cannonReady = adapterShot == null
                                             ? CannonUtil.isCannonReadyToFire(this.cannonMount)
@@ -1499,7 +1572,7 @@ public class WeaponFiringControl {
                                     if (this.level.getGameTime() % 20L == 0L) {
                                         LOGGER.debug("WFC FIREGATES: auto={} lead={} newSolver={} solverFireFresh={} provisional={} freshnessReason={} aimMode={} newConf={} minConf={} laserNoLead={} yawPitchOk={} safeOk={} cannonReady={} stableOk={} firingBE={} target={} aim={} offset={} stable={}/{} motion={} jerk={} eps={} reason={}", new Object[]{auto, hasLeadSolution, hasNewTargetingSolution, targetingResultFreshForFire, targetingResultProvisional, this.lastTargetingFreshnessReason, aimUpdateMode, targetingResult != null ? targetingResult.confidence() : null, motion.minConfidence(), canFireWithoutLead, yawPitchOk, safeOk, cannonReady, stableOk, this.fireController != null, this.target, offsetAim, this.offset, this.aimStableTicks, motion.stableTicksRequired(), motion.motionClass(), motion.jerk(), motion.aimStableEps(), motion.reason()});
                                         if (!yawPitchOk) {
-                                            LOGGER.debug("WFC AIMCHK: yawCtrl={} pitchCtrl={} atYaw={} atPitch={} targYaw={} targPitch={} minimumTolerance={}", new Object[]{this.yawController != null ? this.yawController.getBlockPos() : null, this.pitchController != null ? this.pitchController.getBlockPos() : null, this.yawController != null && this.yawController.isAlignedForFiring(lag, minimumFiringTolerance), this.pitchController != null && this.pitchController.isAlignedForFiring(lag, minimumFiringTolerance), this.yawController != null ? this.yawController.getTargetAngle() : null, this.pitchController != null ? this.pitchController.getTargetAngle() : null, minimumFiringTolerance});
+                                            LOGGER.debug("WFC AIMCHK: yawCtrl={} pitchCtrl={} atYaw={} atPitch={} targYaw={} targPitch={} minimumTolerance={} rangeTolerance={} range={} axes={}", new Object[]{this.yawController != null ? this.yawController.getBlockPos() : null, this.pitchController != null ? this.pitchController.getBlockPos() : null, this.yawController != null && this.yawController.isAlignedForFiring(lag, minimumFiringTolerance, firingTolerance.maximumDegrees()), this.pitchController != null && this.pitchController.isAlignedForFiring(lag, minimumFiringTolerance, firingTolerance.maximumDegrees()), this.yawController != null ? this.yawController.getTargetAngle() : null, this.pitchController != null ? this.pitchController.getTargetAngle() : null, minimumFiringTolerance, firingTolerance.maximumDegrees(), firingTolerance.distanceBlocks(), firingTolerance.axisCount()});
                                         }
 
                                         if (!auto) {
@@ -1559,6 +1632,7 @@ public class WeaponFiringControl {
                                                 sharedFireGates,
                                                 lag,
                                                 minimumFiringTolerance,
+                                                firingTolerance.maximumDegrees(),
                                                 adapterShot,
                                                 currentProjectile,
                                                 cannon);
@@ -1594,6 +1668,7 @@ public class WeaponFiringControl {
 
     public void resetTarget() {
         this.visCache.clear();
+        this.clearSublevelAimCache();
         this.target = null;
         this.activetrack = null;
         this.targetEntity = null;
@@ -1602,6 +1677,7 @@ public class WeaponFiringControl {
         this.lastAimPoint = null;
         this.lastOffsetAim = null;
         this.aimStableTicks = 0;
+        this.lastFiringAlignmentTolerance = null;
         this.cachedSableAngles = null;
         this.cachedSableAimTarget = null;
         this.cachedSableSolveTick = -1L;
@@ -1622,6 +1698,7 @@ public class WeaponFiringControl {
                 target, sameTarget, ballisticConfigChanged,
                 this.level != null ? this.level.getGameTime() : -1L);
         if (target == null) {
+            this.clearSublevelAimCache();
             this.target = null;
             this.activetrack = null;
             this.targetEntity = null;
@@ -1656,6 +1733,7 @@ public class WeaponFiringControl {
             this.targetEntity = null;
             this.targetSublevel = null;
             this.targetShipId = null;
+            this.clearSublevelAimCache();
             this.lastAimPoint = null;
             this.lastOffsetAim = null;
             this.aimStableTicks = 0;
@@ -1687,6 +1765,7 @@ public class WeaponFiringControl {
         this.view = view;
         this.targetingConfig = config;
         this.activetrack = null;
+        this.clearSublevelAimCache();
         if (!reset && binoTarget != null) {
             this.binoMode = true;
             this.binoTargetPos = binoTarget.immutable();
@@ -2252,7 +2331,9 @@ public class WeaponFiringControl {
 
         if (CannonUtil.isBigCannon(cannon)) {
             CannonUtil.BigCannonShotState bigShot = CannonUtil.resolveBigCannonShotState(cannon, level);
-            if (bigShot == null || !Double.isFinite(bigShot.speed()) || bigShot.speed() <= 0.0F) {
+            if (bigShot == null || !bigShot.hasProjectile()
+                    || !Double.isFinite(bigShot.speed())
+                    || bigShot.speed() <= 0.0F) {
                 return null;
             }
             BallisticPropertiesComponent ballistics = bigShot.ballistics();
@@ -2264,9 +2345,7 @@ public class WeaponFiringControl {
                     dimension.dragMultiplier(),
                     ballistics.isQuadraticDrag()
             );
-            String fingerprint = Integer.toHexString(java.util.Objects.hash(
-                    bigShot.speed(), ballistics, bigShot.projectileClass(), bigShot.projectileLocalPos(),
-                    bigShot.propellantCharges(), bigShot.propellantPower(), bigShot.projectileAddedPower()));
+            String fingerprint = bigCannonShotFingerprint(model, bigShot);
             return new ResolvedProjectileState(model, ballistics, 0, bigShot.reason(),
                     SolverKind.STANDARD_ASYNC, fingerprint, true, "big_cannon",
                     bigShot.projectileClass() == null ? "<unresolved>" : bigShot.projectileClass(), 0);
@@ -2276,7 +2355,15 @@ public class WeaponFiringControl {
         if (!Double.isFinite(speed) || speed <= 0.0) {
             return null;
         }
-        BallisticPropertiesComponent ballistics = CannonUtil.getBallistics(cannon, level);
+        BallisticPropertiesComponent ballistics =
+                CannonUtil.isAutocannonFamily(cannon)
+                        ? CannonUtil.resolveLoadedAutocannonBallistics(
+                        cannon, level)
+                        : CannonUtil.getBallistics(cannon, level);
+        if (CannonUtil.isAutocannonFamily(cannon)
+                && ballistics == null) {
+            return null;
+        }
         double gravity = ballistics == null ? CannonUtil.getProjectileGravity(cannon, level) : ballistics.gravity();
         double drag = ballistics == null ? CannonUtil.getProjectileDrag(cannon, level) : ballistics.drag();
         if (!Double.isFinite(gravity)) {
@@ -2299,6 +2386,16 @@ public class WeaponFiringControl {
         return new ResolvedProjectileState(model, ballistics, lifetime, "standard_projectile",
                 SolverKind.STANDARD_ASYNC, fingerprint, true, "standard",
                 CannonUtil.isAutocannonFamily(cannon) ? "<autocannon ammo>" : "<standard ammo>", 0);
+    }
+
+    static String bigCannonShotFingerprint(
+            ProjectileModel model,
+            CannonUtil.BigCannonShotState shot
+    ) {
+        return Integer.toHexString(java.util.Objects.hash(
+                "big_cannon", model, shot.ballistics(), shot.projectileClass(),
+                shot.projectileLocalPos(), shot.propellantCharges(),
+                shot.propellantPower(), shot.projectileAddedPower()));
     }
 
     @Nullable
@@ -3122,15 +3219,63 @@ public class WeaponFiringControl {
         return apiVelocity.lengthSqr() > 1.0E-8 ? apiVelocity : fallbackVelocity;
     }
 
+    private UUID sublevelMotionSampleId(UUID sublevelId) {
+        String dimension = this.level == null ? "unknown"
+                : this.level.dimension().location().toString();
+        String key = sublevelId + "|" + dimension + "|"
+                + this.cannonMount.getBlockPos().asLong();
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void invalidateSublevelAimDependentState(UUID sublevelId) {
+        this.targetMotionStates.remove(sublevelId);
+        if (sublevelId.equals(this.lastSableVelocityTargetId)) {
+            this.lastSableVelocityTargetId = null;
+            this.lastSableVelocityTargetPos = null;
+            this.lastSableVelocityTargetTick = Long.MIN_VALUE;
+            this.lastSableVelocityPerTick = Vec3.ZERO;
+        }
+        AccelerationTracker.clear(this.sublevelMotionSampleId(sublevelId));
+        this.lastAimPoint = null;
+        this.lastOffsetAim = null;
+        this.aimStableTicks = 0;
+        this.cachedSableAngles = null;
+        this.cachedSableAimTarget = null;
+        this.cachedSableSolveTick = -1L;
+        this.cachedSableWorldAimDirection = null;
+        this.clearTargetingResultCache();
+    }
+
+    private void clearSublevelAimCache() {
+        if (this.cachedSublevelAim != null) {
+            AccelerationTracker.clear(this.sublevelMotionSampleId(
+                    this.cachedSublevelAim.sublevelId()));
+        }
+        this.cachedSublevelAim = null;
+        this.currentSublevelAim = null;
+    }
+
     private Vec3 estimateSublevelTargetVelocityFromPosition(SubLevelAccess subLevel, Vec3 targetWorldPosition, long gameTime) {
         UUID id = subLevel.getUniqueId();
         if (targetWorldPosition != null && id != null) {
-            Vec3 velocity = this.lastSableVelocityPerTick;
-            if (id.equals(this.lastSableVelocityTargetId) && this.lastSableVelocityTargetPos != null && this.lastSableVelocityTargetTick != Long.MIN_VALUE && gameTime > this.lastSableVelocityTargetTick) {
+            Vec3 velocity = Vec3.ZERO;
+            boolean sameTarget = id.equals(this.lastSableVelocityTargetId);
+            if (sameTarget && this.lastSableVelocityTargetPos != null
+                    && gameTime == this.lastSableVelocityTargetTick) {
+                return this.lastSableVelocityPerTick;
+            }
+            if (sameTarget && this.lastSableVelocityTargetPos != null
+                    && this.lastSableVelocityTargetTick != Long.MIN_VALUE
+                    && gameTime > this.lastSableVelocityTargetTick) {
                 long dt = gameTime - this.lastSableVelocityTargetTick;
-                velocity = targetWorldPosition.subtract(this.lastSableVelocityTargetPos).scale((double)1.0F / (double)dt);
-                if (!Double.isFinite(velocity.x) || !Double.isFinite(velocity.y) || !Double.isFinite(velocity.z) || velocity.lengthSqr() > (double)25.0F) {
-                    velocity = Vec3.ZERO;
+                if (dt <= TARGET_MOTION_HISTORY_MAX_GAP_TICKS) {
+                    velocity = targetWorldPosition
+                            .subtract(this.lastSableVelocityTargetPos)
+                            .scale(1.0 / (double)dt);
+                    if (!finite(velocity)
+                            || velocity.lengthSqr() > 25.0) {
+                        velocity = Vec3.ZERO;
+                    }
                 }
             }
 
@@ -3158,6 +3303,13 @@ public class WeaponFiringControl {
 
         long tick = serverLevel.getGameTime();
         TargetMotionState previous = this.targetMotionStates.get(targetId);
+        if (previous != null) {
+            long sampleGap = tick - previous.tick;
+            if (sampleGap <= 0L
+                    || sampleGap > TARGET_MOTION_HISTORY_MAX_GAP_TICKS) {
+                previous = null;
+            }
+        }
         long dt = previous == null ? 1L : Math.max(1L, tick - previous.tick);
         Vec3 sampledPosition = targetWorldPosition == null ? Vec3.ZERO : targetWorldPosition;
         int stationarySamples = previous != null
@@ -3265,6 +3417,15 @@ public class WeaponFiringControl {
 
     @Nullable
     private AABB resolveSublevelWorldAabb(@Nullable SubLevelAccess subLevel) {
+        if (subLevel != null && this.currentSublevelAim != null) {
+            return this.currentSublevelAim.worldAabb();
+        }
+        return this.resolveWholeSublevelWorldAabb(subLevel);
+    }
+
+    @Nullable
+    private AABB resolveWholeSublevelWorldAabb(
+            @Nullable SubLevelAccess subLevel) {
         if (Mods.SABLE.isLoaded() && subLevel != null && subLevel.boundingBox() != null) {
             BoundingBox3dc box = subLevel.boundingBox();
             double minX = box.minX();
@@ -3291,7 +3452,10 @@ public class WeaponFiringControl {
     private Vec3 getPlatformAcceleration(ServerLevel serverLevel, Vec3 platformVelocity) {
         if (Mods.SABLE.isLoaded() && SableUtils.isBlockInShipyard(serverLevel, this.cannonMount.getBlockPos())) {
             SubLevelAccess mountShip = SableCompanion.INSTANCE.getContaining(serverLevel, this.cannonMount.getBlockPos());
-            return mountShip == null ? Vec3.ZERO : AccelerationTracker.getAccelerationPerTick2(mountShip.getUniqueId(), platformVelocity);
+            return mountShip == null ? Vec3.ZERO
+                    : AccelerationTracker.getAccelerationPerTick2(
+                    mountShip.getUniqueId(), platformVelocity,
+                    serverLevel.getGameTime());
         } else {
             return Vec3.ZERO;
         }
@@ -3581,8 +3745,9 @@ public class WeaponFiringControl {
                 double currentYaw = wrap360((double)contraption.yaw);
                 double targetYaw = wrap360(desiredControllerYaw);
                 double yawError = Math.abs(shortestDelta(currentYaw, targetYaw));
-                yawTicks = ticksForAngle(yawError,
-                        Math.abs(this.yawController.getAvailableInputSpeed()) / 24.0);
+                yawTicks = DirectCbcMountMotion.estimateTicks(
+                        yawError,
+                        Math.abs(this.yawController.getAvailableInputSpeed()));
             }
 
             double pitchTicks = (double)0.0F;
@@ -3591,8 +3756,9 @@ public class WeaponFiringControl {
                 int invert = -cannonContraption.initialOrientation().getStepX() + cannonContraption.initialOrientation().getStepZ();
                 currentPitch *= (double)(-invert);
                 double pitchError = Math.abs(desiredPitch - currentPitch);
-                pitchTicks = ticksForAngle(pitchError,
-                        Math.abs(this.pitchController.getAvailableInputSpeed()) / 24.0);
+                pitchTicks = DirectCbcMountMotion.estimateTicks(
+                        pitchError,
+                        Math.abs(this.pitchController.getAvailableInputSpeed()));
             }
 
             double ticks = Math.max(yawTicks, pitchTicks);
@@ -3681,20 +3847,28 @@ public class WeaponFiringControl {
     }
 
     private boolean hasCorrectYawPitch(boolean lag, double minimumToleranceDegrees) {
+        return this.hasCorrectYawPitch(
+                lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
+    }
+
+    private boolean hasCorrectYawPitch(boolean lag,
+                                       double minimumToleranceDegrees,
+                                       double maximumToleranceDegrees) {
         if (this.yawController == null && this.pitchController == null) {
             return false;
         } else {
             boolean yaw = this.cannonMount.supportsDirectYawControl()
                     || this.isFixedMountYawAligned(
-                    this.fixedMountDesiredYaw, lag, minimumToleranceDegrees);
+                    this.fixedMountDesiredYaw, lag, minimumToleranceDegrees,
+                    maximumToleranceDegrees);
             if (this.yawController != null) {
                 yaw = this.yawController.isAlignedForFiring(
-                        lag, minimumToleranceDegrees);
+                        lag, minimumToleranceDegrees, maximumToleranceDegrees);
             }
 
             boolean pitch = this.pitchController != null
                     && this.pitchController.isAlignedForFiring(
-                    lag, minimumToleranceDegrees);
+                    lag, minimumToleranceDegrees, maximumToleranceDegrees);
             return yaw && pitch;
         }
     }
@@ -3722,6 +3896,17 @@ public class WeaponFiringControl {
             boolean lag,
             double minimumToleranceDegrees
     ) {
+        return this.isFixedMountYawAligned(
+                desiredYaw, lag, minimumToleranceDegrees,
+                Double.POSITIVE_INFINITY);
+    }
+
+    private boolean isFixedMountYawAligned(
+            @Nullable Double desiredYaw,
+            boolean lag,
+            double minimumToleranceDegrees,
+            double maximumToleranceDegrees
+    ) {
         PitchOrientedContraptionEntity mounted = this.cannonMount.getContraption();
         if (desiredYaw == null || mounted == null) {
             return false;
@@ -3733,7 +3918,38 @@ public class WeaponFiringControl {
         if (Double.isFinite(minimumToleranceDegrees)) {
             tolerance = Math.max(tolerance, Math.max(0.0, minimumToleranceDegrees));
         }
+        if (Double.isFinite(maximumToleranceDegrees)) {
+            tolerance = Math.min(tolerance,
+                    Math.max(0.0, maximumToleranceDegrees));
+        }
         return Math.abs(shortestDelta(wrap360(mounted.yaw), wrap360(desiredYaw))) < tolerance;
+    }
+
+    private int activeAlignmentAxisCount() {
+        int axes = this.pitchController == null ? 0 : 1;
+        if (this.yawController != null
+                || !this.cannonMount.supportsDirectYawControl()) {
+            axes++;
+        }
+        return Math.max(1, axes);
+    }
+
+    static FiringAlignmentTolerance firingAlignmentTolerance(
+            double distanceBlocks,
+            double lateralErrorBudgetBlocks,
+            int axisCount
+    ) {
+        boolean validDistance = Double.isFinite(distanceBlocks)
+                && distanceBlocks >= 0.0;
+        double distance = validDistance ? distanceBlocks : 0.0;
+        double budget = Double.isFinite(lateralErrorBudgetBlocks)
+                ? Math.max(0.0, lateralErrorBudgetBlocks) : 0.0;
+        int axes = Math.max(1, axisCount);
+        double perAxisBudget = budget / Math.sqrt(axes);
+        double maximumDegrees = validDistance
+                ? Math.toDegrees(Math.atan2(perAxisBudget, distance)) : 0.0;
+        return new FiringAlignmentTolerance(
+                maximumDegrees, distance, budget, axes);
     }
 
     private void updateDualFireControllers(
@@ -3741,6 +3957,7 @@ public class WeaponFiringControl {
             boolean sharedFireGates,
             boolean lag,
             double authorityMinimumTolerance,
+            double maximumTolerance,
             @Nullable WeaponShotProfile authorityAdapter,
             @Nullable ResolvedProjectileState authorityProjectile,
             AbstractMountedCannonContraption authorityCannon
@@ -3762,18 +3979,20 @@ public class WeaponFiringControl {
             boolean pitchAligned = this.pitchController != null
                     && this.pitchController
                     .isCbcMountAlignedForFiring(
-                            side.mount, lag, tolerance);
+                            side.mount, lag, tolerance,
+                            maximumTolerance);
             boolean yawCommandValid =
                     this.sharedYawController != null
                             || side.desiredYaw != null;
             boolean yawAligned;
             if (this.sharedYawController != null) {
                 yawAligned = this.sharedYawController
-                        .isAlignedForFiring(lag, tolerance);
+                        .isAlignedForFiring(
+                                lag, tolerance, maximumTolerance);
             } else {
                 yawAligned = side.yaw != null
                         && side.yaw.isAlignedForFiring(
-                        lag, tolerance);
+                        lag, tolerance, maximumTolerance);
             }
             boolean profileMatches = side == authority
                     || authorityFingerprint != null
@@ -4082,6 +4301,17 @@ public class WeaponFiringControl {
             boolean looseAim, String reason) {
     }
 
+    private static record CachedSublevelAim(
+            UUID sublevelId, SubLevelAimResolver.LocalAim localAim,
+            int revision, boolean requireLos, long acquiredTick) {
+    }
+
+    private static record ResolvedSublevelAim(
+            Vec3 worldPoint, @Nullable AABB worldAabb,
+            @Nullable SubLevelAimResolver.LocalAim localAim,
+            int revision, boolean fallback) {
+    }
+
     private static record AimGeometry(
             Vec3 steeringOrigin, Vec3 muzzlePosition,
             double muzzleForwardOffset, boolean coupled) {
@@ -4094,6 +4324,150 @@ public class WeaponFiringControl {
                     direction.normalize()
                             .scale(this.muzzleForwardOffset));
         }
+    }
+
+    /**
+     * Resolves the point this weapon would actually use to engage a track.
+     * Sublevel tracks are evaluated without mutating the live firing cache so
+     * auto-target candidate probing cannot disturb the current target.
+     */
+    @Nullable
+    public Vec3 resolveEngagementAimPoint(ServerLevel serverLevel,
+                                          @Nullable RadarTrack track,
+                                          boolean requireLos) {
+        if (track == null || !isSableTrack(track)) {
+            return track == null ? null : track.position();
+        }
+        UUID id;
+        try {
+            id = UUID.fromString(track.id());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+        SubLevelContainer container = SubLevelContainer.getContainer(serverLevel);
+        SubLevelAccess subLevel = container == null
+                ? null : container.getSubLevel(id);
+        Vec3 origin = this.getCannonRayStart();
+        if (subLevel == null || origin == null) {
+            return null;
+        }
+        ResolvedSublevelAim aim = this.resolveSublevelAim(
+                serverLevel, subLevel, origin, requireLos, false);
+        return aim == null ? null : aim.worldPoint();
+    }
+
+    private static boolean isSableTrack(RadarTrack track) {
+        return track != null && track.trackCategory() == TrackCategory.SABLE
+                && "Sable:ship".equals(track.entityType());
+    }
+
+    @Nullable
+    private ResolvedSublevelAim resolveSublevelAim(
+            ServerLevel serverLevel, SubLevelAccess subLevel,
+            Vec3 worldOrigin, boolean requireLos, boolean cacheSelection) {
+        UUID id = subLevel.getUniqueId();
+        SableSilhouetteServerCache.Snapshot snapshot =
+                SableSilhouetteServerCache.getSnapshot(serverLevel, id);
+        long now = serverLevel.getGameTime();
+
+        if (!snapshot.hasDetailedHull()) {
+            if (cacheSelection && this.cachedSublevelAim != null) {
+                this.invalidateSublevelAimDependentState(id);
+                this.cachedSublevelAim = null;
+            }
+            Vec3 center = RadarTrackUtil.getPosition(subLevel);
+            ResolvedSublevelAim fallback = new ResolvedSublevelAim(
+                    center, this.resolveWholeSublevelWorldAabb(subLevel),
+                    null, snapshot.revision(), true);
+            if (requireLos && !this.rayReachesTargetSublevel(
+                    worldOrigin, center, id)) {
+                return null;
+            }
+            return fallback;
+        }
+
+        CachedSublevelAim cached = cacheSelection
+                ? this.cachedSublevelAim : null;
+        boolean sameCache = cached != null
+                && id.equals(cached.sublevelId())
+                && cached.revision() == snapshot.revision()
+                && cached.requireLos() == requireLos;
+        boolean reacquire = !sameCache
+                || now - cached.acquiredTick()
+                >= SUBLEVEL_AIM_REACQUIRE_TICKS;
+        if (sameCache && !reacquire) {
+            ResolvedSublevelAim resolved = this.materializeSublevelAim(
+                    subLevel, cached.localAim(), cached.revision());
+            if (!requireLos || this.rayReachesTargetSublevel(
+                    worldOrigin, resolved.worldPoint(), id)) {
+                return resolved;
+            }
+        }
+
+        Vec3 localOrigin = SubLevelAimResolver.toLocal(
+                subLevel, worldOrigin);
+        SubLevelAimResolver.LocalAim selected = SubLevelAimResolver.select(
+                snapshot.silhouette().localBoxes(), localOrigin,
+                SUBLEVEL_AIM_CANDIDATE_LIMIT, candidate -> {
+                    if (!requireLos) {
+                        return true;
+                    }
+                    Vec3 worldPoint = SubLevelAimResolver.toWorld(
+                            subLevel, candidate.point());
+                    return this.rayReachesTargetSublevel(
+                            worldOrigin, worldPoint, id);
+                });
+        if (selected == null) {
+            return null;
+        }
+
+        if (cacheSelection) {
+            boolean changed = cached == null
+                    || cached.revision() != snapshot.revision()
+                    || !cached.localAim().equals(selected);
+            this.cachedSublevelAim = new CachedSublevelAim(
+                    id, selected, snapshot.revision(), requireLos, now);
+            if (changed) {
+                this.invalidateSublevelAimDependentState(id);
+            }
+        }
+        return this.materializeSublevelAim(
+                subLevel, selected, snapshot.revision());
+    }
+
+    private ResolvedSublevelAim materializeSublevelAim(
+            SubLevelAccess subLevel, SubLevelAimResolver.LocalAim localAim,
+            int revision) {
+        return new ResolvedSublevelAim(
+                SubLevelAimResolver.toWorld(subLevel, localAim.point()),
+                SubLevelAimResolver.toWorldAabb(subLevel, localAim.box()),
+                localAim, revision, false);
+    }
+
+    private boolean rayReachesTargetSublevel(Vec3 start, Vec3 end,
+                                              UUID targetId) {
+        for (SafeZone zone : this.safeZones) {
+            if (zone != null && zone.intersects(this.level, start, end)) {
+                return false;
+            }
+        }
+        ClipContext context = new ClipContext(start, end, Block.COLLIDER,
+                Fluid.NONE, CollisionContext.empty());
+        HitResult hit = this.level.clip(context);
+        if (hit.getType() == Type.MISS) {
+            return true;
+        }
+        if (hit.getLocation().distanceToSqr(start)
+                >= end.distanceToSqr(start) - 1.0E-6) {
+            return true;
+        }
+        if (hit instanceof BlockHitResult blockHit) {
+            SubLevelAccess hitSublevel = SableCompanion.INSTANCE.getContaining(
+                    this.level, blockHit.getBlockPos());
+            return hitSublevel != null
+                    && targetId.equals(hitSublevel.getUniqueId());
+        }
+        return false;
     }
 
     public static record SolverDebugReport(List<String> lines, @Nullable ProjectileSimulator.SimulationResult trajectory) {
@@ -4135,6 +4509,14 @@ public class WeaponFiringControl {
             return new AimCommand(appliedPitchDeg,
                     appliedControllerYawDeg);
         }
+    }
+
+    record FiringAlignmentTolerance(
+            double maximumDegrees,
+            double distanceBlocks,
+            double lateralErrorBudgetBlocks,
+            int axisCount
+    ) {
     }
 
     static record MountAimFrame(
@@ -4223,11 +4605,11 @@ public class WeaponFiringControl {
     }
 
     static AimUpdateMode selectAimUpdateMode(
-            boolean hasResolvedAim, boolean asyncBallisticAimExpected) {
+            boolean hasResolvedAim, boolean ballisticAimExpected) {
         if (hasResolvedAim) {
             return AimUpdateMode.SOLVED;
         }
-        return asyncBallisticAimExpected
+        return ballisticAimExpected
                 ? AimUpdateMode.HOLD : AimUpdateMode.DIRECT;
     }
 
