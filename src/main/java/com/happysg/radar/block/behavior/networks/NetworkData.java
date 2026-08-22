@@ -10,6 +10,7 @@ import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
 import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
+import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlock;
 import com.happysg.radar.registry.ModBlocks;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
@@ -753,7 +754,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         if (state.getBlock() instanceof SkyRadarBlock) {
             return new ContactEndpoint(ContactKind.RADAR, pos, RadarKind.SKY, null);
         }
-        if (isSonarBlock(state)) {
+        if (state.getBlock() instanceof SonarBearingBlock) {
             return new ContactEndpoint(ContactKind.RADAR, pos, RadarKind.SONAR, null);
         }
 
