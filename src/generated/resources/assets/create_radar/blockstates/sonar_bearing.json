@@ -1,0 +1,30 @@
+{
+  "variants": {
+    "facing=up": {
+      "model": "create_radar:block/sonar_bearing"
+    },
+    "facing=down": {
+      "model": "create_radar:block/sonar_bearing",
+      "x": 180
+    },
+    "facing=north": {
+      "model": "create_radar:block/sonar_bearing",
+      "x": 90
+    },
+    "facing=east": {
+      "model": "create_radar:block/sonar_bearing",
+      "x": 90,
+      "y": 90
+    },
+    "facing=south": {
+      "model": "create_radar:block/sonar_bearing",
+      "x": 90,
+      "y": 180
+    },
+    "facing=west": {
+      "model": "create_radar:block/sonar_bearing",
+      "x": 90,
+      "y": 270
+    }
+  }
+}

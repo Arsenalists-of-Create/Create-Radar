@@ -21,6 +21,8 @@
   "block.create_radar.radar_plate_block": "Radar Plate",
   "block.create_radar.radar_receiver_block": "Radar Receiver Block",
   "block.create_radar.radar_warning_receiver": "Radar Warning Receiver",
+  "block.create_radar.sonar_bearing": "Sonar Bearing",
+  "block.create_radar.sonar_sensor": "Sonar Sensor",
   "block.create_radar.radar_warning_receiver.tooltip.summary": "",
   "block.create_radar.radar_warning_receiver.tooltip.condition1":"When placed on a Sable Sublevel",
   "block.create_radar.radar_warning_receiver.tooltip.behaviour1": "Plays a sound when _in range of_ a radar, as well another sound when _locked on to_ by a radar",
