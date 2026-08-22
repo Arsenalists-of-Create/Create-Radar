@@ -8,17 +8,17 @@ import net.minecraft.world.phys.Vec3;
 public interface RadarContact {
 
     /**
-     * Stable identifier for this contact.
+     * @return stable contact identifier
      */
     String getId();
 
     /**
-     * Current world-space position of the contact.
+     * @return current world-space position
      */
     Vec3 getPosition();
 
     /**
-     * Current world-space velocity of the contact.
+     * @return current world-space velocity
      */
     Vec3 getVelocity();
 }
