@@ -21,6 +21,9 @@ import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.api.mount.RadarMountAdapter;
+import com.happysg.radar.api.mount.RadarMountRegistry;
+import com.happysg.radar.api.controller.RadarYawController;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
@@ -50,8 +53,7 @@ import org.slf4j.Logger;
 import java.util.List;
 
 public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
-        implements ControllerLimitAccess, ControllerCollisionSource,
-        ControllerInputShaft {
+        implements ControllerLimitAccess, ControllerCollisionSource, ControllerInputShaft, RadarYawController {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -89,11 +91,13 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private final CannonMountYaw cannonHandler;
     private final PhysBearingYaw physHandler;
+    private final ApiMountYaw apiHandler;
 
     public AutoYawControllerBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
         super(typeIn, pos, state);
         this.cannonHandler = new CannonMountYaw(this);
         this.physHandler = new PhysBearingYaw(this);
+        this.apiHandler = new ApiMountYaw(this);
     }
 
     @Override
@@ -122,11 +126,15 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         if (mount != null) {
             if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
                 cannonHandler.tick(mount.cbc);
+
             } else if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
                 if (level.getGameTime() % 20 == 5) {
                     physHandler.maybeUpdateYawZeroFromCannonInitialOrientation();
                 }
                 physHandler.tick(mount.phys);
+
+            } else if (mount.kind == MountKind.API && mount.api != null) {
+                apiHandler.tick(mount.api);
             }
         }
     }
@@ -142,6 +150,18 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     public double getRequestedTargetAngle() {
         return requestedTargetAngle;
+    }
+
+    @Override
+    public boolean isControllerRunning() { return isRunning; }
+
+    @Override
+    public void stopController() {
+        kineticControllerState.endContinuousTracking();
+        isRunning = false;
+        kineticControllerState.onTargetChanged(false, targetAngle, DEADBAND_DEG);
+        notifyUpdate();
+        setChanged();
     }
 
     private void applyTargetRequest(double requestedAngle, boolean running,
@@ -388,6 +408,11 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
         if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
             physHandler.setTarget(mount.phys, targetPos);
+            return;
+        }
+
+        if (mount.kind == MountKind.API && mount.api != null) {
+            apiHandler.setTarget(mount.api, targetPos);
         }
     }
 
@@ -506,6 +531,10 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
             return physHandler.atTargetYaw(mount.phys, lag, minimumToleranceDegrees);
         }
 
+        if (mount.kind == MountKind.API && mount.api != null) {
+            return apiHandler.atTargetYaw(mount.api, lag, minimumToleranceDegrees);
+        }
+
         return false;
     }
 
@@ -609,6 +638,12 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
                 newMount = Mount.cbc(cbc);
             } else if (Mods.VS_CLOCKWORK.isLoaded() && adjacent instanceof PhysBearingBlockEntity phys) {
                 newMount = Mount.phys(phys);
+            } else {
+                RadarMountAdapter api = RadarMountRegistry.find(level, mountPos);
+
+                if (api != null && api.supportsYaw()) {
+                    newMount = Mount.api(api, mountPos);
+                }
             }
         }
 
@@ -670,8 +705,19 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         CannonMountContext cbc = Mods.CREATEBIGCANNONS.isLoaded()
                 ? CannonMountContext.resolveEndpoint(level, pos)
                 : null;
-        return (cbc != null && cbc.supportsDirectYawControl())
-                || (Mods.VS_CLOCKWORK.isLoaded() && be instanceof PhysBearingBlockEntity);
+
+        if (cbc != null && cbc.supportsDirectYawControl()) {
+            return true;
+        }
+
+        if (Mods.VS_CLOCKWORK.isLoaded()
+                && be instanceof PhysBearingBlockEntity) {
+            return true;
+        }
+
+        RadarMountAdapter api = RadarMountRegistry.find(level, pos);
+
+        return api != null && api.supportsYaw();
     }
 
     /** Server-side mount data used by the controller collision-view snapshot. */
@@ -752,9 +798,11 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         if (first == null || second == null || first.kind != second.kind) {
             return false;
         }
-        return first.kind == MountKind.CBC
-                ? first.cbc != null && first.cbc.sameMount(second.cbc)
-                : first.phys == second.phys;
+        return switch (first.kind) {
+            case CBC -> first.cbc != null && second.cbc != null && first.cbc.sameMount(second.cbc);
+            case PHYS -> first.phys == second.phys;
+            case API -> first.apiPos != null && first.apiPos.equals(second.apiPos);
+        };
     }
 
     /** Input power is sampled, never connected to this isolated generator. */
@@ -1006,9 +1054,17 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
                 .anyMatch(CannonMountContext::hasAssembledCannon)) {
             return true;
         }
+
         Mount mount = resolveMount();
-        return mount != null && mount.kind == MountKind.PHYS
-                && mount.phys != null && mount.phys.isRunning();
+        if (mount == null) {
+            return false;
+        }
+
+        return switch (mount.kind) {
+            case CBC -> mount.cbc != null && mount.cbc.hasAssembledCannon();
+            case PHYS -> mount.phys != null && mount.phys.isRunning();
+            case API -> mount.api != null && mount.api.isValid() && mount.api.isAssembled();
+        };
     }
 
     @Override
@@ -1255,26 +1311,31 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     enum MountKind {
         CBC,
-        PHYS
+        PHYS,
+        API
     }
 
     static class Mount {
         final MountKind kind;
         final CannonMountContext cbc;
         final PhysBearingBlockEntity phys;
+        final RadarMountAdapter api;
+        final BlockPos apiPos;
 
-        private Mount(MountKind kind, @Nullable CannonMountContext cbc, @Nullable PhysBearingBlockEntity phys) {
+        private Mount(MountKind kind, @Nullable CannonMountContext cbc, @Nullable PhysBearingBlockEntity phys, @Nullable RadarMountAdapter api, @Nullable BlockPos apiPos) {
             this.kind = kind;
             this.cbc = cbc;
             this.phys = phys;
+            this.api = api;
+            this.apiPos = apiPos;
         }
 
         static Mount cbc(CannonMountContext cbc) {
-            return new Mount(MountKind.CBC, cbc, null);
+            return new Mount(MountKind.CBC, cbc, null, null, null);
         }
-
         static Mount phys(PhysBearingBlockEntity phys) {
-            return new Mount(MountKind.PHYS, null, phys);
+            return new Mount(MountKind.PHYS, null, phys, null, null);
         }
+        static Mount api(RadarMountAdapter api, BlockPos pos) { return new Mount(MountKind.API, null, null, api, pos.immutable()); }
     }
 }

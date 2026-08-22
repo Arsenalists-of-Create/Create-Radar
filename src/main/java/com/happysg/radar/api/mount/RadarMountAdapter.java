@@ -1,5 +1,6 @@
 package com.happysg.radar.api.mount;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.BlockPos;
 
 /**
  * Represents a weapon mount that Create Radar can aim.
@@ -49,4 +50,9 @@ public interface RadarMountAdapter {
      * World-space position aiming calculations should originate from.
      */
     Vec3 getAimOrigin();
+
+    /**
+     * Block position used to identify and link this mount.
+     */
+    BlockPos getMountPos();
 }

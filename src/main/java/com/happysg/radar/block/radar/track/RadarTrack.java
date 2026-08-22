@@ -2,6 +2,7 @@ package com.happysg.radar.block.radar.track;
 
 import com.happysg.radar.block.monitor.MonitorSprite;
 import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.api.tracking.RadarContact;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.createmod.catnip.theme.Color;
 import net.minecraft.nbt.CompoundTag;
@@ -13,7 +14,7 @@ import net.minecraft.world.phys.Vec3;
 import java.util.UUID;
 
 
-public class RadarTrack {
+public class RadarTrack implements RadarContact {
     public static final int FRIENDLY_RADAR_COLOR = 0x3399ff;
 
     private final String id;
@@ -139,10 +140,12 @@ public class RadarTrack {
         scannedTime = level.getGameTime();
     }
 
+    @Override
     public String getId() {
         return id;
     }
 
+    @Override
     public Vec3 getPosition() {
         return position;
     }
@@ -151,6 +154,7 @@ public class RadarTrack {
         this.position = position;
     }
 
+    @Override
     public Vec3 getVelocity() {
         return velocity;
     }

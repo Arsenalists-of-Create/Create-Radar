@@ -24,6 +24,9 @@ import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.api.mount.RadarMountAdapter;
+import com.happysg.radar.api.mount.RadarMountRegistry;
+import com.happysg.radar.api.controller.RadarPitchController;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
@@ -53,8 +56,7 @@ import java.util.Set;
 import java.util.UUID;
 
 public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
-        implements ControllerLimitAccess, ControllerCollisionSource,
-        ControllerInputShaft {
+        implements ControllerLimitAccess, ControllerCollisionSource, ControllerInputShaft, RadarPitchController {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final double CBC_TOLERANCE = 0.1;
@@ -106,11 +108,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private final CannonMountPitch cannonHandler;
     private final PhysBearingPitch physHandler;
+    private final ApiMountPitch apiHandler;
 
     public AutoPitchControllerBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
         super(typeIn, pos, state);
         this.cannonHandler = new CannonMountPitch(this);
         this.physHandler = new PhysBearingPitch(this);
+        this.apiHandler = new ApiMountPitch(this);
     }
 
     @Override
@@ -144,10 +148,14 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
-        if (mount != null && mount.kind == MountKind.PHYS
-                && Mods.VS_CLOCKWORK.isLoaded()) {
+        Mount mount = resolveMount();
+        if (mount != null && mount.kind == MountKind.PHYS && supportsPhysBearingMounts() && Mods.VS_CLOCKWORK.isLoaded()) {
             physHandler.tick(mount.phys);
+            return;
+        }
+
+        if (mount != null && mount.kind == MountKind.API && mount.api != null) {
+            apiHandler.tick(mount.api);
             return;
         }
 
@@ -518,10 +526,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
-        if (mount != null && mount.kind == MountKind.PHYS
-                && Mods.VS_CLOCKWORK.isLoaded()) {
+        Mount mount = resolveMount();
+        if (mount != null && mount.kind == MountKind.PHYS && supportsPhysBearingMounts() && Mods.VS_CLOCKWORK.isLoaded()) {
             physHandler.setTarget(mount.phys, targetPos);
+        }
+
+        if (mount != null && mount.kind == MountKind.API && mount.api != null) {
+            apiHandler.setTarget(mount.api, targetPos);
         }
     }
 
@@ -545,25 +556,26 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         if (hasStructuralKineticSelection()) {
-            return kineticControllerState.isReady(resolveKineticMount(), isRunning,
-                    targetAngle, DEADBAND_DEG);
+            return kineticControllerState.isReady(resolveKineticMount(), isRunning, targetAngle, DEADBAND_DEG);
         }
 
         List<CannonMountContext> cbcMounts = resolveControlledCbcMounts();
         if (Mods.CREATEBIGCANNONS.isLoaded() && !cbcMounts.isEmpty()) {
             for (CannonMountContext mount : cbcMounts) {
-                if (!cannonHandler.atTargetPitch(
-                        mount, lag, minimumToleranceDegrees)) {
+                if (!cannonHandler.atTargetPitch(mount, lag, minimumToleranceDegrees)) {
                     return false;
                 }
             }
             return true;
         }
 
-        Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
-        if (mount != null && mount.kind == MountKind.PHYS
-                && Mods.VS_CLOCKWORK.isLoaded()) {
+        Mount mount = resolveMount();
+        if (mount != null && mount.kind == MountKind.PHYS && supportsPhysBearingMounts() && Mods.VS_CLOCKWORK.isLoaded()) {
             return physHandler.atTargetPitch(mount.phys, lag, minimumToleranceDegrees);
+        }
+
+        if (mount != null && mount.kind == MountKind.API && mount.api != null) {
+            return apiHandler.atTargetPitch(mount.api, lag, minimumToleranceDegrees);
         }
 
         return false;
@@ -971,10 +983,14 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                     : null;
             if (cbc != null) {
                 newMount = Mount.cbc(cbc);
-            } else if (supportsPhysBearingMounts()
-                    && Mods.VS_CLOCKWORK.isLoaded()
-                    && be instanceof PhysBearingBlockEntity phys) {
+            } else if (supportsPhysBearingMounts() && Mods.VS_CLOCKWORK.isLoaded() && be instanceof PhysBearingBlockEntity phys) {
                 newMount = Mount.phys(phys);
+            } else {
+                RadarMountAdapter api = RadarMountRegistry.find(level, mountPos);
+
+                if (api != null && api.supportsPitch()) {
+                    newMount = Mount.api(api, mountPos);
+                }
             }
         }
 
@@ -1004,12 +1020,16 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (first == second) {
             return true;
         }
+
         if (first == null || second == null || first.kind != second.kind) {
             return false;
         }
-        return first.kind == MountKind.CBC
-                ? first.cbc != null && first.cbc.sameMount(second.cbc)
-                : first.phys == second.phys;
+
+        return switch (first.kind) {
+            case CBC -> first.cbc != null && second.cbc != null && first.cbc.sameMount(second.cbc);
+            case PHYS -> first.phys == second.phys;
+            case API -> first.apiPos != null && first.apiPos.equals(second.apiPos);
+        };
     }
 
     @Nullable
@@ -1321,9 +1341,20 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                 .anyMatch(CannonMountContext::hasAssembledCannon)) {
             return true;
         }
-        Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
-        return mount != null && mount.kind == MountKind.PHYS
-                && mount.phys != null && mount.phys.isRunning();
+        Mount mount = resolveMount();
+        if (mount == null) {
+            return false;
+        }
+
+        if (mount.kind == MountKind.PHYS) {
+            return supportsPhysBearingMounts() && mount.phys != null && mount.phys.isRunning();
+        }
+
+        if (mount.kind == MountKind.API) {
+            return mount.api != null && mount.api.isValid() && mount.api.isAssembled();
+        }
+
+        return false;
     }
 
     @Override
@@ -1451,6 +1482,11 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         kineticControllerState.onTargetChanged(running, targetAngle, DEADBAND_DEG);
     }
 
+    @Override
+    public boolean isControllerRunning() {
+        return isRunning;
+    }
+
     boolean isRunningController() {
         return isRunning;
     }
@@ -1526,26 +1562,31 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     enum MountKind {
         CBC,
-        PHYS
+        PHYS,
+        API
     }
 
     static class Mount {
         final MountKind kind;
         final CannonMountContext cbc;
         final PhysBearingBlockEntity phys;
+        final RadarMountAdapter api;
+        final BlockPos apiPos;
 
-        private Mount(MountKind kind, @Nullable CannonMountContext cbc, @Nullable PhysBearingBlockEntity phys) {
+        private Mount(MountKind kind, @Nullable CannonMountContext cbc, @Nullable PhysBearingBlockEntity phys, @Nullable RadarMountAdapter api, @Nullable BlockPos apiPos) {
             this.kind = kind;
             this.cbc = cbc;
             this.phys = phys;
+            this.api = api;
+            this.apiPos = apiPos;
         }
 
         static Mount cbc(CannonMountContext cbc) {
-            return new Mount(MountKind.CBC, cbc, null);
+            return new Mount(MountKind.CBC, cbc, null, null, null);
         }
-
         static Mount phys(PhysBearingBlockEntity phys) {
-            return new Mount(MountKind.PHYS, null, phys);
+            return new Mount(MountKind.PHYS, null, phys, null, null);
         }
+        static Mount api(RadarMountAdapter api, BlockPos pos) { return new Mount(MountKind.API, null, null, api, pos.immutable()); }
     }
 }

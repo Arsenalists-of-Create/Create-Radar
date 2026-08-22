@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.firing;
 
+import com.happysg.radar.api.controller.RadarFireController;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
@@ -16,7 +17,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.List;
 
-public class FireControllerBlockEntity extends SmartBlockEntity {
+public class FireControllerBlockEntity extends SmartBlockEntity implements RadarFireController {
     boolean powered = false;
 
     // server-time when we last got a target update
@@ -34,6 +35,11 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
 
     @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
+    }
+
+    @Override
+    public boolean isFiring() {
+        return isPowered();
     }
 
     @Override
