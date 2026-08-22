@@ -34,9 +34,16 @@ public class VS2ShipVelocityTracker {
         if (ship == null || level == null || samplePos == null) return Vec3.ZERO;
 
         Vector3d mutableSamplePos = new Vector3d(samplePos);
-        Vec3 velocity = toVec3(SableCompanion.INSTANCE.getVelocity(level, mutableSamplePos)).scale(1.0 / 20.0);
-        LAST_VEL_TICK.put(ship.getUniqueId(), velocity);
-        return velocity;
+        try {
+            Vec3 velocity = toVec3(SableCompanion.INSTANCE.getVelocity(level, mutableSamplePos)).scale(1.0 / 20.0);
+            LAST_VEL_TICK.put(ship.getUniqueId(), velocity);
+            return velocity;
+        } catch (RuntimeException e) {
+            if ("Body has been removed".equals(e.getMessage())) {
+                return Vec3.ZERO;
+            }
+            throw e;
+        }
     }
 
     private static Vec3 toVec3(Object velocity) {
