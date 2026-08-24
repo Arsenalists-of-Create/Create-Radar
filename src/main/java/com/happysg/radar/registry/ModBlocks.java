@@ -4,6 +4,7 @@ import com.happysg.radar.CreateRadar;
 
 
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlock;
+import com.happysg.radar.block.arad.jammer.JammerBlock;
 import com.happysg.radar.block.controller.id.IdentificationTransponder;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
 import com.happysg.radar.block.controller.firing.FireControllerBlock;
@@ -28,6 +29,7 @@ import com.simibubi.create.foundation.data.BuilderTransformers;
 import com.simibubi.create.foundation.data.SharedProperties;
 import com.tterrag.registrate.util.entry.BlockEntry;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
@@ -103,6 +105,7 @@ public class ModBlocks {
                     .initialProperties(SharedProperties::softMetal)
                     .properties(BlockBehaviour.Properties::noOcclusion)
                     .properties(p -> p.strength(0.8f))
+                    .addLayer(() -> RenderType::cutoutMipped)
                     .blockstate((c, p) -> p.simpleBlock(c.getEntry(),
                             p.models().getExistingFile(c.getId())))
                     .transform(axeOrPickaxe())
@@ -120,9 +123,40 @@ public class ModBlocks {
                     .simpleItem()
                     .register();
 
-
-
-
+    public static final BlockEntry<JammerBlock> DIRECTIONAL_JAMMER =
+            REGISTRATE.block("directional_jammer", JammerBlock::new)
+                    .lang("Directional Jammer")
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(BlockBehaviour.Properties::noOcclusion)
+                    .properties(p -> p.strength(0.8f))
+                    .addLayer(() -> RenderType::cutoutMipped)
+                    .blockstate((c, p) -> p.getVariantBuilder(c.get())
+                            .forAllStates(state -> {
+                                Direction facing = state.getValue(JammerBlock.FACING);
+                                int rotationX = switch (facing) {
+                                    case UP -> 0;
+                                    case DOWN -> 180;
+                                    case NORTH, EAST, SOUTH, WEST -> 90;
+                                };
+                                int rotationY = switch (facing) {
+                                    case NORTH, UP, DOWN -> 0;
+                                    case EAST -> 90;
+                                    case SOUTH -> 180;
+                                    case WEST -> 270;
+                                };
+                                return ConfiguredModel.builder()
+                                        .modelFile(p.models().getExistingFile(
+                                                CreateRadar.asResource("block/jammer_mount")))
+                                        .rotationX(rotationX)
+                                        .rotationY(rotationY)
+                                        .build();
+                            }))
+                    .transform(axeOrPickaxe())
+                    .item()
+                    .model((c, p) -> p.withExistingParent(c.getName(),
+                            CreateRadar.asResource("block/directional_jammer")))
+                    .build()
+                    .register();
 
     @SuppressWarnings("unused")
     public static final BlockEntry<RadarReceiverBlock> RADAR_RECEIVER_BLOCK =

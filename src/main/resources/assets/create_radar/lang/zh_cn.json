@@ -43,7 +43,7 @@
   "create_radar.data_link.link_to_monitor": "连接至雷达显示器或火炮底座",
   "create_radar.data_link.mount_set": "火炮底座已选择",
   "create_radar.data_link.rwr_set": "Radar Warning Receiver Selected",
-  "create_radar.data_link.arad_monitor_conflict": "Monitor already linked to another network",
+  "create_radar.data_link.arad_monitor_conflict": "ARAD endpoint already linked to another network",
   "create_radar.data_link.only_pitch_allowed": "仅允许俯仰控制器",
   "create_radar.data_link.place_failed": "放置失败",
   "create_radar.data_link.select_mount_or_filterer_first": "请选择火炮底座或网络控制器",

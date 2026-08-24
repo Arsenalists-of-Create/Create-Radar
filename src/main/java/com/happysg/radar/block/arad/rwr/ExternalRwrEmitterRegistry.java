@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -51,7 +52,34 @@ public final class ExternalRwrEmitterRegistry {
             @Nullable UUID targetShipId,
             ThreatStage stage,
             RadarType radarType,
-            boolean requireLineOfSight
+            boolean requireLineOfSight,
+            @Nullable SelectionMetadata selectionMetadata
+    ) {
+        /**
+         * Backwards-compatible constructor for display-only emitters. External emitters must
+         * explicitly supply selection metadata before an ARAD monitor may designate them.
+         */
+        public EmitterState(
+                String sourceId,
+                Vec3 position,
+                Vec3 forward,
+                double range,
+                double halfAngleDegrees,
+                @Nullable UUID targetShipId,
+                ThreatStage stage,
+                RadarType radarType,
+                boolean requireLineOfSight
+        ) {
+            this(sourceId, position, forward, range, halfAngleDegrees, targetShipId,
+                    stage, radarType, requireLineOfSight, null);
+        }
+    }
+
+    /** Metadata required for an external RWR contact to participate in ARAD selection. */
+    public record SelectionMetadata(
+            UUID emitterId,
+            float rollingRpm,
+            float rollingRate
     ) {
     }
 
@@ -94,6 +122,23 @@ public final class ExternalRwrEmitterRegistry {
         Map<String, Entry> emitters = EMITTERS_BY_DIMENSION.get(level.dimension());
         Entry entry = emitters == null ? null : emitters.get(sourceId);
         return entry != null && entry.expiresAtTick() > level.getGameTime();
+    }
+
+    /** Resolves a live external emitter that explicitly opted into ARAD selection. */
+    public static synchronized Optional<EmitterState> resolveSelectable(
+            ServerLevel level,
+            String sourceId
+    ) {
+        if (level == null || sourceId == null || sourceId.isBlank()) {
+            return Optional.empty();
+        }
+        Map<String, Entry> emitters = EMITTERS_BY_DIMENSION.get(level.dimension());
+        Entry entry = emitters == null ? null : emitters.get(sourceId);
+        if (entry == null || entry.expiresAtTick() <= level.getGameTime()
+                || entry.state().selectionMetadata() == null) {
+            return Optional.empty();
+        }
+        return Optional.of(entry.state());
     }
 
     static synchronized List<RwrRadarContact> contactsFor(
@@ -173,7 +218,15 @@ public final class ExternalRwrEmitterRegistry {
                 && state.range() > 0.0D
                 && Double.isFinite(state.halfAngleDegrees())
                 && state.stage() != null
-                && state.radarType() != null;
+                && state.radarType() != null
+                && isValid(state.selectionMetadata());
+    }
+
+    private static boolean isValid(@Nullable SelectionMetadata selectionMetadata) {
+        return selectionMetadata == null
+                || selectionMetadata.emitterId() != null
+                && Float.isFinite(selectionMetadata.rollingRpm())
+                && Float.isFinite(selectionMetadata.rollingRate());
     }
 
     private static EmitterState normalize(EmitterState state) {
@@ -186,21 +239,23 @@ public final class ExternalRwrEmitterRegistry {
                 state.targetShipId(),
                 state.stage(),
                 state.radarType(),
-                state.requireLineOfSight()
+                state.requireLineOfSight(),
+                state.selectionMetadata()
         );
     }
 
     private static boolean isWithinEnvelope(EmitterState state, Vec3 targetPosition) {
         Vec3 delta = targetPosition.subtract(state.position());
         double distanceSqr = delta.lengthSqr();
-        if (distanceSqr < MIN_DISTANCE_SQR || distanceSqr > state.range() * state.range()) {
+        if (distanceSqr < MIN_DISTANCE_SQR || distanceSqr >= state.range() * state.range()) {
             return false;
         }
         double minimumDot = Math.cos(Math.toRadians(state.halfAngleDegrees()));
         return state.forward().dot(delta.normalize()) >= minimumDot;
     }
 
-    private static boolean hasLineOfSight(ServerLevel level, Vec3 origin, Vec3 targetPosition, UUID targetShipId) {
+    private static boolean hasLineOfSight(ServerLevel level, Vec3 origin, Vec3 targetPosition,
+                                          @Nullable UUID targetShipId) {
         ClipContext context = new ClipContext(
                 origin,
                 targetPosition,

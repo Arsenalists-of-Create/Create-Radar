@@ -25,7 +25,8 @@ public final class ModBlockData {
                 ModBlocks.NETWORK_FILTERER_BLOCK,
                 ModBlocks.STATIONARY_RADAR,
                 ModBlocks.ID_BLOCK,
-                ModBlocks.RWR_BLOCK
+                ModBlocks.RWR_BLOCK,
+                ModBlocks.DIRECTIONAL_JAMMER
         ));
 
         return blocks;

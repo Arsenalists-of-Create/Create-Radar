@@ -3,12 +3,14 @@ package com.happysg.radar.block.monitor;
 import com.happysg.radar.api.arad.ARADTargetDesignationEvent;
 import com.happysg.radar.api.arad.ARADTargeting;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
 import com.happysg.radar.compat.Mods;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
 
 import java.util.Objects;
@@ -54,19 +56,41 @@ final class ARADTargetDesignationHandler {
         ARADTargeting.NativeRadarContact contact = ARADTargeting
                 .resolveNativeContact(level, receiver, sourceId)
                 .orElse(null);
-        if (contact == null) {
-            return false;
+        ARADTargetDesignationEvent.Target target;
+        BlockPos emitterPos;
+        if (contact != null) {
+            target = ARADTargeting.createNoisyTarget(level, contact, level.getRandom());
+            emitterPos = contact.radarPos();
+        } else {
+            ExternalRwrEmitterRegistry.EmitterState external = ExternalRwrEmitterRegistry
+                    .resolveSelectable(level, sourceId)
+                    .orElse(null);
+            if (external == null || external.selectionMetadata() == null) {
+                return false;
+            }
+            Vec3 rangeOrigin = external.targetShipId() == null
+                    ? receiver.worldPosition()
+                    : ARADTargeting.sableReceiver(level, external.targetShipId())
+                    .map(ARADTargeting.Receiver::worldPosition)
+                    .orElse(receiver.worldPosition());
+            double rangeRatio = external.position().distanceTo(rangeOrigin) / external.range();
+            if (!Double.isFinite(rangeRatio)) {
+                return false;
+            }
+            emitterPos = BlockPos.containing(external.position());
+            target = new ARADTargetDesignationEvent.Target(
+                    emitterPos,
+                    external.selectionMetadata().emitterId(),
+                    Math.max(0.0D, Math.min(ARADTargeting.MAX_PASSIVE_RANGE_RATIO, rangeRatio)),
+                    external.position(),
+                    null,
+                    null
+            );
         }
-
-        ARADTargetDesignationEvent.Target target = ARADTargeting.createNoisyTarget(
-                level,
-                contact,
-                level.getRandom()
-        );
         if (target == null) {
             return false;
         }
-        controller.setRwrSelectionState(sourceId, contact.radarPos(), rwrPos);
+        controller.setRwrSelectionState(sourceId, emitterPos, rwrPos);
         NeoForge.EVENT_BUS.post(new ARADTargetDesignationEvent(
                 ARADTargetDesignationEvent.Action.ASSIGN,
                 level,
@@ -96,9 +120,12 @@ final class ARADTargetDesignationHandler {
                 && selectedRadarPos != null
                 && Objects.equals(rwrPos, linkedRwrPos)
                 && level.getBlockEntity(rwrPos) instanceof RadarWarningReceiverBlockEntity rwr
-                && ARADTargeting.resolveNativeRadar(level, sourceId)
-                        .filter(radar -> radar.getWorldPos().equals(selectedRadarPos))
-                        .isPresent();
+                && (ARADTargeting.resolveNativeRadar(level, sourceId)
+                .filter(radar -> radar.getWorldPos().equals(selectedRadarPos))
+                .isPresent()
+                || ExternalRwrEmitterRegistry.resolveSelectable(level, sourceId).isPresent()
+                && rwr.getRadarContacts(level).stream()
+                .anyMatch(contact -> sourceId.equals(contact.sourceId())));
         if (!live) {
             clear(level, controller);
         }

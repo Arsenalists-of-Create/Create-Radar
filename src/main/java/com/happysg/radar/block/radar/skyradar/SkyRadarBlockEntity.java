@@ -509,6 +509,11 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     }
 
     @Override
+    public float getInputRpm() {
+        return getSpeed();
+    }
+
+    @Override
     public void setSpeed(float speed) {
         super.setSpeed(Mth.clamp(speed, -getMaxSkyRadarRpm(), getMaxSkyRadarRpm()));
     }

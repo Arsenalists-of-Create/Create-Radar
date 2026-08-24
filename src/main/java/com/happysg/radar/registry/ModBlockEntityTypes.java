@@ -4,6 +4,9 @@ import com.happysg.radar.CreateRadar;
 
 
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
+import com.happysg.radar.block.arad.jammer.JammerBlockEntity;
+import com.happysg.radar.block.arad.jammer.JammerRenderer;
+import com.happysg.radar.block.arad.jammer.JammerVisual;
 import com.happysg.radar.block.controller.kinetic.ControllerShaftRenderer;
 import com.happysg.radar.block.controller.kinetic.ControllerShaftVisual;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
@@ -103,6 +106,12 @@ public class ModBlockEntityTypes {
             .validBlocks(ModBlocks.RWR_BLOCK)
             .register();
 
+    public static final BlockEntityEntry<JammerBlockEntity> DIRECTIONAL_JAMMER = REGISTRATE
+            .blockEntity("directional_jammer", JammerBlockEntity::new)
+            .visual(() -> JammerVisual::new, true)
+            .renderer(() -> JammerRenderer::new)
+            .validBlocks(ModBlocks.DIRECTIONAL_JAMMER)
+            .register();
 
     public static void register() {
         CreateRadar.getLogger().info("Registering block entity types!");

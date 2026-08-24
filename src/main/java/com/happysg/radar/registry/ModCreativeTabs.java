@@ -80,7 +80,7 @@ public class ModCreativeTabs {
        // pOutput.accept(ModItems.GUIDED_FUZE);
         pOutput.accept(ModItems.ADVANCED_PROXY_FUZE);
         //sheild jammer
-        //directional jammer
+        pOutput.accept(ModBlocks.DIRECTIONAL_JAMMER);
         //siren
         if (Mods.TRACKWORK.isLoaded()) {
 

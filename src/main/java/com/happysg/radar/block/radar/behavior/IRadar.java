@@ -43,6 +43,11 @@ public interface IRadar extends DebugInspectable {
         return 0f;
     }
 
+
+    default float getInputRpm() {
+        return 0f;
+    }
+
     //todo better name and/or plan to handle different types of radars
     default boolean renderRelativeToMonitor() {
         return true;

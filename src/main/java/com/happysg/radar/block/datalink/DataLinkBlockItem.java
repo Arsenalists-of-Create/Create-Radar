@@ -2,6 +2,7 @@ package com.happysg.radar.block.datalink;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.arad.jammer.JammerBlockEntity;
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
@@ -278,7 +279,11 @@ public class DataLinkBlockItem extends BlockItem {
     }
 
     private InteractionResult completeAradLink(LinkUse use) {
-        if (!(use.be() instanceof MonitorBlockEntity monitor)) {
+        MonitorBlockEntity monitor = use.be() instanceof MonitorBlockEntity value
+                ? value : null;
+        JammerBlockEntity jammer = use.be() instanceof JammerBlockEntity value
+                ? value : null;
+        if (monitor == null && jammer == null) {
             if (!use.level().isClientSide) {
                 sendError(use.player(), DATA_LINK_INVALID_FILTER_TARGET);
                 clearLinkTag(use.stack());
@@ -298,13 +303,21 @@ public class DataLinkBlockItem extends BlockItem {
                 instanceof RadarWarningReceiverBlockEntity))
             return invalidSelection(use);
 
-        BlockPos monitorPos = monitor.getControllerPos();
-        if (monitorPos == null) monitorPos = use.clickedPos();
+        BlockPos endpointPos;
+        if (monitor != null) {
+            endpointPos = monitor.getControllerPos();
+            if (endpointPos == null) endpointPos = use.clickedPos();
+        } else {
+            endpointPos = use.clickedPos();
+        }
 
         BlockPos placedPos = getPlacementPos(use);
         ARADData aradData = ARADData.get(serverLevel);
         ARADData.Group group = aradData.getOrCreateGroup(serverLevel.dimension(), rwrPos);
-        if (!aradData.canAttachMonitor(serverLevel, group, monitorPos)) {
+        boolean canAttach = monitor != null
+                ? aradData.canAttachMonitor(serverLevel, group, endpointPos)
+                : aradData.canAttachJammer(group, endpointPos);
+        if (!canAttach) {
             sendError(use.player(), DATA_LINK_ARAD_MONITOR_CONFLICT);
             clearLinkTag(use.stack());
             return InteractionResult.FAIL;
@@ -317,10 +330,15 @@ public class DataLinkBlockItem extends BlockItem {
         }
 
         setLinkStyle(use.level(), placedPos, DataLinkBlock.LinkStyle.RADAR);
-        aradData.attachMonitor(serverLevel, group, monitorPos, ARADData.LinkOrigin.DATALINK);
-        aradData.addDataLinkToGroup(group, placedPos, monitorPos);
+        if (monitor != null) {
+            aradData.attachMonitor(serverLevel, group, endpointPos,
+                    ARADData.LinkOrigin.DATALINK);
+        } else {
+            aradData.attachJammer(serverLevel, group, endpointPos);
+        }
+        aradData.addDataLinkToGroup(group, placedPos, endpointPos);
         if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink) {
-            dataLink.target(monitorPos);
+            dataLink.target(endpointPos);
         }
 
         sendSuccess(use.player());

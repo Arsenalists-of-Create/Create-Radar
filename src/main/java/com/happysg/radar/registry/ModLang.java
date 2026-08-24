@@ -56,7 +56,7 @@ public class ModLang {
         REGISTRATE.addRawLang(CreateRadar.MODID + ".data_link.no_target", "Not a Monitor");
         REGISTRATE.addRawLang(CreateRadar.MODID + ".data_link.title", "Data Link");
         REGISTRATE.addRawLang(CreateRadar.MODID + ".data_link.rwr_set", "Radar Warning Receiver Set");
-        REGISTRATE.addRawLang(CreateRadar.MODID + ".data_link.arad_monitor_conflict", "Monitor already linked to another network");
+        REGISTRATE.addRawLang(CreateRadar.MODID + ".data_link.arad_monitor_conflict", "ARAD endpoint already linked to another network");
 
         REGISTRATE.addRawLang(CreateRadar.MODID + ".radar_button.player", "Player");
         REGISTRATE.addRawLang(CreateRadar.MODID + ".radar_button.vs2", "VS2");

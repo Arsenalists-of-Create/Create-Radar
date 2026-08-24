@@ -151,6 +151,11 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     @Override
+    public float getInputRpm() {
+        return getSpeed();
+    }
+
+    @Override
     public void assemble() {
         if (!(level.getBlockState(getBlockPos()).getBlock() instanceof RadarBearingBlock))
             return;

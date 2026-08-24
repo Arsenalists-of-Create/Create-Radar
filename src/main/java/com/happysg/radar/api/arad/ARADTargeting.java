@@ -103,6 +103,7 @@ public final class ARADTargeting {
         NATIVE_RADARS
                 .computeIfAbsent(level.dimension(), ignored -> new LinkedHashMap<>())
                 .put(sourceId, new NativeRadarHeartbeat(emitterId, radarPos.immutable(), level.getGameTime()));
+        RadarRpmTelemetry.heartbeat(level, radar);
     }
 
     /** Builds a receiver for a missile or other sensor in ordinary world space. */
@@ -198,6 +199,16 @@ public final class ARADTargeting {
         return Optional.of(radar);
     }
 
+    /** Returns the current 20-second rolling shaft telemetry for a native emitter. */
+    public static RollingRpmTracker.Snapshot resolveRpmTelemetry(
+            ServerLevel level,
+            String sourceId
+    ) {
+        return resolveNativeRadar(level, sourceId)
+                .map(radar -> RadarRpmTelemetry.snapshot(level, radar))
+                .orElse(RollingRpmTracker.Snapshot.ZERO);
+    }
+
     /** Applies the shared ARAD range-error bands and creates a fixed or moving target reference. */
     public static @Nullable ARADTargetDesignationEvent.Target createNoisyTarget(
             ServerLevel level,
@@ -243,14 +254,38 @@ public final class ARADTargeting {
         );
     }
 
+    /** Resolves a designation's current world position, including moving Sable targets. */
+    public static Optional<Vec3> resolveTargetPosition(
+            ServerLevel level,
+            ARADTargetDesignationEvent.Target target
+    ) {
+        Objects.requireNonNull(level, "level");
+        Objects.requireNonNull(target, "target");
+        if (target.targetSublevelId() == null || target.targetLocalPosition() == null) {
+            return Optional.of(target.noisyWorldPosition());
+        }
+
+        SubLevelAccess sublevel = resolveSublevel(level, target.targetSublevelId());
+        if (sublevel == null) {
+            return Optional.empty();
+        }
+        Vec3 local = target.targetLocalPosition();
+        Vector3d transformed = sublevel.logicalPose().transformPosition(
+                new Vector3d(local.x, local.y, local.z));
+        Vec3 worldPosition = new Vec3(transformed.x(), transformed.y(), transformed.z());
+        return finite(worldPosition) ? Optional.of(worldPosition) : Optional.empty();
+    }
+
     /** Clears the transient native-radar index for an unloading server level. */
     public static void clearNativeRadars(ServerLevel level) {
         NATIVE_RADARS.remove(level.dimension());
+        RadarRpmTelemetry.clear(level);
     }
 
     /** Prunes expired or no-longer-owned heartbeats at the end of each server-level tick. */
     public static void tickNativeRadars(ServerLevel level) {
         liveNativeRadars(level);
+        RadarRpmTelemetry.tick(level, NATIVE_RADAR_HEARTBEAT_TTL_TICKS);
     }
 
     private static Optional<Receiver> refreshReceiver(ServerLevel level, Receiver receiver) {

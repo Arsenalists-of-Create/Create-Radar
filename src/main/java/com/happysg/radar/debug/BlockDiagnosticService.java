@@ -1,6 +1,7 @@
 package com.happysg.radar.debug;
 
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.block.arad.jammer.JammerBlockEntity;
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
@@ -159,6 +160,23 @@ public final class BlockDiagnosticService {
                     .add("Monitor", "safe zones", monitor.safeZones.size())
                     .add("Monitor", "selected", shortIdentifier(
                             monitor.getSelectedEntity()));
+        }
+        if (blockEntity instanceof JammerBlockEntity jammer) {
+            JammerBlockEntity.SelectedEmitterInfo emitter =
+                    jammer.getSelectedEmitterInfo();
+            builder.add("Directional jammer", "ARAD linked",
+                            jammer.isAradLinked())
+                    .add("Directional jammer", "selected emitter",
+                            emitter == null ? "none"
+                                    : shortIdentifier(emitter.sourceId()))
+                    .add("Directional jammer", "emitter position",
+                            emitter == null ? "none" : emitter.position())
+                    .add("Directional jammer", "radar type",
+                            emitter == null ? "none" : emitter.radarType())
+                    .add("Directional jammer", "rolling RPM",
+                            emitter == null ? 0.0f : emitter.rollingRpm())
+                    .add("Directional jammer", "rolling rate (RPM/s)",
+                            emitter == null ? 0.0f : emitter.rollingRate());
         }
         if (blockEntity instanceof AutoPitchControllerBlockEntity pitch) {
             builder.add("Pitch controller", "target",

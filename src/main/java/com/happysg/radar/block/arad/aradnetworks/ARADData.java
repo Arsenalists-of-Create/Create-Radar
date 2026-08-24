@@ -1,6 +1,7 @@
 package com.happysg.radar.block.arad.aradnetworks;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.arad.jammer.JammerBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
@@ -34,6 +35,7 @@ public class ARADData extends SavedData {
     public static class Group {
         public final RwrKey key;
         public final Set<BlockPos> monitorEndpoints = new HashSet<>();
+        public final Set<BlockPos> jammerEndpoints = new HashSet<>();
         public final Set<BlockPos> dataLinks = new HashSet<>();
 
         public Group(RwrKey key) {
@@ -44,6 +46,7 @@ public class ARADData extends SavedData {
     private final Map<String, Group> groupsByRwr = new HashMap<>();
     private final Map<String, String> monitorToRwr = new HashMap<>();
     private final Map<String, LinkOrigin> endpointOrigins = new HashMap<>();
+    private final Map<String, String> jammerToRwr = new HashMap<>();
     private final Map<String, String> dataLinkToRwr = new HashMap<>();
     private final Map<String, String> dataLinkToEndpoint = new HashMap<>();
 
@@ -75,6 +78,10 @@ public class ARADData extends SavedData {
         return endpointOrigins.get(key(dim, monitorPos)) == LinkOrigin.DATALINK;
     }
 
+    public boolean isJammerLinked(ResourceKey<Level> dim, BlockPos jammerPos) {
+        return jammerToRwr.containsKey(key(dim, jammerPos));
+    }
+
     @Nullable
     public LinkOrigin getEndpointOrigin(ResourceKey<Level> dim, BlockPos monitorPos) {
         return endpointOrigins.get(key(dim, monitorPos));
@@ -83,6 +90,12 @@ public class ARADData extends SavedData {
     @Nullable
     public BlockPos getRwrForMonitor(ResourceKey<Level> dim, BlockPos monitorPos) {
         String rwrKey = monitorToRwr.get(key(dim, monitorPos));
+        return rwrKey == null ? null : posFromKey(rwrKey);
+    }
+
+    @Nullable
+    public BlockPos getRwrForJammer(ResourceKey<Level> dim, BlockPos jammerPos) {
+        String rwrKey = jammerToRwr.get(key(dim, jammerPos));
         return rwrKey == null ? null : posFromKey(rwrKey);
     }
 
@@ -114,6 +127,22 @@ public class ARADData extends SavedData {
         }
         group.monitorEndpoints.add(monitorPos);
         notifyMonitor(level, monitorPos);
+        setDirty();
+    }
+
+    public boolean canAttachJammer(Group group, BlockPos jammerPos) {
+        String existing = jammerToRwr.get(key(group.key.dim(), jammerPos));
+        return existing == null || existing.equals(key(group.key.dim(), group.key.rwrPos()));
+    }
+
+    public void attachJammer(ServerLevel level, Group group, BlockPos jammerPos) {
+        if (!canAttachJammer(group, jammerPos)) {
+            return;
+        }
+        String groupKey = key(group.key.dim(), group.key.rwrPos());
+        group.jammerEndpoints.add(jammerPos);
+        jammerToRwr.put(key(group.key.dim(), jammerPos), groupKey);
+        notifyJammer(level, jammerPos);
         setDirty();
     }
 
@@ -243,26 +272,38 @@ public class ARADData extends SavedData {
 
         if (group != null && endpointKey != null) {
             BlockPos endpoint = posFromKey(endpointKey);
-            removeMonitorFromGroup(level, group, endpoint, true);
+            if (group.jammerEndpoints.contains(endpoint)) {
+                removeJammerFromGroup(level, group, endpoint, true);
+            } else {
+                removeMonitorFromGroup(level, group, endpoint, true);
+            }
         }
 
         cleanupIfEmpty(groupKey);
         setDirty();
     }
 
-    public void onEndpointRemoved(ServerLevel level, BlockPos monitorPos) {
-        BlockPos normalized = normalizeMonitor(level, monitorPos);
-        if (normalized == null) normalized = monitorPos;
+    public void onEndpointRemoved(ServerLevel level, BlockPos endpointPos) {
+        BlockPos normalized = normalizeMonitor(level, endpointPos);
+        if (normalized == null) normalized = endpointPos;
         String endpointKey = key(level.dimension(), normalized);
         String groupKey = monitorToRwr.get(endpointKey);
+        if (groupKey == null) {
+            groupKey = jammerToRwr.get(endpointKey);
+        }
         if (groupKey == null) return;
 
         Group group = groupsByRwr.get(groupKey);
         if (group != null) {
-            removeMonitorFromGroup(level, group, normalized, false);
+            if (group.jammerEndpoints.contains(normalized)) {
+                removeJammerFromGroup(level, group, normalized, false);
+            } else {
+                removeMonitorFromGroup(level, group, normalized, false);
+            }
         } else {
             monitorToRwr.remove(endpointKey);
             endpointOrigins.remove(endpointKey);
+            jammerToRwr.remove(endpointKey);
         }
         cleanupIfEmpty(groupKey);
         setDirty();
@@ -277,6 +318,10 @@ public class ARADData extends SavedData {
             monitorToRwr.remove(key(level.dimension(), monitor));
             endpointOrigins.remove(key(level.dimension(), monitor));
             notifyMonitor(level, monitor);
+        }
+        for (BlockPos jammer : group.jammerEndpoints) {
+            jammerToRwr.remove(key(level.dimension(), jammer));
+            notifyJammer(level, jammer);
         }
         for (BlockPos dataLink : group.dataLinks) {
             dataLinkToRwr.remove(key(level.dimension(), dataLink));
@@ -303,6 +348,30 @@ public class ARADData extends SavedData {
         String newKey = key(dim, newPos);
         monitorToRwr.put(newKey, groupKey);
         if (origin != null) endpointOrigins.put(newKey, origin);
+        for (Map.Entry<String, String> entry : dataLinkToEndpoint.entrySet()) {
+            if (oldKey.equals(entry.getValue())) {
+                entry.setValue(newKey);
+            }
+        }
+        setDirty();
+        return true;
+    }
+
+    public boolean updateJammerPosition(ResourceKey<Level> dim, BlockPos oldPos, BlockPos newPos) {
+        if (oldPos.equals(newPos)) return true;
+        String oldKey = key(dim, oldPos);
+        String groupKey = jammerToRwr.remove(oldKey);
+        if (groupKey == null) return false;
+
+        Group group = groupsByRwr.get(groupKey);
+        if (group == null || !group.jammerEndpoints.remove(oldPos)) {
+            jammerToRwr.put(oldKey, groupKey);
+            return false;
+        }
+
+        group.jammerEndpoints.add(newPos);
+        String newKey = key(dim, newPos);
+        jammerToRwr.put(newKey, groupKey);
         for (Map.Entry<String, String> entry : dataLinkToEndpoint.entrySet()) {
             if (oldKey.equals(entry.getValue())) {
                 entry.setValue(newKey);
@@ -354,10 +423,20 @@ public class ARADData extends SavedData {
         cleanupIfEmpty(key(group.key.dim(), group.key.rwrPos()));
     }
 
+    private void removeJammerFromGroup(@Nullable ServerLevel level, Group group, BlockPos jammerPos, boolean notify) {
+        if (!group.jammerEndpoints.remove(jammerPos)) return;
+        jammerToRwr.remove(key(group.key.dim(), jammerPos));
+        if (notify && level != null) {
+            notifyJammer(level, jammerPos);
+        }
+        cleanupIfEmpty(key(group.key.dim(), group.key.rwrPos()));
+    }
+
     private void cleanupIfEmpty(String groupKey) {
         Group group = groupsByRwr.get(groupKey);
         if (group == null) return;
-        if (!group.monitorEndpoints.isEmpty() || !group.dataLinks.isEmpty()) return;
+        if (!group.monitorEndpoints.isEmpty() || !group.jammerEndpoints.isEmpty()
+                || !group.dataLinks.isEmpty()) return;
         groupsByRwr.remove(groupKey);
     }
 
@@ -365,6 +444,13 @@ public class ARADData extends SavedData {
         BlockEntity be = level.getBlockEntity(monitorPos);
         if (be instanceof MonitorBlockEntity monitor) {
             monitor.refreshAradLinkState();
+        }
+    }
+
+    private static void notifyJammer(ServerLevel level, BlockPos jammerPos) {
+        BlockEntity be = level.getBlockEntity(jammerPos);
+        if (be instanceof JammerBlockEntity jammer) {
+            jammer.refreshAradLinkState();
         }
     }
 
@@ -409,6 +495,13 @@ public class ARADData extends SavedData {
                 }
             }
 
+            ListTag jammers = groupTag.getList("JammerEndpoints", Tag.TAG_COMPOUND);
+            for (int j = 0; j < jammers.size(); j++) {
+                BlockPos jammerPos = readPos(jammers.getCompound(j));
+                group.jammerEndpoints.add(jammerPos);
+                data.jammerToRwr.put(key(dim, jammerPos), groupKey);
+            }
+
             data.groupsByRwr.put(groupKey, group);
         }
 
@@ -432,6 +525,12 @@ public class ARADData extends SavedData {
                 monitors.add(endpoint);
             }
             groupTag.put("MonitorEndpoints", monitors);
+
+            ListTag jammers = new ListTag();
+            for (BlockPos jammer : group.jammerEndpoints) {
+                jammers.add(writePos(jammer));
+            }
+            groupTag.put("JammerEndpoints", jammers);
 
             ListTag links = new ListTag();
             for (BlockPos dataLink : group.dataLinks) {
