@@ -131,7 +131,7 @@ repositories {
 dependencies {
     def includeOptionalCbcCompatRuntime = !project.hasProperty("skipOptionalCbcCompatRuntime")
 
-    compileOnly files ("lib/createenergycannons-forge-0.2.jar")
+    compileOnly files ("lib/createenergycannons-neoforge-${cbc_cec_version}+${minecraft_version}.jar")
     compileOnly("org.joml:joml-primitives:1.10.0")
     compileOnly("maven.modrinth:kotlin-for-forge:${forge_kotlin_version}")
     compileOnly("org.valkyrienskies.core:api:${vs_core_version}") { transitive = false }
@@ -168,16 +168,19 @@ dependencies {
     implementation("maven.modrinth:rpl:${rpl_version}") {
         transitive = false
     }
-    compileOnly files("lib/createenergycannons-0.2+mc1.20.1.jar")
+
+    compileOnly files("lib/createenergycannons${cbc_cec_version}+mc${minecraft_version}.jar")
     compileOnly files("lib/createbigcannons-${cbc_version}+mc.${minecraft_version}.jar")
     compileOnly files("lib/cbcmodernwarfare-${cbc_mw_version}+mc.${minecraft_version}-neoforge.jar")
     compileOnly files("lib/cbc_at_Neoforge_${minecraft_version}_${cbc_at_version}.jar")
-    compileOnly files("lib/CBC-Military-Supplement-1.21.1-2.1.0.jar")
+    compileOnly files("lib/CBC-Military-Supplement-${minecraft_version}-${cbc_ms_version}.jar")
     localRuntime files("lib/createbigcannons-${cbc_version}+mc.${minecraft_version}.jar")
     if (includeOptionalCbcCompatRuntime) {
         localRuntime files("lib/cbcmodernwarfare-${cbc_mw_version}+mc.${minecraft_version}-neoforge.jar")
         localRuntime files("lib/cbc_at_Neoforge_${minecraft_version}_${cbc_at_version}.jar")
-        localRuntime files("lib/CBC-Military-Supplement-1.21.1-2.1.0.jar")
+        localRuntime files("lib/CBC-Military-Supplement-${minecraft_version}-${cbc_ms_version}.jar")
+        localRuntime files("lib/architectury-13.0.8-neoforge.jar") // CEC
+        localRuntime files("lib/createenergycannons-neoforge-${cbc_cec_version}+${minecraft_version}.jar")
     }
 
     annotationProcessor "org.spongepowered:mixin:0.8.5:processor"

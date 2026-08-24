@@ -40,11 +40,18 @@ public class VS2ShipVelocityTracker {
         // position to it resolves no sublevel and returns zero.
         Vector3d localSamplePos = ship.logicalPose()
                 .transformPositionInverse(new Vector3d(worldSamplePos));
-        Vector3d velocityPerSecond = SableCompanion.INSTANCE.getVelocity(
-                level, ship, localSamplePos, new Vector3d());
-        Vec3 velocity = toVec3(velocityPerSecond).scale(1.0 / 20.0);
-        LAST_VEL_TICK.put(ship.getUniqueId(), velocity);
-        return velocity;
+        try {
+            Vector3d velocityPerSecond = SableCompanion.INSTANCE.getVelocity(
+                    level, ship, localSamplePos, new Vector3d());
+            Vec3 velocity = toVec3(velocityPerSecond).scale(1.0 / 20.0);
+            LAST_VEL_TICK.put(ship.getUniqueId(), velocity);
+            return velocity;
+        } catch (RuntimeException e) {
+            if ("Body has been removed".equals(e.getMessage())) {
+                return Vec3.ZERO;
+            }
+            throw e;
+        }
     }
 
     private static Vec3 toVec3(Object velocity) {

@@ -60,8 +60,6 @@ public class ModCreativeTabs {
         pOutput.accept(ModBlocks.MONITOR);
         pOutput.accept(ModBlocks.RADAR_LINK);
         pOutput.accept(ModBlocks.RADAR_BEARING_BLOCK);
-        pOutput.accept(ModBlocks.SONAR_BEARING);
-        pOutput.accept(ModBlocks.SONAR_PANEL);
         pOutput.accept(ModBlocks.RADAR_RECEIVER_BLOCK);
         pOutput.accept(ModBlocks.RADAR_PLATE_BLOCK);
         pOutput.accept(ModBlocks.RADAR_DISH_BLOCK);
@@ -72,6 +70,8 @@ public class ModCreativeTabs {
         pOutput.accept(ModBlocks.NETWORK_FILTERER_BLOCK);
         pOutput.accept(ModBlocks.FIRE_CONTROLLER_BLOCK);
         pOutput.accept(ModBlocks.SKY_RADAR);
+        pOutput.accept(ModBlocks.SONAR_BEARING);
+        pOutput.accept(ModBlocks.SONAR_SENSOR);
         pOutput.accept(ModItems.SAFE_ZONE_DESIGNATOR);
         pOutput.accept(ModItems.IDENT_FILTER_ITEM);
         pOutput.accept(ModItems.RADAR_FILTER_ITEM);

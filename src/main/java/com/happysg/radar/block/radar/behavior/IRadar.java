@@ -1,5 +1,7 @@
 package com.happysg.radar.block.radar.behavior;
 
+import com.happysg.radar.api.tracking.RadarContact;
+import com.happysg.radar.api.tracking.RadarSource;
 import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
@@ -14,8 +16,13 @@ import net.minecraft.server.level.ServerLevel;
 import java.util.Collection;
 import java.util.UUID;
 
-public interface IRadar extends DebugInspectable {
+public interface IRadar extends RadarSource, DebugInspectable {
     Collection<RadarTrack> getTracks();
+
+    @Override
+    default Collection<? extends RadarContact> getContacts() {
+        return getTracks();
+    }
 
     float getRange();
 

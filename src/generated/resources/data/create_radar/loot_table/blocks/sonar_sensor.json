@@ -2,6 +2,7 @@
   "type": "minecraft:block",
   "pools": [
     {
+      "bonus_rolls": 0.0,
       "conditions": [
         {
           "condition": "minecraft:survives_explosion"
@@ -10,10 +11,11 @@
       "entries": [
         {
           "type": "minecraft:item",
-          "name": "create_radar:sonar_panel"
+          "name": "create_radar:sonar_sensor"
         }
       ],
       "rolls": 1.0
     }
-  ]
+  ],
+  "random_sequence": "create_radar:blocks/sonar_sensor"
 }

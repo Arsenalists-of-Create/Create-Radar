@@ -6,6 +6,7 @@ import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
+import com.happysg.radar.block.radar.behavior.SonarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
@@ -74,6 +75,8 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     private static final float ALPHA_GRID = 0.5f;
     private static final float ALPHA_SWEEP = 0.8f;
     private static final float ARAD_RING_WIDTH_SCALE = 0.012f;
+    private static final float SONAR_RING_WIDTH_SCALE = 0.010f;
+    private static final float SONAR_PULSE_ALPHA = 0.9f;
     private static final int PLANE_SWEEP_CYCLE_TICKS = 20;
     private static final float PLANE_SWEEP_RADIUS_SCALE = 0.81f;
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -818,9 +821,17 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
                             MultiBufferSource bufferSource, MonitorProjection.DisplayPoint center, float scale, float partialTicks) {
         if (!radar.running())
             return;
+
         String radarType = liveRadar != null ? liveRadar.getRadarType() : radar.type();
+
+        if (isSonarRadar(radarType)) {
+            renderSonarPulse(radar, controller, projection, ms, bufferSource, center, scale, partialTicks);
+            return;
+        }
+
         if (isOwnedLock(radar, liveRadar))
             return;
+
         if (isPlaneRadar(radarType)) {
             renderPlaneSweepLine(radar, liveRadar, controller, projection, ms, bufferSource, center, scale, partialTicks);
             return;
@@ -1112,6 +1123,72 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
 
     private static boolean isPlaneRadar(String radarType) {
         return "nonspinning".equals(radarType);
+    }
+
+    private static boolean isSonarRadar(String radarType) {
+        return "sonar".equals(radarType);
+    }
+
+    private void renderSonarPulse(MonitorBlockEntity.RadarDisplayInfo radar, MonitorBlockEntity controller, MonitorProjection projection, PoseStack ms, MultiBufferSource bufferSource, MonitorProjection.DisplayPoint center, float scale, float partialTicks) {
+        if (!radar.running() || controller.getLevel() == null)
+            return;
+
+        float progress = ((controller.getLevel().getGameTime() % SonarScanningBlockBehavior.SCAN_PERIOD_TICKS) + partialTicks) / SonarScanningBlockBehavior.SCAN_PERIOD_TICKS;
+        progress = Mth.clamp(progress, 0f, 1f);
+
+        int size = controller.getSize();
+        float centerX = 1f - size / 2f + center.xOffset() * size;
+        float centerZ = 1f - size / 2f + center.zOffset() * size;
+        float maxRadius = size * scale * 0.5f;
+        float radius = maxRadius * progress;
+
+        if (radius <= 0.001f)
+            return;
+
+        float fade = 1f;
+
+        if (progress > 0.8f) {
+            fade = 1f - ((progress - 0.8f) / 0.2f);
+        }
+
+        float alpha = SONAR_PULSE_ALPHA * Mth.clamp(fade, 0f, 1f);
+        float width = Math.max(0.01f, size * SONAR_RING_WIDTH_SCALE );
+        int segments = Math.max(64, size * 32);
+        VertexConsumer buffer = getSolidBuffer(bufferSource);
+        Matrix4f matrix = ms.last().pose();
+        Color color = new Color(RadarConfig.client().groundRadarColor.get());
+
+        renderSonarRing(buffer, matrix, color, centerX, centerZ, radius, width, segments, alpha);
+    }
+
+    private void renderSonarRing(VertexConsumer buffer, Matrix4f matrix, Color color, float centerX, float centerZ, float radius, float width, int segments, float alpha) {
+        float innerRadius = Math.max(0f, radius - width * 0.5f);
+        float outerRadius = radius + width * 0.5f;
+
+        for (int segment = 0; segment < segments; segment++) {
+            double a0 = Math.PI * 2.0 * segment / segments;
+            double a1 = Math.PI * 2.0 * (segment + 1) / segments;
+
+            float cos0 = (float) Math.cos(a0);
+            float sin0 = (float) Math.sin(a0);
+
+            float cos1 = (float) Math.cos(a1);
+            float sin1 = (float) Math.sin(a1);
+
+            renderSolidVertices(buffer, matrix, color, alpha, DEPTH_SWEEP,
+                    centerX + cos0 * outerRadius,
+                    centerZ + sin0 * outerRadius,
+
+                    centerX + cos1 * outerRadius,
+                    centerZ + sin1 * outerRadius,
+
+                    centerX + cos1 * innerRadius,
+                    centerZ + sin1 * innerRadius,
+
+                    centerX + cos0 * innerRadius,
+                    centerZ + sin0 * innerRadius
+            );
+        }
     }
 
     private static boolean isLockCapableRadar(String radarType) {

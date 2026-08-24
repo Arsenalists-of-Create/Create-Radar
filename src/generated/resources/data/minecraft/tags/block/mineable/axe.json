@@ -3,8 +3,6 @@
     "create_radar:monitor",
     "create_radar:data_link",
     "create_radar:radar_bearing",
-    "create_radar:sonar_bearing",
-    "create_radar:sonar_panel",
     "create_radar:directional_jammer",
     "create_radar:radar_receiver_block",
     "create_radar:radar_dish_block",
@@ -18,6 +16,8 @@
     "create_radar:identification_transponder",
     "create_radar:radar_warning_receiver",
     "create_radar:sky_radar",
+    "create_radar:sonar_bearing",
+    "create_radar:sonar_sensor",
     "create_radar:t_pitch"
   ]
 }

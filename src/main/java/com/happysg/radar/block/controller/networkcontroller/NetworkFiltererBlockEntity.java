@@ -10,6 +10,7 @@ import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.radar.behavior.SkyRadarScanningBehavior;
+import com.happysg.radar.block.radar.behavior.SonarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
@@ -1168,6 +1169,12 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             SkyRadarScanningBehavior skyScan = BlockEntityBehaviour.get(sbe, SkyRadarScanningBehavior.TYPE);
             if (skyScan != null) {
                 skyScan.applyDetectionConfig(detection);
+            }
+
+            SonarScanningBlockBehavior sonarScan = BlockEntityBehaviour.get(sbe, SonarScanningBlockBehavior.TYPE);
+
+            if (sonarScan != null) {
+                sonarScan.applyDetectionConfig(detection);
             }
         }
     }

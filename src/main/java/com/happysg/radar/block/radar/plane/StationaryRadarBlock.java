@@ -35,10 +35,8 @@ public class StationaryRadarBlock extends HorizontalDirectionalBlock implements 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         Direction direction = context.isSecondaryUseActive() ? context.getHorizontalDirection().getOpposite() : context.getHorizontalDirection();
-        return this.defaultBlockState()
-                .setValue(FACING, direction);
+        return this.defaultBlockState().setValue(FACING, direction);
     }
-
 
     @Override
     public Class<StationaryRadarBlockEntity> getBlockEntityClass() {

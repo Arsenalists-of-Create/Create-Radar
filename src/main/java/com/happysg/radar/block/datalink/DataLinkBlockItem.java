@@ -17,10 +17,13 @@ import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
 import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
+import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlock;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.registry.AllDataBehaviors;
 import com.happysg.radar.registry.ModBlocks;
+import com.happysg.radar.api.mount.RadarMountAdapter;
+import com.happysg.radar.api.mount.RadarMountRegistry;
 import net.arsenalists.createenergycannons.content.energymount.EnergyCannonMount;
 import net.createmod.catnip.outliner.Outliner;
 import net.minecraft.ChatFormatting;
@@ -188,20 +191,25 @@ public class DataLinkBlockItem extends BlockItem {
 
     @Nullable
     private static BlockPos resolveSelectableMount(LinkUse use) {
-        CannonMountContext cbc =
-                CannonMountContext.resolveEndpoint(use.level(), use.clickedPos());
+        CannonMountContext cbc = CannonMountContext.resolveEndpoint(use.level(), use.clickedPos());
+
         if (cbc != null) {
             return cbc.getBlockPos().immutable();
         }
 
         BlockState state = use.clickedState();
-        boolean isEnergyMount = Mods.CREATEENERGYCANNONS.isLoaded()
-                && state.getBlock() instanceof EnergyCannonMount;
-        if (CannonMountContext.isCompactMount(use.be(), state)
-                || state.getBlock() instanceof CannonMountBlock
-                || isEnergyMount) {
+        boolean isEnergyMount = Mods.CREATEENERGYCANNONS.isLoaded() && state.getBlock() instanceof EnergyCannonMount;
+
+        if (CannonMountContext.isCompactMount(use.be(), state) || state.getBlock() instanceof CannonMountBlock || isEnergyMount) {
             return use.clickedPos().immutable();
         }
+
+        RadarMountAdapter apiMount = RadarMountRegistry.find(use.level(), use.clickedPos());
+
+        if (apiMount != null) {
+            return apiMount.getMountPos().immutable();
+        }
+
         return null;
     }
 
@@ -563,7 +571,7 @@ public class DataLinkBlockItem extends BlockItem {
             if (state.getBlock() instanceof RadarBearingBlock) return RADAR_BEARING;
             if (state.getBlock() instanceof StationaryRadarBlock) return RADAR_STATIONARY;
             if (state.getBlock() instanceof SkyRadarBlock) return RADAR_SKY;
-            if (isSonarBlock(state)) return RADAR_SONAR;
+            if (state.getBlock() instanceof SonarBearingBlock) return RADAR_SONAR;
             if (ControllerType.from(be, state) != null) return CONTROLLER;
             return null;
         }

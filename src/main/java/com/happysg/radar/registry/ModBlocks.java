@@ -20,8 +20,11 @@ import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
 import com.happysg.radar.block.radar.receiver.AbstractRadarFrame;
 import com.happysg.radar.block.radar.receiver.RadarReceiverBlock;
 
+import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlock;
+import com.happysg.radar.block.radar.sonar.sensor.SonarSensorBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarSublevelConnectorBlock;
+
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableAwareDataLinkBlock;
 import com.simibubi.create.foundation.data.AssetLookup;
@@ -31,8 +34,6 @@ import com.tterrag.registrate.util.entry.BlockEntry;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.tags.BlockTags;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.MapColor;
@@ -97,30 +98,6 @@ public class ModBlocks {
                     .item()
                     .model(AssetLookup.customBlockItemModel("_", "item"))
                     .build()
-                    .register();
-
-    public static final BlockEntry<Block> SONAR_BEARING =
-            REGISTRATE.block("sonar_bearing", Block::new)
-                    .lang("Sonar Bearing")
-                    .initialProperties(SharedProperties::softMetal)
-                    .properties(BlockBehaviour.Properties::noOcclusion)
-                    .properties(p -> p.strength(0.8f))
-                    .addLayer(() -> RenderType::cutoutMipped)
-                    .blockstate((c, p) -> p.simpleBlock(c.getEntry(),
-                            p.models().getExistingFile(c.getId())))
-                    .transform(axeOrPickaxe())
-                    .simpleItem()
-                    .register();
-
-    public static final BlockEntry<Block> SONAR_PANEL =
-            REGISTRATE.block("sonar_panel", Block::new)
-                    .lang("Sonar Panel")
-                    .initialProperties(SharedProperties::softMetal)
-                    .properties(p -> p.strength(0.8f))
-                    .blockstate((c, p) -> p.simpleBlock(c.getEntry(),
-                            p.models().getExistingFile(c.getId())))
-                    .transform(axeOrPickaxe())
-                    .simpleItem()
                     .register();
 
     public static final BlockEntry<JammerBlock> DIRECTIONAL_JAMMER =
@@ -337,6 +314,30 @@ public class ModBlocks {
                     .properties(BlockBehaviour.Properties::noLootTable)
                     .blockstate((c, p) -> p.simpleBlock(c.get(), p.models().getExistingFile(ResourceLocation.withDefaultNamespace("block/barrier"))))
                     .register();
+
+    public static final BlockEntry<SonarBearingBlock> SONAR_BEARING =
+            REGISTRATE.block("sonar_bearing", SonarBearingBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.noOcclusion())
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .blockstate((c, p) -> p.directionalBlock(c.getEntry(), p.models().getExistingFile(CreateRadar.asResource("block/sonar_bearing"))))
+                    .item()
+                    .model((c, p) -> p.withExistingParent(c.getName(), CreateRadar.asResource("block/sonar_bearing")))
+                    .build()
+                    .register();
+
+    public static final BlockEntry<SonarSensorBlock> SONAR_SENSOR =
+            REGISTRATE.block("sonar_sensor", SonarSensorBlock::new)
+                    .initialProperties(SharedProperties::softMetal)
+                    .properties(p -> p.strength(0.8f))
+                    .transform(axeOrPickaxe())
+                    .blockstate((c, p) -> p.simpleBlock(c.getEntry(), p.models().getExistingFile(CreateRadar.asResource("block/sonar_sensor"))))
+                    .item()
+                    .model((c, p) -> p.withExistingParent(c.getName(), CreateRadar.asResource("block/sonar_sensor")))
+                    .build()
+                    .register();
+
     public static final BlockEntry<TPitchControllerBlock> T_PITCH =
             REGISTRATE.block("t_pitch", TPitchControllerBlock::new)
                     .lang("T-Pitch Controller")
