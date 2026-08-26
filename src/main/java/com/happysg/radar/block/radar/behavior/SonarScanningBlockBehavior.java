@@ -38,7 +38,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     public static final BehaviourType<SonarScanningBlockBehavior> TYPE = new BehaviourType<>();
 
     public static final int SCAN_PERIOD_TICKS = 40;
-    public static final int MAX_CONSECUTIVE_AIR_BLOCKS = 16;
+    public static final int MAX_AIR_BLOCKS = 16;
     private static final int TRACK_EXPIRATION_TICKS = 100;
     private final SonarBearingBlockEntity sonar;
     private final Map<String, RadarTrack> radarTracks = new HashMap<>();
@@ -206,7 +206,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         double tMaxY = initialTMax(start.y, y, stepY, dy);
         double tMaxZ = initialTMax(start.z, z, stepZ, dz);
 
-        int consecutiveAir = 0;
+        int airBlocks = 0;
 
         int guard = Math.abs(endX - x) + Math.abs(endY - y) + Math.abs(endZ - z) + 8;
 
@@ -217,13 +217,11 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
                 return false;
 
             if (level.getBlockState(pos).isAir()) {
-                consecutiveAir++;
+                airBlocks++;
 
-                if (consecutiveAir > MAX_CONSECUTIVE_AIR_BLOCKS) {
+                if (airBlocks > MAX_AIR_BLOCKS) {
                     return false;
                 }
-            } else {
-                consecutiveAir = 0;
             }
 
             if (x == endX && y == endY && z == endZ) {
