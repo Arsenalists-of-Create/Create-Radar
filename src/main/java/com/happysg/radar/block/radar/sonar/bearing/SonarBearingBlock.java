@@ -2,6 +2,7 @@ package com.happysg.radar.block.radar.sonar.bearing;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.registry.ModBlockEntityTypes;
+import com.happysg.radar.registry.ModBlocks;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
@@ -30,7 +31,26 @@ public class SonarBearingBlock extends DirectionalKineticBlock implements IBE<So
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
-        Direction facing = context.getNearestLookingVerticalDirection();
+        Level level = context.getLevel();
+        BlockPos pos = context.getClickedPos().relative(context.getClickedFace());
+
+        boolean sensorAbove = ModBlocks.SONAR_SENSOR.has(level.getBlockState(pos.above()));
+        boolean sensorBelow = ModBlocks.SONAR_SENSOR.has(level.getBlockState(pos.below()));
+
+        Direction facing;
+
+        if (sensorAbove && !sensorBelow) {
+            facing = Direction.UP;
+        } else if (sensorBelow && !sensorAbove) {
+            facing = Direction.DOWN;
+        } else {
+            // Fallback when there are no panels yet
+            facing = context.getClickedFace();
+
+            if (facing.getAxis() != Direction.Axis.Y) {
+                facing = Direction.UP;
+            }
+        }
 
         return defaultBlockState().setValue(FACING, facing);
     }
