@@ -99,7 +99,7 @@ public class ModBlockEntityTypes {
             .validBlocks(ModBlocks.SKY_RADAR)
             .register();
 
-    public static final BlockEntityEntry<SonarBearingBlockEntity> SONAR_BEARING = REGISTRATE
+    public static final BlockEntityEntry<SonarBearingBlockEntity> SONAR_BEARING_BE = REGISTRATE
             .blockEntity("sonar_bearing", SonarBearingBlockEntity::new)
             .validBlocks(ModBlocks.SONAR_BEARING)
             .register();

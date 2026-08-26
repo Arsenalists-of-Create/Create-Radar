@@ -768,14 +768,6 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         return null;
     }
 
-    private static boolean isSonarBlock(BlockState state) {
-        Class<?> blockClass = state.getBlock().getClass();
-        Package blockPackage = blockClass.getPackage();
-        return blockPackage != null
-                && blockPackage.getName().contains(".radar.sonar")
-                && blockClass.getSimpleName().contains("Sonar");
-    }
-
     private boolean claimEndpointForGroup(@Nullable ServerLevel level, Group group, BlockPos endpointPos, LinkOrigin origin) {
         String endpointKey = key(group.key.dim(), endpointPos);
         String myKey = key(group.key.dim(), group.key.filtererPos());

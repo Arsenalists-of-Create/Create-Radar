@@ -17,11 +17,14 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import org.apache.commons.lang3.tuple.Pair;
+import java.util.HashSet;
+import java.util.Set;
 
 public class SonarContraption extends BearingContraption {
 
     private BlockPos bearingPos;
-    private BlockPos endSensor;
+    private BlockPos rootPos;
+    private final Set<BlockPos> sensorPositions = new HashSet<>();
     private int panelCount;
 
     public SonarContraption() {
@@ -30,6 +33,10 @@ public class SonarContraption extends BearingContraption {
     @Override
     public boolean assemble(Level level, BlockPos pos) throws AssemblyException {
         bearingPos = pos;
+        rootPos = null;
+
+        sensorPositions.clear();
+        panelCount = 0;
 
         if (pos.getY() >= SonarBearingBlockEntity.MAX_BEARING_Y_EXCLUSIVE) {
             throw new AssemblyException(Component.literal("Sonar bearing must be below Y 64"));
@@ -43,14 +50,31 @@ public class SonarContraption extends BearingContraption {
 
         facing = bearingState.getValue(SonarBearingBlock.FACING);
 
-        boolean assembled = super.assemble(level, pos);
-
-        if (!assembled || panelCount <= 0) {
-            throw new AssemblyException(Component.literal("Sonar requires at least one sensor on the top of the bearing"));
+        if (facing != Direction.UP && facing != Direction.DOWN) {
+            throw new AssemblyException(Component.literal("Sonar bearing must face up or down"));
         }
 
-        if (!isNearSurface(level)) {
-            throw new AssemblyException(Component.literal("The end sonar sensor must be near a surface"));
+        rootPos = bearingPos.relative(facing);
+
+        if (!ModBlocks.SONAR_SENSOR.has(level.getBlockState(rootPos))) {
+            throw new AssemblyException(Component.literal("Sonar requires a sensor directly above or below the bearing"));
+        }
+
+        boolean assembled = super.assemble(level, pos);
+
+        if (!assembled || sensorPositions.isEmpty()) {
+            throw new AssemblyException(Component.literal("Sonar requires at least one sensor"));
+        }
+
+        if (!sensorPositions.contains(rootPos)) {
+            throw new AssemblyException(Component.literal("Sonar root sensor was not assembled"));
+        }
+
+        validateSensorPlane();
+        panelCount = calculatePanelCount();
+
+        if (!isRootNearSurface(level)) {
+            throw new AssemblyException(Component.literal("The sonar root must be near a surface"));
         }
 
         return true;
@@ -58,19 +82,7 @@ public class SonarContraption extends BearingContraption {
 
     @Override
     protected boolean movementAllowed(BlockState state, Level level, BlockPos pos) {
-        if (!ModBlocks.SONAR_SENSOR.has(state)) {
-            return false;
-        }
-
-        if (bearingPos == null) {
-            return false;
-        }
-
-        if (!isOnSensorLine(pos)) {
-            return false;
-        }
-
-        return super.movementAllowed(state, level, pos);
+        return ModBlocks.SONAR_SENSOR.has(state) && super.movementAllowed(state, level, pos);
     }
 
     @Override
@@ -81,50 +93,32 @@ public class SonarContraption extends BearingContraption {
             return;
         }
 
-        if (bearingPos == null || !isOnSensorLine(pos)) {
+        if (bearingPos == null) {
+            return;
+        }
+
+        BlockPos sensorPos = pos.immutable();
+
+        if (!sensorPositions.add(sensorPos)) {
             return;
         }
 
         super.addBlock(level, pos, capture);
-        panelCount++;
-
-        if (endSensor == null || distanceFromBearing(pos) > distanceFromBearing(endSensor)) {
-            endSensor = pos.immutable();
-        }
     }
 
-    private boolean isOnSensorLine(BlockPos pos) {
-        if (bearingPos == null || facing == null) {
+    private boolean isRootNearSurface(Level level) {
+        if (rootPos == null || facing == null) {
             return false;
         }
 
-        int dx = pos.getX() - bearingPos.getX();
-        int dy = pos.getY() - bearingPos.getY();
-        int dz = pos.getZ() - bearingPos.getZ();
+        Direction contactFace = facing.getOpposite();
 
-        return switch (facing) {
-            case EAST -> dx > 0 && dy == 0 && dz == 0;
-            case WEST -> dx < 0 && dy == 0 && dz == 0;
-            case UP -> dy > 0 && dx == 0 && dz == 0;
-            case DOWN -> dy < 0 && dx == 0 && dz == 0;
-            case SOUTH -> dz > 0 && dx == 0 && dy == 0;
-            case NORTH -> dz < 0 && dx == 0 && dy == 0;
-        };
-    }
+        for (int gap = 0;
+             gap <= SonarBearingBlockEntity.MAX_GROUND_AIR_GAP;
+             gap++) {
 
-    private int distanceFromBearing(BlockPos pos) {
-        return Math.abs(pos.getX() - bearingPos.getX()) + Math.abs(pos.getY() - bearingPos.getY()) + Math.abs(pos.getZ() - bearingPos.getZ());
-    }
-
-    private boolean isNearSurface(Level level) {
-        if (endSensor == null || facing == null) {
-            return false;
-        }
-
-        for (int gap = 0; gap <= SonarBearingBlockEntity.MAX_GROUND_AIR_GAP; gap++) {
-            BlockPos surfacePos = endSensor.relative(facing, gap + 1);
+            BlockPos surfacePos = rootPos.relative(facing, gap + 1);
             BlockState surfaceState = level.getBlockState(surfacePos);
-            Direction contactFace = facing.getOpposite();
 
             if (surfaceState.isFaceSturdy(level, surfacePos, contactFace)) {
                 return true;
@@ -132,6 +126,10 @@ public class SonarContraption extends BearingContraption {
         }
 
         return false;
+    }
+
+    public Set<BlockPos> getSensorPositions() {
+        return Set.copyOf(sensorPositions);
     }
 
     public int getPanelCount() {
@@ -142,18 +140,66 @@ public class SonarContraption extends BearingContraption {
         return facing;
     }
 
+    private void validateSensorPlane() throws AssemblyException {
+        if (rootPos == null) {
+            throw new AssemblyException(
+                    Component.literal("Sonar root is missing")
+            );
+        }
+
+        int rootY = rootPos.getY();
+
+        for (BlockPos sensorPos : sensorPositions) {
+            if (sensorPos.getY() != rootY) {
+                throw new AssemblyException(
+                        Component.literal("All sonar sensors must be on the same horizontal plane")
+                );
+            }
+        }
+    }
+
+    private int calculatePanelCount() {
+        if (sensorPositions.isEmpty()) {
+            return 0;
+        }
+
+        int minX = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+
+        for (BlockPos sensorPos : sensorPositions) {
+            minX = Math.min(minX, sensorPos.getX());
+            maxX = Math.max(maxX, sensorPos.getX());
+
+            minZ = Math.min(minZ, sensorPos.getZ());
+            maxZ = Math.max(maxZ, sensorPos.getZ());
+        }
+
+        int width = maxX - minX + 1;
+        int depth = maxZ - minZ + 1;
+
+        return Math.min(width, depth);
+    }
+
     @Override
     public CompoundTag writeNBT(HolderLookup.Provider registries, boolean spawnPacket) {
         CompoundTag tag = super.writeNBT(registries, spawnPacket);
         tag.putInt("PanelCount", panelCount);
+        long[] sensors = sensorPositions.stream().mapToLong(BlockPos::asLong).toArray();
+        tag.putLongArray("SensorPositions", sensors);
         return tag;
     }
 
     @Override
     public void readNBT(Level level, CompoundTag tag, boolean spawnData) {
         super.readNBT(level, tag, spawnData);
-
         panelCount = tag.getInt("PanelCount");
+        sensorPositions.clear();
+
+        for (long packed : tag.getLongArray("SensorPositions")) {
+            sensorPositions.add(BlockPos.of(packed));
+        }
     }
 
     @Override

@@ -531,14 +531,6 @@ public class DataLinkBlockItem extends BlockItem {
             return null;
         }
 
-        private static boolean isSonarBlock(BlockState state) {
-            Class<?> blockClass = state.getBlock().getClass();
-            Package blockPackage = blockClass.getPackage();
-            return blockPackage != null
-                    && blockPackage.getName().contains(".radar.sonar")
-                    && blockClass.getSimpleName().contains("Sonar");
-        }
-
         FilterCommit validate(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group) {
             return switch (this) {
                 case MONITOR -> validateMonitor(use, serverLevel, data, group);

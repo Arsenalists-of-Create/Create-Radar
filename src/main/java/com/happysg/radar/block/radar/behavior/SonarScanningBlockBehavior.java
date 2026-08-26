@@ -1,6 +1,7 @@
 package com.happysg.radar.block.radar.behavior;
 
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
+import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlockEntity;
 import com.happysg.radar.block.radar.track.RadarEntityTypeTags;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
@@ -9,7 +10,6 @@ import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
@@ -40,7 +40,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     public static final int SCAN_PERIOD_TICKS = 40;
     public static final int MAX_CONSECUTIVE_AIR_BLOCKS = 16;
     private static final int TRACK_EXPIRATION_TICKS = 100;
-    private final SmartBlockEntity sonar;
+    private final SonarBearingBlockEntity sonar;
     private final Map<String, RadarTrack> radarTracks = new HashMap<>();
 
     private double range;
@@ -54,7 +54,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     private boolean scanProjectiles = true;
     private boolean scanItems = true;
 
-    public SonarScanningBlockBehavior(SmartBlockEntity sonar) {
+    public SonarScanningBlockBehavior(SonarBearingBlockEntity sonar) {
         super(sonar);
         this.sonar = sonar;
     }
@@ -94,7 +94,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             if (!insideCoverage(level, origin, target))
                 continue;
 
-            if (!signalSurvives(level, origin, target))
+            if (!signalSurvivesFromSensors(level, target))
                 continue;
 
             radarTracks.compute(entity.getUUID().toString(), (id, existing) -> {
@@ -127,7 +127,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             if (!insideCoverage(level, origin, target))
                 continue;
 
-            if (!signalSurvives(level, origin, target))
+            if (!signalSurvivesFromSensors(level, target))
                 continue;
 
             radarTracks.compute(ship.getUniqueId().toString(), (id, existing) -> {
@@ -333,6 +333,24 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         scanItems = config.item();
 
         radarTracks.values().removeIf(track -> !allowCategory(track.trackCategory()));
+    }
+
+    private boolean signalSurvivesFromSensors(ServerLevel level, Vec3 target) {
+        Collection<BlockPos> sensors = sonar.getSensorPositions();
+
+        if (sensors.isEmpty()) {
+            return false;
+        }
+
+        for (BlockPos sensorPos : sensors) {
+            Vec3 sensorOrigin = Vec3.atCenterOf(sensorPos);
+
+            if (signalSurvives(level, sensorOrigin, target)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public Collection<RadarTrack> getRadarTracks() {

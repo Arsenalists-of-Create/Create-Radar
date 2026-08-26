@@ -30,11 +30,7 @@ public class SonarBearingBlock extends DirectionalKineticBlock implements IBE<So
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
-        Direction facing = context.getNearestLookingDirection();
-
-        if (facing.getAxis() == Direction.Axis.Y) {
-            facing = facing.getOpposite();
-        }
+        Direction facing = context.getNearestLookingVerticalDirection();
 
         return defaultBlockState().setValue(FACING, facing);
     }
@@ -56,7 +52,7 @@ public class SonarBearingBlock extends DirectionalKineticBlock implements IBE<So
 
     @Override
     public BlockEntityType<? extends SonarBearingBlockEntity> getBlockEntityType() {
-        return ModBlockEntityTypes.SONAR_BEARING.get();
+        return ModBlockEntityTypes.SONAR_BEARING_BE.get();
     }
 
     @Override
