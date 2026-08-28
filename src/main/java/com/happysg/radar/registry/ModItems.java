@@ -9,6 +9,7 @@ import com.happysg.radar.item.identfilter.IdentFilterItem;
 import com.happysg.radar.item.radarproxfuze.AdvancedProximityFuze;
 import com.happysg.radar.item.targetfilter.TargetFilterItem;
 import com.tterrag.registrate.util.entry.ItemEntry;
+import net.minecraft.world.item.ItemStack;
 
 import static com.happysg.radar.CreateRadar.REGISTRATE;
 

@@ -26,10 +26,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
 public class SonarBearingBlockEntity extends KineticBlockEntity implements IRadar, IControlContraption {
 
@@ -211,16 +208,9 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
 
         boolean oldValid = structureValid;
         boolean yValid = worldPosition.getY() < MAX_BEARING_Y_EXCLUSIVE;
-        boolean hasPanels = assembled && panelCount > 0;
-        boolean surfaceValid = false;
+        boolean hasSensors = assembled && movedContraption != null && panelCount > 0;
 
-        if (hasPanels) {
-            Direction sensorDirection = getSensorDirection();
-            BlockPos endSensor = worldPosition.relative(sensorDirection, panelCount);
-            surfaceValid = isEndSensorNearSurface(endSensor, sensorDirection);
-        }
-
-        structureValid = yValid && hasPanels && surfaceValid;
+        structureValid = yValid && hasSensors;
 
         if (oldValid != structureValid) {
             setChanged();
@@ -231,44 +221,8 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
         }
     }
 
-    private boolean isEndSensorNearSurface(
-            BlockPos endSensor,
-            Direction sensorDirection
-    ) {
-        if (level == null) {
-            return false;
-        }
-
-        for (int gap = 0; gap <= MAX_GROUND_AIR_GAP; gap++) {
-
-            BlockPos surfacePos = endSensor.relative(sensorDirection, gap + 1);
-
-            if (surfacePos.getY() < level.getMinBuildHeight()) {
-                return true;
-            }
-
-            if (surfacePos.getY() >= level.getMaxBuildHeight()) {
-                return false;
-            }
-
-            BlockState state = level.getBlockState(surfacePos);
-
-            if (state.isFaceSturdy(level, surfacePos, sensorDirection.getOpposite())) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private Direction getSensorDirection() {
-        BlockState state = getBlockState();
-
-        if (state.hasProperty(SonarBearingBlock.FACING)) {
-            return state.getValue(SonarBearingBlock.FACING);
-        }
-
-        return Direction.DOWN;
+    public Collection<BlockPos> getSensorPositions() {
+        return getContraption().map(SonarContraption::getSensorPositions).orElse(Set.of());
     }
 
     private void updateScanningBehavior() {
