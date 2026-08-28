@@ -38,6 +38,32 @@ public class RadarTrackUtil {
         return new Vec3(vecD.x, vecD.y, vecD.z);
     }
 
+    /**
+     * Translation applied to a live ship silhouette so it follows the
+     * position reported by radar, including directional-jamming jitter.
+     */
+    public static Vec3 getReportedPositionOffset(
+            RadarTrack track, SubLevelAccess subLevel) {
+        if (track == null || subLevel == null || subLevel.boundingBox() == null) {
+            return Vec3.ZERO;
+        }
+        return getReportedPositionOffset(track.position(),
+                getPosition(subLevel));
+    }
+
+    public static Vec3 getReportedPositionOffset(Vec3 reportedPosition,
+                                                 Vec3 physicalPosition) {
+        if (!finite(reportedPosition) || !finite(physicalPosition)) {
+            return Vec3.ZERO;
+        }
+        return reportedPosition.subtract(physicalPosition);
+    }
+
+    private static boolean finite(Vec3 value) {
+        return value != null && Double.isFinite(value.x)
+                && Double.isFinite(value.y) && Double.isFinite(value.z);
+    }
+
 
 
 

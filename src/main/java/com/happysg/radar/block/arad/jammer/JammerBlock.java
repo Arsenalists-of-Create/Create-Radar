@@ -53,6 +53,7 @@ public class JammerBlock extends DirectionalKineticBlock
                          BlockState newState, boolean isMoving) {
         if (!state.is(newState.getBlock()) && level instanceof ServerLevel serverLevel) {
             ARADData.get(serverLevel).onEndpointRemoved(serverLevel, pos);
+            DirectionalJammingService.remove(serverLevel, pos);
         }
         super.onRemove(state, level, pos, newState, isMoving);
     }

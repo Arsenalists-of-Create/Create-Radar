@@ -26,7 +26,7 @@ public class PlaneRadarPeripheral implements GenericPeripheral {
     @LuaFunction(mainThread = true)
     public static List<Map<? super String, Object>> getTracks(StationaryRadarBlockEntity radarEntity){
         List<Map<? super String, Object>> tracks = new ArrayList<>();
-        for (RadarTrack track : radarEntity.getTracks()) {
+        for (RadarTrack track : radarEntity.getReportedTracks()) {
             HashMap<? super String, Object> map = new HashMap<>();
             map.put("position", getMapFromVector(track.position()));
             map.put("velocity", getMapFromVector(track.velocity()));
@@ -34,6 +34,8 @@ public class PlaneRadarPeripheral implements GenericPeripheral {
             map.put("id", track.id());
             map.put("scannedTime", track.scannedTime());
             map.put("entityType", track.entityType());
+            map.put("synthetic", track.isSynthetic());
+            map.put("friendly", track.isFriendly());
             tracks.add(map);
         }
         return tracks;

@@ -402,7 +402,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     }
 
     private static RadarTrack findTrack(IRadar radar, String selectedId) {
-        for (RadarTrack track : radar.getTracks()) {
+        for (RadarTrack track : radar.getReportedTracks()) {
             if (track == null) {
                 continue;
             }

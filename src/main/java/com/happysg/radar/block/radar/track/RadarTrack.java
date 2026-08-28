@@ -28,8 +28,34 @@ public class RadarTrack implements RadarContact {
     private int silhouetteRevision = -1;
     private byte silhouetteStatus = 0;
     private boolean friendly;
+    private boolean synthetic;
+    private JammingData jammingData;
 
     private Vec3 vector;
+
+    public record JammingData(
+            String radarSourceId,
+            float outerStrength,
+            float directionalStrength,
+            float severeStrength,
+            float friendlyOutageChance,
+            Vec3 guidancePositionOffset,
+            Vec3 guidanceVelocityOffset,
+            long sampleToken
+    ) {
+        public JammingData {
+            radarSourceId = radarSourceId == null ? "" : radarSourceId;
+            guidancePositionOffset = guidancePositionOffset == null
+                    ? Vec3.ZERO : guidancePositionOffset;
+            guidanceVelocityOffset = guidanceVelocityOffset == null
+                    ? Vec3.ZERO : guidanceVelocityOffset;
+        }
+
+        public float priorityScore() {
+            return severeStrength * 100.0F
+                    + directionalStrength * 10.0F + outerStrength;
+        }
+    }
 
     public RadarTrack(String id, Vec3 position, Vec3 velocity, long scannedTime, TrackCategory trackCategory, String entityType, float entityheight) {
         this.id = id;
@@ -53,8 +79,26 @@ public class RadarTrack implements RadarContact {
         copy.silhouetteRevision = silhouetteRevision;
         copy.silhouetteStatus = silhouetteStatus;
         copy.friendly = friendly;
+        copy.synthetic = synthetic;
+        copy.jammingData = jammingData;
         copy.vector = vector;
         return copy;
+    }
+
+    public void copyMutableStateFrom(RadarTrack source) {
+        if (source == null) {
+            return;
+        }
+        position = source.position;
+        velocity = source.velocity;
+        scannedTime = source.scannedTime;
+        silhouetteId = source.silhouetteId;
+        silhouetteRevision = source.silhouetteRevision;
+        silhouetteStatus = source.silhouetteStatus;
+        friendly = source.friendly;
+        synthetic = source.synthetic;
+        jammingData = source.jammingData;
+        vector = source.vector;
     }
 
     public Color getColor() {
@@ -92,6 +136,20 @@ public class RadarTrack implements RadarContact {
 
         );
         track.friendly = tag.getBoolean("Friendly");
+        track.synthetic = tag.getBoolean("Synthetic");
+        if (tag.contains("Jamming", Tag.TAG_COMPOUND)) {
+            CompoundTag jamming = tag.getCompound("Jamming");
+            track.jammingData = new JammingData(
+                    jamming.getString("RadarSource"),
+                    jamming.getFloat("OuterStrength"),
+                    jamming.getFloat("DirectionalStrength"),
+                    jamming.getFloat("SevereStrength"),
+                    jamming.getFloat("FriendlyOutageChance"),
+                    readVec3(jamming, "GuidancePositionOffset"),
+                    readVec3(jamming, "GuidanceVelocityOffset"),
+                    jamming.getLong("SampleToken")
+            );
+        }
         if (tag.contains("SilhouetteId", Tag.TAG_STRING)) {
             try {
                 track.silhouetteId = UUID.fromString(tag.getString("SilhouetteId"));
@@ -119,6 +177,23 @@ public class RadarTrack implements RadarContact {
         tag.putString("entityType", entityType);
         tag.putFloat("eh", entityheight );
         tag.putBoolean("Friendly", friendly);
+        tag.putBoolean("Synthetic", synthetic);
+        if (jammingData != null) {
+            CompoundTag jamming = new CompoundTag();
+            jamming.putString("RadarSource", jammingData.radarSourceId());
+            jamming.putFloat("OuterStrength", jammingData.outerStrength());
+            jamming.putFloat("DirectionalStrength",
+                    jammingData.directionalStrength());
+            jamming.putFloat("SevereStrength", jammingData.severeStrength());
+            jamming.putFloat("FriendlyOutageChance",
+                    jammingData.friendlyOutageChance());
+            writeVec3(jamming, "GuidancePositionOffset",
+                    jammingData.guidancePositionOffset());
+            writeVec3(jamming, "GuidanceVelocityOffset",
+                    jammingData.guidanceVelocityOffset());
+            jamming.putLong("SampleToken", jammingData.sampleToken());
+            tag.put("Jamming", jamming);
+        }
         if (silhouetteId != null) {
             tag.putString("SilhouetteId", silhouetteId.toString());
             tag.putInt("SilhouetteRevision", silhouetteRevision);
@@ -201,6 +276,22 @@ public class RadarTrack implements RadarContact {
         this.friendly = friendly;
     }
 
+    public boolean isSynthetic() {
+        return synthetic;
+    }
+
+    public void setSynthetic(boolean synthetic) {
+        this.synthetic = synthetic;
+    }
+
+    public JammingData getJammingData() {
+        return jammingData;
+    }
+
+    public void setJammingData(JammingData jammingData) {
+        this.jammingData = jammingData;
+    }
+
     public void setSilhouette(UUID silhouetteId, int silhouetteRevision, byte silhouetteStatus) {
         this.silhouetteId = silhouetteId;
         this.silhouetteRevision = silhouetteRevision;
@@ -236,5 +327,24 @@ public class RadarTrack implements RadarContact {
     }
     public boolean friendly() {
         return isFriendly();
+    }
+
+    private static void writeVec3(CompoundTag tag, String key, Vec3 value) {
+        CompoundTag vector = new CompoundTag();
+        vector.putDouble("X", value.x);
+        vector.putDouble("Y", value.y);
+        vector.putDouble("Z", value.z);
+        tag.put(key, vector);
+    }
+
+    private static Vec3 readVec3(CompoundTag tag, String key) {
+        if (!tag.contains(key, Tag.TAG_COMPOUND)) {
+            return Vec3.ZERO;
+        }
+        CompoundTag vector = tag.getCompound(key);
+        Vec3 value = new Vec3(vector.getDouble("X"), vector.getDouble("Y"),
+                vector.getDouble("Z"));
+        return Double.isFinite(value.x) && Double.isFinite(value.y)
+                && Double.isFinite(value.z) ? value : Vec3.ZERO;
     }
 }

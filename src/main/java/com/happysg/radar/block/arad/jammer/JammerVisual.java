@@ -22,8 +22,6 @@ import java.util.function.Consumer;
 /** Flywheel visual for the jammer shaft and aimed upper assembly. */
 public class JammerVisual extends KineticBlockEntityVisual<JammerBlockEntity>
         implements SimpleDynamicVisual, SimpleTickableVisual {
-    private static final float PIVOT_OFFSET = 7.0f / 16.0f;
-
     private final RotatingInstance shaft;
     private final TransformedInstance upper;
 
@@ -70,17 +68,19 @@ public class JammerVisual extends KineticBlockEntityVisual<JammerBlockEntity>
         Quaternionf rotation = JammerOrientation.rotation(mountFacing,
                 blockEntity.getInterpolatedYaw(partialTick),
                 blockEntity.getInterpolatedPitch(partialTick));
+        float pivotOffset = JammerBlockEntity.TURRET_PIVOT_OFFSET;
 
         upper.setIdentityTransform()
                 .translate(
                         visualPos.getX() + 0.5f
-                                + mountFacing.getStepX() * PIVOT_OFFSET,
+                                + mountFacing.getStepX() * pivotOffset,
                         visualPos.getY() + 0.5f
-                                + mountFacing.getStepY() * PIVOT_OFFSET,
+                                + mountFacing.getStepY() * pivotOffset,
                         visualPos.getZ() + 0.5f
-                                + mountFacing.getStepZ() * PIVOT_OFFSET)
+                                + mountFacing.getStepZ() * pivotOffset)
                 .rotate(rotation)
-                .translate(-0.5f, 0.0f, -0.5f)
+                .translate(-0.5f,
+                        -JammerBlockEntity.TURRET_MODEL_PIVOT_Y, -0.5f)
                 .setChanged();
     }
 

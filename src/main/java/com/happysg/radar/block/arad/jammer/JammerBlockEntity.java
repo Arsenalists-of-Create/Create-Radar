@@ -6,6 +6,8 @@ import com.happysg.radar.api.arad.RollingRpmTracker;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
 import com.happysg.radar.block.arad.rwr.RadarType;
+import com.happysg.radar.block.radar.behavior.IRadar;
+import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -27,6 +29,9 @@ public class JammerBlockEntity extends KineticBlockEntity {
     private static final float DEFAULT_YAW = 270.0f;
     private static final float DEFAULT_PITCH = 0.0f;
     private static final float ANGLE_EPSILON = 1.0e-4f;
+    private static final double DIRECTION_EPSILON_SQR = 1.0e-12D;
+    static final float TURRET_PIVOT_OFFSET = 1.0f;
+    static final float TURRET_MODEL_PIVOT_Y = 9.0f / 16.0f;
 
     public int range = 128;
     public boolean enabled = true;
@@ -48,12 +53,17 @@ public class JammerBlockEntity extends KineticBlockEntity {
         }
     }
 
+    record AimAngles(float yaw, float pitch) {
+    }
+
     private float yaw;
     private float previousYaw;
     private float targetYaw;
     private float pitch;
     private float previousPitch;
     private float targetPitch;
+    private float restYaw;
+    private float restPitch;
     private BlockPos lastKnownPos;
     private boolean aradLinked;
     private @Nullable String selectedEmitterSource;
@@ -63,6 +73,8 @@ public class JammerBlockEntity extends KineticBlockEntity {
     private RadarType selectedRadarType = RadarType.GROUND;
     private float selectedRollingRpm;
     private float selectedRollingRate;
+    private DirectionalJammingService.Profile jammingProfile =
+            DirectionalJammingService.Profile.INACTIVE;
 
     public JammerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -71,9 +83,11 @@ public class JammerBlockEntity extends KineticBlockEntity {
         yaw = defaultYaw(mountFacing, null);
         previousYaw = yaw;
         targetYaw = yaw;
+        restYaw = yaw;
         pitch = DEFAULT_PITCH;
         previousPitch = pitch;
         targetPitch = pitch;
+        restPitch = pitch;
         lastKnownPos = pos.immutable();
     }
 
@@ -88,21 +102,21 @@ public class JammerBlockEntity extends KineticBlockEntity {
         }
 
         float maximumStep = degreesPerTick(getSpeed());
-        if (maximumStep <= 0.0f) {
-            return;
+        if (maximumStep > 0.0f) {
+            float nextYaw = moveTowardWrapped(yaw, targetYaw, maximumStep);
+            float nextPitch = moveToward(pitch, targetPitch, maximumStep);
+            if (Math.abs(Mth.wrapDegrees(nextYaw - yaw)) > ANGLE_EPSILON
+                    || Math.abs(nextPitch - pitch) > ANGLE_EPSILON) {
+                yaw = nextYaw;
+                pitch = nextPitch;
+                if (level != null && !level.isClientSide) {
+                    setChanged();
+                }
+            }
         }
 
-        float nextYaw = moveTowardWrapped(yaw, targetYaw, maximumStep);
-        float nextPitch = moveToward(pitch, targetPitch, maximumStep);
-        if (Math.abs(Mth.wrapDegrees(nextYaw - yaw)) <= ANGLE_EPSILON
-                && Math.abs(nextPitch - pitch) <= ANGLE_EPSILON) {
-            return;
-        }
-
-        yaw = nextYaw;
-        pitch = nextPitch;
-        if (level != null && !level.isClientSide) {
-            setChanged();
+        if (level instanceof ServerLevel serverLevel) {
+            updateJammingContribution(serverLevel);
         }
     }
 
@@ -110,8 +124,8 @@ public class JammerBlockEntity extends KineticBlockEntity {
         long gameTime = serverLevel.getGameTime();
         if (gameTime % RollingRpmTracker.SAMPLE_INTERVAL_TICKS == 0) {
             refreshAradLinkState();
-            refreshSelectedEmitterInfo(serverLevel);
         }
+        refreshSelectedEmitterInfo(serverLevel);
         if (gameTime % 40 != 0 || lastKnownPos.equals(worldPosition)) {
             return;
         }
@@ -179,6 +193,16 @@ public class JammerBlockEntity extends KineticBlockEntity {
     }
 
     private void clearAradSelectionInternal() {
+        clearAradSelectionData();
+        targetYaw = restYaw;
+        targetPitch = restPitch;
+        if (level instanceof ServerLevel serverLevel) {
+            DirectionalJammingService.remove(serverLevel, worldPosition);
+            jammingProfile = DirectionalJammingService.Profile.INACTIVE;
+        }
+    }
+
+    private void clearAradSelectionData() {
         selectingMonitorPos = null;
         selectedEmitterSource = null;
         selectedTarget = null;
@@ -218,15 +242,23 @@ public class JammerBlockEntity extends KineticBlockEntity {
                     external.selectionMetadata().rollingRate()
             );
         }
+        AimAngles aim = aimAnglesForWorldPosition(position);
         boolean changed = selectedEmitterPosition == null
                 || selectedEmitterPosition.distanceToSqr(position) > 1.0e-8
                 || selectedRadarType != radarType
                 || Math.abs(selectedRollingRpm - telemetry.rollingRpm()) > ANGLE_EPSILON
-                || Math.abs(selectedRollingRate - telemetry.rollingRate()) > ANGLE_EPSILON;
+                || Math.abs(selectedRollingRate - telemetry.rollingRate()) > ANGLE_EPSILON
+                || (aim != null
+                && (Math.abs(Mth.wrapDegrees(aim.yaw() - targetYaw)) > ANGLE_EPSILON
+                || Math.abs(aim.pitch() - targetPitch) > ANGLE_EPSILON));
         selectedEmitterPosition = position;
         selectedRadarType = radarType;
         selectedRollingRpm = telemetry.rollingRpm();
         selectedRollingRate = telemetry.rollingRate();
+        if (aim != null) {
+            targetYaw = aim.yaw();
+            targetPitch = aim.pitch();
+        }
         if (changed) {
             setChanged();
             notifyUpdate();
@@ -254,6 +286,10 @@ public class JammerBlockEntity extends KineticBlockEntity {
         return selectedRollingRate;
     }
 
+    public DirectionalJammingService.Profile getJammingProfile() {
+        return jammingProfile;
+    }
+
     public @Nullable SelectedEmitterInfo getSelectedEmitterInfo() {
         if (selectedEmitterSource == null || selectedTarget == null
                 || selectedEmitterPosition == null) {
@@ -273,6 +309,8 @@ public class JammerBlockEntity extends KineticBlockEntity {
     void initializePlacedAim(Direction mountFacing,
                              Direction placerHorizontalFacing) {
         float placedYaw = defaultYaw(mountFacing, placerHorizontalFacing);
+        restYaw = placedYaw;
+        restPitch = DEFAULT_PITCH;
         yaw = placedYaw;
         previousYaw = placedYaw;
         targetYaw = placedYaw;
@@ -283,7 +321,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
         notifyUpdate();
     }
 
-    /** Sets the absolute world-space yaw target. */
+    /** Sets the absolute yaw target in the jammer's local frame. */
     public void setYaw(float yawDegrees) {
         float wrapped = wrap360(yawDegrees);
         if (Math.abs(Mth.wrapDegrees(wrapped - targetYaw)) <= ANGLE_EPSILON) {
@@ -294,7 +332,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
         notifyUpdate();
     }
 
-    /** Sets the absolute world-space pitch target; positive values aim upward. */
+    /** Sets the local-frame pitch target; positive values aim upward. */
     public void setPitch(float pitchDegrees) {
         float clamped = clampPitch(pitchDegrees);
         if (Math.abs(clamped - targetPitch) <= ANGLE_EPSILON) {
@@ -340,6 +378,60 @@ public class JammerBlockEntity extends KineticBlockEntity {
         return getMountFacing().getOpposite();
     }
 
+    Vec3 getTurretPivotLocal() {
+        Direction mountFacing = getMountFacing();
+        return worldPosition.getCenter().add(
+                mountFacing.getStepX() * TURRET_PIVOT_OFFSET,
+                mountFacing.getStepY() * TURRET_PIVOT_OFFSET,
+                mountFacing.getStepZ() * TURRET_PIVOT_OFFSET
+        );
+    }
+
+    private @Nullable AimAngles aimAnglesForWorldPosition(Vec3 worldTarget) {
+        if (!finite(worldTarget)) {
+            return null;
+        }
+        Vec3 localTarget = PhysicsHandler.getShipVec(worldTarget, this);
+        return aimAngles(localTarget.subtract(getTurretPivotLocal()), targetYaw);
+    }
+
+    private void updateJammingContribution(ServerLevel serverLevel) {
+        IRadar targetRadar = selectedEmitterSource == null ? null
+                : ARADTargeting.resolveNativeRadar(serverLevel,
+                selectedEmitterSource).orElse(null);
+        if (!enabled || selectedEmitterSource == null
+                || selectedEmitterPosition == null || targetRadar == null) {
+            DirectionalJammingService.remove(serverLevel, worldPosition);
+            jammingProfile = DirectionalJammingService.Profile.INACTIVE;
+            return;
+        }
+
+        Vec3 localTarget = PhysicsHandler.getShipVec(selectedEmitterPosition,
+                this);
+        Vec3 localDirection = localTarget.subtract(getTurretPivotLocal());
+        if (!finite(localDirection)
+                || localDirection.lengthSqr() <= DIRECTION_EPSILON_SQR) {
+            DirectionalJammingService.remove(serverLevel, worldPosition);
+            jammingProfile = DirectionalJammingService.Profile.INACTIVE;
+            return;
+        }
+        org.joml.Vector3f forward = JammerOrientation.forward(yaw, pitch);
+        Vec3 normalized = localDirection.normalize();
+        double dot = Mth.clamp(normalized.x * forward.x()
+                + normalized.y * forward.y()
+                + normalized.z * forward.z(), -1.0D, 1.0D);
+        float alignmentDegrees = (float) Math.toDegrees(Math.acos(dot));
+        Vec3 jammerWorldPosition = PhysicsHandler.getWorldVec(serverLevel,
+                getTurretPivotLocal());
+        Vec3 targetRadarWorldPosition = PhysicsHandler.getWorldVec(serverLevel,
+                targetRadar.getWorldPos().getCenter());
+        jammingProfile = DirectionalJammingService.heartbeat(
+                serverLevel, worldPosition, selectedEmitterSource,
+                jammerWorldPosition, targetRadarWorldPosition,
+                targetRadar.getRange(), Math.abs(getSpeed()),
+                selectedRollingRpm, selectedRollingRate, alignmentDegrees);
+    }
+
     public boolean affects(BlockPos radarPos) {
         if (!enabled) return false;
         return radarPos.closerThan(worldPosition, range);
@@ -360,6 +452,10 @@ public class JammerBlockEntity extends KineticBlockEntity {
         targetPitch = compound.contains("TargetPitch", Tag.TAG_FLOAT)
                 ? clampPitch(compound.getFloat("TargetPitch"))
                 : pitch;
+        restYaw = compound.contains("RestYaw", Tag.TAG_FLOAT)
+                ? wrap360(compound.getFloat("RestYaw")) : targetYaw;
+        restPitch = compound.contains("RestPitch", Tag.TAG_FLOAT)
+                ? clampPitch(compound.getFloat("RestPitch")) : targetPitch;
         previousYaw = yaw;
         previousPitch = pitch;
         lastKnownPos = compound.contains("LastKnownPos", Tag.TAG_LONG)
@@ -377,6 +473,8 @@ public class JammerBlockEntity extends KineticBlockEntity {
         compound.putFloat("TargetYaw", wrap360(targetYaw));
         compound.putFloat("Pitch", clampPitch(pitch));
         compound.putFloat("TargetPitch", clampPitch(targetPitch));
+        compound.putFloat("RestYaw", wrap360(restYaw));
+        compound.putFloat("RestPitch", clampPitch(restPitch));
         compound.putLong("LastKnownPos", lastKnownPos.asLong());
         compound.putBoolean("AradLinked", aradLinked);
         writeSelectedEmitter(compound);
@@ -416,7 +514,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
     }
 
     private void readSelectedEmitter(CompoundTag compound) {
-        clearAradSelectionInternal();
+        clearAradSelectionData();
         if (!compound.contains("SelectedEmitterSource", Tag.TAG_STRING)
                 || !compound.contains("SelectedRadarPos", Tag.TAG_COMPOUND)
                 || !hasVec3(compound, "SelectedNoisyPosition")) {
@@ -510,6 +608,28 @@ public class JammerBlockEntity extends KineticBlockEntity {
             case NORTH -> 270.0f;
             case UP, DOWN -> DEFAULT_YAW;
         };
+    }
+
+    static @Nullable AimAngles aimAngles(Vec3 direction, float fallbackYaw) {
+        if (!finite(direction) || direction.lengthSqr() <= DIRECTION_EPSILON_SQR) {
+            return null;
+        }
+        double horizontalSqr = direction.x * direction.x
+                + direction.z * direction.z;
+        float yaw = horizontalSqr <= DIRECTION_EPSILON_SQR
+                ? wrap360(fallbackYaw)
+                : wrap360((float) Math.toDegrees(Math.atan2(direction.z,
+                direction.x)));
+        float pitch = clampPitch((float) Math.toDegrees(Math.atan2(
+                direction.y, Math.sqrt(horizontalSqr))));
+        return new AimAngles(yaw, pitch);
+    }
+
+    private static boolean finite(Vec3 value) {
+        return value != null
+                && Double.isFinite(value.x)
+                && Double.isFinite(value.y)
+                && Double.isFinite(value.z);
     }
 
     static float degreesPerTick(float rpm) {

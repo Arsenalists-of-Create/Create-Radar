@@ -1,6 +1,7 @@
 package com.happysg.radar.compat.vs2;
 
 import com.happysg.radar.compat.Mods;
+import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
@@ -15,6 +16,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 public class SableUtils {
@@ -93,6 +95,25 @@ public class SableUtils {
 
     public static SubLevelAccess getShipManagingPos(BlockEntity blockEntity) {
         return getShipManagingPos(blockEntity.getLevel(), blockEntity.getBlockPos());
+    }
+
+    /** Returns the loaded Sable connection component containing a block position. */
+    public static Set<UUID> getConnectedSublevelIds(Level level, BlockPos pos) {
+        if (!Mods.SABLE.isLoaded()) {
+            return Set.of();
+        }
+        SubLevelAccess access = getShipManagingPos(level, pos);
+        if (!(access instanceof SubLevel subLevel)) {
+            return access == null ? Set.of() : Set.of(access.getUniqueId());
+        }
+        java.util.HashSet<UUID> ids = new java.util.HashSet<>();
+        for (SubLevel connected : SubLevelHelper.getConnectedChain(subLevel)) {
+            ids.add(connected.getUniqueId());
+        }
+        if (ids.isEmpty()) {
+            ids.add(subLevel.getUniqueId());
+        }
+        return Set.copyOf(ids);
     }
 
     public static Vec3 getWorldVec(Level level, BlockPos pos) {

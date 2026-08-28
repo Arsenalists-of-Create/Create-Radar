@@ -1,9 +1,23 @@
 package com.happysg.radar.block.arad.jammer;
 
 import com.happysg.radar.api.arad.RollingRpmTracker;
+import com.happysg.radar.block.monitor.MonitorPonderJammingSelfTest;
+import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.block.radar.track.RadarTrackUtil;
+import com.happysg.radar.block.radar.track.TrackCategory;
+import com.happysg.radar.compat.sable.SableSilhouetteStatus;
+import com.happysg.radar.compat.sable.SubLevelSilhouette;
+import com.happysg.radar.compat.sable.SyntheticSableSilhouetteFactory;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 public final class JammerSelfTest {
     private static final float EPSILON = 1.0e-4f;
@@ -15,8 +29,23 @@ public final class JammerSelfTest {
         verifyPlacementDefaults();
         verifyKineticStepping();
         verifyRollingRpmTelemetry();
+        verifyAutomaticAimAngles();
         verifyOrientationBasis();
-        System.out.println("PASS directional jammer placement, aiming, and RPM telemetry checks");
+        verifyVisualPivot();
+        verifyJammingProfile();
+        verifyJammingRangeBalance();
+        verifyJammerClustering();
+        verifyActiveJammerEligibility();
+        verifyNearbyRadarSpillover();
+        verifyBalancedEffectScaling();
+        verifyJammingTrackMetadata();
+        verifyJammedObservationWins();
+        verifySilhouetteJitterAlignment();
+        verifyProceduralFakeShipSilhouettes();
+        verifyFakeHullConfigToggle();
+        verifyFakeShipRarityGate();
+        MonitorPonderJammingSelfTest.verify();
+        System.out.println("PASS directional jammer placement, aiming, telemetry, and jamming checks");
     }
 
     private static void verifyPlacementDefaults() {
@@ -88,6 +117,49 @@ public final class JammerSelfTest {
                 "larger rolling-RPM changes produce a greater rate");
     }
 
+    private static void verifyAutomaticAimAngles() {
+        requireAim(new Vec3(1, 0, 0), 0.0f, 0.0f,
+                "east target");
+        requireAim(new Vec3(0, 0, 1), 90.0f, 0.0f,
+                "south target");
+        requireAim(new Vec3(-1, 0, 0), 180.0f, 0.0f,
+                "west target");
+        requireAim(new Vec3(0, 0, -1), 270.0f, 0.0f,
+                "north target");
+        requireAim(new Vec3(1, 1, 0), 0.0f, 45.0f,
+                "elevated east target");
+        requireAim(new Vec3(0, -1, 1), 90.0f, -45.0f,
+                "depressed south target");
+
+        JammerBlockEntity.AimAngles vertical = JammerBlockEntity.aimAngles(
+                new Vec3(0, 4, 0), 123.0f);
+        require(vertical != null, "vertical target should resolve");
+        requireNear(vertical.yaw(), 123.0f,
+                "vertical target should retain its fallback yaw");
+        requireNear(vertical.pitch(), 90.0f,
+                "vertical target should aim straight up");
+
+        require(JammerBlockEntity.aimAngles(Vec3.ZERO, 0.0f) == null,
+                "coincident target should not change aim");
+        require(JammerBlockEntity.aimAngles(
+                new Vec3(Double.NaN, 0, 0), 0.0f) == null,
+                "non-finite target should not change aim");
+    }
+
+    private static void requireAim(Vec3 direction, float expectedYaw,
+                                   float expectedPitch, String label) {
+        JammerBlockEntity.AimAngles aim = JammerBlockEntity.aimAngles(
+                direction, 42.0f);
+        require(aim != null, label + " should resolve");
+        requireNear(aim.yaw(), expectedYaw, label + " yaw");
+        requireNear(aim.pitch(), expectedPitch, label + " pitch");
+
+        Vector3f expectedForward = new Vector3f((float) direction.x,
+                (float) direction.y, (float) direction.z).normalize();
+        requireVectorNear(JammerOrientation.forward(aim.yaw(), aim.pitch()),
+                expectedForward, label + " forward");
+    }
+
     private static void verifyOrientationBasis() {
         requireOrientation(Direction.UP, 270.0f, 0.0f,
                 new Vector3f(0, 0, -1), new Vector3f(0, 1, 0),
@@ -105,6 +177,403 @@ public final class JammerSelfTest {
         requireFinite(poleForward, "vertical aim orientation");
         requireVectorNear(poleForward, new Vector3f(0, 1, 0),
                 "positive pitch should aim upward");
+    }
+
+    private static void verifyVisualPivot() {
+        requireNear(JammerBlockEntity.TURRET_PIVOT_OFFSET, 1.0f,
+                "turret pivot should be centered in the adjacent block");
+        requireNear(JammerBlockEntity.TURRET_MODEL_PIVOT_Y, 9.0f / 16.0f,
+                "partial-model pivot should account for its mount overlap");
+
+        Vector3f modelPivot = new Vector3f(0.5f,
+                JammerBlockEntity.TURRET_MODEL_PIVOT_Y, 0.5f);
+        for (Direction mountFacing : Direction.values()) {
+            Vector3f expectedWorldPivot = new Vector3f(
+                    0.5f + mountFacing.getStepX(),
+                    0.5f + mountFacing.getStepY(),
+                    0.5f + mountFacing.getStepZ());
+
+            Quaternionf rotation = JammerOrientation.rotation(mountFacing,
+                    37.0f, -23.0f);
+            Vector3f transformedPivot = new Vector3f(modelPivot)
+                    .sub(0.5f, JammerBlockEntity.TURRET_MODEL_PIVOT_Y, 0.5f)
+                    .rotate(rotation)
+                    .add(expectedWorldPivot);
+            requireVectorNear(transformedPivot, expectedWorldPivot,
+                    mountFacing.getName() + " visual pivot");
+        }
+    }
+
+    private static void verifyJammingProfile() {
+        DirectionalJammingService.Profile stopped =
+                DirectionalJammingService.calculateProfile(
+                        0.0f, 0.0f, 0.0f, 0.0f);
+        require(!stopped.active(), "zero jammer RPM must disable jamming");
+
+        DirectionalJammingService.Profile outerEdge =
+                DirectionalJammingService.calculateProfile(
+                        65.0f, 50.0f, 0.0f, 0.0f);
+        requireNear(outerEdge.rpmDifference(), 15.0f,
+                "outer threshold RPM difference");
+        require(outerEdge.outerStrength() > 0.0f,
+                "outer threshold must begin guidance corruption");
+        requireNear(outerEdge.directionalStrength(), 0.0f,
+                "outer threshold must not begin directional jitter");
+
+        DirectionalJammingService.Profile closer =
+                DirectionalJammingService.calculateProfile(
+                        61.0f, 50.0f, 0.0f, 0.0f);
+        require(closer.outerStrength() > outerEdge.outerStrength(),
+                "guidance corruption must increase toward the inner tier");
+
+        DirectionalJammingService.Profile directionalEdge =
+                DirectionalJammingService.calculateProfile(
+                        60.0f, 50.0f, 0.0f, 0.0f);
+        require(directionalEdge.directionalStrength() > 0.0f,
+                "10 RPM difference must begin directional jitter");
+
+        DirectionalJammingService.Profile severeEdge =
+                DirectionalJammingService.calculateProfile(
+                        55.0f, 50.0f, 0.0f, 0.0f);
+        require(severeEdge.severeStrength() > 0.0f,
+                "5 RPM difference must begin severe deception");
+
+        DirectionalJammingService.Profile changingRadar =
+                DirectionalJammingService.calculateProfile(
+                        75.0f, 50.0f, 20.0f, 0.0f);
+        requireNear(changingRadar.rateBonus(), 10.0f,
+                "rolling-rate tolerance expansion");
+        requireNear(changingRadar.outerThreshold(), 25.0f,
+                "expanded outer threshold");
+        require(changingRadar.outerStrength() > 0.0f,
+                "expanded threshold must activate at its edge");
+
+        DirectionalJammingService.Profile fullAlignment =
+                DirectionalJammingService.calculateProfile(
+                        50.0f, 50.0f, 0.0f, 3.0f);
+        DirectionalJammingService.Profile halfAlignment =
+                DirectionalJammingService.calculateProfile(
+                        50.0f, 50.0f, 0.0f, 9.0f);
+        DirectionalJammingService.Profile missed =
+                DirectionalJammingService.calculateProfile(
+                        50.0f, 50.0f, 0.0f, 15.0f);
+        requireNear(fullAlignment.alignmentFactor(), 1.0f,
+                "full-alignment boundary");
+        requireNear(halfAlignment.alignmentFactor(), 0.5f,
+                "alignment taper midpoint");
+        require(!missed.active(),
+                "15-degree turret error must disable the contribution");
+    }
+
+    private static void verifyJammingRangeBalance() {
+        requireNear(DirectionalJammingService.calculateRangeFactor(
+                        49.0, 100.0F, 0.50F, 0.85F), 1.0F,
+                "range below the full-effect boundary");
+        requireNear(DirectionalJammingService.calculateRangeFactor(
+                        50.0, 100.0F, 0.50F, 0.85F), 1.0F,
+                "full-effect range boundary");
+        requireNear(DirectionalJammingService.calculateRangeFactor(
+                        67.5, 100.0F, 0.50F, 0.85F), 0.5F,
+                "range falloff midpoint");
+        requireNear(DirectionalJammingService.calculateRangeFactor(
+                        85.0, 100.0F, 0.50F, 0.85F), 0.0F,
+                "zero-effect range boundary");
+        requireNear(DirectionalJammingService.calculateRangeFactor(
+                        100.0, 100.0F, 0.50F, 0.85F), 0.0F,
+                "range beyond the zero-effect boundary");
+        requireNear(DirectionalJammingService.calculateRangeFactor(
+                        67.5, 100.0F, 0.85F, 0.50F), 0.5F,
+                "reversed range settings must be sanitized");
+        requireNear(DirectionalJammingService.calculateRangeFactor(
+                        10.0, 0.0F, 0.50F, 0.85F), 0.0F,
+                "invalid radar range must fail closed");
+    }
+
+    private static void verifyJammerClustering() {
+        BlockPos group = new BlockPos(5, 6, 7);
+        List<DirectionalJammingService.ClusterIdentity> mixedChain = List.of(
+                new DirectionalJammingService.ClusterIdentity(
+                        Vec3.ZERO, null, Set.of()),
+                new DirectionalJammingService.ClusterIdentity(
+                        new Vec3(40.0, 0.0, 0.0), group, Set.of()),
+                new DirectionalJammingService.ClusterIdentity(
+                        new Vec3(1000.0, 0.0, 0.0), group, Set.of()));
+        requireArrayEquals(DirectionalJammingService.clusterSizes(
+                        mixedChain, 50.0F), new int[]{3, 3, 3},
+                "proximity and ARAD links must form a transitive cluster");
+
+        UUID commonSublevel = UUID.fromString(
+                "c260f433-ef0f-44bc-bf28-f86d85d3b2f1");
+        List<DirectionalJammingService.ClusterIdentity> sableChain = List.of(
+                new DirectionalJammingService.ClusterIdentity(
+                        Vec3.ZERO, null, Set.of(commonSublevel,
+                        UUID.fromString("b73c778e-c155-4b36-a30e-860fce72828d"))),
+                new DirectionalJammingService.ClusterIdentity(
+                        new Vec3(500.0, 0.0, 0.0), null,
+                        Set.of(commonSublevel,
+                        UUID.fromString("77ca6209-dbbb-435a-89a4-2c3d9437e0ef"))));
+        requireArrayEquals(DirectionalJammingService.clusterSizes(
+                        sableChain, 0.0F), new int[]{2, 2},
+                "connected Sable sublevels must share a cluster");
+
+        List<DirectionalJammingService.ClusterIdentity> independent = List.of(
+                new DirectionalJammingService.ClusterIdentity(
+                        Vec3.ZERO, null, Set.of()),
+                new DirectionalJammingService.ClusterIdentity(
+                        new Vec3(40.0, 0.0, 0.0), null, Set.of()));
+        requireArrayEquals(DirectionalJammingService.clusterSizes(
+                        independent, 0.0F), new int[]{1, 1},
+                "zero proximity radius must disable distance clustering");
+        requireArrayEquals(DirectionalJammingService.clusterSizes(
+                        independent, 40.0F), new int[]{2, 2},
+                "proximity radius boundary must be inclusive");
+    }
+
+    private static void verifyActiveJammerEligibility() {
+        DirectionalJammingService.Profile active =
+                DirectionalJammingService.calculateProfile(
+                        50.0F, 50.0F, 0.0F, 0.0F);
+        DirectionalJammingService.Profile stopped =
+                DirectionalJammingService.calculateProfile(
+                        0.0F, 50.0F, 0.0F, 0.0F);
+        require(DirectionalJammingService.isActiveContribution(
+                        active, 1.0F, 102L, 100L),
+                "an active contribution at the TTL boundary must count");
+        require(!DirectionalJammingService.isActiveContribution(
+                        active, 1.0F, 103L, 100L),
+                "an expired contribution must not count");
+        require(!DirectionalJammingService.isActiveContribution(
+                        stopped, 1.0F, 100L, 100L),
+                "a stopped jammer must not count");
+        require(!DirectionalJammingService.isActiveContribution(
+                        active, 0.0F, 100L, 100L),
+                "an out-of-range jammer must not count");
+    }
+
+    private static void verifyNearbyRadarSpillover() {
+        Vec3 targetRadar = Vec3.ZERO;
+        require(DirectionalJammingService.contributionAffectsRadar(
+                        "target", targetRadar, "target",
+                        new Vec3(1000.0, 0.0, 0.0), 0.0F),
+                "the directly targeted radar must always receive its contribution");
+        require(DirectionalJammingService.contributionAffectsRadar(
+                        "target", targetRadar, "neighbor",
+                        new Vec3(25.0, 0.0, 0.0), 25.0F),
+                "spillover radius boundary must be inclusive");
+        require(!DirectionalJammingService.contributionAffectsRadar(
+                        "target", targetRadar, "outside",
+                        new Vec3(25.01, 0.0, 0.0), 25.0F),
+                "radars beyond the spillover radius must remain unaffected");
+        require(!DirectionalJammingService.contributionAffectsRadar(
+                        "target", targetRadar, "neighbor",
+                        targetRadar, 0.0F),
+                "zero spillover radius must disable inherited effects");
+        require(!DirectionalJammingService.contributionAffectsRadar(
+                        "target", targetRadar, "second-hop",
+                        new Vec3(50.0, 0.0, 0.0), 25.0F),
+                "spillover must not propagate outward from an inherited radar");
+        require(DirectionalJammingService.supportsRadarType("ground")
+                        && DirectionalJammingService.supportsRadarType("plane")
+                        && !DirectionalJammingService.supportsRadarType("sonar"),
+                "spillover must preserve native sonar immunity");
+    }
+
+    private static void verifyBalancedEffectScaling() {
+        DirectionalJammingService.Profile full =
+                DirectionalJammingService.calculateProfile(
+                        50.0F, 50.0F, 0.0F, 0.0F);
+        DirectionalJammingService.Profile quarter = full.balanced(0.5F, 2);
+        requireNear(quarter.rangeFactor(), 0.5F,
+                "profile range factor");
+        require(quarter.clusterSize() == 2,
+                "profile cluster size");
+        requireNear(quarter.stackingFactor(), 0.5F,
+                "profile stacking factor");
+        requireNear(quarter.effectivenessFactor(), 0.25F,
+                "combined range and stacking factor");
+        requireNear(quarter.outerStrength(), full.outerStrength() * 0.25F,
+                "outer guidance scaling");
+        requireNear(quarter.directionalStrength(),
+                full.directionalStrength() * 0.25F,
+                "directional jitter scaling");
+        requireNear(quarter.severeStrength(), full.severeStrength() * 0.25F,
+                "severe jitter scaling");
+        requireNear(DirectionalJammingService.severeStateChance(
+                        quarter, 0.25F, 0.75F), 0.1875F,
+                "dropout and IFF probability scaling");
+        requireNear(quarter.severeStateScale(), 0.25F,
+                "synthetic-contact count scaling");
+    }
+
+    private static void verifyJammingTrackMetadata() {
+        RadarTrack original = new RadarTrack(
+                "d8257dad-e25d-4aa6-8a84-d37cabc26676",
+                new Vec3(10.0, 20.0, 30.0),
+                new Vec3(0.25, -0.5, 0.75), 42L,
+                TrackCategory.SABLE, "Sable:ship", 6.0f);
+        original.setFriendly(true);
+        original.setSynthetic(true);
+        UUID silhouetteId = UUID.fromString(original.getId());
+        original.setSilhouette(silhouetteId,
+                SyntheticSableSilhouetteFactory.REVISION,
+                SableSilhouetteStatus.READY);
+        original.setJammingData(new RadarTrack.JammingData(
+                "minecraft:overworld|12", 0.25f, 0.5f, 0.75f, 0.55f,
+                new Vec3(1.0, 2.0, 3.0),
+                new Vec3(0.1, 0.2, 0.3), 987654321L));
+
+        RadarTrack restored = RadarTrack.deserializeNBT(
+                original.serializeNBT());
+        require(restored.isSynthetic(),
+                "synthetic marker must survive track serialization");
+        require(restored.isFriendly(),
+                "friendly marker must survive track serialization");
+        require(restored.getJammingData() != null,
+                "jamming metadata must survive track serialization");
+        requireNear(restored.getJammingData().severeStrength(), 0.75f,
+                "serialized severe strength");
+        requireNear(restored.getJammingData().friendlyOutageChance(), 0.55f,
+                "serialized friendly outage chance");
+        require(restored.getJammingData().guidancePositionOffset()
+                        .distanceToSqr(new Vec3(1.0, 2.0, 3.0)) <= EPSILON,
+                "serialized guidance position offset");
+        require(restored.getJammingData().sampleToken() == 987654321L,
+                "serialized jamming sample token");
+        require(silhouetteId.equals(restored.getSilhouetteId()),
+                "synthetic silhouette ID must survive track serialization");
+        require(restored.getSilhouetteRevision()
+                        == SyntheticSableSilhouetteFactory.REVISION,
+                "synthetic silhouette revision must survive track serialization");
+        require(restored.getSilhouetteStatus() == SableSilhouetteStatus.READY,
+                "synthetic silhouette status must survive track serialization");
+    }
+
+    private static void verifyJammedObservationWins() {
+        RadarTrack clean = new RadarTrack("target", Vec3.ZERO, Vec3.ZERO,
+                100L, TrackCategory.CONTRAPTION, "test", 1.0f);
+        RadarTrack jammed = new RadarTrack("target", Vec3.ZERO, Vec3.ZERO,
+                50L, TrackCategory.CONTRAPTION, "test", 1.0f);
+        jammed.setJammingData(new RadarTrack.JammingData(
+                "radar", 0.1f, 0.0f, 0.0f, 0.0f,
+                Vec3.ZERO, Vec3.ZERO, 1L));
+        require(DirectionalJammingService.preferObservation(clean, jammed)
+                        == jammed,
+                "jammed report must win over a newer clean report");
+        require(DirectionalJammingService.preferObservation(jammed, clean)
+                        == jammed,
+                "jammed report must win regardless of merge order");
+
+        RadarTrack stronger = new RadarTrack("target", Vec3.ZERO, Vec3.ZERO,
+                25L, TrackCategory.CONTRAPTION, "test", 1.0f);
+        stronger.setJammingData(new RadarTrack.JammingData(
+                "nearby-radar", 0.2f, 0.3f, 0.4f, 0.1f,
+                Vec3.ZERO, Vec3.ZERO, 2L));
+        require(DirectionalJammingService.preferObservation(jammed, stronger)
+                        == stronger,
+                "strongest overlapping jammed observation must win");
+        require(DirectionalJammingService.preferObservation(stronger, jammed)
+                        == stronger,
+                "strongest overlap selection must ignore merge order");
+    }
+
+    private static void verifySilhouetteJitterAlignment() {
+        Vec3 physicalCenter = new Vec3(100.0, 40.0, -25.0);
+        Vec3 reportedCenter = new Vec3(112.0, 37.0, 4.0);
+        Vec3 offset = RadarTrackUtil.getReportedPositionOffset(
+                reportedCenter, physicalCenter);
+        require(offset.distanceToSqr(new Vec3(12.0, -3.0, 29.0))
+                        <= EPSILON,
+                "silhouette must receive the full reported-track offset");
+
+        Vec3 physicalSilhouettePoint = new Vec3(103.0, 40.0, -27.0);
+        Vec3 shiftedPoint = physicalSilhouettePoint.add(offset);
+        Vec3 relativeToIcon = shiftedPoint.subtract(reportedCenter);
+        Vec3 relativeToShip = physicalSilhouettePoint.subtract(physicalCenter);
+        require(relativeToIcon.distanceToSqr(relativeToShip) <= EPSILON,
+                "silhouette shape must remain anchored to the jittered icon");
+    }
+
+    private static void verifyProceduralFakeShipSilhouettes() {
+        UUID id = UUID.fromString("43f4f848-a26c-4d0f-91b8-f919ce370ab6");
+        SyntheticSableSilhouetteFactory.Profile firstProfile =
+                SyntheticSableSilhouetteFactory.profile(id);
+        SyntheticSableSilhouetteFactory.Profile secondProfile =
+                SyntheticSableSilhouetteFactory.profile(id);
+        require(firstProfile.equals(secondProfile),
+                "fake hull profile must be deterministic for its track ID");
+        require(firstProfile.length() >= 12.0 && firstProfile.length() <= 36.0,
+                "fake hull length must remain in the configured design range");
+        require(firstProfile.beam() >= 5.0 && firstProfile.beam() <= 14.0,
+                "fake hull beam must remain in the configured design range");
+        require(firstProfile.height() >= 3.0 && firstProfile.height() <= 8.0,
+                "fake hull height must remain in the configured design range");
+        require(firstProfile.headingDegrees() >= 0.0F
+                        && firstProfile.headingDegrees() < 360.0F,
+                "fake hull heading must be normalized");
+
+        SubLevelSilhouette firstHull =
+                SyntheticSableSilhouetteFactory.create(id);
+        SubLevelSilhouette secondHull =
+                SyntheticSableSilhouetteFactory.create(id);
+        require(!firstHull.isEmpty(), "fake hull must contain visible geometry");
+        require(firstHull.localBoxes().equals(secondHull.localBoxes()),
+                "fake hull geometry must be deterministic for its track ID");
+        SubLevelSilhouette.ProjectedSilhouette projected =
+                SyntheticSableSilhouetteFactory.project(id, firstHull,
+                        SubLevelSilhouette.ProjectionSettings
+                                .distantContactDefault());
+        require(!projected.isEmpty(),
+                "fake hull must produce a drawable top-down silhouette");
+
+        Set<Integer> archetypes = new HashSet<>();
+        for (int index = 1; index <= 64; index++) {
+            archetypes.add(SyntheticSableSilhouetteFactory.profile(
+                    new UUID(0L, index)).archetype());
+        }
+        require(archetypes.equals(Set.of(0, 1, 2)),
+                "deterministic fake hull generation must exercise all archetypes");
+    }
+
+    private static void verifyFakeHullConfigToggle() {
+        UUID id = UUID.fromString("e2088232-1646-468b-a5f4-a9ae15ded056");
+        RadarTrack fakeShip = new RadarTrack(id.toString(), Vec3.ZERO,
+                Vec3.ZERO, 1L, TrackCategory.SABLE, "Sable:ship", 5.0F);
+        fakeShip.setSynthetic(true);
+
+        DirectionalJammingService.applySyntheticShipSilhouetteMetadata(
+                fakeShip, true);
+        require(id.equals(fakeShip.getSilhouetteId()),
+                "enabled fake hull generation must attach ghost-owned metadata");
+        require(fakeShip.getSilhouetteRevision()
+                        == SyntheticSableSilhouetteFactory.REVISION,
+                "enabled fake hull generation must use the procedural revision");
+        require(fakeShip.getSilhouetteStatus() == SableSilhouetteStatus.READY,
+                "procedural fake hull metadata must be immediately drawable");
+
+        DirectionalJammingService.applySyntheticShipSilhouetteMetadata(
+                fakeShip, false);
+        require(fakeShip.getSilhouetteId() == null,
+                "disabled fake hull generation must remove silhouette metadata");
+        require(fakeShip.isSynthetic(),
+                "disabling fake hulls must leave the fake contact itself intact");
+    }
+
+    private static void verifyFakeShipRarityGate() {
+        require(DirectionalJammingService.shouldCreateFakeShip(
+                        true, 0.10F, 0.099F),
+                "a roll below the fake-ship chance must create a ship contact");
+        require(!DirectionalJammingService.shouldCreateFakeShip(
+                        true, 0.10F, 0.10F),
+                "a roll at the fake-ship chance must remain an ordinary contact");
+        require(!DirectionalJammingService.shouldCreateFakeShip(
+                        false, 1.0F, 0.0F),
+                "fake ship contacts require Sable compatibility");
+        require(!DirectionalJammingService.shouldCreateFakeShip(
+                        true, 0.0F, 0.0F),
+                "zero fake-ship chance must disable fake ships");
+        require(DirectionalJammingService.shouldCreateFakeShip(
+                        true, 1.0F, 0.999F),
+                "full fake-ship chance must accept every valid roll");
     }
 
     private static void requireOrientation(Direction mountFacing, float yaw,
@@ -138,6 +607,13 @@ public final class JammerSelfTest {
                                     String label) {
         require(Math.abs(actual - expected) <= EPSILON,
                 label + ": expected " + expected + ", got " + actual);
+    }
+
+    private static void requireArrayEquals(int[] actual, int[] expected,
+                                           String label) {
+        require(java.util.Arrays.equals(actual, expected),
+                label + ": expected " + java.util.Arrays.toString(expected)
+                        + ", got " + java.util.Arrays.toString(actual));
     }
 
     private static void require(boolean condition, String message) {

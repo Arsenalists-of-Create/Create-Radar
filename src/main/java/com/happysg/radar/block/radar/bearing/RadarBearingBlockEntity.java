@@ -2,9 +2,7 @@ package com.happysg.radar.block.radar.bearing;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.api.arad.ARADTargeting;
-import com.happysg.radar.block.arad.aradnetworks.JamRegistry;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
-import com.happysg.radar.block.arad.jammer.FakeRadarTrackFactory;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.radar.behavior.IRadar;
@@ -284,13 +282,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     public Collection<RadarTrack> getTracks() {
-        Collection<RadarTrack> real = scanningBehavior.getRadarTracks();
-
-            if (level instanceof ServerLevel sl &&
-                    JamRegistry.isRadarSpoofed(sl, worldPosition)) {
-                return FakeRadarTrackFactory.generate(sl, worldPosition, 8);
-            }
-            return real;
+        return scanningBehavior.getRadarTracks();
     }
 
     @Override

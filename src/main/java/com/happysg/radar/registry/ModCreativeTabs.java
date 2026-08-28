@@ -77,10 +77,10 @@ public class ModCreativeTabs {
         pOutput.accept(ModItems.RADAR_FILTER_ITEM);
         pOutput.accept(ModItems.TARGET_FILTER_ITEM);
         pOutput.accept(ModItems.BINOCULARS);
-       // pOutput.accept(ModItems.GUIDED_FUZE);
+
         pOutput.accept(ModItems.ADVANCED_PROXY_FUZE);
         //sheild jammer
-        pOutput.accept(ModBlocks.DIRECTIONAL_JAMMER);
+
         //siren
         if (Mods.TRACKWORK.isLoaded()) {
 
@@ -89,6 +89,8 @@ public class ModCreativeTabs {
             pOutput.accept(ModBlocks.ID_BLOCK);
             pOutput.accept(ModBlocks.STATIONARY_RADAR);
             pOutput.accept(ModBlocks.RWR_BLOCK);
+            pOutput.accept(ModBlocks.DIRECTIONAL_JAMMER);
+
 
         }
     }

@@ -105,7 +105,7 @@ public class MonitorInputHandler {
 
         Player player = event.getEntity();
         Level level = player.level();
-        if (!level.isClientSide())
+        if (!level.isClientSide() || !player.isLocalPlayer())
             return;
         if (lastHoveredAradLevel != level) {
             lastHoveredAradMonitor = null;

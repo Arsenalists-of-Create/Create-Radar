@@ -1,6 +1,7 @@
 package com.happysg.radar.debug;
 
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.block.arad.jammer.DirectionalJammingService;
 import com.happysg.radar.block.arad.jammer.JammerBlockEntity;
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
 import com.happysg.radar.block.behavior.networks.NetworkData;
@@ -164,6 +165,8 @@ public final class BlockDiagnosticService {
         if (blockEntity instanceof JammerBlockEntity jammer) {
             JammerBlockEntity.SelectedEmitterInfo emitter =
                     jammer.getSelectedEmitterInfo();
+            DirectionalJammingService.Profile profile =
+                    jammer.getJammingProfile();
             builder.add("Directional jammer", "ARAD linked",
                             jammer.isAradLinked())
                     .add("Directional jammer", "selected emitter",
@@ -176,7 +179,35 @@ public final class BlockDiagnosticService {
                     .add("Directional jammer", "rolling RPM",
                             emitter == null ? 0.0f : emitter.rollingRpm())
                     .add("Directional jammer", "rolling rate (RPM/s)",
-                            emitter == null ? 0.0f : emitter.rollingRate());
+                            emitter == null ? 0.0f : emitter.rollingRate())
+                    .add("Directional jammer", "input RPM",
+                            profile.jammerRpm())
+                    .add("Directional jammer", "RPM difference",
+                            profile.rpmDifference())
+                    .add("Directional jammer", "rate tolerance bonus",
+                            profile.rateBonus())
+                    .add("Directional jammer", "tier tolerances",
+                            profile.outerThreshold() + " / "
+                                    + profile.directionalThreshold() + " / "
+                                    + profile.severeThreshold())
+                    .add("Directional jammer", "alignment error",
+                            profile.alignmentDegrees())
+                    .add("Directional jammer", "alignment factor",
+                            profile.alignmentFactor())
+                    .add("Directional jammer", "range factor",
+                            profile.rangeFactor())
+                    .add("Directional jammer", "jammer cluster size",
+                            profile.clusterSize())
+                    .add("Directional jammer", "stacking factor",
+                            profile.stackingFactor())
+                    .add("Directional jammer", "range/stack effectiveness",
+                            profile.effectivenessFactor())
+                    .add("Directional jammer", "active tier",
+                            profile.tierName())
+                    .add("Directional jammer", "tier strengths",
+                            profile.outerStrength() + " / "
+                                    + profile.directionalStrength() + " / "
+                                    + profile.severeStrength());
         }
         if (blockEntity instanceof AutoPitchControllerBlockEntity pitch) {
             builder.add("Pitch controller", "target",

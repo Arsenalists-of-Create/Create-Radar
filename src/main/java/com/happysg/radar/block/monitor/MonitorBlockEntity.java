@@ -7,6 +7,7 @@ import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.arad.jammer.DirectionalJammingService;
 import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
 import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
@@ -24,6 +25,7 @@ import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
 import com.happysg.radar.compat.vs2.SableUtils;
+import com.happysg.radar.config.RadarConfig;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.api.equipment.goggles.IHaveHoveringInformation;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
@@ -81,6 +83,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     private boolean ponderRwrVisualOverride = false;
     private boolean ponderRwrVisualActive = false;
     private boolean ponderRwrIconEnlarged = false;
+    private @Nullable PonderJammingVisual.Tier ponderJammingTier;
+    private long ponderJammingStartTick;
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -178,6 +182,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         if (level == null)
             return;
+
+        if (ponderJammingTier != null) {
+            refreshPonderJammingVisual();
+            return;
+        }
 
 //        if(activetrack != null){
 //            setSelectedTargetServer(activetrack);
@@ -621,7 +630,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     private static @Nullable RadarTrack findTrack(IRadar radar, String selectedId) {
-        for (RadarTrack track : radar.getTracks()) {
+        for (RadarTrack track : radar.getReportedTracks()) {
             if (track == null) {
                 continue;
             }
@@ -643,7 +652,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         MonitorBlockEntity controllerBe = getController();
         if (controllerBe == null)
             return;
-        if (track != null && track.trackCategory() == TrackCategory.SABLE && "Sable:ship".equals(track.entityType())) {
+        if (track != null && !track.isSynthetic()
+                && track.trackCategory() == TrackCategory.SABLE
+                && "Sable:ship".equals(track.entityType())) {
             UUID shipId = UUID.fromString(track.id());
             SubLevelAccess subLevel = SubLevelContainer.getContainer(sl).getSubLevel(shipId);
             if (subLevel == null) {
@@ -760,24 +771,27 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         DetectionConfig det = this.filter; // already synced from network (or legacy)
         LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
         for (IRadar radar : radars) {
-            for (RadarTrack track : radar.getTracks()) {
+            for (RadarTrack track : radar.getReportedTracks()) {
                 if (track == null || !det.test(track)) continue;
                 String id = track.getId();
                 if (id == null || id.isBlank()) id = track.id();
                 if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
-                merged.merge(id, track.copy(), MonitorBlockEntity::newerTrack);
+                merged.merge(id, track.copy(), DirectionalJammingService::preferObservation);
             }
         }
         if (Mods.SABLE.isLoaded() && level instanceof ServerLevel serverLevel) {
             String networkSecret = monitorNetworkSecret(serverLevel);
             for (RadarTrack track : merged.values()) {
                 if (track.trackCategory() == TrackCategory.SABLE) {
-                    track.setFriendly(isFriendlySublevel(track, networkSecret));
-                    SableSilhouetteServerCache.attachMetadata(serverLevel, track);
+                    if (!track.isSynthetic()) {
+                        track.setFriendly(isFriendlySublevel(track, networkSecret));
+                        SableSilhouetteServerCache.attachMetadata(serverLevel, track);
+                    }
                 } else {
                     track.setFriendly(false);
                     track.clearSilhouette();
                 }
+                DirectionalJammingService.applyFriendlyInterference(track, serverLevel.getGameTime());
             }
         }
         cachedTracks = List.copyOf(merged.values());
@@ -787,6 +801,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
     }
     public boolean isLinked() {
+        if (ponderJammingTier != null) {
+            return true;
+        }
         if (ponderRwrVisualOverride) {
             return ponderRwrVisualActive;
         }
@@ -794,7 +811,65 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public boolean isAradLinked() {
+        if (ponderJammingTier != null) {
+            return false;
+        }
         return ponderRwrVisualOverride ? ponderRwrVisualActive : aradLinked;
+    }
+
+    public boolean isPonderJammingVisual() {
+        return ponderJammingTier != null;
+    }
+
+    public void showPonderGuidanceJamming() {
+        activatePonderJammingVisual(PonderJammingVisual.Tier.GUIDANCE);
+    }
+
+    public void showPonderDirectionalJamming() {
+        activatePonderJammingVisual(PonderJammingVisual.Tier.DIRECTIONAL);
+    }
+
+    public void showPonderSevereJamming() {
+        activatePonderJammingVisual(PonderJammingVisual.Tier.SEVERE);
+    }
+
+    public void endPonderJammingVisual() {
+        ponderJammingTier = null;
+        radarInfos = List.of();
+        cachedTracks = List.of();
+        radarPos = null;
+    }
+
+    private void activatePonderJammingVisual(PonderJammingVisual.Tier tier) {
+        ponderJammingTier = Objects.requireNonNull(tier, "tier");
+        ponderJammingStartTick = level == null ? 0L : level.getGameTime();
+        ponderRwrVisualOverride = false;
+        ponderRwrVisualActive = false;
+        ponderRwrIconEnlarged = false;
+        rwrInfos = List.of();
+        controller = worldPosition;
+        radarPos = worldPosition;
+        refreshPonderJammingVisual();
+    }
+
+    private void refreshPonderJammingVisual() {
+        if (ponderJammingTier == null) {
+            return;
+        }
+        long now = level == null ? ponderJammingStartTick
+                : level.getGameTime();
+        Vec3 center = Vec3.atCenterOf(worldPosition);
+        radarInfos = List.of(new RadarDisplayInfo(
+                worldPosition, center, 64.0F, true, "spinning",
+                0.0F, 6.0F, now, 360.0F, null,
+                false, null, null));
+        boolean fakeHullEnabled = Mods.SABLE.isLoaded()
+                && RadarConfig.server() != null
+                && RadarConfig.server().directionalJammingGenerateFakeHulls.get();
+        cachedTracks = PonderJammingVisual.createFrame(
+                ponderJammingTier, center, now,
+                Math.max(0L, now - ponderJammingStartTick),
+                fakeHullEnabled).tracks();
     }
 
     public boolean isPonderRwrVisual() {
@@ -931,6 +1006,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     private void activatePonderRwrVisual() {
+        ponderJammingTier = null;
+        radarInfos = List.of();
+        cachedTracks = List.of();
+        radarPos = null;
         ponderRwrVisualOverride = true;
         ponderRwrVisualActive = true;
         controller = worldPosition;
@@ -945,10 +1024,6 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     public List<RwrDisplayInfo> getRwrInfos() {
         return rwrInfos;
-    }
-
-    private static RadarTrack newerTrack(RadarTrack first, RadarTrack second) {
-        return second.scannedTime() >= first.scannedTime() ? second : first;
     }
 
     private String monitorNetworkSecret(ServerLevel level) {

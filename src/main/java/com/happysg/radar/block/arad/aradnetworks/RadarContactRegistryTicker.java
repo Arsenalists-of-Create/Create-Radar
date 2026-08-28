@@ -2,6 +2,7 @@ package com.happysg.radar.block.arad.aradnetworks;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.api.arad.ARADTargeting;
+import com.happysg.radar.block.arad.jammer.DirectionalJammingService;
 import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
 import com.happysg.radar.debug.ConflictTraceRecorder;
 import net.minecraft.server.level.ServerLevel;
@@ -25,6 +26,7 @@ public final class RadarContactRegistryTicker {
                 ARADTargeting.tickNativeRadars(sl);
                 RadarContactRegistry.tickDecay(sl);
                 ExternalRwrEmitterRegistry.tickDecay(sl);
+                DirectionalJammingService.tick(sl);
             } catch (RuntimeException exception) {
                 trace.failed(exception.getClass().getSimpleName());
                 throw exception;
@@ -39,6 +41,7 @@ public final class RadarContactRegistryTicker {
         if (event.getLevel() instanceof ServerLevel sl) {
             ARADTargeting.clearNativeRadars(sl);
             ExternalRwrEmitterRegistry.clear(sl);
+            DirectionalJammingService.clear(sl);
         }
     }
 }

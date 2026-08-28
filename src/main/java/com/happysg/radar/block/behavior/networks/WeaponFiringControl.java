@@ -715,7 +715,12 @@ public class WeaponFiringControl {
             } else {
                 Vec3 start = this.getCannonRayStart();
                 if (this.level instanceof ServerLevel sl) {
-                    boolean shouldBeEntity = track.trackCategory() == TrackCategory.PLAYER || track.trackCategory() == TrackCategory.HOSTILE || track.trackCategory() == TrackCategory.ANIMAL || track.trackCategory() == TrackCategory.PROJECTILE || track.trackCategory() == TrackCategory.MISSILE;
+                    boolean shouldBeEntity = !track.isSynthetic()
+                            && (track.trackCategory() == TrackCategory.PLAYER
+                            || track.trackCategory() == TrackCategory.HOSTILE
+                            || track.trackCategory() == TrackCategory.ANIMAL
+                            || track.trackCategory() == TrackCategory.PROJECTILE
+                            || track.trackCategory() == TrackCategory.MISSILE);
                     Entity e = null;
 
                     try {
@@ -976,7 +981,8 @@ public class WeaponFiringControl {
         } else {
             if (this.binoMode) {
                 this.lastTargetTick = this.level.getGameTime();
-            } else if (this.activetrack != null && (this.targetEntity != null || this.targetSublevel != null)) {
+            } else if (this.activetrack != null && (this.activetrack.isSynthetic()
+                    || this.targetEntity != null || this.targetSublevel != null)) {
                 this.lastTargetTick = this.level.getGameTime();
             }
 
@@ -986,54 +992,69 @@ public class WeaponFiringControl {
             } else {
                 if (!this.binoMode && this.activetrack != null) {
                     if (this.level instanceof ServerLevel sl) {
-                        boolean isSableShip = Mods.SABLE.isLoaded() && "Sable:ship".equals(this.activetrack.entityType());
-                        if (isSableShip) {
-                            UUID id;
-                            try {
-                                id = UUID.fromString(this.activetrack.id());
-                            } catch (IllegalArgumentException var43) {
-                                LOGGER.debug("WFC: invalid Sable ship id={}, stopping fire", this.activetrack.id());
-                                this.stopFireCannon();
-                                return;
-                            }
-
-                            if (this.targetSublevel == null || !id.equals(this.targetShipId)) {
-                                this.targetSublevel = this.getShipByUUID(sl, this.activetrack.id());
-                                this.targetShipId = id;
-                                if (this.targetSublevel == null) {
-                                    LOGGER.debug("WFC: Sable ship id={} not loaded, stopping fire", id);
+                        if (this.activetrack.isSynthetic()) {
+                            this.targetEntity = null;
+                            this.targetSublevel = null;
+                            this.targetShipId = null;
+                        } else {
+                            boolean isSableShip = Mods.SABLE.isLoaded()
+                                    && "Sable:ship".equals(
+                                    this.activetrack.entityType());
+                            if (isSableShip) {
+                                UUID id;
+                                try {
+                                    id = UUID.fromString(
+                                            this.activetrack.id());
+                                } catch (IllegalArgumentException var43) {
+                                    LOGGER.debug("WFC: invalid Sable ship id={}, stopping fire", this.activetrack.id());
                                     this.stopFireCannon();
                                     return;
                                 }
+
+                                if (this.targetSublevel == null
+                                        || !id.equals(this.targetShipId)) {
+                                    this.targetSublevel = this.getShipByUUID(
+                                            sl, this.activetrack.id());
+                                    this.targetShipId = id;
+                                    if (this.targetSublevel == null) {
+                                        LOGGER.debug("WFC: Sable ship id={} not loaded, stopping fire", id);
+                                        this.stopFireCannon();
+                                        return;
+                                    }
+                                }
+
+                                this.targetEntity = null;
+                            } else {
+                                Entity e = null;
+
+                                try {
+                                    e = this.getEntityByUUID(sl, UUID.fromString(this.activetrack.id()));
+                                } catch (Throwable var42) {
+                                }
+
+                                if (e == null || !e.isAlive()) {
+                                    LOGGER.debug("WFC: entity id={} not loaded/alive, stopping fire", this.activetrack.id());
+                                    this.stopFireCannon();
+                                    return;
+                                }
+
+                                this.targetEntity = e;
+                                this.targetSublevel = null;
                             }
-
-                            this.targetEntity = null;
-                        } else {
-                            Entity e = null;
-
-                            try {
-                                e = this.getEntityByUUID(sl, UUID.fromString(this.activetrack.id()));
-                            } catch (Throwable var42) {
-                            }
-
-                            if (e == null || !e.isAlive()) {
-                                LOGGER.debug("WFC: entity id={} not loaded/alive, stopping fire", this.activetrack.id());
-                                this.stopFireCannon();
-                                return;
-                            }
-
-                            this.targetEntity = e;
-                            this.targetSublevel = null;
                         }
                     }
                 }
 
-                if (!this.binoMode && this.activetrack != null && this.targetEntity == null && this.targetSublevel == null) {
+                if (!this.binoMode && this.activetrack != null
+                        && !this.activetrack.isSynthetic()
+                        && this.targetEntity == null && this.targetSublevel == null) {
                     LOGGER.debug("WFC: no resolved target entity/ship, stopping fire (trackId={})", this.activetrack.id());
                     this.stopFireCannon();
                 } else {
                     if (!this.binoMode) {
-                        if (this.targetSublevel != null) {
+                        if (this.activetrack != null && this.activetrack.isSynthetic()) {
+                            this.target = this.activetrack.position();
+                        } else if (this.targetSublevel != null) {
                             this.target = RadarTrackUtil.getPosition(this.targetSublevel);
                         } else if (this.targetEntity != null) {
                             this.target = this.getEntityAimPoint(this.targetEntity);
@@ -1128,6 +1149,12 @@ public class WeaponFiringControl {
                                                 targetVel,
                                                 serverLevel.getGameTime());
                                         targetMotionId = this.targetSublevel.getUniqueId();
+                                    } else if (!this.binoMode && this.activetrack != null
+                                            && this.activetrack.isSynthetic()) {
+                                        rawTargetPos = this.activetrack.position();
+                                        this.target = rawTargetPos;
+                                        targetVel = this.activetrack.velocity();
+                                        targetAccel = Vec3.ZERO;
                                     } else if (!this.binoMode && this.targetEntity != null) {
                                         rawTargetPos = this.getEntityAimPoint(this.targetEntity);
                                         this.target = this.toWorldPosition(serverLevel, rawTargetPos, this.targetEntity);
@@ -1152,6 +1179,19 @@ public class WeaponFiringControl {
                                             this.target, targetVel, targetAccel);
                                     targetVel = motion.velocity();
                                     targetAccel = motion.acceleration();
+
+                                    RadarTrack guidanceTrack = this.binoMode
+                                            ? null : this.activetrack;
+                                    JammedGuidance guidance =
+                                            applyJammingGuidance(this.target,
+                                                    targetVel, guidanceTrack);
+                                    this.target = guidance.position();
+                                    targetVel = guidance.velocity();
+                                    if (guidanceTrack != null
+                                            && guidanceTrack.getJammingData()
+                                            != null) {
+                                        rawTargetPos = this.target;
+                                    }
 
                                     double dist = this.getCannonRayStart().distanceTo(this.target);
                                     double noLeadDist = (double)1.0F;
@@ -1692,6 +1732,9 @@ public class WeaponFiringControl {
     public void setTarget(Vec3 target, TargetingConfig config, RadarTrack track, WeaponNetworkRuntime.WeaponGroupView view) {
         TargetingConfig nextConfig = config == null ? TargetingConfig.DEFAULT : config;
         boolean sameTarget = target != null && sameTargetIdentity(this.activetrack, track);
+        boolean jammingSampleChanged = sameTarget
+                && jammingSampleToken(this.activetrack)
+                != jammingSampleToken(track);
         boolean ballisticConfigChanged =
                 !sameBallisticConfiguration(this.targetingConfig, nextConfig);
         LOGGER.debug("setTarget() -> target={} sameIdentity={} ballisticConfigChanged={} atTick={}",
@@ -1721,10 +1764,14 @@ public class WeaponFiringControl {
             }
 
             if (sameTarget) {
-                if (ballisticConfigChanged) {
+                if (ballisticConfigChanged || jammingSampleChanged) {
                     this.lastAimPoint = null;
                     this.lastOffsetAim = null;
                     this.aimStableTicks = 0;
+                    this.cachedSableAngles = null;
+                    this.cachedSableAimTarget = null;
+                    this.cachedSableSolveTick = -1L;
+                    this.cachedSableWorldAimDirection = null;
                     this.clearTargetingResultCache();
                 }
                 return;
@@ -1752,6 +1799,29 @@ public class WeaponFiringControl {
         return current != null && next != null
                 && Objects.equals(current.getId(), next.getId())
                 && current.getTrackCategory() == next.getTrackCategory();
+    }
+
+    static long jammingSampleToken(@Nullable RadarTrack track) {
+        RadarTrack.JammingData jamming = track == null
+                ? null : track.getJammingData();
+        return jamming == null ? Long.MIN_VALUE : jamming.sampleToken();
+    }
+
+    static JammedGuidance applyJammingGuidance(
+            Vec3 position, Vec3 velocity, @Nullable RadarTrack track) {
+        RadarTrack.JammingData jamming = track == null
+                ? null : track.getJammingData();
+        Vec3 safePosition = position == null ? Vec3.ZERO : position;
+        Vec3 safeVelocity = velocity == null ? Vec3.ZERO : velocity;
+        if (jamming == null) {
+            return new JammedGuidance(safePosition, safeVelocity);
+        }
+        return new JammedGuidance(
+                safePosition.add(jamming.guidancePositionOffset()),
+                safeVelocity.add(jamming.guidanceVelocityOffset()));
+    }
+
+    static record JammedGuidance(Vec3 position, Vec3 velocity) {
     }
 
     private static boolean sameBallisticConfiguration(
@@ -4335,7 +4405,7 @@ public class WeaponFiringControl {
     public Vec3 resolveEngagementAimPoint(ServerLevel serverLevel,
                                           @Nullable RadarTrack track,
                                           boolean requireLos) {
-        if (track == null || !isSableTrack(track)) {
+        if (track == null || track.isSynthetic() || !isSableTrack(track)) {
             return track == null ? null : track.position();
         }
         UUID id;

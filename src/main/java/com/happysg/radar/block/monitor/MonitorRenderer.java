@@ -8,11 +8,13 @@ import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.happysg.radar.block.radar.behavior.SonarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableSilhouetteClientCache;
 import com.happysg.radar.compat.sable.SableSilhouetteStatus;
 import com.happysg.radar.compat.sable.SubLevelSilhouette;
+import com.happysg.radar.compat.sable.SyntheticSableSilhouetteFactory;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.networking.packets.SableSilhouetteRequestPacket;
@@ -34,6 +36,7 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
@@ -169,6 +172,20 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         }
 
         renderRadarTracks(projection, blockEntity, ms, bufferSource);
+        if (blockEntity.isPonderJammingVisual()) {
+            renderPonderJammingWarning(blockEntity, ms, bufferSource);
+        }
+    }
+
+    private void renderPonderJammingWarning(MonitorBlockEntity monitor,
+                                            PoseStack ms,
+                                            MultiBufferSource bufferSource) {
+        float center = 1.0F - monitor.getSize() / 2.0F;
+        float top = 1.0F - monitor.getSize() + 0.08F;
+        renderTrackLabel(ms, bufferSource,
+                Component.translatable("create_radar.monitor_jammed").getString(),
+                center, top, DEPTH_TRACK_BASE + 0.01F, 1.0F,
+                0xFF4040);
     }
 
     private void renderAradDisplay(MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource) {
@@ -525,8 +542,15 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
 
         UUID silhouetteId = track.getSilhouetteId();
         int revision = track.getSilhouetteRevision();
-        SubLevelSilhouette silhouette = SableSilhouetteClientCache.get(silhouetteId, revision);
-        if (silhouette == null) {
+        boolean syntheticSilhouette = track.isSynthetic()
+                && revision == SyntheticSableSilhouetteFactory.REVISION
+                && silhouetteId.toString().equals(track.getId());
+        SubLevelSilhouette silhouette = syntheticSilhouette
+                ? SableSilhouetteClientCache.getOrCreateSynthetic(
+                silhouetteId, revision,
+                () -> SyntheticSableSilhouetteFactory.create(silhouetteId))
+                : SableSilhouetteClientCache.get(silhouetteId, revision);
+        if (silhouette == null && !syntheticSilhouette) {
             long gameTime = monitor.getLevel().getGameTime();
             if (SableSilhouetteClientCache.shouldRequest(silhouetteId, revision, gameTime)) {
                 SableSilhouetteRequestPacket.send(monitor.getControllerPos(), silhouetteId, revision);
@@ -537,33 +561,38 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             return;
         }
 
-        SubLevelAccess subLevel = getClientSubLevel(silhouetteId);
-        if (subLevel == null) {
+        long gameTime = monitor.getLevel().getGameTime();
+        SubLevelSilhouette.ProjectionSettings projectionSettings = silhouetteProjectionSettings();
+        SubLevelAccess subLevel = syntheticSilhouette
+                ? null : getClientSubLevel(silhouetteId);
+        if (!syntheticSilhouette && subLevel == null) {
             return;
         }
-
-        long gameTime = monitor.getLevel().getGameTime();
-        Pose3dc pose = subLevel instanceof ClientSubLevelAccess clientSubLevel
-                ? clientSubLevel.renderPose(partialTicks)
-                : subLevel.logicalPose();
-        SubLevelSilhouette.ProjectionSettings projectionSettings = silhouetteProjectionSettings();
-        SubLevelSilhouette.ProjectedSilhouette projected = SableSilhouetteClientCache.getProjected(
-                silhouetteId,
-                revision,
-                gameTime,
-                projectionSettings,
-                () -> {
-                    Vector3d scratch = new Vector3d();
-                    return silhouette.project(
-                            (localX, localY, localZ, destination) -> {
-                                scratch.set(localX, localY, localZ);
-                                Vector3d transformed = pose.transformPosition(scratch);
-                                destination.set(transformed.x(), transformed.y(), transformed.z());
-                            },
-                            projectionSettings
-                    );
-                }
-        );
+        SubLevelSilhouette.ProjectedSilhouette projected;
+        if (syntheticSilhouette) {
+            projected = SableSilhouetteClientCache.getProjected(
+                    silhouetteId, revision, gameTime, projectionSettings,
+                    () -> SyntheticSableSilhouetteFactory.project(
+                            silhouetteId, silhouette, projectionSettings));
+        } else {
+            Pose3dc pose = subLevel instanceof ClientSubLevelAccess clientSubLevel
+                    ? clientSubLevel.renderPose(partialTicks)
+                    : subLevel.logicalPose();
+            projected = SableSilhouetteClientCache.getProjected(
+                    silhouetteId, revision, gameTime, projectionSettings,
+                    () -> {
+                        Vector3d scratch = new Vector3d();
+                        return silhouette.project(
+                                (localX, localY, localZ, destination) -> {
+                                    scratch.set(localX, localY, localZ);
+                                    Vector3d transformed = pose.transformPosition(scratch);
+                                    destination.set(transformed.x(), transformed.y(), transformed.z());
+                                },
+                                projectionSettings
+                        );
+                    }
+            );
+        }
         if (projected == null || projected.isEmpty()) {
             return;
         }
@@ -580,13 +609,21 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         int rendered = 0;
         int maxSegments = RadarConfig.client().sableSilhouetteMaxRenderedSegments.get();
         double projectY = track.position().y;
+        Vec3 reportedOffset = syntheticSilhouette ? track.position()
+                : RadarTrackUtil.getReportedPositionOffset(track, subLevel);
 
         for (SubLevelSilhouette.LineSegment segment : projected.boundarySegments()) {
             if (rendered++ >= maxSegments) {
                 break;
             }
-            Vec3 start = transformWorldToRadar(segment.start().x(), projectY, segment.start().z(), projection, monitor.getSize());
-            Vec3 end = transformWorldToRadar(segment.end().x(), projectY, segment.end().z(), projection, monitor.getSize());
+            Vec3 start = transformWorldToRadar(
+                    segment.start().x() + reportedOffset.x, projectY,
+                    segment.start().z() + reportedOffset.z,
+                    projection, monitor.getSize());
+            Vec3 end = transformWorldToRadar(
+                    segment.end().x() + reportedOffset.x, projectY,
+                    segment.end().z() + reportedOffset.z,
+                    projection, monitor.getSize());
             if (isOutsideDisplay(start) && isOutsideDisplay(end)) {
                 continue;
             }
@@ -1293,6 +1330,13 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     private void renderTrackLabel(PoseStack ms, MultiBufferSource bufferSource,
                                   String text, float xCenter, float zBelow, float depth,
                                   float alpha) {
+        renderTrackLabel(ms, bufferSource, text, xCenter, zBelow, depth,
+                alpha, 0xFFFFFF);
+    }
+
+    private void renderTrackLabel(PoseStack ms, MultiBufferSource bufferSource,
+                                  String text, float xCenter, float zBelow,
+                                  float depth, float alpha, int rgb) {
 
         if (alpha <= 0.02f) return;
 
@@ -1309,7 +1353,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         float x = -width / 2.0f;
 
         int a = Mth.clamp((int) (alpha * 255f), 0, 255);
-        int argb = (a << 24) | 0xFFFFFF;
+        int argb = (a << 24) | (rgb & 0xFFFFFF);
 
         int packedLight = 0xF000F0;
 

@@ -1,6 +1,7 @@
 package com.happysg.radar.block.controller.networkcontroller;
 
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
+import com.happysg.radar.block.arad.jammer.DirectionalJammingService;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
@@ -105,6 +106,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private @Nullable TrackCategory lastPushedTrackCategory = null;
     private int lastPushedCfgHash = 0;
     private long lastPushedSafeZonesHash = 0;
+    private long lastPushedJammingToken = Long.MIN_VALUE;
     private boolean endpointRepushRequired = true;
 
     public void onWeaponTopologyChanged() {
@@ -187,6 +189,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     }
 
     private boolean isSelectedTrackStale(ServerLevel sl, RadarTrack track) {
+        if (track.isSynthetic()) return false;
         if (!isVsShipStillLoaded(sl, track)) return true;
 
         if (!isEntityBackedCategory(track.trackCategory())) return false;
@@ -235,12 +238,12 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
         for (IRadar radar : radars) {
-            for (RadarTrack track : radar.getTracks()) {
+            for (RadarTrack track : radar.getReportedTracks()) {
                 if (track == null || !detectionCache.test(track)) continue;
                 String id = track.getId();
                 if (id == null || id.isBlank()) id = track.id();
                 if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
-                merged.merge(id, track, NetworkFiltererBlockEntity::newerTrack);
+                merged.merge(id, track, DirectionalJammingService::preferObservation);
             }
         }
         cachedTracks = List.copyOf(merged.values());
@@ -322,7 +325,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                         !Objects.equals(lastPushedTrackId, newId) ||
                         lastPushedTrackCategory != newCategory ||
                         lastPushedCfgHash != newCfgHash ||
-                        lastPushedSafeZonesHash != newZonesHash;
+                        lastPushedSafeZonesHash != newZonesHash ||
+                        lastPushedJammingToken != jammingToken(selected);
 
         activeTrackCache = selected;
 
@@ -331,6 +335,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             lastPushedTrackCategory = newCategory;
             lastPushedCfgHash = newCfgHash;
             lastPushedSafeZonesHash = newZonesHash;
+            lastPushedJammingToken = jammingToken(selected);
             endpointRepushRequired = false;
             pushToEndpoints(selected);
         }
@@ -361,7 +366,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         float strongestSignal = Float.NEGATIVE_INFINITY;
         String targetId = shipId.toString();
         for (IRadar radar : getRunningRadars(sl, group)) {
-            boolean tracksTarget = radar.getTracks().stream()
+            boolean tracksTarget = radar.getReportedTracks().stream()
                     .anyMatch(track -> track != null && targetId.equals(track.getId()));
             if (!tracksTarget) {
                 continue;
@@ -410,8 +415,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return strongestRadar;
     }
 
-    private static RadarTrack newerTrack(RadarTrack first, RadarTrack second) {
-        return second.scannedTime() >= first.scannedTime() ? second : first;
+    private static long jammingToken(@Nullable RadarTrack track) {
+        RadarTrack.JammingData jamming = track == null ? null : track.getJammingData();
+        return jamming == null ? Long.MIN_VALUE : jamming.sampleToken();
     }
 
     private @Nullable IRadar resolveRadar(ServerLevel sl, BlockPos pos) {
@@ -461,10 +467,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         if (Mods.SABLE.isLoaded()) {
             if (prev != null && track == null)
-                RadarContactRegistry.unLock(sl, UUID.fromString(prev));
+                parseUuid(prev).ifPresent(id -> RadarContactRegistry.unLock(sl, id));
 
-            if (track != null && track.trackCategory() == TrackCategory.SABLE && !isChaffSuppressed(next))
-                RadarContactRegistry.markLocked(sl, UUID.fromString(track.getId()), 10);
+            if (track != null && !track.isSynthetic() && track.trackCategory() == TrackCategory.SABLE && !isChaffSuppressed(next))
+                parseUuid(track.getId()).ifPresent(id -> RadarContactRegistry.markLocked(sl, id, 10));
         }
 
         if (isChaffSuppressed(next)) {
@@ -486,6 +492,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         lastPushedTrackCategory = track == null ? null : track.getTrackCategory();
         lastPushedCfgHash = cfgHash(cfg);
         lastPushedSafeZonesHash = safeZonesHash(safeZones);
+        lastPushedJammingToken = jammingToken(track);
         endpointRepushRequired = false;
     }
 
@@ -564,6 +571,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return null;
         }
 
+        if (track.isSynthetic()) {
+            return track.position();
+        }
+
         UUID targetId = parseUuid(track.getId()).orElse(null);
         if (targetId == null) {
             return null;
@@ -607,11 +618,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         RadarTrack liveTrack = null;
         for (IRadar radar : getRunningRadars(serverLevel, group)) {
-            for (RadarTrack track : radar.getTracks()) {
+            for (RadarTrack track : radar.getReportedTracks()) {
                 if (track == null || !selectedId.equals(track.getId())) {
                     continue;
                 }
-                liveTrack = liveTrack == null ? track : newerTrack(liveTrack, track);
+                liveTrack = liveTrack == null ? track : DirectionalJammingService.preferObservation(liveTrack, track);
             }
         }
 

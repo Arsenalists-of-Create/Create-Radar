@@ -7,11 +7,13 @@ import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableSilhouetteClientCache;
 import com.happysg.radar.compat.sable.SableSilhouetteStatus;
 import com.happysg.radar.compat.sable.SubLevelSilhouette;
+import com.happysg.radar.compat.sable.SyntheticSableSilhouetteFactory;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
@@ -995,8 +997,15 @@ public class MonitorScreen extends Screen {
 
         UUID silhouetteId = track.getSilhouetteId();
         int revision = track.getSilhouetteRevision();
-        SubLevelSilhouette silhouette = SableSilhouetteClientCache.get(silhouetteId, revision);
-        if (silhouette == null) {
+        boolean syntheticSilhouette = track.isSynthetic()
+                && revision == SyntheticSableSilhouetteFactory.REVISION
+                && silhouetteId.toString().equals(track.getId());
+        SubLevelSilhouette silhouette = syntheticSilhouette
+                ? SableSilhouetteClientCache.getOrCreateSynthetic(
+                silhouetteId, revision,
+                () -> SyntheticSableSilhouetteFactory.create(silhouetteId))
+                : SableSilhouetteClientCache.get(silhouetteId, revision);
+        if (silhouette == null && !syntheticSilhouette) {
             long gameTime = monitor.getLevel().getGameTime();
             if (SableSilhouetteClientCache.shouldRequest(silhouetteId, revision, gameTime)) {
                 SableSilhouetteRequestPacket.send(monitor.getControllerPos(), silhouetteId, revision);
@@ -1007,33 +1016,38 @@ public class MonitorScreen extends Screen {
             return;
         }
 
-        SubLevelAccess subLevel = getClientSubLevel(silhouetteId);
-        if (subLevel == null) {
+        long gameTime = monitor.getLevel().getGameTime();
+        SubLevelSilhouette.ProjectionSettings projectionSettings = silhouetteProjectionSettings();
+        SubLevelAccess subLevel = syntheticSilhouette
+                ? null : getClientSubLevel(silhouetteId);
+        if (!syntheticSilhouette && subLevel == null) {
             return;
         }
-
-        long gameTime = monitor.getLevel().getGameTime();
-        Pose3dc pose = subLevel instanceof ClientSubLevelAccess clientSubLevel
-                ? clientSubLevel.renderPose(partialTicks)
-                : subLevel.logicalPose();
-        SubLevelSilhouette.ProjectionSettings projectionSettings = silhouetteProjectionSettings();
-        SubLevelSilhouette.ProjectedSilhouette projected = SableSilhouetteClientCache.getProjected(
-                silhouetteId,
-                revision,
-                gameTime,
-                projectionSettings,
-                () -> {
-                    Vector3d scratch = new Vector3d();
-                    return silhouette.project(
-                            (localX, localY, localZ, destination) -> {
-                                scratch.set(localX, localY, localZ);
-                                Vector3d transformed = pose.transformPosition(scratch);
-                                destination.set(transformed.x(), transformed.y(), transformed.z());
-                            },
-                            projectionSettings
-                    );
-                }
-        );
+        SubLevelSilhouette.ProjectedSilhouette projected;
+        if (syntheticSilhouette) {
+            projected = SableSilhouetteClientCache.getProjected(
+                    silhouetteId, revision, gameTime, projectionSettings,
+                    () -> SyntheticSableSilhouetteFactory.project(
+                            silhouetteId, silhouette, projectionSettings));
+        } else {
+            Pose3dc pose = subLevel instanceof ClientSubLevelAccess clientSubLevel
+                    ? clientSubLevel.renderPose(partialTicks)
+                    : subLevel.logicalPose();
+            projected = SableSilhouetteClientCache.getProjected(
+                    silhouetteId, revision, gameTime, projectionSettings,
+                    () -> {
+                        Vector3d scratch = new Vector3d();
+                        return silhouette.project(
+                                (localX, localY, localZ, destination) -> {
+                                    scratch.set(localX, localY, localZ);
+                                    Vector3d transformed = pose.transformPosition(scratch);
+                                    destination.set(transformed.x(), transformed.y(), transformed.z());
+                                },
+                                projectionSettings
+                        );
+                    }
+            );
+        }
         if (projected == null || projected.isEmpty()) {
             return;
         }
@@ -1047,14 +1061,22 @@ public class MonitorScreen extends Screen {
         int rendered = 0;
         int thickness = Math.max(1, Math.round(uiScale));
         double projectY = track.position().y;
+        Vec3 reportedOffset = syntheticSilhouette ? track.position()
+                : RadarTrackUtil.getReportedPositionOffset(track, subLevel);
 
         RenderSystem.enableBlend();
         for (SubLevelSilhouette.LineSegment segment : projected.boundarySegments()) {
             if (rendered++ >= maxSegments) {
                 break;
             }
-            MonitorProjection.DisplayPoint start = projection.project(new Vec3(segment.start().x(), projectY, segment.start().z()));
-            MonitorProjection.DisplayPoint end = projection.project(new Vec3(segment.end().x(), projectY, segment.end().z()));
+            MonitorProjection.DisplayPoint start = projection.project(
+                    new Vec3(segment.start().x() + reportedOffset.x,
+                            projectY,
+                            segment.start().z() + reportedOffset.z));
+            MonitorProjection.DisplayPoint end = projection.project(
+                    new Vec3(segment.end().x() + reportedOffset.x,
+                            projectY,
+                            segment.end().z() + reportedOffset.z));
             if (start.outside() && end.outside()) {
                 continue;
             }

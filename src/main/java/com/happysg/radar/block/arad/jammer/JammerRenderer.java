@@ -18,8 +18,6 @@ import org.joml.Quaternionf;
 /** Non-Flywheel renderer for the jammer shaft and aimed upper assembly. */
 public class JammerRenderer
         extends KineticBlockEntityRenderer<JammerBlockEntity> {
-    private static final float PIVOT_OFFSET = 7.0f / 16.0f;
-
     public JammerRenderer(BlockEntityRendererProvider.Context context) {
         super(context);
     }
@@ -41,14 +39,16 @@ public class JammerRenderer
         Quaternionf rotation = JammerOrientation.rotation(mountFacing,
                 blockEntity.getInterpolatedYaw(partialTick),
                 blockEntity.getInterpolatedPitch(partialTick));
+        float pivotOffset = JammerBlockEntity.TURRET_PIVOT_OFFSET;
 
         poseStack.pushPose();
         poseStack.translate(
-                0.5f + mountFacing.getStepX() * PIVOT_OFFSET,
-                0.5f + mountFacing.getStepY() * PIVOT_OFFSET,
-                0.5f + mountFacing.getStepZ() * PIVOT_OFFSET);
+                0.5f + mountFacing.getStepX() * pivotOffset,
+                0.5f + mountFacing.getStepY() * pivotOffset,
+                0.5f + mountFacing.getStepZ() * pivotOffset);
         poseStack.mulPose(rotation);
-        poseStack.translate(-0.5f, 0.0f, -0.5f);
+        poseStack.translate(-0.5f,
+                -JammerBlockEntity.TURRET_MODEL_PIVOT_Y, -0.5f);
 
         CachedBuffers.partial(ModPartials.ROTATING_JAMMER,
                         blockEntity.getBlockState())

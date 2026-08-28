@@ -6,6 +6,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.Set;
+import java.util.UUID;
+
 /**
  * Middle layer to avoid crashes when Valkyrien Skies 2 is not loaded.
  * No direct references to Valkyrien Skies 2 classes.
@@ -59,5 +62,11 @@ public class PhysicsHandler {
         if (!Mods.SABLE.isLoaded())
             return false;
         return SableUtils.isBlockInShipyard(level, blockPos);
+    }
+
+    public static Set<UUID> getConnectedSublevelIds(Level level, BlockPos pos) {
+        if (!Mods.SABLE.isLoaded())
+            return Set.of();
+        return SableUtils.getConnectedSublevelIds(level, pos);
     }
 }

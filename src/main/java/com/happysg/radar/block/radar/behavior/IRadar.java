@@ -12,16 +12,28 @@ import com.happysg.radar.debug.DiagnosticSnapshotBuilder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.entity.BlockEntity;
 
 import java.util.Collection;
 import java.util.UUID;
 
 public interface IRadar extends RadarSource, DebugInspectable {
+    /** Raw, uncorrupted observations produced by this sensor. */
     Collection<RadarTrack> getTracks();
+
+    /** Server-authoritative observations after directional jamming effects. */
+    default Collection<RadarTrack> getReportedTracks() {
+        if (this instanceof BlockEntity blockEntity
+                && blockEntity.getLevel() instanceof ServerLevel serverLevel) {
+            return com.happysg.radar.block.arad.jammer.DirectionalJammingService
+                    .reportedTracks(serverLevel, this, getTracks());
+        }
+        return getTracks();
+    }
 
     @Override
     default Collection<? extends RadarContact> getContacts() {
-        return getTracks();
+        return getReportedTracks();
     }
 
     float getRange();

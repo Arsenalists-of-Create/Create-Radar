@@ -26,6 +26,7 @@ public final class WeaponFiringControlSelfTest {
         List<TargetingSolverSelfTest.Result> results = new ArrayList<>();
         results.add(checkObservationRefreshKeepsIdentity());
         results.add(checkIdentityChangesInvalidate());
+        results.add(checkJammingGuidanceRefresh());
         results.add(checkAimPointRebase());
         results.add(checkAimDirectionRebase());
         results.add(checkPendingSolveLifetime());
@@ -71,6 +72,35 @@ public final class WeaponFiringControlSelfTest {
                 original, differentCategory);
         return result("swivel_target_identity_change", passed,
                 "differentIdAndCategoryRejected=" + passed);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkJammingGuidanceRefresh() {
+        RadarTrack first = track("mob-1", TrackCategory.HOSTILE,
+                new Vec3(10.0, 20.0, 30.0), 20L);
+        first.setJammingData(new RadarTrack.JammingData(
+                "radar", 0.5f, 0.25f, 0.0f, 0.0f,
+                new Vec3(2.0, -3.0, 4.0),
+                new Vec3(0.1, -0.2, 0.3), 100L));
+        RadarTrack next = first.copy();
+        next.setJammingData(new RadarTrack.JammingData(
+                "radar", 0.5f, 0.25f, 0.0f, 0.0f,
+                Vec3.ZERO, Vec3.ZERO, 101L));
+
+        WeaponFiringControl.JammedGuidance guidance =
+                WeaponFiringControl.applyJammingGuidance(
+                        first.position(), new Vec3(1.0, 2.0, 3.0), first);
+        boolean positionShifted = guidance.position().distanceToSqr(
+                new Vec3(12.0, 17.0, 34.0)) < 1.0E-12;
+        boolean velocityShifted = guidance.velocity().distanceToSqr(
+                new Vec3(1.1, 1.8, 3.3)) < 1.0E-12;
+        boolean tokenChanged = WeaponFiringControl.jammingSampleToken(first)
+                != WeaponFiringControl.jammingSampleToken(next);
+        boolean passed = positionShifted && velocityShifted && tokenChanged;
+        return result("jammed_guidance_refreshes_ballistic_sample", passed,
+                "position=" + guidance.position() + " velocity="
+                        + guidance.velocity() + " tokenChanged="
+                        + tokenChanged);
     }
 
     private static TargetingSolverSelfTest.Result

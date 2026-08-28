@@ -5,7 +5,7 @@ import org.joml.Matrix3f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
-/** Shared world-space orientation math for the directional jammer visual. */
+/** Shared turret-local orientation math for the directional jammer visual. */
 public final class JammerOrientation {
     private static final float PARALLEL_EPSILON = 1.0e-6f;
 
