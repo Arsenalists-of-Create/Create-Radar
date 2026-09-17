@@ -4,6 +4,10 @@
     {
       "id": "create_kaboom:missile",
       "required": false
+    },
+    {
+      "id": "create_kaboom:unguided_rocket",
+      "required": false
     }
   ]
 }

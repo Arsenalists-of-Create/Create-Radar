@@ -75,6 +75,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private boolean artillery = false;
     private boolean binoMode = false;
+    @Nullable
+    private BlockPos binoTargetPos;
+    private TargetingConfig binocularTargetingConfig = TargetingConfig.DEFAULT;
 
     @Nullable
     public RadarTrack track;
@@ -202,7 +205,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         firingControl = new WeaponFiringControl(this, mount, autoyaw);
         firingControl.setSafeZones(safeZones);
-        if (!binoMode && track != null) {
+        if (binoMode && binoTargetPos != null) {
+            firingControl.setBinoTarget(binoTargetPos,
+                    binocularTargetingConfig, view, false);
+        } else if (track != null) {
             firingControl.setTarget(track.getPosition(), radarTargetingConfig,
                     track, view);
         }
@@ -240,6 +246,12 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     @Override
     public void onLoad() {
         super.onLoad();
+
+        // Binocular ownership is deliberately session-only. Keep it across a
+        // firing-control replacement, but never across a world/chunk reload.
+        this.binoMode = false;
+        this.binoTargetPos = null;
+        this.binocularTargetingConfig = TargetingConfig.DEFAULT;
 
         if (this.firingControl != null) {
             firingControl.clearBinoTarget();
@@ -746,12 +758,26 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         if (reset || binoTargetPos == null) {
             this.binoMode = false;
+            this.binoTargetPos = null;
+            this.binocularTargetingConfig = TargetingConfig.DEFAULT;
 
             if (firingControl != null) {
                 firingControl.clearBinoTarget();
+                if (track != null && level instanceof ServerLevel) {
+                    var view = getWeaponGroup();
+                    if (view != null) {
+                        firingControl.setTarget(track.getPosition(),
+                                radarTargetingConfig, track, view);
+                    }
+                }
             }
             return;
         }
+
+        this.binoMode = true;
+        this.binoTargetPos = binoTargetPos.immutable();
+        this.binocularTargetingConfig = config == null
+                ? TargetingConfig.DEFAULT : config;
 
         if (firingControl == null) {
             getFiringControl();
@@ -768,8 +794,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        this.binoMode = true;
-        firingControl.setBinoTarget(binoTargetPos, config, view, reset);
+        firingControl.setBinoTarget(this.binoTargetPos,
+                this.binocularTargetingConfig, view, false);
     }
 
     public void setTrack(RadarTrack track) {
@@ -1040,7 +1066,6 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         if (oldMount != null && !sameMount(oldMount, newMount)) {
             clearFiringControl();
-            track = null;
             isRunning = false;
             lastTargetPos = null;
         }
@@ -1137,7 +1162,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (next == 0.0f && generatedSpeed == 0.0f) {
             return;
         }
-        if (next != 0.0f && Math.abs(next - generatedSpeed) < 0.01f) {
+        if (next != 0.0f && Math.abs(next - generatedSpeed) < 1.0e-5f) {
             return;
         }
         generatedSpeed = next;
@@ -1211,6 +1236,12 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         return setStructuralAimDirection(worldAimDirection, true);
     }
 
+    public boolean setRadarAimDirection(@Nullable Vec3 worldAimDirection,
+                                       double maximumFiringToleranceDegrees) {
+        return setStructuralAimDirection(worldAimDirection, true,
+                maximumFiringToleranceDegrees);
+    }
+
     public void endRadarTracking() {
         kineticControllerState.endContinuousTracking();
     }
@@ -1228,6 +1259,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection,
                                               boolean continuous) {
+        return setStructuralAimDirection(worldAimDirection, continuous,
+                Double.POSITIVE_INFINITY);
+    }
+
+    private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection,
+                                              boolean continuous,
+                                              double maximumFiringToleranceDegrees) {
         if (debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
@@ -1257,7 +1295,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         if (continuous) {
-            kineticControllerState.beginContinuousTracking();
+            kineticControllerState.beginContinuousTracking(
+                    maximumFiringToleranceDegrees);
         } else {
             kineticControllerState.endContinuousTracking();
         }

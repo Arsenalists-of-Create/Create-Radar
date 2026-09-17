@@ -1,6 +1,7 @@
 package com.happysg.radar.block.behavior.networks;
 
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
+import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
 import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
@@ -11,6 +12,7 @@ import com.happysg.radar.targeting.TargetingSolverSelfTest;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
 
@@ -27,6 +29,8 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkObservationRefreshKeepsIdentity());
         results.add(checkIdentityChangesInvalidate());
         results.add(checkJammingGuidanceRefresh());
+        results.add(checkMutableJammingSampleRefresh());
+        results.add(checkGuidanceAabbTranslation());
         results.add(checkAimPointRebase());
         results.add(checkAimDirectionRebase());
         results.add(checkPendingSolveLifetime());
@@ -36,11 +40,16 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkAsyncBallisticAimHandoff());
         results.add(checkDirectAdapterAimGating());
         results.add(checkSublevelFrameTracksCarrierRotation());
+        results.add(checkNestedSwivelYawLimits());
+        results.add(checkStructuralPitchLimits());
         results.add(checkLimitBoundaryTrackingFailsClosed());
         results.add(checkUnavailableSourceFrameFailsClosed());
         results.add(checkSmoothAimKeepsStability());
         results.add(checkDualMountYawConvergence());
         results.add(checkDualFirePolicy());
+        results.add(checkPerSideSafeZoneGeometry());
+        results.add(checkDualAimingSourceRecovery());
+        results.add(checkSecondarySolutionIdentity());
         results.add(checkDualYawTopologyPolicy());
         results.add(checkRangeAwareFiringTolerance());
         return List.copyOf(results);
@@ -94,13 +103,91 @@ public final class WeaponFiringControlSelfTest {
                 new Vec3(12.0, 17.0, 34.0)) < 1.0E-12;
         boolean velocityShifted = guidance.velocity().distanceToSqr(
                 new Vec3(1.1, 1.8, 3.3)) < 1.0E-12;
+        boolean offsetPreserved = guidance.positionOffset().distanceToSqr(
+                new Vec3(2.0, -3.0, 4.0)) < 1.0E-12;
         boolean tokenChanged = WeaponFiringControl.jammingSampleToken(first)
                 != WeaponFiringControl.jammingSampleToken(next);
-        boolean passed = positionShifted && velocityShifted && tokenChanged;
+        boolean passed = positionShifted && velocityShifted
+                && offsetPreserved && tokenChanged;
         return result("jammed_guidance_refreshes_ballistic_sample", passed,
                 "position=" + guidance.position() + " velocity="
-                        + guidance.velocity() + " tokenChanged="
+                        + guidance.velocity() + " offset="
+                        + guidance.positionOffset() + " tokenChanged="
                         + tokenChanged);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkMutableJammingSampleRefresh() {
+        RadarTrack shared = track("mob-1", TrackCategory.HOSTILE,
+                Vec3.ZERO, 20L);
+        shared.setJammingData(new RadarTrack.JammingData(
+                "radar", 0.5f, 0.25f, 0.0f, 0.0f,
+                Vec3.ZERO, Vec3.ZERO, 100L));
+        long retainedToken = WeaponFiringControl.jammingSampleToken(shared);
+
+        shared.setJammingData(new RadarTrack.JammingData(
+                "radar", 0.5f, 0.25f, 0.0f, 0.0f,
+                Vec3.ZERO, Vec3.ZERO, 101L));
+        boolean aliasedMutationDetected =
+                WeaponFiringControl.jammingSampleChanged(
+                        true, retainedToken, shared);
+
+        long jammedToken = WeaponFiringControl.jammingSampleToken(shared);
+        shared.setJammingData(null);
+        boolean jammingEndDetected =
+                WeaponFiringControl.jammingSampleChanged(
+                        true, jammedToken, shared);
+        boolean unchangedCleanIgnored =
+                !WeaponFiringControl.jammingSampleChanged(
+                        true, Long.MIN_VALUE, shared);
+        boolean differentTargetIgnored =
+                !WeaponFiringControl.jammingSampleChanged(
+                        false, retainedToken, shared);
+        boolean passed = aliasedMutationDetected && jammingEndDetected
+                && unchangedCleanIgnored && differentTargetIgnored;
+        return result("mutable_jamming_proxy_invalidates_sample", passed,
+                "aliased=" + aliasedMutationDetected
+                        + " ended=" + jammingEndDetected
+                        + " clean=" + unchangedCleanIgnored
+                        + " different=" + differentTargetIgnored);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkGuidanceAabbTranslation() {
+        AABB physical = new AABB(-1.0, -2.0, -3.0,
+                1.0, 2.0, 3.0);
+        Vec3 guidance = new Vec3(4.0, 5.0, 6.0);
+        Vec3 prediction = new Vec3(0.5, -1.0, 2.0);
+        AABB translated = WeaponFiringControl.translateTargetAabb(
+                physical, guidance, prediction);
+        AABB unchanged = WeaponFiringControl.translateTargetAabb(
+                physical, Vec3.ZERO, Vec3.ZERO);
+        AABB missing = WeaponFiringControl.translateTargetAabb(
+                null, guidance, prediction);
+
+        Vec3 expectedCenter = guidance.add(prediction);
+        boolean centerAligned = translated != null
+                && translated.getCenter().distanceToSqr(expectedCenter)
+                < 1.0E-12;
+        boolean dimensionsPreserved = translated != null
+                && Math.abs(translated.getXsize() - physical.getXsize())
+                < 1.0E-12
+                && Math.abs(translated.getYsize() - physical.getYsize())
+                < 1.0E-12
+                && Math.abs(translated.getZsize() - physical.getZsize())
+                < 1.0E-12;
+        boolean zeroUnchanged = unchanged != null
+                && unchanged.getCenter().distanceToSqr(
+                physical.getCenter()) < 1.0E-12;
+        boolean nullPreserved = missing == null;
+        boolean passed = centerAligned && dimensionsPreserved
+                && zeroUnchanged && nullPreserved;
+        return result("jammed_guidance_translates_target_aabb", passed,
+                "center=" + (translated == null
+                        ? null : translated.getCenter())
+                        + " expected=" + expectedCenter
+                        + " dimensions=" + dimensionsPreserved
+                        + " null=" + nullPreserved);
     }
 
     private static TargetingSolverSelfTest.Result
@@ -352,9 +439,9 @@ public final class WeaponFiringControlSelfTest {
         boolean adapterHasResolvedAim =
                 WeaponFiringControl.hasResolvedAimForUpdate(
                         false, false, true, true);
-        boolean laserHasResolvedAim =
+        boolean unresolvedLaserIsNotResolved =
                 WeaponFiringControl.hasResolvedAimForUpdate(
-                        false, false, true, false);
+                        false, false, true, true);
         boolean directIgnoresBallisticSolutions =
                 !WeaponFiringControl.hasResolvedAimForUpdate(
                         true, true, true, true);
@@ -371,7 +458,7 @@ public final class WeaponFiringControlSelfTest {
                 WeaponFiringControl.hasFireEligibleAim(
                         false, false, true);
         boolean passed = !adapterHasResolvedAim
-                && laserHasResolvedAim
+                && !unresolvedLaserIsNotResolved
                 && directIgnoresBallisticSolutions
                 && adapterMode == WeaponFiringControl.AimUpdateMode.DIRECT
                 && !unresolvedReady
@@ -384,7 +471,8 @@ public final class WeaponFiringControlSelfTest {
                 "mode=" + adapterMode
                         + " unresolvedReady=" + unresolvedReady
                         + " resolvedReady=" + resolvedReady
-                        + " laserResolved=" + laserHasResolvedAim);
+                        + " unresolvedLaser="
+                        + unresolvedLaserIsNotResolved);
     }
 
     private static TargetingSolverSelfTest.Result
@@ -421,6 +509,79 @@ public final class WeaponFiringControlSelfTest {
                         + after.requestedControllerYawDeg()
                         + " applied="
                         + after.appliedControllerYawDeg());
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkNestedSwivelYawLimits() {
+        boolean legal = true;
+        boolean illegal = true;
+        boolean boundary = true;
+        boolean roundTrip = true;
+        for (KineticAimFrame parent : List.of(KineticAimFrame.world(),
+                new KineticAimFrame(new Vec3(0, 1, 0),
+                        new Vec3(-1, 0, 0), new Vec3(0, 0, 1)))) {
+            for (double stageYaw : new double[]{80.0, -80.0}) {
+                KineticAimFrame pitchParent = new KineticAimFrame(
+                        parent.worldDirection(stageYaw - 90.0, 0.0),
+                        parent.upAxis(), parent.worldDirection(stageYaw, 0.0));
+                WeaponFiringControl.MountAimFrame nested =
+                        new WeaponFiringControl.MountAimFrame(
+                                WeaponFiringControl.MountFrameKind.STRUCTURAL,
+                                null, new PitchConstraint(-70.0, 70.0,
+                                pitchParent.rightAxis(), pitchParent.upAxis(),
+                                pitchParent.forwardAxis()),
+                                new ControllerMovementLimits(CannonAxis.YAW, -90.0, 90.0),
+                                0.0, null, parent);
+                // Legal in the yaw parent's frame, 160 degrees away in the
+                // pitch parent's frame. The old shared-frame check rejected it.
+                Vec3 target = parent.worldDirection(-stageYaw, 25.0);
+                var evaluation = nested.evaluate(target);
+                legal &= evaluation.fireEligible();
+                roundTrip &= nested.worldDirection(evaluation.requestedPitchDeg(),
+                                evaluation.requestedControllerYawDeg())
+                        .distanceTo(target) < 1.0e-6;
+
+                // Conversely, a target locally near the pitch stage must not
+                // bypass the actual yaw actuator's limits.
+                Vec3 outside = parent.worldDirection(Math.copySign(110.0, stageYaw), 25.0);
+                var rejected = nested.evaluate(outside);
+                illegal &= rejected.valid() && rejected.yawConstrained()
+                        && !rejected.fireEligible();
+                Vec3 applied = nested.worldDirection(rejected.appliedPitchDeg(),
+                        rejected.appliedControllerYawDeg());
+                boundary &= nested.evaluate(applied).fireEligible()
+                        && applied.distanceTo(parent.worldDirection(
+                        Math.copySign(90.0, stageYaw), 25.0)) < 1.0e-6;
+            }
+        }
+        return result("nested_swivel_limits_use_yaw_parent", legal && illegal
+                        && boundary && roundTrip,
+                "legal=" + legal + " rejected=" + illegal
+                        + " boundary=" + boundary + " roundTrip=" + roundTrip);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkStructuralPitchLimits() {
+        KineticAimFrame tilted = new KineticAimFrame(new Vec3(0, 1, 0),
+                new Vec3(-1, 0, 0), new Vec3(0, 0, 1));
+        PitchConstraint swivel = WeaponFiringControl.mountPitchConstraint(
+                true, -70.0, 70.0, -5.0, 15.0,
+                tilted.rightAxis(), tilted.upAxis(), tilted.forwardAxis());
+        PitchConstraint direct = WeaponFiringControl.mountPitchConstraint(
+                false, -70.0, 70.0, -5.0, 15.0,
+                tilted.rightAxis(), tilted.upAxis(), tilted.forwardAxis());
+        PitchConstraint configured = WeaponFiringControl.mountPitchConstraint(
+                true, -20.0, 20.0, -5.0, 15.0,
+                tilted.rightAxis(), tilted.upAxis(), tilted.forwardAxis());
+        boolean passed = swivel.allows(tilted.worldDirection(0.0, 60.0))
+                && swivel.allows(tilted.worldDirection(0.0, -60.0))
+                && !swivel.allows(tilted.worldDirection(0.0, 80.0))
+                && !configured.allows(tilted.worldDirection(0.0, 60.0))
+                && !direct.allows(tilted.worldDirection(0.0, 60.0))
+                && !direct.allows(tilted.worldDirection(0.0, -60.0))
+                && direct.allows(tilted.worldDirection(0.0, 10.0));
+        return result("swivel_pitch_uses_assembly_limits", passed,
+                "swivel=" + swivel.summary() + " direct=" + direct.summary());
     }
 
     private static TargetingSolverSelfTest.Result
@@ -531,26 +692,135 @@ public final class WeaponFiringControlSelfTest {
         boolean allReady =
                 WeaponFiringControl.dualSideFireEligible(
                         true, true, true,
-                        true, true, true);
+                        true, true, true, true, true);
         boolean yawBlocksOnlySide =
                 !WeaponFiringControl.dualSideFireEligible(
                         true, true, false,
-                        true, true, true);
+                        true, true, true, true, true);
         boolean profileBlocksOnlySide =
                 !WeaponFiringControl.dualSideFireEligible(
                         true, true, true,
-                        true, true, false);
+                        true, true, false, true, true);
         boolean sharedGateStops =
                 !WeaponFiringControl.dualSideFireEligible(
                         false, true, true,
-                        true, true, true);
+                        true, true, true, true, true);
+        boolean unsafeSideStops =
+                !WeaponFiringControl.dualSideFireEligible(
+                        true, true, true,
+                        true, true, true, true, false);
+        boolean staleAimStops =
+                !WeaponFiringControl.dualSideFireEligible(
+                        true, true, true,
+                        true, true, true, false, true);
         boolean passed = allReady && yawBlocksOnlySide
-                && profileBlocksOnlySide && sharedGateStops;
+                && profileBlocksOnlySide && sharedGateStops
+                && unsafeSideStops && staleAimStops;
         return result("t_pitch_independent_fire_gates", passed,
                 "ready=" + allReady
                         + " yawBlocked=" + yawBlocksOnlySide
                         + " profileBlocked=" + profileBlocksOnlySide
-                        + " sharedBlocked=" + sharedGateStops);
+                        + " sharedBlocked=" + sharedGateStops
+                        + " unsafeBlocked=" + unsafeSideStops
+                        + " staleBlocked=" + staleAimStops);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkPerSideSafeZoneGeometry() {
+        Vec3 leftStart = new Vec3(-2.0, 0.0, 0.0);
+        Vec3 rightStart = new Vec3(2.0, 0.0, 0.0);
+        Vec3 leftEnd = new Vec3(-2.0, 0.0, 100.0);
+        Vec3 rightEnd = new Vec3(2.0, 0.0, 100.0);
+        SafeZone leftZone = new SafeZone(
+                new AABB(-2.5, -1.0, 10.0,
+                        -1.5, 1.0, 11.0), null);
+        SafeZone rightZone = new SafeZone(
+                new AABB(1.5, -1.0, 10.0,
+                        2.5, 1.0, 11.0), null);
+        boolean leftOnly = WeaponFiringControl.pathTouchesSafeZone(
+                List.of(leftZone), null, leftStart, leftEnd)
+                && !WeaponFiringControl.pathTouchesSafeZone(
+                List.of(leftZone), null, rightStart, rightEnd);
+        boolean reversed = WeaponFiringControl.pathTouchesSafeZone(
+                List.of(rightZone), null, rightStart, rightEnd)
+                && !WeaponFiringControl.pathTouchesSafeZone(
+                List.of(rightZone), null, leftStart, leftEnd);
+        return result("t_pitch_per_side_safe_zone_geometry",
+                leftOnly && reversed,
+                "leftOnly=" + leftOnly + " reversed=" + reversed);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkDualAimingSourceRecovery() {
+        int initial = WeaponFiringControl.selectDualAimingSourceIndex(
+                -1, 0, List.of(true, true));
+        int primaryRetained =
+                WeaponFiringControl.selectDualAimingSourceIndex(
+                        0, 0, List.of(true, true));
+        int fallback = WeaponFiringControl.selectDualAimingSourceIndex(
+                0, 0, List.of(false, true));
+        int fallbackRetainedAfterPrimaryReload =
+                WeaponFiringControl.selectDualAimingSourceIndex(
+                        1, 0, List.of(true, true));
+        int primaryRecovery =
+                WeaponFiringControl.selectDualAimingSourceIndex(
+                        1, 0, List.of(true, false));
+        int bothEmptyPrimary =
+                WeaponFiringControl.selectDualAimingSourceIndex(
+                        0, 0, List.of(false, false));
+        int bothEmptyFallback =
+                WeaponFiringControl.selectDualAimingSourceIndex(
+                        1, 0, List.of(false, false));
+        boolean passed = initial == 0 && primaryRetained == 0
+                && fallback == 1
+                && fallbackRetainedAfterPrimaryReload == 1
+                && primaryRecovery == 0
+                && bothEmptyPrimary == 0 && bothEmptyFallback == 1;
+        return result("t_pitch_loaded_source_reload_recovery", passed,
+                "sequence=" + initial + "," + primaryRetained + ","
+                        + fallback + ","
+                        + fallbackRetainedAfterPrimaryReload + ","
+                        + primaryRecovery + "," + bothEmptyPrimary
+                        + "," + bothEmptyFallback);
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkSecondarySolutionIdentity() {
+        WeaponFiringControl.SideSolutionKey baseline =
+                new WeaponFiringControl.SideSolutionKey(
+                        BlockPos.ZERO, 11, BlockPos.ZERO.above(),
+                        "hostile:target", "ammo-a", false);
+        WeaponFiringControl.SideSolutionKey same =
+                new WeaponFiringControl.SideSolutionKey(
+                        BlockPos.ZERO, 11, BlockPos.ZERO.above(),
+                        "hostile:target", "ammo-a", false);
+        WeaponFiringControl.SideSolutionKey changedAmmo =
+                new WeaponFiringControl.SideSolutionKey(
+                        BlockPos.ZERO, 11, BlockPos.ZERO.above(),
+                        "hostile:target", "ammo-b", false);
+        WeaponFiringControl.SideSolutionKey changedMount =
+                new WeaponFiringControl.SideSolutionKey(
+                        BlockPos.ZERO, 12, BlockPos.ZERO.above(),
+                        "hostile:target", "ammo-a", false);
+        WeaponFiringControl.SideSolutionKey changedSource =
+                new WeaponFiringControl.SideSolutionKey(
+                        BlockPos.ZERO, 11, BlockPos.ZERO.below(),
+                        "hostile:target", "ammo-a", false);
+        WeaponFiringControl.SideSolutionKey changedTarget =
+                new WeaponFiringControl.SideSolutionKey(
+                        BlockPos.ZERO, 11, BlockPos.ZERO.above(),
+                        "hostile:other", "ammo-a", false);
+        boolean passed = baseline.equals(same)
+                && !baseline.equals(changedAmmo)
+                && !baseline.equals(changedMount)
+                && !baseline.equals(changedSource)
+                && !baseline.equals(changedTarget);
+        return result("t_pitch_secondary_solution_identity", passed,
+                "same=" + baseline.equals(same)
+                        + " ammo=" + baseline.equals(changedAmmo)
+                        + " mount=" + baseline.equals(changedMount)
+                        + " source=" + baseline.equals(changedSource)
+                        + " target=" + baseline.equals(changedTarget));
     }
 
     private static TargetingSolverSelfTest.Result

@@ -74,6 +74,8 @@ public final class KineticControllerState {
     private double watchdogLastError = Double.NaN;
     private int watchdogStallTicks;
     private boolean continuousTracking;
+    private double trackingToleranceDegrees = Double.POSITIVE_INFINITY;
+    private double stopRpm = STOP_RPM;
 
     private boolean syncRequested;
     private ControllerAngleDelta controllerAngleDelta = ControllerAngleDelta.SHORTEST;
@@ -131,7 +133,9 @@ public final class KineticControllerState {
                  DoubleConsumer commandGenerator) {
         controllerAngleDelta = angleDelta == null
                 ? ControllerAngleDelta.SHORTEST : angleDelta;
-        double tolerance = Math.max(0.0, toleranceDegrees);
+        double tolerance = effectiveTolerance(toleranceDegrees);
+        stopRpm = Math.max(SPEED_EPSILON, Math.min(STOP_RPM,
+                tolerance * PROPORTIONAL_RPM_PER_DEGREE * 0.25));
         onTargetChanged(running, controllerTargetDegrees, tolerance);
 
         if (resolution == null || resolution.selection() == KineticMountAdapterResolution.Selection.ABSENT) {
@@ -317,7 +321,14 @@ public final class KineticControllerState {
         // then close the inner loop on that compensated setpoint. This avoids
         // integrating physical lag into an ever-growing bearing target.
         double controlDegrees = setpointRemaining + requestedCompensation;
-        double rawRpm = clamp(controlDegrees * PROPORTIONAL_RPM_PER_DEGREE,
+        // Tight firing tolerances require corrections after a normal move
+        // would have stopped. Approach gently so physical lag does not turn
+        // those small corrections into repeated overshoot/reversal cycles.
+        double proportionalGain = tolerance < toleranceDegrees
+                && Math.abs(remainingDegrees) < 1.0
+                ? PROPORTIONAL_RPM_PER_DEGREE * 0.5
+                : PROPORTIONAL_RPM_PER_DEGREE;
+        double rawRpm = clamp(controlDegrees * proportionalGain,
                 -maximumRpm, maximumRpm) * driveSign;
         rawRpm = limitSetpointCompensation(adapter, rawRpm, controlDegrees,
                 bearingTarget, desiredBearingTarget);
@@ -326,7 +337,7 @@ public final class KineticControllerState {
             beginWatchdog(adapter, bearingTarget, physicalAngle, desiredBearingTarget,
                     maximumRpm);
         }
-        if (Math.abs(rawRpm) <= STOP_RPM) {
+        if (Math.abs(rawRpm) <= stopRpm) {
             stopGenerator(commandGenerator);
             if (!adapter.wakePhysicalAssembly()) {
                 failClosed(commandGenerator, true, "physical_assembly_could_not_wake");
@@ -341,7 +352,7 @@ public final class KineticControllerState {
             setLifecycle(KineticControllerLifecycle.REVERSING);
             return true;
         }
-        if (Math.abs(commandedGeneratorRpm) > STOP_RPM
+        if (Math.abs(commandedGeneratorRpm) > stopRpm
                 && Math.signum(commandedGeneratorRpm) != Math.signum(rawRpm)) {
             reversalTicks = REVERSAL_HOLD_TICKS;
             stopGenerator(commandGenerator);
@@ -354,7 +365,7 @@ public final class KineticControllerState {
         smoothedGeneratorRpm = limitSetpointCompensation(
                 adapter, smoothedGeneratorRpm, controlDegrees,
                 bearingTarget, desiredBearingTarget);
-        if (Math.abs(smoothedGeneratorRpm) < STOP_RPM) {
+        if (Math.abs(smoothedGeneratorRpm) < stopRpm) {
             smoothedGeneratorRpm = 0.0;
         }
 
@@ -379,14 +390,14 @@ public final class KineticControllerState {
     }
 
     public void onTargetChanged(boolean running, double targetDegrees, double toleranceDegrees) {
-        double tolerance = Math.max(0.0, toleranceDegrees);
+        double tolerance = effectiveTolerance(toleranceDegrees);
         boolean materialTargetChange = !Double.isFinite(observedTarget)
                 || !Double.isFinite(targetDegrees)
                 || Math.abs(KineticAngleMath.shortestDelta(observedTarget, targetDegrees)) > tolerance;
         boolean runningChange = observedRunning != running;
-        if (materialTargetChange) {
-            observedTarget = targetDegrees;
-        }
+        // Keep every aim update, including sub-tolerance motion. Tolerance
+        // controls settling, not whether a new destination is remembered.
+        observedTarget = targetDegrees;
         observedRunning = running;
         if (materialTargetChange || runningChange) {
             commandRevision++;
@@ -412,6 +423,15 @@ public final class KineticControllerState {
      * targets. The cumulative travel bound remains active in this mode.
      */
     public void beginContinuousTracking() {
+        beginContinuousTracking(Double.POSITIVE_INFINITY);
+    }
+
+    public void beginContinuousTracking(double maximumFiringToleranceDegrees) {
+        // Leave headroom inside the firing gate without resetting the motion
+        // watchdog when range (and hence required accuracy) changes.
+        trackingToleranceDegrees = Double.isFinite(maximumFiringToleranceDegrees)
+                ? Math.max(0.0, maximumFiringToleranceDegrees) * 0.5
+                : Double.POSITIVE_INFINITY;
         if (continuousTracking) {
             return;
         }
@@ -426,6 +446,7 @@ public final class KineticControllerState {
      * frame. The next ordinary set-angle command gets a fresh finite watchdog.
      */
     public void endContinuousTracking() {
+        trackingToleranceDegrees = Double.POSITIVE_INFINITY;
         if (!continuousTracking) {
             return;
         }
@@ -437,6 +458,12 @@ public final class KineticControllerState {
 
     boolean isContinuousTracking() {
         return continuousTracking;
+    }
+
+    private double effectiveTolerance(double toleranceDegrees) {
+        return Math.min(Math.max(0.0, toleranceDegrees),
+                continuousTracking ? trackingToleranceDegrees
+                        : Double.POSITIVE_INFINITY);
     }
 
     public boolean isReady(KineticMountAdapterResolution resolution, boolean running,
@@ -562,7 +589,7 @@ public final class KineticControllerState {
     }
 
     private void observeDriveSign(double bearingAngle, double tolerance) {
-        if (!Double.isFinite(lastBearingAngle) || Math.abs(commandedGeneratorRpm) <= STOP_RPM) {
+        if (!Double.isFinite(lastBearingAngle) || Math.abs(commandedGeneratorRpm) <= stopRpm) {
             return;
         }
         double movement = KineticAngleMath.shortestDelta(lastBearingAngle, bearingAngle);
@@ -635,7 +662,7 @@ public final class KineticControllerState {
             blockedReason = "watchdog_travel_bound_exceeded";
             return false;
         }
-        double progressThreshold = Math.max(1.0e-4, tolerance * 0.05);
+        double progressThreshold = Math.max(1.0e-7, tolerance * 0.05);
         double currentError = Math.abs(plannedBearingDelta(
                 physicalAngle, destination));
         boolean movedTowardPriorTarget = Math.abs(physicalStep) > progressThreshold
@@ -658,7 +685,7 @@ public final class KineticControllerState {
                                              double bearingTarget,
                                              double destination) {
         int direction = (int) Math.signum(controlDegrees);
-        if (direction == 0 || Math.abs(requestedRpm) <= STOP_RPM) {
+        if (direction == 0 || Math.abs(requestedRpm) <= stopRpm) {
             return requestedRpm;
         }
         double setpointRemaining = plannedBearingDelta(
@@ -839,6 +866,7 @@ public final class KineticControllerState {
         smoothedGeneratorRpm = 0.0;
         activeAdapter = null;
         continuousTracking = false;
+        trackingToleranceDegrees = Double.POSITIVE_INFINITY;
         setStructuralMode(false);
         resetEndpointSession(false);
         setLifecycle(KineticControllerLifecycle.CLOSED);
@@ -850,6 +878,8 @@ public final class KineticControllerState {
 
     public void read(CompoundTag parent, boolean wasMoved, boolean clientPacket) {
         activeAdapter = null;
+        continuousTracking = false;
+        trackingToleranceDegrees = Double.POSITIVE_INFINITY;
         structuralMode = false;
         lifecycle = KineticControllerLifecycle.CLOSED;
         observedTarget = Double.NaN;

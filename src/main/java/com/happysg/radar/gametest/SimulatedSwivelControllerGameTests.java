@@ -90,8 +90,28 @@ public final class SimulatedSwivelControllerGameTests {
         runControllerTest(helper, 5, Direction.UP, Direction.UP);
     }
 
+    @PrefixGameTestTemplate(false)
+    @GameTest(templateNamespace = "simulated", template = "extrakineticstest.swivelbearing", timeoutTicks = 900)
+    public static void pitchFineRadarAlignment(GameTestHelper helper) {
+        runControllerTest(helper, 6, Direction.EAST, Direction.EAST,
+                Math.toDegrees(Math.atan2(2.0 / Math.sqrt(2.0), 4000.0)));
+    }
+
+    @PrefixGameTestTemplate(false)
+    @GameTest(templateNamespace = "simulated", template = "extrakineticstest.swivelbearing", timeoutTicks = 900)
+    public static void yawFineRadarAlignment(GameTestHelper helper) {
+        runControllerTest(helper, 7, Direction.DOWN, Direction.DOWN,
+                Math.toDegrees(Math.atan2(2.0 / Math.sqrt(2.0), 4000.0)));
+    }
+
     private static void runControllerTest(GameTestHelper helper, int slot, Direction bearingFacing,
                                           Direction controllerFacing) {
+        runControllerTest(helper, slot, bearingFacing, controllerFacing,
+                Double.POSITIVE_INFINITY);
+    }
+
+    private static void runControllerTest(GameTestHelper helper, int slot, Direction bearingFacing,
+                                          Direction controllerFacing, double maximumFiringTolerance) {
         AtomicReference<Fixture> fixtureRef = new AtomicReference<>();
         SampleState samples = new SampleState();
         BlockPos bearingPos = new BlockPos(8 + slot * 32, 96, 8);
@@ -103,7 +123,7 @@ public final class SimulatedSwivelControllerGameTests {
         sequence.thenExecute(() -> runWithCleanup(helper, site, () -> {
             rebuildBearingFixture(helper, site, bearingFacing);
             fixtureRef.set(installController(helper, site.bearingPos(),
-                    bearingFacing, controllerFacing));
+                    bearingFacing, controllerFacing, maximumFiringTolerance));
         }));
         sequence.thenIdle(1).thenWaitUntil(() -> armController(fixtureRef.get(), samples));
         for (int i = 0; i < SAMPLE_TICKS; i++) {
@@ -389,7 +409,9 @@ public final class SimulatedSwivelControllerGameTests {
         }
         if (samples.unwrappedPhysicalTravel > allowedPhysicalTravel) {
             throw new GameTestAssertException("Physical Swivel overshot: travel="
-                    + samples.unwrappedPhysicalTravel + "/" + allowedPhysicalTravel);
+                    + samples.unwrappedPhysicalTravel + "/" + allowedPhysicalTravel
+                    + " error=" + error + " stableTicks=" + samples.stablePhysicalTicks
+                    + " " + kineticStatus(fixture.controller()));
         }
         int requiredStableTicks = fullRevolutionTicks + 20;
         if (requiredStableTicks >= SAMPLE_TICKS) {
@@ -461,7 +483,8 @@ public final class SimulatedSwivelControllerGameTests {
 
     private static Fixture installController(GameTestHelper helper, BlockPos bearingPos,
                                              Direction bearingFacing,
-                                             Direction controllerFacing) {
+                                             Direction controllerFacing,
+                                             double maximumFiringTolerance) {
         Direction.Axis axis = bearingFacing.getAxis();
         Direction controllerSide = axis == Direction.Axis.X ? Direction.SOUTH : Direction.EAST;
         BlockPos controllerPos = bearingPos.relative(controllerSide);
@@ -522,12 +545,14 @@ public final class SimulatedSwivelControllerGameTests {
             return new Fixture(controller, motor, decoyCog, bearing,
                     startingSetpoint,
                     () -> {
-                        if (!yaw.setRadarAimDirection(worldAim)) {
+                        if (!yaw.setRadarAimDirection(worldAim, maximumFiringTolerance)) {
                             throw new GameTestAssertException(
                                     "Yaw controller rejected a valid world-space radar aim");
                         }
                     },
-                    () -> yaw.atTargetYaw(true));
+                    () -> Double.isFinite(maximumFiringTolerance)
+                            ? yaw.isAlignedForFiring(true, 0.0, maximumFiringTolerance)
+                            : yaw.atTargetYaw(true));
         }
         if (controller instanceof AutoPitchControllerBlockEntity pitch) {
             Vec3 worldAim = new Vec3(
@@ -537,12 +562,14 @@ public final class SimulatedSwivelControllerGameTests {
             return new Fixture(controller, motor, decoyCog, bearing,
                     startingSetpoint,
                     () -> {
-                        if (!pitch.setRadarAimDirection(worldAim)) {
+                        if (!pitch.setRadarAimDirection(worldAim, maximumFiringTolerance)) {
                             throw new GameTestAssertException(
                                     "Pitch controller rejected a valid world-space radar aim");
                         }
                     },
-                    () -> pitch.atTargetPitch(true));
+                    () -> Double.isFinite(maximumFiringTolerance)
+                            ? pitch.isAlignedForFiring(true, 0.0, maximumFiringTolerance)
+                            : pitch.atTargetPitch(true));
         }
         throw new GameTestAssertException("Controller block entity was not created");
     }

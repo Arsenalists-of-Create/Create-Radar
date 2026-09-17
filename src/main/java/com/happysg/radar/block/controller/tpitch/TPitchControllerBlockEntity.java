@@ -1,6 +1,7 @@
 package com.happysg.radar.block.controller.tpitch;
 
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
+import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.compat.Mods;
@@ -71,17 +72,33 @@ public class TPitchControllerBlockEntity
             return null;
         }
         BlockPos dominant = view.preferredMountPos();
-        if (dominant != null) {
-            for (CannonMountContext mount : cachedAdjacentMounts) {
-                if (mount.getBlockPos().equals(dominant)
-                        && isActiveCannonMount(mount)) {
-                    return mount;
-                }
-            }
+        List<CannonMountContext> mounts = resolveControlledCbcMounts();
+        if (mounts.isEmpty()) {
+            return null;
         }
 
-        List<CannonMountContext> mounts = resolveControlledCbcMounts();
-        return mounts.isEmpty() ? null : mounts.getFirst();
+        // Ammunition owns source selection; cooldowns and an open breech only
+        // affect readiness and must not make the shared pitch hunt sides.
+        CannonMountContext current = firingControl == null
+                ? null : firingControl.cannonMount;
+        int currentIndex = -1;
+        int preferredIndex = -1;
+        List<Boolean> loaded = new ArrayList<>(mounts.size());
+        for (int i = 0; i < mounts.size(); i++) {
+            CannonMountContext mount = mounts.get(i);
+            loaded.add(WeaponFiringControl.hasResolvableShot(
+                    mount, serverLevel));
+            if (current != null && mount.sameMount(current)) {
+                currentIndex = i;
+            }
+            if (dominant != null
+                    && mount.getBlockPos().equals(dominant)) {
+                preferredIndex = i;
+            }
+        }
+        int selected = WeaponFiringControl.selectDualAimingSourceIndex(
+                currentIndex, preferredIndex, loaded);
+        return selected < 0 ? null : mounts.get(selected);
     }
 
     /**

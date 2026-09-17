@@ -36,6 +36,7 @@ public final class KineticControllerSelfTest {
         checkFirstNonzeroAndReadiness(failures);
         checkPhysicalFeedbackCorrection(failures);
         checkFiringAlignment(failures);
+        checkFineRadarTracking(failures);
         checkPowerLossAndFailClosedStates(failures);
         checkUnavailableAndReassembly(failures);
         checkReversal(failures);
@@ -344,6 +345,83 @@ public final class KineticControllerSelfTest {
         expectFalse(failures, "disassembled_swivel_blocks_firing",
                 trackingState.isAlignedForFiring(
                         trackingPresent, BlockPos.ZERO, true, 21.0, 2.0));
+    }
+
+    private static void checkFineRadarTracking(List<String> failures) {
+        for (CannonAxis axis : CannonAxis.values()) {
+            for (double firingTolerance : new double[]{
+                    Math.toDegrees(Math.atan2(2.0 / Math.sqrt(2.0), 4000.0)),
+                    Math.toDegrees(Math.atan2(0.1 / Math.sqrt(2.0), 8000.0))}) {
+                String suffix = axis + "_" + firingTolerance;
+                FakeRig rig = new FakeRig(axis);
+                KineticControllerState state = new KineticControllerState(axis);
+                KineticMountAdapterResolution present =
+                        KineticMountAdapterResolution.present(rig.adapter);
+                double initial = axis == CannonAxis.YAW ? 359.99 : 10.0;
+                rig.adapter.targetAngle = initial;
+                rig.adapter.physicalAngle = initial;
+                state.beginContinuousTracking();
+                for (int tick = 0; tick < 6; tick++) {
+                    state.tick(BlockPos.ZERO, present, true, initial, 0.05,
+                            rig.availableInputRpm, true, rig::command);
+                }
+                expectTrue(failures, "fine_fixture_settles_" + suffix,
+                        state.isReady(present, true, initial, 0.05));
+
+                double target = KineticAngleMath.wrap360(initial + 0.04);
+                state.beginContinuousTracking(firingTolerance);
+                state.onTargetChanged(true, target, 0.05);
+                expectFalse(failures, "fine_target_blocks_before_motion_" + suffix,
+                        state.isAlignedForFiring(present, BlockPos.ZERO, true,
+                                target, firingTolerance));
+                boolean fineDrive = false;
+                for (int tick = 0; tick < 160; tick++) {
+                    // Reasserting the requested precision must not continually
+                    // reset the watchdog or prevent a tiny command from settling.
+                    state.beginContinuousTracking(firingTolerance);
+                    state.tick(BlockPos.ZERO, present, true, target, 0.05,
+                            rig.availableInputRpm, true, rig::command);
+                    fineDrive |= Math.abs(rig.commandedRpm) > EPSILON
+                            && Math.abs(rig.commandedRpm) < 0.05;
+                    rig.advance();
+                }
+                expectFalse(failures, "fine_motion_does_not_latch_watchdog_" + suffix,
+                        state.isBlocked());
+                expectTrue(failures, "fine_target_eventually_can_fire_" + suffix,
+                        state.isAlignedForFiring(present, BlockPos.ZERO, true,
+                                target, firingTolerance));
+
+                // Even a change smaller than the servo's settling tolerance
+                // must replace the remembered destination.
+                target = KineticAngleMath.wrap360(target + firingTolerance * 0.1);
+                state.tick(BlockPos.ZERO, present, true, target, 0.05,
+                        rig.availableInputRpm, true, rig::command);
+                expectClose(failures, "fine_sub_tolerance_target_remembered_" + suffix,
+                        state.getDesiredBearingTarget(), target);
+
+                // Tightening the budget alone must resume correction from a
+                // pose that used to qualify as aligned.
+                rig.adapter.targetAngle = KineticAngleMath.wrap360(target + firingTolerance * 0.25);
+                rig.adapter.physicalAngle = rig.adapter.targetAngle;
+                double tighter = firingTolerance * 0.1;
+                state.beginContinuousTracking(tighter);
+                for (int tick = 0; tick < 160; tick++) {
+                    state.tick(BlockPos.ZERO, present, true, target, 0.05,
+                            rig.availableInputRpm, true, rig::command);
+                    fineDrive |= Math.abs(rig.commandedRpm) > EPSILON
+                            && Math.abs(rig.commandedRpm) < 0.05;
+                    rig.advance();
+                }
+                expectTrue(failures, "fine_motor_corrections_reach_endpoint_" + suffix,
+                        fineDrive);
+                expectTrue(failures, "fine_range_change_reacquires_" + suffix,
+                        state.isAlignedForFiring(present, BlockPos.ZERO, true,
+                                target, tighter));
+                state.endContinuousTracking();
+                expectFalse(failures, "fine_tracking_ends_" + suffix,
+                        state.isContinuousTracking());
+            }
+        }
     }
 
     private static void checkPhysicalFeedbackCorrection(List<String> failures) {

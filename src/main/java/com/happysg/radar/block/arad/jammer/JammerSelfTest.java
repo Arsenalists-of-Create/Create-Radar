@@ -1,6 +1,7 @@
 package com.happysg.radar.block.arad.jammer;
 
 import com.happysg.radar.api.arad.RollingRpmTracker;
+import com.happysg.radar.api.jamming.DirectionalJammingApi;
 import com.happysg.radar.block.monitor.MonitorPonderJammingSelfTest;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
@@ -33,12 +34,13 @@ public final class JammerSelfTest {
         verifyOrientationBasis();
         verifyVisualPivot();
         verifyJammingProfile();
-        verifyJammingRangeBalance();
+        verifyNoiseInterpolation();
         verifyJammerClustering();
         verifyActiveJammerEligibility();
         verifyNearbyRadarSpillover();
         verifyBalancedEffectScaling();
         verifyJammingTrackMetadata();
+        verifyExternalGuidanceObservation();
         verifyJammedObservationWins();
         verifySilhouetteJitterAlignment();
         verifyProceduralFakeShipSilhouettes();
@@ -46,6 +48,32 @@ public final class JammerSelfTest {
         verifyFakeShipRarityGate();
         MonitorPonderJammingSelfTest.verify();
         System.out.println("PASS directional jammer placement, aiming, telemetry, and jamming checks");
+    }
+
+    private static void verifyExternalGuidanceObservation() {
+        RadarTrack track = new RadarTrack(UUID.randomUUID().toString(),
+                new Vec3(12.0, 3.0, 4.0), new Vec3(0.5, 0.0, 0.0), 42L,
+                TrackCategory.CONTRAPTION, "test:target", 1.0F);
+        track.setJammingData(new RadarTrack.JammingData("test:emitter",
+                1.0F, 0.5F, 0.0F, 0.0F,
+                new Vec3(2.0, -1.0, 3.0), new Vec3(0.1, 0.2, 0.3), 99L));
+        DirectionalJammingApi.GuidanceObservation observation =
+                DirectionalJammingApi.resolveGuidance(track,
+                        new Vec3(10.0, 10.0, 10.0), new Vec3(1.0, 2.0, 3.0));
+        require(observation != null && observation.jammed(),
+                "external guidance observation should retain jamming metadata");
+        require(observation.position().equals(new Vec3(12.0, 9.0, 13.0)),
+                "external guidance should apply the full offset once");
+        require(observation.velocity().equals(new Vec3(1.1, 2.2, 3.3)),
+                "external guidance should apply the velocity offset once");
+
+        track.setSynthetic(true);
+        DirectionalJammingApi.GuidanceObservation synthetic =
+                DirectionalJammingApi.resolveGuidance(track,
+                        new Vec3(100.0, 100.0, 100.0), Vec3.ZERO);
+        require(synthetic != null && synthetic.synthetic()
+                        && synthetic.position().equals(track.position()),
+                "synthetic guidance should use its reported coordinates");
     }
 
     private static void verifyPlacementDefaults() {
@@ -265,28 +293,71 @@ public final class JammerSelfTest {
                 "15-degree turret error must disable the contribution");
     }
 
-    private static void verifyJammingRangeBalance() {
-        requireNear(DirectionalJammingService.calculateRangeFactor(
-                        49.0, 100.0F, 0.50F, 0.85F), 1.0F,
-                "range below the full-effect boundary");
-        requireNear(DirectionalJammingService.calculateRangeFactor(
-                        50.0, 100.0F, 0.50F, 0.85F), 1.0F,
-                "full-effect range boundary");
-        requireNear(DirectionalJammingService.calculateRangeFactor(
-                        67.5, 100.0F, 0.50F, 0.85F), 0.5F,
-                "range falloff midpoint");
-        requireNear(DirectionalJammingService.calculateRangeFactor(
-                        85.0, 100.0F, 0.50F, 0.85F), 0.0F,
-                "zero-effect range boundary");
-        requireNear(DirectionalJammingService.calculateRangeFactor(
-                        100.0, 100.0F, 0.50F, 0.85F), 0.0F,
-                "range beyond the zero-effect boundary");
-        requireNear(DirectionalJammingService.calculateRangeFactor(
-                        67.5, 100.0F, 0.85F, 0.50F), 0.5F,
-                "reversed range settings must be sanitized");
-        requireNear(DirectionalJammingService.calculateRangeFactor(
-                        10.0, 0.0F, 0.50F, 0.85F), 0.0F,
-                "invalid radar range must fail closed");
+    private static void verifyNoiseInterpolation() {
+        Vec3 target = new Vec3(0.0, 0.0, 100.0);
+        Vec3 origin = Vec3.ZERO;
+        int periodTicks = 5;
+        long seed = 0x5A17C0DEL;
+
+        DirectionalJammingService.NoiseSample first =
+                DirectionalJammingService.noise(
+                        target, origin, 20.0F, periodTicks, 0L, seed);
+        DirectionalJammingService.NoiseSample beforeBoundary =
+                DirectionalJammingService.noise(
+                        target, origin, 20.0F, periodTicks, 4L, seed);
+        DirectionalJammingService.NoiseSample atBoundary =
+                DirectionalJammingService.noise(
+                        target, origin, 20.0F, periodTicks, 5L, seed);
+        require(first.token() == beforeBoundary.token(),
+                "noise token must remain stable within a segment");
+        require(first.token() != atBoundary.token(),
+                "noise token must change at a segment boundary");
+
+        for (long tick = 0L; tick < 15L; tick++) {
+            DirectionalJammingService.NoiseSample current =
+                    DirectionalJammingService.noise(
+                            target, origin, 20.0F, periodTicks, tick, seed);
+            DirectionalJammingService.NoiseSample next =
+                    DirectionalJammingService.noise(
+                            target, origin, 20.0F, periodTicks,
+                            tick + 1L, seed);
+            Vec3 actualStep = next.offset().subtract(current.offset());
+            require(actualStep.distanceToSqr(current.velocityOffset())
+                            <= 1.0E-18,
+                    "noise velocity must match the next-tick position step"
+                            + " at tick " + tick + ": expected "
+                            + actualStep + ", got "
+                            + current.velocityOffset());
+        }
+
+        DirectionalJammingService.NoiseSample periodOne =
+                DirectionalJammingService.noise(
+                        target, origin, 20.0F, 1, 9L, seed);
+        DirectionalJammingService.NoiseSample nextPeriodOne =
+                DirectionalJammingService.noise(
+                        target, origin, 20.0F, 1, 10L, seed);
+        require(nextPeriodOne.offset().subtract(periodOne.offset())
+                        .distanceToSqr(periodOne.velocityOffset())
+                        <= 1.0E-18,
+                "one-tick noise periods must remain position/velocity consistent");
+
+        DirectionalJammingService.NoiseSample clampedPeriod =
+                DirectionalJammingService.noise(
+                        target, origin, 20.0F, 0, 9L, seed);
+        require(Double.isFinite(clampedPeriod.offset().x)
+                        && Double.isFinite(clampedPeriod.offset().y)
+                        && Double.isFinite(clampedPeriod.offset().z)
+                        && Double.isFinite(clampedPeriod.velocityOffset().x)
+                        && Double.isFinite(clampedPeriod.velocityOffset().y)
+                        && Double.isFinite(clampedPeriod.velocityOffset().z),
+                "invalid noise periods must be clamped to finite samples");
+
+        DirectionalJammingService.NoiseSample disabled =
+                DirectionalJammingService.noise(
+                        target, origin, 0.0F, periodTicks, 0L, seed);
+        require(disabled.offset().equals(Vec3.ZERO)
+                        && disabled.velocityOffset().equals(Vec3.ZERO),
+                "zero-strength noise must remain disabled");
     }
 
     private static void verifyJammerClustering() {
@@ -337,17 +408,14 @@ public final class JammerSelfTest {
                 DirectionalJammingService.calculateProfile(
                         0.0F, 50.0F, 0.0F, 0.0F);
         require(DirectionalJammingService.isActiveContribution(
-                        active, 1.0F, 102L, 100L),
+                        active, 102L, 100L),
                 "an active contribution at the TTL boundary must count");
         require(!DirectionalJammingService.isActiveContribution(
-                        active, 1.0F, 103L, 100L),
+                        active, 103L, 100L),
                 "an expired contribution must not count");
         require(!DirectionalJammingService.isActiveContribution(
-                        stopped, 1.0F, 100L, 100L),
+                        stopped, 100L, 100L),
                 "a stopped jammer must not count");
-        require(!DirectionalJammingService.isActiveContribution(
-                        active, 0.0F, 100L, 100L),
-                "an out-of-range jammer must not count");
     }
 
     private static void verifyNearbyRadarSpillover() {
@@ -382,26 +450,24 @@ public final class JammerSelfTest {
         DirectionalJammingService.Profile full =
                 DirectionalJammingService.calculateProfile(
                         50.0F, 50.0F, 0.0F, 0.0F);
-        DirectionalJammingService.Profile quarter = full.balanced(0.5F, 2);
-        requireNear(quarter.rangeFactor(), 0.5F,
-                "profile range factor");
-        require(quarter.clusterSize() == 2,
+        DirectionalJammingService.Profile half = full.balanced(2);
+        require(half.clusterSize() == 2,
                 "profile cluster size");
-        requireNear(quarter.stackingFactor(), 0.5F,
+        requireNear(half.stackingFactor(), 0.5F,
                 "profile stacking factor");
-        requireNear(quarter.effectivenessFactor(), 0.25F,
-                "combined range and stacking factor");
-        requireNear(quarter.outerStrength(), full.outerStrength() * 0.25F,
+        requireNear(half.effectivenessFactor(), 0.5F,
+                "cluster effectiveness factor");
+        requireNear(half.outerStrength(), full.outerStrength() * 0.5F,
                 "outer guidance scaling");
-        requireNear(quarter.directionalStrength(),
-                full.directionalStrength() * 0.25F,
+        requireNear(half.directionalStrength(),
+                full.directionalStrength() * 0.5F,
                 "directional jitter scaling");
-        requireNear(quarter.severeStrength(), full.severeStrength() * 0.25F,
+        requireNear(half.severeStrength(), full.severeStrength() * 0.5F,
                 "severe jitter scaling");
         requireNear(DirectionalJammingService.severeStateChance(
-                        quarter, 0.25F, 0.75F), 0.1875F,
-                "dropout and IFF probability scaling");
-        requireNear(quarter.severeStateScale(), 0.25F,
+                        half, 0.25F, 0.75F), 0.375F,
+                "dropout and IFF cluster scaling");
+        requireNear(half.severeStateScale(), 0.5F,
                 "synthetic-contact count scaling");
     }
 

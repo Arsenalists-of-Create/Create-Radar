@@ -880,7 +880,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         if (next == 0.0f && generatedSpeed == 0.0f) {
             return;
         }
-        if (next != 0.0f && Math.abs(next - generatedSpeed) < 0.01f) {
+        if (next != 0.0f && Math.abs(next - generatedSpeed) < 1.0e-5f) {
             return;
         }
         generatedSpeed = next;
@@ -964,6 +964,12 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         return setStructuralAimDirection(worldAimDirection, true);
     }
 
+    public boolean setRadarAimDirection(@Nullable Vec3 worldAimDirection,
+                                       double maximumFiringToleranceDegrees) {
+        return setStructuralAimDirection(worldAimDirection, true,
+                maximumFiringToleranceDegrees);
+    }
+
     public void endRadarTracking() {
         kineticControllerState.endContinuousTracking();
     }
@@ -981,6 +987,13 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection,
                                               boolean continuous) {
+        return setStructuralAimDirection(worldAimDirection, continuous,
+                Double.POSITIVE_INFINITY);
+    }
+
+    private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection,
+                                              boolean continuous,
+                                              double maximumFiringToleranceDegrees) {
         if (debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
@@ -1010,7 +1023,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         if (continuous) {
-            kineticControllerState.beginContinuousTracking();
+            kineticControllerState.beginContinuousTracking(
+                    maximumFiringToleranceDegrees);
         } else {
             kineticControllerState.endContinuousTracking();
         }

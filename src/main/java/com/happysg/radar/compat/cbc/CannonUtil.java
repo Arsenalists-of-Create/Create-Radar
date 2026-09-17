@@ -33,14 +33,17 @@ import rbasamoyai.createbigcannons.cannon_control.contraption.MountedAutocannonC
 import rbasamoyai.createbigcannons.cannon_control.contraption.MountedBigCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import rbasamoyai.createbigcannons.cannons.autocannon.IAutocannonBlockEntity;
+import rbasamoyai.createbigcannons.cannons.autocannon.breech.AbstractAutocannonBreechBlockEntity;
 import rbasamoyai.createbigcannons.cannons.autocannon.material.AutocannonMaterial;
 import rbasamoyai.createbigcannons.index.CBCEntityTypes;
 import rbasamoyai.createbigcannons.index.CBCMunitionPropertiesHandlers;
 
 import rbasamoyai.createbigcannons.cannons.big_cannons.BigCannonBehavior;
 import rbasamoyai.createbigcannons.cannons.big_cannons.IBigCannonBlockEntity;
+import rbasamoyai.createbigcannons.cannons.big_cannons.breeches.quickfiring_breech.QuickfiringBreechBlockEntity;
 import rbasamoyai.createbigcannons.munitions.AbstractCannonProjectile;
 import rbasamoyai.createbigcannons.munitions.autocannon.AutocannonAmmoItem;
+import rbasamoyai.createbigcannons.munitions.autocannon.ammo_container.AutocannonAmmoContainerItem;
 import rbasamoyai.createbigcannons.munitions.big_cannon.AbstractBigCannonProjectile;
 import rbasamoyai.createbigcannons.munitions.big_cannon.config.BigCannonCommonShellProperties;
 import rbasamoyai.createbigcannons.munitions.big_cannon.ProjectileBlock;
@@ -149,6 +152,15 @@ public class CannonUtil {
     @Nullable
     public static BallisticPropertiesComponent resolveLoadedAutocannonBallistics(
             AbstractMountedCannonContraption cannon, Level level) {
+        if (cannon instanceof MountedAutocannonContraption
+                && cannon.getStartPos() != null
+                && cannon.presentBlockEntities.get(cannon.getStartPos())
+                instanceof AbstractAutocannonBreechBlockEntity breech) {
+            // The automation handler hides partially filled queues and magazines.
+            // Preview the same round extractNextInput() will consume, in FIFO order.
+            return level == null ? null : getProjectileBallistics(
+                    createAutocannonProjectile(peekAutocannonAmmo(breech), level));
+        }
         if (cannon == null || level == null || !(cannon instanceof GetItemStorage storageOwner)) {
             return null;
         }
@@ -172,6 +184,18 @@ public class CannonUtil {
         }
 
         return null;
+    }
+
+    public static ItemStack peekAutocannonAmmo(AbstractAutocannonBreechBlockEntity breech) {
+        ItemStack queued = breech.getInputBuffer().peekFirst();
+        if (queued != null) {
+            return queued.copy();
+        }
+        // Poll a copy so CBC's tracer/creative-magazine selection stays exact
+        // without consuming ammunition or advancing the real magazine's cursor.
+        ItemStack magazine = breech.getMagazine();
+        return magazine.isEmpty() ? ItemStack.EMPTY
+                : AutocannonAmmoContainerItem.pollItemFromContainer(magazine.copy());
     }
 
     @Nullable
@@ -888,7 +912,21 @@ public class CannonUtil {
             return energyMount.isReadyToFire();
         }
 
-        // Regular cannons are always ready
+        PitchOrientedContraptionEntity entity = mount.getContraption();
+        if (entity == null || !entity.isAlive()) return false;
+        if (entity.getContraption() instanceof MountedBigCannonContraption cannon) {
+            BlockPos start = cannon.getStartPos();
+            Direction direction = cannon.initialOrientation();
+            if (start == null || direction == null) return false;
+            BlockEntity breech = cannon.presentBlockEntities.get(
+                    start.relative(direction.getOpposite()));
+            if (breech instanceof QuickfiringBreechBlockEntity quickfiring
+                    && quickfiring.getOpenProgress() > 0) {
+                return false;
+            }
+        }
+        // Do not gate autocannons on canFire(): its fire-rate check needs the
+        // redstone signal we are deciding whether to supply in the first place.
         return true;
     }
 

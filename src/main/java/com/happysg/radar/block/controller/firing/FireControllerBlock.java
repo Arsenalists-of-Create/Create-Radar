@@ -11,6 +11,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
@@ -32,6 +34,16 @@ public class FireControllerBlock extends Block implements EntityBlock {
     public @Nullable BlockEntity newBlockEntity(BlockPos pPos, BlockState pState) {
         return new FireControllerBlockEntity(ModBlockEntityTypes.FIRE_CONTROLLER.get(), pPos, pState);
     }
+
+    @Override
+    public <T extends BlockEntity> @Nullable BlockEntityTicker<T> getTicker(
+            Level level, BlockState state, BlockEntityType<T> type) {
+        return type == ModBlockEntityTypes.FIRE_CONTROLLER.get()
+                ? (tickLevel, pos, tickState, entity) ->
+                ((FireControllerBlockEntity) entity).tick()
+                : null;
+    }
+
     @Override
     public int getSignal(BlockState pBlockState, BlockGetter pBlockAccess, BlockPos pPos, Direction pSide) {
         return pBlockState.getValue(POWERED) ? 15 : 0;

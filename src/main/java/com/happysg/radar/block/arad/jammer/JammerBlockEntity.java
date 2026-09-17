@@ -396,17 +396,26 @@ public class JammerBlockEntity extends KineticBlockEntity {
     }
 
     private void updateJammingContribution(ServerLevel serverLevel) {
-        IRadar targetRadar = selectedEmitterSource == null ? null
+        IRadar nativeRadar = selectedEmitterSource == null ? null
                 : ARADTargeting.resolveNativeRadar(serverLevel,
                 selectedEmitterSource).orElse(null);
+        ExternalRwrEmitterRegistry.EmitterState externalEmitter =
+                selectedEmitterSource == null || nativeRadar != null ? null
+                        : ExternalRwrEmitterRegistry.resolveSelectable(serverLevel,
+                        selectedEmitterSource).orElse(null);
         if (!enabled || selectedEmitterSource == null
-                || selectedEmitterPosition == null || targetRadar == null) {
+                || selectedEmitterPosition == null
+                || nativeRadar == null && externalEmitter == null) {
             DirectionalJammingService.remove(serverLevel, worldPosition);
             jammingProfile = DirectionalJammingService.Profile.INACTIVE;
             return;
         }
 
-        Vec3 localTarget = PhysicsHandler.getShipVec(selectedEmitterPosition,
+        Vec3 targetWorldPosition = nativeRadar == null
+                ? externalEmitter.position()
+                : PhysicsHandler.getWorldVec(serverLevel,
+                nativeRadar.getWorldPos().getCenter());
+        Vec3 localTarget = PhysicsHandler.getShipVec(targetWorldPosition,
                 this);
         Vec3 localDirection = localTarget.subtract(getTurretPivotLocal());
         if (!finite(localDirection)
@@ -423,12 +432,10 @@ public class JammerBlockEntity extends KineticBlockEntity {
         float alignmentDegrees = (float) Math.toDegrees(Math.acos(dot));
         Vec3 jammerWorldPosition = PhysicsHandler.getWorldVec(serverLevel,
                 getTurretPivotLocal());
-        Vec3 targetRadarWorldPosition = PhysicsHandler.getWorldVec(serverLevel,
-                targetRadar.getWorldPos().getCenter());
         jammingProfile = DirectionalJammingService.heartbeat(
                 serverLevel, worldPosition, selectedEmitterSource,
-                jammerWorldPosition, targetRadarWorldPosition,
-                targetRadar.getRange(), Math.abs(getSpeed()),
+                jammerWorldPosition, targetWorldPosition,
+                Math.abs(getSpeed()),
                 selectedRollingRpm, selectedRollingRate, alignmentDegrees);
     }
 

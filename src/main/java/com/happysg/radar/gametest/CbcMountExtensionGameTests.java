@@ -737,8 +737,11 @@ public final class CbcMountExtensionGameTests {
             controller.markMountDirtyExternal();
             controller.getFiringControl();
             WeaponFiringControl afterClear = controller.firingControl;
-            require(afterClear != null && afterClear != fallback,
-                    "T-Pitch did not return to its reactivated preferred cannon");
+            require(afterClear == fallback,
+                    "Both empty sides did not retain the current aiming source");
+            require(afterClear.cannonMount.getBlockPos()
+                            .equals(secondaryMountPos),
+                    "Both empty sides unexpectedly switched to the preferred mount");
             require(activeRadarTrack(afterClear) == null,
                     "Explicitly cleared radar target was resurrected after replacement");
 
@@ -750,17 +753,27 @@ public final class CbcMountExtensionGameTests {
             require(activeRadarTrack(afterClear) == null,
                     "Binocular targeting did not take ownership from radar targeting");
 
-            disassembleTestCannon(primary);
+            disassembleTestCannon(secondary);
             controller.markMountDirtyExternal();
             controller.getFiringControl();
             WeaponFiringControl duringBinocular = controller.firingControl;
             require(duringBinocular != null && duringBinocular != afterClear,
                     "T-Pitch did not replace firing control during binocular targeting");
             require(duringBinocular.cannonMount.getBlockPos()
-                            .equals(secondaryMountPos),
+                            .equals(primaryMountPos),
                     "T-Pitch did not select the active fallback in binocular mode");
             require(activeRadarTrack(duringBinocular) == null,
                     "Radar target replay overrode binocular targeting ownership");
+            controller.setAndAcquirePos(null, TargetingConfig.DEFAULT, true);
+            require(activeRadarTrack(duringBinocular) == track,
+                    "Leaving binocular mode did not restore the retained radar target");
+
+            controller.setAndAcquirePos(controllerPos.north(14),
+                    TargetingConfig.DEFAULT, false);
+            controller.setAndAcquireTrack(null, TargetingConfig.DEFAULT);
+            controller.setAndAcquirePos(null, TargetingConfig.DEFAULT, true);
+            require(activeRadarTrack(duringBinocular) == null,
+                    "Explicitly cleared radar target was restored after binocular mode");
         } finally {
             disassembleTestCannon(primary);
             disassembleTestCannon(secondary);

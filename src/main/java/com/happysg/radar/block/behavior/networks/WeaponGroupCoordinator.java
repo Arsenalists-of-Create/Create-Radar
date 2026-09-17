@@ -90,7 +90,7 @@ public final class WeaponGroupCoordinator {
                 pitch.firingControl.tick();
             } catch (RuntimeException exception) {
                 trace.failed(exception.getClass().getSimpleName());
-                pitch.firingControl.resetTarget();
+                pitch.firingControl.resetAimForRetry();
                 DiagnosticRecorder.error("weapon_network", "coordinator_tick",
                         "network_tick_failed_and_firing_stopped", exception,
                         sl, mountPos, "createbigcannons", "sable");

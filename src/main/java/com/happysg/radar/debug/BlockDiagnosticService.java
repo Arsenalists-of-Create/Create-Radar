@@ -194,13 +194,11 @@ public final class BlockDiagnosticService {
                             profile.alignmentDegrees())
                     .add("Directional jammer", "alignment factor",
                             profile.alignmentFactor())
-                    .add("Directional jammer", "range factor",
-                            profile.rangeFactor())
                     .add("Directional jammer", "jammer cluster size",
                             profile.clusterSize())
                     .add("Directional jammer", "stacking factor",
                             profile.stackingFactor())
-                    .add("Directional jammer", "range/stack effectiveness",
+                    .add("Directional jammer", "stacking effectiveness",
                             profile.effectivenessFactor())
                     .add("Directional jammer", "active tier",
                             profile.tierName())

@@ -51,9 +51,7 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigInt skyPlaneRadarMaxSolidBlocks = i(8, 0, "skyPlaneRadarMaxSolidBlocks", "Maximum number of solid blocks a sky or plane radar signal can pass through");
 
     public final ConfigGroup directionalJammingConfig = group(3, "directionalJammingConfig", "Directional jammer frequency matching and deception effects");
-    public final ConfigBool directionalJammingEnabled = b(true, "enabled", "Allow directional jammers to corrupt the selected native radar");
-    public final ConfigFloat directionalJammingFullEffectRangeRatio = f(0.50F, 0.0F, 4.0F, "fullEffectRangeRatio", "Radar-range fraction at or below which directional jamming has full range effectiveness");
-    public final ConfigFloat directionalJammingZeroEffectRangeRatio = f(0.85F, 0.0F, 4.0F, "zeroEffectRangeRatio", "Radar-range fraction at or beyond which directional jamming has no effect");
+    public final ConfigBool directionalJammingEnabled = b(true, "enabled", "Allow directional jammers to corrupt the selected radar emitter");
     public final ConfigFloat directionalJammingClusterRadius = f(50.0F, 0.0F, 4096.0F, "jammerClusterRadiusBlocks", "World-space radius connecting active directional jammers into one stacking-penalty cluster; zero disables proximity clustering");
     public final ConfigFloat directionalJammingSpilloverRadius = f(25.0F, 0.0F, 4096.0F, "nearbyRadarSpilloverRadiusBlocks", "World-space radius around a directly jammed radar that inherits its effects; zero disables spillover");
     public final ConfigFloat directionalJammingOuterRpmTolerance = f(15.0F, 0.0F, 256.0F, "outerRpmTolerance", "RPM difference that begins cannon guidance error");

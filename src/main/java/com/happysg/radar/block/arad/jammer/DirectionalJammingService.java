@@ -53,7 +53,6 @@ public final class DirectionalJammingService {
             float severeThreshold,
             float alignmentDegrees,
             float alignmentFactor,
-            float rangeFactor,
             int clusterSize,
             float stackingFactor,
             float effectivenessFactor,
@@ -65,7 +64,7 @@ public final class DirectionalJammingService {
         public static final Profile INACTIVE = new Profile(
                 0.0F, 0.0F, 0.0F, Float.POSITIVE_INFINITY,
                 0.0F, 15.0F, 10.0F, 5.0F,
-                180.0F, 0.0F, 0.0F, 1, 1.0F, 0.0F,
+                180.0F, 0.0F, 1, 1.0F, 1.0F,
                 0.0F, 0.0F, 0.0F, 0.0F);
 
         public boolean active() {
@@ -82,20 +81,16 @@ public final class DirectionalJammingService {
             return outerStrength > 0.0F ? "guidance" : "inactive";
         }
 
-        Profile balanced(float requestedRangeFactor, int requestedClusterSize) {
-            float safeRangeFactor = clamp(requestedRangeFactor, 0.0F, 1.0F);
+        Profile balanced(int requestedClusterSize) {
             int safeClusterSize = Math.max(1, requestedClusterSize);
             float safeStackingFactor = 1.0F / safeClusterSize;
-            float safeEffectivenessFactor = safeRangeFactor
-                    * safeStackingFactor;
             return new Profile(jammerRpm, radarRpm, rollingRate, rpmDifference,
                     rateBonus, outerThreshold, directionalThreshold,
                     severeThreshold, alignmentDegrees, alignmentFactor,
-                    safeRangeFactor, safeClusterSize, safeStackingFactor,
-                    safeEffectivenessFactor,
-                    outerStrength * safeEffectivenessFactor,
-                    directionalStrength * safeEffectivenessFactor,
-                    severeStrength * safeEffectivenessFactor,
+                    safeClusterSize, safeStackingFactor, safeStackingFactor,
+                    outerStrength * safeStackingFactor,
+                    directionalStrength * safeStackingFactor,
+                    severeStrength * safeStackingFactor,
                     severeProgress);
         }
 
@@ -108,8 +103,6 @@ public final class DirectionalJammingService {
             boolean enabled,
             boolean syntheticShipSilhouettes,
             float syntheticShipChance,
-            float fullEffectRangeRatio,
-            float zeroEffectRangeRatio,
             float clusterRadiusBlocks,
             float spilloverRadiusBlocks,
             float outerThreshold,
@@ -143,13 +136,6 @@ public final class DirectionalJammingService {
             if (config == null) {
                 return defaults();
             }
-            float[] rangeRatios = {
-                    clamp(config.directionalJammingFullEffectRangeRatio.get(),
-                            0.0F, 4.0F),
-                    clamp(config.directionalJammingZeroEffectRangeRatio.get(),
-                            0.0F, 4.0F)
-            };
-            java.util.Arrays.sort(rangeRatios);
             float[] thresholds = {
                     finitePositive(config.directionalJammingOuterRpmTolerance.get()),
                     finitePositive(config.directionalJammingDirectionalRpmTolerance.get()),
@@ -209,7 +195,6 @@ public final class DirectionalJammingService {
                     config.directionalJammingGenerateFakeHulls.get(),
                     clamp(config.directionalJammingFakeShipChance.get(),
                             0.0F, 1.0F),
-                    rangeRatios[0], rangeRatios[1],
                     finitePositive(config.directionalJammingClusterRadius.get()),
                     finitePositive(config.directionalJammingSpilloverRadius.get()),
                     outer, directional,
@@ -236,7 +221,7 @@ public final class DirectionalJammingService {
 
         private static Tuning defaults() {
             return new Tuning(true, true, 0.10F,
-                    0.50F, 0.85F, 50.0F, 25.0F,
+                    50.0F, 25.0F,
                     15.0F, 10.0F, 5.0F,
                     0.5F, 15.0F, 0.10F, 3.0F, 15.0F, 30.0F,
                     1.5F, 3.0F, 20.0F, 40, 10, 5, 20,
@@ -252,7 +237,6 @@ public final class DirectionalJammingService {
             Vec3 targetRadarWorldPosition,
             BlockPos aradGroupRoot,
             Set<UUID> connectedSublevels,
-            float rangeFactor,
             Profile profile,
             long heartbeatTick
     ) {
@@ -267,7 +251,7 @@ public final class DirectionalJammingService {
         Contribution withProfile(Profile replacement) {
             return new Contribution(jammerPos, targetSourceId,
                     jammerWorldPosition, targetRadarWorldPosition,
-                    aradGroupRoot, connectedSublevels, rangeFactor, replacement,
+                    aradGroupRoot, connectedSublevels, replacement,
                     heartbeatTick);
         }
     }
@@ -301,7 +285,17 @@ public final class DirectionalJammingService {
     ) {
     }
 
-    private record NoiseSample(Vec3 offset, Vec3 velocityOffset, long token) {
+    private record ObservationVolume(double range, Vec3 forward,
+                                     float halfAngleDegrees) {
+        private ObservationVolume {
+            range = Double.isFinite(range) ? Math.max(32.0, range) : 32.0;
+            forward = finite(forward) && forward.lengthSqr() > VECTOR_EPSILON
+                    ? forward.normalize() : null;
+            halfAngleDegrees = clamp(halfAngleDegrees, 0.0F, 180.0F);
+        }
+    }
+
+    record NoiseSample(Vec3 offset, Vec3 velocityOffset, long token) {
         static final NoiseSample ZERO = new NoiseSample(Vec3.ZERO, Vec3.ZERO, 0L);
 
         NoiseSample add(NoiseSample other) {
@@ -353,34 +347,11 @@ public final class DirectionalJammingService {
                 ? Mth.lerp(severeProgress, tuning.onsetStrength, 1.0F) : 0.0F;
         return new Profile(safeJammer, safeRadar, safeRate, difference, bonus,
                 outer, directional, severe, safeAlignment, alignmentFactor,
-                1.0F, 1, 1.0F, 1.0F,
+                1, 1.0F, 1.0F,
                 outerRaw * alignmentFactor,
                 directionalRaw * alignmentFactor,
                 severeRaw * alignmentFactor,
                 severeProgress);
-    }
-
-    static float calculateRangeFactor(double distance, float radarRange,
-                                      float firstRatio, float secondRatio) {
-        if (!Double.isFinite(distance) || distance < 0.0
-                || !Float.isFinite(radarRange) || radarRange <= 0.0F) {
-            return 0.0F;
-        }
-        float safeFirstRatio = finitePositive(firstRatio);
-        float safeSecondRatio = finitePositive(secondRatio);
-        float fullRatio = clamp(Math.min(safeFirstRatio, safeSecondRatio),
-                0.0F, 4.0F);
-        float zeroRatio = clamp(Math.max(safeFirstRatio, safeSecondRatio),
-                0.0F, 4.0F);
-        double ratio = distance / radarRange;
-        if (ratio <= fullRatio) {
-            return 1.0F;
-        }
-        if (ratio >= zeroRatio || zeroRatio <= fullRatio) {
-            return 0.0F;
-        }
-        return clamp((float) ((zeroRatio - ratio)
-                / (zeroRatio - fullRatio)), 0.0F, 1.0F);
     }
 
     public static Profile heartbeat(
@@ -389,7 +360,6 @@ public final class DirectionalJammingService {
             String targetSourceId,
             Vec3 jammerWorldPosition,
             Vec3 targetRadarWorldPosition,
-            float targetRadarRange,
             float jammerRpm,
             float radarRollingRpm,
             float radarRollingRate,
@@ -403,17 +373,12 @@ public final class DirectionalJammingService {
         Profile baseProfile = calculateProfile(jammerRpm, radarRollingRpm,
                 radarRollingRate, alignmentDegrees);
         Tuning tuning = Tuning.current();
-        float rangeFactor = calculateRangeFactor(
-                jammerWorldPosition.distanceTo(targetRadarWorldPosition),
-                targetRadarRange, tuning.fullEffectRangeRatio,
-                tuning.zeroEffectRangeRatio);
-        Profile rangedProfile = baseProfile.balanced(rangeFactor, 1);
         DimensionState state = DIMENSIONS.computeIfAbsent(level.dimension(),
                 ignored -> new DimensionState());
         BlockPos key = jammerPos.immutable();
-        if (!rangedProfile.active()) {
+        if (!baseProfile.active()) {
             state.contributions.remove(key);
-            return rangedProfile;
+            return baseProfile;
         }
         BlockPos aradGroupRoot = ARADData.get(level).getRwrForJammer(
                 level.dimension(), key);
@@ -422,13 +387,13 @@ public final class DirectionalJammingService {
         long now = level.getGameTime();
         state.contributions.put(key, new Contribution(key, targetSourceId,
                 jammerWorldPosition, targetRadarWorldPosition,
-                aradGroupRoot, connectedSublevels, rangeFactor, baseProfile,
+                aradGroupRoot, connectedSublevels, baseProfile,
                 now));
         return effectiveContributions(state, now, tuning).stream()
                 .filter(contribution -> contribution.jammerPos.equals(key))
                 .map(Contribution::profile)
                 .findFirst()
-                .orElse(rangedProfile);
+                .orElse(baseProfile);
     }
 
     public static void remove(ServerLevel level, BlockPos jammerPos) {
@@ -467,6 +432,50 @@ public final class DirectionalJammingService {
         if (emitterId == null) {
             return rawTracks;
         }
+        return reportedTracks(level, sourceId, emitterId, radarWorldPosition,
+                new ObservationVolume(radar.getRange(), null, 180.0F),
+                rawTracks, tuning, contribution);
+    }
+
+    public static Collection<RadarTrack> reportedExternalTracks(
+            ServerLevel level,
+            String sourceId,
+            UUID emitterId,
+            Vec3 emitterPosition,
+            Vec3 emitterForward,
+            double range,
+            float halfAngleDegrees,
+            Collection<RadarTrack> rawTracks
+    ) {
+        if (level == null || sourceId == null || sourceId.isBlank()
+                || emitterId == null || !finite(emitterPosition)
+                || rawTracks == null) {
+            return rawTracks == null ? List.of() : rawTracks;
+        }
+        Tuning tuning = Tuning.current();
+        if (!tuning.enabled) {
+            return rawTracks;
+        }
+        Contribution contribution = strongestContribution(level, sourceId,
+                emitterPosition, tuning);
+        if (contribution == null) {
+            return rawTracks;
+        }
+        return reportedTracks(level, sourceId, emitterId, emitterPosition,
+                new ObservationVolume(range, emitterForward, halfAngleDegrees),
+                rawTracks, tuning, contribution);
+    }
+
+    private static Collection<RadarTrack> reportedTracks(
+            ServerLevel level,
+            String sourceId,
+            UUID emitterId,
+            Vec3 radarWorldPosition,
+            ObservationVolume volume,
+            Collection<RadarTrack> rawTracks,
+            Tuning tuning,
+            Contribution contribution
+    ) {
         DimensionState dimension = DIMENSIONS.computeIfAbsent(level.dimension(),
                 ignored -> new DimensionState());
         RadarViewState view = dimension.views.computeIfAbsent(emitterId,
@@ -492,10 +501,11 @@ public final class DirectionalJammingService {
             reported.add(proxy);
         }
         view.realViews.keySet().removeIf(id -> !seen.containsKey(id));
-        maintainGhosts(view, raw, radar, radarWorldPosition, contribution,
+        maintainGhosts(view, raw, volume, radarWorldPosition, contribution,
                 tuning, now);
         for (Ghost ghost : view.ghosts.values()) {
-            updateGhost(ghost, contribution, tuning, now);
+            updateGhost(ghost, volume, radarWorldPosition, contribution,
+                    tuning, now);
             reported.add(ghost.track());
         }
         return List.copyOf(reported);
@@ -629,8 +639,8 @@ public final class DirectionalJammingService {
             DimensionState state, long now, Tuning tuning) {
         List<Contribution> active = state.contributions.values().stream()
                 .filter(contribution -> isActiveContribution(
-                        contribution.profile, contribution.rangeFactor,
-                        now, contribution.heartbeatTick))
+                        contribution.profile, now,
+                        contribution.heartbeatTick))
                 .toList();
         if (active.isEmpty()) {
             return List.of();
@@ -646,16 +656,15 @@ public final class DirectionalJammingService {
         for (int index = 0; index < active.size(); index++) {
             Contribution contribution = active.get(index);
             effective.add(contribution.withProfile(
-                    contribution.profile.balanced(
-                            contribution.rangeFactor, sizes[index])));
+                    contribution.profile.balanced(sizes[index])));
         }
         return List.copyOf(effective);
     }
 
-    static boolean isActiveContribution(Profile profile, float rangeFactor,
-                                        long now, long heartbeatTick) {
+    static boolean isActiveContribution(Profile profile, long now,
+                                        long heartbeatTick) {
         long age = now - heartbeatTick;
-        return profile != null && profile.active() && rangeFactor > 0.0F
+        return profile != null && profile.active()
                 && age >= 0 && age <= CONTRIBUTION_TTL_TICKS;
     }
 
@@ -816,7 +825,7 @@ public final class DirectionalJammingService {
     private static void maintainGhosts(
             RadarViewState view,
             List<RadarTrack> raw,
-            IRadar radar,
+            ObservationVolume volume,
             Vec3 radarWorldPosition,
             Contribution contribution,
             Tuning tuning,
@@ -845,7 +854,7 @@ public final class DirectionalJammingService {
             view.ghosts.remove(last);
         }
         while (view.ghosts.size() < desired) {
-            Ghost ghost = createGhost(view, raw, radar, radarWorldPosition,
+            Ghost ghost = createGhost(view, raw, volume, radarWorldPosition,
                     contribution, tuning, now);
             view.ghosts.put(UUID.fromString(ghost.track.getId()), ghost);
         }
@@ -854,7 +863,7 @@ public final class DirectionalJammingService {
     private static Ghost createGhost(
             RadarViewState view,
             List<RadarTrack> raw,
-            IRadar radar,
+            ObservationVolume volume,
             Vec3 radarWorldPosition,
             Contribution contribution,
             Tuning tuning,
@@ -886,13 +895,20 @@ public final class DirectionalJammingService {
         float height = syntheticShipProfile == null
                 ? template == null ? 4.0F : template.getEnityHeight()
                 : (float) syntheticShipProfile.height();
-        double radarRange = Math.max(32.0, radar.getRange());
+        double radarRange = volume.range;
         double radius = radarRange * (0.25 + random.nextDouble() * 0.65);
-        double angle = random.nextDouble() * Math.PI * 2.0;
-        double vertical = (random.nextDouble() - 0.5)
-                * Math.min(64.0, radarRange * 0.15);
-        Vec3 basePosition = radarWorldPosition.add(Math.cos(angle) * radius,
-                vertical, Math.sin(angle) * radius);
+        Vec3 basePosition;
+        if (volume.forward == null) {
+            double angle = random.nextDouble() * Math.PI * 2.0;
+            double vertical = (random.nextDouble() - 0.5)
+                    * Math.min(64.0, radarRange * 0.15);
+            basePosition = radarWorldPosition.add(Math.cos(angle) * radius,
+                    vertical, Math.sin(angle) * radius);
+        } else {
+            Vec3 direction = randomDirectionInCone(volume.forward,
+                    volume.halfAngleDegrees, random);
+            basePosition = radarWorldPosition.add(direction.scale(radius));
+        }
         Vec3 velocity;
         if (syntheticShipProfile != null) {
             double heading = Math.toRadians(
@@ -921,7 +937,9 @@ public final class DirectionalJammingService {
         return new Ghost(track, basePosition, velocity, now, now + lifetime);
     }
 
-    private static void updateGhost(Ghost ghost, Contribution contribution,
+    private static void updateGhost(Ghost ghost, ObservationVolume volume,
+                                    Vec3 radarWorldPosition,
+                                    Contribution contribution,
                                     Tuning tuning, long now) {
         Vec3 drifted = ghost.basePosition.add(
                 ghost.velocity.scale(now - ghost.spawnTick));
@@ -931,7 +949,8 @@ public final class DirectionalJammingService {
                 tuning.severePeriodTicks, now,
                 seed(ghost.track.getId(), contribution.targetSourceId, 0L,
                         0x1F83D9ABFB41BD6BL));
-        ghost.track.setPosition(drifted.add(noise.offset));
+        ghost.track.setPosition(constrainToVolume(drifted.add(noise.offset),
+                radarWorldPosition, volume));
         ghost.track.setVelocity(ghost.velocity.add(noise.velocityOffset));
         ghost.track.setScannedTime(now);
         ghost.track.setSynthetic(true);
@@ -944,6 +963,34 @@ public final class DirectionalJammingService {
                 contribution.profile.severeStrength,
                 friendlyOutageChance(contribution.profile, tuning),
                 Vec3.ZERO, Vec3.ZERO, noise.token));
+    }
+
+    private static Vec3 constrainToVolume(Vec3 position, Vec3 origin,
+                                          ObservationVolume volume) {
+        if (volume.forward == null) {
+            return position;
+        }
+        Vec3 ray = position.subtract(origin);
+        double distance = Math.min(volume.range, ray.length());
+        if (distance <= VECTOR_EPSILON) {
+            return origin.add(volume.forward.scale(Math.min(1.0, volume.range)));
+        }
+        Vec3 direction = ray.normalize();
+        double limit = Math.cos(Math.toRadians(volume.halfAngleDegrees));
+        double dot = Mth.clamp(direction.dot(volume.forward), -1.0, 1.0);
+        if (dot >= limit) {
+            return origin.add(direction.scale(distance));
+        }
+        Vec3 perpendicular = direction.subtract(volume.forward.scale(dot));
+        if (perpendicular.lengthSqr() <= VECTOR_EPSILON) {
+            Vec3 reference = Math.abs(volume.forward.y) < 0.9
+                    ? new Vec3(0.0, 1.0, 0.0) : new Vec3(1.0, 0.0, 0.0);
+            perpendicular = volume.forward.cross(reference);
+        }
+        double sine = Math.sqrt(Math.max(0.0, 1.0 - limit * limit));
+        Vec3 bounded = volume.forward.scale(limit)
+                .add(perpendicular.normalize().scale(sine));
+        return origin.add(bounded.scale(distance));
     }
 
     static float friendlyOutageChance(Profile profile, Tuning tuning) {
@@ -992,19 +1039,25 @@ public final class DirectionalJammingService {
         return roll >= 0.0F && roll < clamp(chance, 0.0F, 1.0F);
     }
 
-    private static NoiseSample noise(Vec3 target, Vec3 origin,
-                                     float maxDegrees, int periodTicks,
-                                     long now, long baseSeed) {
+    static NoiseSample noise(Vec3 target, Vec3 origin,
+                             float maxDegrees, int periodTicks,
+                             long now, long baseSeed) {
         if (maxDegrees <= 0.0F || !finite(target) || !finite(origin)) {
             return NoiseSample.ZERO;
         }
-        long epoch = Math.floorDiv(now, periodTicks);
-        Vec3 current = angularOffset(target, origin, maxDegrees,
+        int safePeriodTicks = Math.max(1, periodTicks);
+        long epoch = Math.floorDiv(now, safePeriodTicks);
+        double progress = (double) Math.floorMod(now, safePeriodTicks)
+                / (double) safePeriodTicks;
+        Vec3 start = angularOffset(target, origin, maxDegrees,
                 mix64(baseSeed ^ epoch));
-        Vec3 previous = angularOffset(target, origin, maxDegrees,
-                mix64(baseSeed ^ (epoch - 1L)));
-        return new NoiseSample(current,
-                current.subtract(previous).scale(1.0 / periodTicks),
+        Vec3 end = angularOffset(target, origin, maxDegrees,
+                mix64(baseSeed ^ (epoch + 1L)));
+        Vec3 segmentDelta = end.subtract(start);
+        Vec3 segmentVelocity = segmentDelta
+                .scale(1.0 / (double) safePeriodTicks);
+        return new NoiseSample(start.add(segmentDelta.scale(progress)),
+                segmentVelocity,
                 mix64(baseSeed ^ epoch));
     }
 
@@ -1027,6 +1080,24 @@ public final class DirectionalJammingService {
         Vec3 perpendicular = right.scale(Math.cos(azimuth))
                 .add(up.scale(Math.sin(azimuth)));
         return perpendicular.scale(Math.tan(angle) * range);
+    }
+
+    private static Vec3 randomDirectionInCone(Vec3 forward,
+                                              float halfAngleDegrees,
+                                              RandomSource random) {
+        Vec3 reference = Math.abs(forward.y) < 0.9
+                ? new Vec3(0.0, 1.0, 0.0) : new Vec3(1.0, 0.0, 0.0);
+        Vec3 right = forward.cross(reference).normalize();
+        Vec3 up = right.cross(forward).normalize();
+        double minimumCosine = Math.cos(Math.toRadians(halfAngleDegrees));
+        double cosine = minimumCosine
+                + random.nextDouble() * (1.0 - minimumCosine);
+        double sine = Math.sqrt(Math.max(0.0, 1.0 - cosine * cosine));
+        double azimuth = random.nextDouble() * Math.PI * 2.0;
+        return forward.scale(cosine)
+                .add(right.scale(Math.cos(azimuth) * sine))
+                .add(up.scale(Math.sin(azimuth) * sine))
+                .normalize();
     }
 
     private static boolean withinDirectionalCone(Vec3 trackPosition,
