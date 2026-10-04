@@ -1,5 +1,7 @@
 package com.happysg.radar.block.controller.pitch;
 
+import com.happysg.radar.api.weapon.RadarWeaponAdapter;
+import com.happysg.radar.api.weapon.RadarWeaponRegistry;
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.behavior.networks.SafeZone;
@@ -183,36 +185,53 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        CannonMountContext mount = resolvePrimaryCbcMount();
-        if (mount == null || !isFiringControlMount(view, mount)
-                || !mount.isCurrent()) {
+        RadarWeaponAdapter weapon = RadarWeaponRegistry.find(serverLevel, mountPos);
+        CannonMountContext cbcMount = resolvePrimaryCbcMount();
+
+        boolean validWeapon = weapon != null && weapon.isValid() && weapon.isAssembled() && mountPos.equals(weapon.getMountPos());
+        boolean validCbcMount = cbcMount != null && isFiringControlMount(view, cbcMount) && cbcMount.isCurrent();
+
+        if (!validWeapon && !validCbcMount) {
             clearFiringControl();
             return;
         }
-        if (firingControl != null
-                && firingControl.cannonMount.sameMount(mount)
+
+
+        if (validWeapon && firingControl != null && firingControl.matchesWeapon(weapon)) {
+            return;
+        }
+
+        if (!validWeapon
+                && validCbcMount
+                && firingControl != null
+                && firingControl.cannonMount != null
+                && firingControl.cannonMount.sameMount(cbcMount)
                 && firingControl.cannonMount.isCurrent()) {
             return;
         }
 
         clearFiringControl();
         autoyaw = null;
-        // A compact mount cannot be rotated directly, but its yaw controller may
-        // still aim the complete weapon through a structural swivel bearing.
-        if (view.yawPos() != null
-                && level.getBlockEntity(view.yawPos()) instanceof AutoYawControllerBlockEntity aYCBE) {
+
+        if (view.yawPos() != null && level.getBlockEntity(view.yawPos()) instanceof AutoYawControllerBlockEntity aYCBE) {
             autoyaw = aYCBE;
         }
-        firingControl = new WeaponFiringControl(this, mount, autoyaw);
-        firingControl.setSafeZones(safeZones);
-        if (binoMode && binoTargetPos != null) {
-            firingControl.setBinoTarget(binoTargetPos,
-                    binocularTargetingConfig, view, false);
-        } else if (track != null) {
-            firingControl.setTarget(track.getPosition(), radarTargetingConfig,
-                    track, view);
+
+        if (validCbcMount) {
+            firingControl = new WeaponFiringControl(this, cbcMount, autoyaw);
+        } else {
+            firingControl = new WeaponFiringControl(this, weapon, autoyaw);
         }
-        LOGGER.debug("made new Weapon Config!");
+
+        firingControl.setSafeZones(safeZones);
+
+        if (binoMode && binoTargetPos != null) {
+            firingControl.setBinoTarget(binoTargetPos, binocularTargetingConfig, view, false);
+        } else if (track != null) {
+            firingControl.setTarget(track.getPosition(), radarTargetingConfig, track, view);
+        }
+
+        LOGGER.debug("made new Weapon Config! mount={} weaponApi={} cbc={}", mountPos, validWeapon, validCbcMount);
     }
 
     protected boolean isFiringControlMount(
@@ -301,10 +320,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             setChanged();
             return;
         }
-        double applied = effective.clampControllerTarget(
-                requestedAngle, 0.0);
-        targetLimitConstrained = !effective.allowsControllerTarget(
-                requestedAngle, 0.0);
+        double applied = effective.clampControllerTarget(requestedAngle, 0.0);
+
+        LOGGER.debug("RADAR_PITCH_TARGET requested={} applied={} supported={}..{} running={}", requestedAngle, applied, effective.minDegrees(), effective.maxDegrees(), running);
+
+
+        targetLimitConstrained = !effective.allowsControllerTarget(requestedAngle, 0.0);
+
         targetAngle = applied;
         isRunning = running;
         kineticControllerState.onTargetChanged(
@@ -851,12 +873,19 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         CannonMountContext mount = resolvePrimaryCbcMount();
+
         if (mount != null && Mods.CREATEBIGCANNONS.isLoaded()) {
             return cannonHandler.canEngageTrack(mount, track, requireLos, sl);
         }
 
-        return supportsPhysBearingMounts()
-                && firingControl.hasLineOfSightTo(track, requireLos);
+        if (firingControl.weapon != null && firingControl.weapon.isValid() && firingControl.weapon.isAssembled()) {
+            return firingControl.hasLineOfSightTo(track, requireLos);
+        }
+
+        /*
+         * non-CBC structural/physics fallback.
+         */
+        return supportsPhysBearingMounts() && firingControl.hasLineOfSightTo(track, requireLos);
     }
 
     public boolean canConstrainAutoTargeting() {
@@ -870,10 +899,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         CannonMountContext mount = resolvePrimaryCbcMount();
+
         if (mount != null && Mods.CREATEBIGCANNONS.isLoaded()) {
-            return mount.getContraption() != null
-                    && mount.getContraption().getContraption()
-                    instanceof AbstractMountedCannonContraption;
+            return mount.getContraption() != null && mount.getContraption().getContraption() instanceof AbstractMountedCannonContraption;
+        }
+
+        if (firingControl.weapon != null && firingControl.weapon.isValid() && firingControl.weapon.isAssembled()) {
+            return getRayStart() != null;
         }
 
         return supportsPhysBearingMounts() && getRayStart() != null;
@@ -1626,7 +1658,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         return lastTargetPos;
     }
 
-    static double getCbcTolerance() {
+    public static double getCbcTolerance() {
         return CBC_TOLERANCE;
     }
 

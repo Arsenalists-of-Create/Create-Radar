@@ -6,6 +6,7 @@ import com.happysg.radar.block.arad.rwr.RwrLockLoopSoundManager;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorInputHandler;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.cbc.CbcRadarWeaponRegistration;
 import com.happysg.radar.compat.sable.SableSilhouetteClientCache;
 import com.happysg.radar.compat.sable.SableSilhouetteEvents;
 import com.happysg.radar.compat.computercraft.CCCompatRegister;
@@ -90,6 +91,10 @@ public class CreateRadar {
 
         NeoForge.EVENT_BUS.addListener(CreateRadar::clientTick);
         NeoForge.EVENT_BUS.addListener(CreateRadar::onLoadWorld);
+
+        if (Mods.CREATEBIGCANNONS.isLoaded()) {
+            CbcRadarWeaponRegistration.register();
+        }
 
         if (Mods.SABLE.isLoaded())
             SableSilhouetteEvents.register();

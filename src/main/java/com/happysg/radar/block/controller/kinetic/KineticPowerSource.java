@@ -7,9 +7,13 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Samples input shafts without kinetically joining the controller generator to them. */
 public final class KineticPowerSource {
+    private static final Logger LOGGER = LoggerFactory.getLogger(KineticPowerSource.class);
+
     private KineticPowerSource() {
     }
 

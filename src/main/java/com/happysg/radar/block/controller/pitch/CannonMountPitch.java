@@ -184,13 +184,7 @@ public class CannonMountPitch {
 
         double diff = controller.getTargetAngle() - currentPitch;
 
-        LOGGER.debug(
-                "PITCH.rotateCBC current={} target={} diff={} speed={}",
-                currentPitch,
-                controller.getTargetAngle(),
-                diff,
-                controller.getAvailableInputSpeed()
-        );
+        LOGGER.debug("PITCH.rotateCBC current={} target={} diff={} speed={}", currentPitch, controller.getTargetAngle(), diff, controller.getAvailableInputSpeed());
 
         double rpm = Math.abs(controller.getAvailableInputSpeed());
         if (rpm <= 0.0) {
@@ -199,9 +193,13 @@ public class CannonMountPitch {
         }
 
         double move = motionState.nextStep(diff, rpm);
+
+        LOGGER.debug("RADAR_PITCH_MOVE diff={} rpm={} move={}", diff, rpm, move);
+
         if (Math.abs(move) <= 1.0E-9) {
             return;
         }
+
         double nextCtl = currentPitch + move;
 
         mount.setPitch((float) nextCtl);
