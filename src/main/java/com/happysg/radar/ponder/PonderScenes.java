@@ -6,6 +6,7 @@ import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlocks;
 
 import com.happysg.radar.registry.ModSounds;
+import com.simibubi.create.foundation.ponder.CreateSceneBuilder;
 import net.createmod.ponder.api.PonderPalette;
 import net.createmod.ponder.api.element.*;
 import net.createmod.ponder.api.scene.SceneBuilder;
@@ -533,8 +534,6 @@ public class PonderScenes {
                 .attachKeyFrame()
                 .placeNearTarget();
         scene.idle(40);
-
-
     }
 
     public static void weaponSimpleWeaponSetup(@NotNull SceneBuilder scene, SceneBuildingUtil util) {
@@ -683,10 +682,8 @@ public class PonderScenes {
         scene.idle(5);
     }
 
-    public static void sonarSetup(SceneBuilder scene, SceneBuildingUtil util){}
+    public static void sonarSetup(SceneBuilder scene, SceneBuildingUtil util) {}
 
     public static void jammerSetup(SceneBuilder scene, SceneBuildingUtil util){}
-
-
 
 }
