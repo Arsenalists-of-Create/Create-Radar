@@ -65,7 +65,6 @@ public class RadarTrack implements RadarContact {
         this.trackCategory = trackCategory;
         this.entityType = entityType;
         this.entityheight = entityheight;
-
     }
 
     public RadarTrack(Entity entity) {
@@ -89,6 +88,7 @@ public class RadarTrack implements RadarContact {
         if (source == null) {
             return;
         }
+
         position = source.position;
         velocity = source.velocity;
         scannedTime = source.scannedTime;
@@ -133,8 +133,8 @@ public class RadarTrack implements RadarContact {
                 TrackCategory.values()[tag.getInt("Category")],
                 tag.getString("entityType"),
                 tag.getFloat("eh")
-
         );
+
         track.friendly = tag.getBoolean("Friendly");
         track.synthetic = tag.getBoolean("Synthetic");
         if (tag.contains("Jamming", Tag.TAG_COMPOUND)) {
@@ -303,8 +303,6 @@ public class RadarTrack implements RadarContact {
         this.silhouetteRevision = -1;
         this.silhouetteStatus = 0;
     }
-
-
 
     // This is a bit of a jank quick fix, since ive migrated from a record.
     public String id() {

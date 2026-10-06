@@ -9,8 +9,8 @@ import javax.annotation.Nullable;
 /**
  * Public weapon endpoint controlled by Create Radar.
  *
- * <p>The mount adapter owns physical aiming. The weapon adapter owns
- * weapon identity, shot information, readiness, and final fire state.</p>
+ * The mount adapter owns physical aiming. The weapon adapter owns
+ * weapon identity, shot information, readiness, and final fire state.
  */
 public interface RadarWeaponAdapter {
 
@@ -37,8 +37,7 @@ public interface RadarWeaponAdapter {
 
     /**
      * Final fire-state output from Radar.
-     *
-     * <p>false must always fail closed and stop firing immediately.</p>
+     * false must always fail closed and stop firing immediately.
      */
     void setFiring(boolean firing);
 
