@@ -175,7 +175,7 @@ public final class BlockDiagnosticService {
                     .add("Directional jammer", "emitter position",
                             emitter == null ? "none" : emitter.position())
                     .add("Directional jammer", "radar type",
-                            emitter == null ? "none" : emitter.radarType())
+                            emitter == null ? "none" : emitter.radarTypeId())
                     .add("Directional jammer", "rolling RPM",
                             emitter == null ? 0.0f : emitter.rollingRpm())
                     .add("Directional jammer", "rolling rate (RPM/s)",

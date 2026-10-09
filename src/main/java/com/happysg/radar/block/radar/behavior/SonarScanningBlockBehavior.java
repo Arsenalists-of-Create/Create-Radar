@@ -1,5 +1,6 @@
 package com.happysg.radar.block.radar.behavior;
 
+import com.happysg.radar.api.radar.RadarDetectionSettings;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlockEntity;
 import com.happysg.radar.block.radar.track.RadarEntityTypeTags;
@@ -319,17 +320,26 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     public void applyDetectionConfig(DetectionConfig config) {
-        if (config == null)
+        if (config == null) {
             config = DetectionConfig.DEFAULT;
+        }
 
-        scanPlayers = config.player();
-        scanSable = config.sable();
-        scanContraptions = config.contraption();
-        scanMobs = config.mob();
-        scanAnimals = config.animal();
-        scanProjectiles = config.projectile();
-        scanItems = config.item();
+        applyDetectionSettings(config.toApiSettings());
+    }
 
+    public void applyDetectionSettings(RadarDetectionSettings settings) {
+        if (settings == null) {
+            applyDetectionConfig(DetectionConfig.DEFAULT);
+            return;
+        }
+
+        scanPlayers = settings.player();
+        scanSable = settings.sable();
+        scanContraptions = settings.contraption();
+        scanMobs = settings.mob();
+        scanAnimals = settings.animal();
+        scanProjectiles = settings.projectile();
+        scanItems = settings.item();
         radarTracks.values().removeIf(track -> !allowCategory(track.trackCategory()));
     }
 

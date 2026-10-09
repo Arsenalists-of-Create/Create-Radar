@@ -1,10 +1,10 @@
 package com.happysg.radar.block.arad.rwr;
 
-import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import dev.ryanhcode.sable.mixinterface.clip_overwrite.ClipContextExtension;
-import dev.ryanhcode.sable.sublevel.SubLevel;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableRwrLineOfSightAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
@@ -51,7 +51,7 @@ public final class ExternalRwrEmitterRegistry {
             double halfAngleDegrees,
             @Nullable UUID targetShipId,
             ThreatStage stage,
-            RadarType radarType,
+            ResourceLocation radarTypeId,
             boolean requireLineOfSight,
             @Nullable SelectionMetadata selectionMetadata
     ) {
@@ -67,11 +67,11 @@ public final class ExternalRwrEmitterRegistry {
                 double halfAngleDegrees,
                 @Nullable UUID targetShipId,
                 ThreatStage stage,
-                RadarType radarType,
+                ResourceLocation radarTypeId,
                 boolean requireLineOfSight
         ) {
             this(sourceId, position, forward, range, halfAngleDegrees, targetShipId,
-                    stage, radarType, requireLineOfSight, null);
+                    stage, radarTypeId, requireLineOfSight, null);
         }
     }
 
@@ -86,8 +86,7 @@ public final class ExternalRwrEmitterRegistry {
     private record Entry(EmitterState state, long expiresAtTick) {
     }
 
-    private ExternalRwrEmitterRegistry() {
-    }
+    private ExternalRwrEmitterRegistry() {}
 
     public static synchronized void heartbeat(ServerLevel level, EmitterState state, int ttlTicks) {
         if (level == null || !isValid(state)) {
@@ -178,7 +177,7 @@ public final class ExternalRwrEmitterRegistry {
             contacts.add(new RwrRadarContact(
                     state.sourceId(),
                     BlockPos.containing(state.position()),
-                    state.radarType(),
+                    state.radarTypeId(),
                     bearingDegrees(displayReceiverPosition, state.position()),
                     signalStrength(state, receiverPosition),
                     true,
@@ -218,7 +217,7 @@ public final class ExternalRwrEmitterRegistry {
                 && state.range() > 0.0D
                 && Double.isFinite(state.halfAngleDegrees())
                 && state.stage() != null
-                && state.radarType() != null
+                && state.radarTypeId() != null
                 && isValid(state.selectionMetadata());
     }
 
@@ -238,7 +237,7 @@ public final class ExternalRwrEmitterRegistry {
                 Math.max(0.0D, Math.min(180.0D, state.halfAngleDegrees())),
                 state.targetShipId(),
                 state.stage(),
-                state.radarType(),
+                state.radarTypeId(),
                 state.requireLineOfSight(),
                 state.selectionMetadata()
         );
@@ -254,8 +253,7 @@ public final class ExternalRwrEmitterRegistry {
         return state.forward().dot(delta.normalize()) >= minimumDot;
     }
 
-    private static boolean hasLineOfSight(ServerLevel level, Vec3 origin, Vec3 targetPosition,
-                                          @Nullable UUID targetShipId) {
+    private static boolean hasLineOfSight(ServerLevel level, Vec3 origin, Vec3 targetPosition, @Nullable UUID targetShipId) {
         ClipContext context = new ClipContext(
                 origin,
                 targetPosition,
@@ -264,15 +262,12 @@ public final class ExternalRwrEmitterRegistry {
                 (Entity) null
         );
 
-        SubLevelContainer container = SubLevelContainer.getContainer(level);
-        SubLevel targetSubLevel = container == null ? null : container.getSubLevel(targetShipId);
-        if (targetSubLevel != null && context instanceof ClipContextExtension extension) {
-            extension.sable$setIgnoredSubLevel(targetSubLevel);
+        if (targetShipId != null && Mods.SABLE.isLoaded()) {
+            SableRwrLineOfSightAccess.ignoreTargetSublevel(level, context, targetShipId);
         }
 
         BlockHitResult hit = level.clip(context);
-        return hit.getType() == HitResult.Type.MISS
-                || hit.getLocation().distanceToSqr(targetPosition) <= TARGET_HIT_TOLERANCE_SQR;
+        return hit.getType() == HitResult.Type.MISS || hit.getLocation().distanceToSqr(targetPosition) <= TARGET_HIT_TOLERANCE_SQR;
     }
 
     private static float signalStrength(EmitterState state, Vec3 receiverPosition) {

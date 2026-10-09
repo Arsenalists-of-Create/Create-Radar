@@ -1,12 +1,12 @@
 package com.happysg.radar.api.weapon;
 
-import com.happysg.radar.targeting.ProjectileModel;
+import com.happysg.radar.api.weapon.ballistics.RadarProjectileModel;
 import javax.annotation.Nullable;
 import net.minecraft.world.phys.Vec3;
 
 public record WeaponShotProfile(
         AimMode aimMode,
-        @Nullable ProjectileModel projectileModel,
+        @Nullable RadarProjectileModel projectileModel,
         Vec3 muzzlePosition,
         Vec3 inheritedVelocity,
         int maxFlightTicks,
@@ -33,7 +33,7 @@ public record WeaponShotProfile(
     }
 
     public static WeaponShotProfile ballistic(
-            ProjectileModel model,
+            RadarProjectileModel model,
             Vec3 muzzlePosition,
             Vec3 inheritedVelocity,
             int maxFlightTicks,

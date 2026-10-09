@@ -56,8 +56,7 @@ public class AdvancedProximityFuze extends ProximityFuzeItem {
     private static final String TAG_NETWORK_FILTERER_POS = "networkFiltererPos";
     private static final String TAG_NETWORK_DIMENSION = "networkDimension";
 
-    private static final ThreadLocal<Deque<LaunchContext>> LAUNCH_CONTEXT =
-            ThreadLocal.withInitial(ArrayDeque::new);
+    private static final ThreadLocal<Deque<LaunchContext>> LAUNCH_CONTEXT = ThreadLocal.withInitial(ArrayDeque::new);
 
     public AdvancedProximityFuze(Properties properties) {
         super(properties);
@@ -256,26 +255,9 @@ public class AdvancedProximityFuze extends ProximityFuzeItem {
             return null;
         }
 
-        UUID sourceShipId = getSourceShipId(stack, projectile);
-        AABB searchBounds = projectile.getBoundingBox().minmax(new AABB(previousPosition(projectile), projectile.position())).inflate(detonationDistance);
-        ProximityTarget nearest = null;
-        for (SubLevel subLevel : SableUtils.getLoadedShips(projectile.level(), searchBounds)) {
-            UUID shipId = subLevel.getUniqueId();
-            if (shipId != null && shipId.equals(sourceShipId)) {
-                continue;
-            }
-
-            ProximityTarget target = subLevelProximityTarget(projectile, subLevel, detonationDistance);
-            if (target == null) {
-                continue;
-            }
-
-            if (target.distanceSqr() <= detonationDistanceSqr && (nearest == null || target.distanceSqr() < nearest.distanceSqr())) {
-                nearest = target;
-            }
-        }
-
-        return nearest;
+        return SableSupport.getNearbyStructureTarget(
+                stack, projectile, detonationDistance, detonationDistanceSqr
+        );
     }
 
     private static void snapToTarget(AbstractCannonProjectile projectile, Vec3 targetPos) {
@@ -314,10 +296,7 @@ public class AdvancedProximityFuze extends ProximityFuzeItem {
     private static ProximityTarget getLiveStructureTarget(ServerLevel level, AbstractCannonProjectile projectile, RadarTrack target, double detonationDistance) {
         if (target.trackCategory() == TrackCategory.SABLE && Mods.SABLE.isLoaded()) {
             try {
-                UUID shipId = UUID.fromString(target.id());
-                SubLevelContainer container = SubLevelContainer.getContainer(level);
-                SubLevelAccess subLevel = container == null ? null : container.getSubLevel(shipId);
-                return subLevelProximityTarget(projectile, subLevel, detonationDistance);
+                return SableSupport.getLiveStructureTarget(level, projectile, target, detonationDistance);
             } catch (IllegalArgumentException ignored) {
                 return null;
             }
@@ -574,6 +553,51 @@ public class AdvancedProximityFuze extends ProximityFuzeItem {
                 Math.max(bounds.minY, Math.min(bounds.maxY, point.y)),
                 Math.max(bounds.minZ, Math.min(bounds.maxZ, point.z))
         );
+    }
+
+    private static final class SableSupport {
+        private SableSupport() {}
+
+        @Nullable
+        private static ProximityTarget getNearbyStructureTarget(ItemStack stack, AbstractCannonProjectile projectile, double detonationDistance, double detonationDistanceSqr) {
+            UUID sourceShipId = getSourceShipId(stack, projectile);
+
+            AABB searchBounds = projectile.getBoundingBox()
+                    .minmax(new AABB(previousPosition(projectile), projectile.position()))
+                    .inflate(detonationDistance);
+
+            ProximityTarget nearest = null;
+
+            for (SubLevel subLevel : SableUtils.getLoadedShips(projectile.level(), searchBounds)) {
+                UUID shipId = subLevel.getUniqueId();
+
+                if (shipId != null && shipId.equals(sourceShipId)) {
+                    continue;
+                }
+
+                ProximityTarget target = subLevelProximityTarget(projectile, subLevel, detonationDistance);
+
+                if (target == null) {
+                    continue;
+                }
+
+                if (target.distanceSqr() <= detonationDistanceSqr && (nearest == null || target.distanceSqr() < nearest.distanceSqr())) {
+                    nearest = target;
+                }
+            }
+
+            return nearest;
+        }
+
+        @Nullable
+        private static ProximityTarget getLiveStructureTarget(ServerLevel level, AbstractCannonProjectile projectile, RadarTrack target, double detonationDistance) {
+            UUID shipId = UUID.fromString(target.id());
+
+            SubLevelContainer container = SubLevelContainer.getContainer(level);
+            SubLevelAccess subLevel = container == null ? null : container.getSubLevel(shipId);
+
+            return subLevelProximityTarget(projectile, subLevel, detonationDistance);
+        }
     }
 
     private record LaunchContext(ResourceLocation dimension, BlockPos mountPos, @Nullable BlockPos filtererPos) {

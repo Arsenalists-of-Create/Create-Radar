@@ -1,5 +1,7 @@
 package com.happysg.radar.block.behavior.networks;
 
+import com.happysg.radar.api.mount.RadarMountAdapter;
+import com.happysg.radar.api.mount.RadarMountRegistry;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
@@ -39,8 +41,7 @@ import java.util.WeakHashMap;
  * immutable effective snapshot before the weapon coordinator runs.</p>
  */
 public final class WeaponNetworkRuntime {
-    private static final Map<ServerLevel, WeaponNetworkRuntime> BY_LEVEL =
-            new WeakHashMap<>();
+    private static final Map<ServerLevel, WeaponNetworkRuntime> BY_LEVEL = new WeakHashMap<>();
     private static final Comparator<BlockPos> STABLE_POSITION =
             Comparator.comparingInt((BlockPos position) -> position.getX())
                     .thenComparingInt(position -> position.getY())
@@ -48,8 +49,7 @@ public final class WeaponNetworkRuntime {
 
     private final ServerLevel level;
     private final Map<BlockPos, LinkEntry> linksByDataLink = new HashMap<>();
-    private final Map<BlockPos, DataLinkBlockEntity.WeaponEndpointType>
-            contactControllers = new HashMap<>();
+    private final Map<BlockPos, DataLinkBlockEntity.WeaponEndpointType> contactControllers = new HashMap<>();
 
     private RuntimeSnapshot snapshot = RuntimeSnapshot.empty();
     private boolean topologyDirty = true;
@@ -104,6 +104,33 @@ public final class WeaponNetworkRuntime {
         if (contactControllers.remove(controllerPos) != null) {
             topologyDirty = true;
         }
+    }
+
+    @Nullable
+    private BlockPos resolveAvailableMount(BlockPos position) {
+        if (position == null || !level.hasChunkAt(position)) {
+            return null;
+        }
+
+        CannonMountContext cbc = CannonMountContext.resolveEndpoint(level, position);
+
+        if (cbc != null && cbc.isCurrent()) {
+            return cbc.getBlockPos().immutable();
+        }
+
+        RadarMountAdapter api = RadarMountRegistry.find(level, position);
+
+        if (api == null || !api.isValid()) {
+            return null;
+        }
+
+        BlockPos mountPos = api.getMountPos();
+
+        if (mountPos == null || !level.hasChunkAt(mountPos)) {
+            return null;
+        }
+
+        return mountPos.immutable();
     }
 
     /**
@@ -902,32 +929,37 @@ public final class WeaponNetworkRuntime {
         return mounts.stream().sorted(STABLE_POSITION).toList();
     }
 
-    private void addTPitchSide(
-            Set<BlockPos> mounts,
-            BlockPos endpointPos,
-            Set<BlockPos> targetedMounts
-    ) {
+    private void addTPitchSide(Set<BlockPos> mounts, BlockPos endpointPos, Set<BlockPos> targetedMounts) {
         CannonMountContext direct = directMount(endpointPos);
+
         if (direct != null) {
             mounts.add(direct.getBlockPos().immutable());
             return;
         }
 
-        CannonMountContext extended =
-                CannonMountContext.resolveEndpoint(level, endpointPos);
-        if (extended != null
-                && targetedMounts.contains(extended.getBlockPos())) {
+        RadarMountAdapter api = RadarMountRegistry.find(level, endpointPos);
+
+        if (api != null && api.isValid()) {
+            BlockPos mountPos = api.getMountPos();
+
+            if (mountPos != null) {
+                mounts.add(mountPos.immutable());
+                return;
+            }
+        }
+
+        CannonMountContext extended = CannonMountContext.resolveEndpoint(level, endpointPos);
+
+        if (extended != null && targetedMounts.contains(extended.getBlockPos())) {
             mounts.add(extended.getBlockPos().immutable());
         }
     }
 
-    private void addDirectMount(
-            Set<BlockPos> mounts,
-            BlockPos endpointPos
-    ) {
-        CannonMountContext mount = directMount(endpointPos);
-        if (mount != null) {
-            mounts.add(mount.getBlockPos().immutable());
+    private void addDirectMount(Set<BlockPos> mounts, BlockPos endpointPos) {
+        BlockPos mountPos = resolveAvailableMount(endpointPos);
+
+        if (mountPos != null) {
+            mounts.add(mountPos);
         }
     }
 
@@ -1177,9 +1209,8 @@ public final class WeaponNetworkRuntime {
     }
 
     private boolean isExplicitMountAvailable(BlockPos mountPos) {
-        CannonMountContext mount = directMount(mountPos);
-        return mount != null
-                && mount.getBlockPos().equals(mountPos);
+        BlockPos resolved = resolveAvailableMount(mountPos);
+        return resolved != null && resolved.equals(mountPos);
     }
 
     /**

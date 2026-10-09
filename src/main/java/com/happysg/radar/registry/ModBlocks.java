@@ -27,6 +27,7 @@ import com.happysg.radar.block.radar.skyradar.SkyRadarSublevelConnectorBlock;
 
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableAwareDataLinkBlock;
+import com.happysg.radar.compat.sable.SableDataLinkFactory;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BuilderTransformers;
 import com.simibubi.create.foundation.data.SharedProperties;
@@ -80,9 +81,11 @@ public class ModBlocks {
                     .register();
 
     private static DataLinkBlock createDataLinkBlock(BlockBehaviour.Properties properties) {
-        return Mods.SABLE.<DataLinkBlock>runIfInstalled(
-                        () -> () -> new SableAwareDataLinkBlock(properties))
-                .orElseGet(() -> new DataLinkBlock(properties));
+        if (Mods.SABLE.isLoaded()) {
+            return SableDataLinkFactory.create(properties);
+        }
+
+        return new DataLinkBlock(properties);
     }
 
 

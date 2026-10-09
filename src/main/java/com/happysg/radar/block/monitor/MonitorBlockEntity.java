@@ -1,5 +1,10 @@
 package com.happysg.radar.block.monitor;
 
+import com.happysg.radar.api.monitor.*;
+import com.happysg.radar.api.radar.*;
+import com.happysg.radar.api.radar.rwr.RadarRwrTypes;
+import com.happysg.radar.api.tracking.RadarContact;
+import com.happysg.radar.api.tracking.RadarSource;
 import com.happysg.radar.block.behavior.networks.INetworkNode;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.SafeZone;
@@ -14,9 +19,9 @@ import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
 import com.happysg.radar.block.arad.rwr.RwrRadarContact;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
-import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
+import com.happysg.radar.block.radar.track.RadarContactTrackAdapter;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
@@ -31,15 +36,16 @@ import com.simibubi.create.api.equipment.goggles.IHaveHoveringInformation;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -56,7 +62,7 @@ import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoveringInformation, INetworkNode  {
+public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoveringInformation, INetworkNode, MonitorSnapshotProvider, MonitorContactProvider, MonitorDetectionSettingsProvider, MonitorStateProvider {
 
     protected BlockPos controller;
     protected int radius = 1;
@@ -96,6 +102,27 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     private BlockPos lastKnownPos = BlockPos.ZERO;
     public final List<SafeZone> safeZones = new ArrayList<>();
 
+    @Override
+    public List<MonitorContactSnapshot> getMonitorContacts() {
+        if (cachedTracks == null || cachedTracks.isEmpty()) {
+            return List.of();
+        }
+
+        return cachedTracks.stream().map(track -> new MonitorContactSnapshot(track.id(), track.position(), true, "create_radar")).toList();
+    }
+
+    @Override
+    public RadarDetectionSettings getMonitorDetectionSettings() { return filter.toApiSettings(); }
+
+    @Override
+    public BlockPos getMonitorControllerPos() { return getControllerPos(); }
+
+    @Override
+    public int getMonitorSize() { return getSize(); }
+
+    @Override
+    public boolean isMonitorController() { return isController(); }
+
     public MonitorBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
     }
@@ -105,20 +132,54 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             Vec3 center,
             float range,
             boolean running,
-            String type,
+            RadarDisplayProfile displayProfile,
             float globalAngle,
             float angularSpeed,
             long angleSnapshotTime,
             float fovDegrees,
-            @Nullable net.minecraft.core.Direction direction,
-            boolean renderRelativeToMonitor,
+            @Nullable Direction direction,
             @Nullable String ownedLockedTargetId,
-            @Nullable Vec3 ownedLockedTargetPos
-    ) {}
+            @Nullable Vec3 ownedLockedTargetPos,
+            MonitorRadarData data,
+            MonitorExtensionState extensionState
+    ) {
+        public RadarDisplayInfo {
+            if (displayProfile == null) {
+                displayProfile = RadarDisplayProfiles.GENERIC;
+            }
+
+            if (data == null) {
+                data = MonitorRadarData.empty();
+            }
+
+            if (extensionState == null) {
+                extensionState = MonitorExtensionState.empty();
+            }
+        }
+
+        public MonitorRadarSnapshot toApiSnapshot() {
+            return new MonitorRadarSnapshot(
+                    pos,
+                    center,
+                    range,
+                    running,
+                    displayProfile,
+                    globalAngle,
+                    angularSpeed,
+                    angleSnapshotTime,
+                    fovDegrees,
+                    direction,
+                    ownedLockedTargetId,
+                    ownedLockedTargetPos,
+                    data,
+                    extensionState
+            );
+        }
+    }
 
     public record RwrDisplayInfo(
             String sourceId,
-            RadarType radarType,
+            ResourceLocation radarTypeId,
             float bearingDegrees,
             float radiusOffset,
             boolean withinRadarRange,
@@ -130,7 +191,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     private record PendingRwrDisplayInfo(
             String sourceId,
-            RadarType radarType,
+            ResourceLocation radarTypeId,
             float trueBearingDegrees,
             float displayBearingDegrees,
             int ring,
@@ -193,7 +254,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 //        }
 
         if (!level.isClientSide && level instanceof ServerLevel sl) {
-            if (level.getGameTime() % 5 == 0) {
+            int monitorSyncInterval = getMonitorSyncIntervalTicks(sl);
+            if (level.getGameTime() % monitorSyncInterval == 0) {
                 syncFromNetwork(sl);
                 refreshAradLinkState();
                 syncFromArad(sl);
@@ -214,6 +276,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 sendData();
             }
         }
+
         if (!level.isClientSide && level.getGameTime() % 40 == 0) {
             if (level instanceof ServerLevel serverLevel) {
 
@@ -327,7 +390,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             float displayBearingDegrees = fuzzedRwrBearing(contact, exactLocked, gameTime);
             pendingInfos.add(new PendingRwrDisplayInfo(
                     contact.sourceId(),
-                    contact.radarType(),
+                    contact.radarTypeId(),
                     contact.bearingDegrees(),
                     displayBearingDegrees,
                     ring,
@@ -488,7 +551,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             float radiusOffset = count <= 1 ? 0.0f : (index - (count - 1) * 0.5f) * RWR_STACK_RADIUS_STEP;
             infos.add(new RwrDisplayInfo(
                     info.sourceId(),
-                    info.radarType(),
+                    info.radarTypeId(),
                     info.displayBearingDegrees(),
                     radiusOffset,
                     info.withinRadarRange(),
@@ -542,102 +605,173 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     private List<RadarDisplayInfo> buildRadarInfos(ServerLevel sl, NetworkData.Group g) {
         List<RadarDisplayInfo> infos = new ArrayList<>();
         Map<BlockPos, RadarDisplayInfo> previousInfos = new HashMap<>();
+
         for (RadarDisplayInfo info : radarInfos) {
             previousInfos.put(info.pos(), info);
         }
 
         OwnedLock ownedLock = findOwnedLock(sl, g);
+
         for (NetworkData.RadarEndpoint endpoint : g.getRadarEndpoints()) {
+
             BlockEntity be = sl.getBlockEntity(endpoint.pos());
-            if (!(be instanceof IRadar radar)) {
+
+            if (!(be instanceof NetworkRadarSource networkRadar) || !(be instanceof RadarDisplaySource displayRadar)) {
+
                 RadarDisplayInfo previousInfo = previousInfos.get(endpoint.pos());
+
                 if (previousInfo != null && !sl.hasChunkAt(endpoint.pos())) {
                     infos.add(previousInfo);
                 }
+
                 continue;
             }
+
+            BlockPos radarPosition = networkRadar.getRadarPosition();
+
+            if (radarPosition == null) {
+                radarPosition = endpoint.pos();
+            }
+
+            MonitorExtensionState extensionState;
+
+            if (be instanceof MonitorExtensionStateProvider provider) {
+                extensionState = provider.getMonitorExtensionState();
+
+                if (extensionState == null) {
+                    extensionState = MonitorExtensionState.empty();
+                }
+            } else {
+                MonitorRadarData monitorData = be instanceof MonitorRadarDataProvider provider ? provider.getMonitorRadarData() : MonitorRadarData.empty();
+
+                if (monitorData == null) {
+                    monitorData = MonitorRadarData.empty();
+                }
+
+                extensionState = new MonitorExtensionState(getSize(), getSize(), false, monitorData);
+            }
+
+            MonitorRadarData monitorData = extensionState.data();
+
             infos.add(new RadarDisplayInfo(
                     endpoint.pos(),
-                    PhysicsHandler.getWorldVec(sl, endpoint.pos()),
-                    radar.getRange(),
-                    radar.isRunning(),
-                    radar.getRadarType(),
-                    radar.getGlobalAngle(),
-                    getRadarAngularSpeed(radar),
+                    PhysicsHandler.getWorldVec(sl, radarPosition),
+                    networkRadar.getRange(),
+                    networkRadar.isRunning(),
+                    displayRadar.getRadarDisplayProfile(),
+                    displayRadar.getDisplayAngleDegrees(),
+                    displayRadar.getDisplayAngularSpeedDegreesPerTick(),
                     sl.getGameTime(),
-                    radar.getFovDegrees(),
-                    radar.getradarDirection(),
-                    radar.renderRelativeToMonitor(),
-                    ownedLock != null && ownedLock.radarPos().equals(endpoint.pos()) ? ownedLock.targetId() : null,
-                    ownedLock != null && ownedLock.radarPos().equals(endpoint.pos()) ? ownedLock.targetPos() : null
+                    displayRadar.getDisplayFovDegrees(),
+                    displayRadar.getDisplayDirection(),
+                    ownedLock != null && ownedLock.radarPos().equals(endpoint.pos())
+                            ? ownedLock.targetId()
+                            : null,
+                    ownedLock != null && ownedLock.radarPos().equals(endpoint.pos())
+                            ? ownedLock.targetPos()
+                            : null,
+                    monitorData,
+                    extensionState
             ));
         }
-        return List.copyOf(infos);
-    }
 
-    private static float getRadarAngularSpeed(IRadar radar) {
-        if (radar instanceof RadarBearingBlockEntity bearing) {
-            return bearing.getAngularSpeed();
-        }
-        if (radar instanceof SkyRadarBlockEntity skyRadar) {
-            return skyRadar.getEffectiveAngularSpeed();
-        }
-        return 0f;
+        return List.copyOf(infos);
     }
 
     private @Nullable OwnedLock findOwnedLock(ServerLevel sl, NetworkData.Group g) {
         String selectedId = g.selectedTargetId;
+
         if (selectedId == null || selectedId.isBlank()) {
             return null;
         }
 
         BlockPos closestRadarPos = null;
-        RadarTrack closestTrack = null;
+        Vec3 closestTrackPosition = null;
         double closestDistance = Double.MAX_VALUE;
 
         for (NetworkData.RadarEndpoint endpoint : g.getRadarEndpoints()) {
             BlockEntity be = sl.getBlockEntity(endpoint.pos());
-            if (!(be instanceof IRadar radar) || !radar.isRunning()) {
-                continue;
-            }
-            if (!isLockCapableRadar(radar.getRadarType())) {
+
+            if (!(be instanceof RadarSource radar) || !radar.isRunning() || !(be instanceof RadarDisplaySource displayRadar)) {
                 continue;
             }
 
-            RadarTrack track = findTrack(radar, selectedId);
-            if (track == null || track.position() == null) {
+            if (!displayRadar.getRadarDisplayProfile().lockCapable()) {
                 continue;
             }
 
-            Vec3 radarPos = PhysicsHandler.getWorldVec(sl, endpoint.pos());
-            double distance = radarPos.distanceToSqr(track.position());
+            RadarContact contact = findContact(radar, selectedId);
+
+            if (contact == null || contact.getPosition() == null) {
+                continue;
+            }
+
+            BlockPos sourcePos = endpoint.pos();
+
+            if (be instanceof NetworkRadarSource networkRadar) {
+                BlockPos canonicalPos = networkRadar.getRadarPosition();
+
+                if (canonicalPos != null) {
+                    sourcePos = canonicalPos;
+                }
+            }
+
+            Vec3 radarPos = PhysicsHandler.getWorldVec(sl, sourcePos);
+
+            double distance = radarPos.distanceToSqr(contact.getPosition());
+
             if (distance < closestDistance) {
                 closestDistance = distance;
                 closestRadarPos = endpoint.pos();
-                closestTrack = track;
+                closestTrackPosition = contact.getPosition();
             }
         }
 
-        if (closestRadarPos == null || closestTrack == null) {
+        if (closestRadarPos == null || closestTrackPosition == null) {
             return null;
         }
 
-        return new OwnedLock(closestRadarPos, selectedId, closestTrack.position());
+        return new OwnedLock(closestRadarPos, selectedId, closestTrackPosition);
     }
 
-    private static boolean isLockCapableRadar(String radarType) {
-        return "sky".equals(radarType) || "nonspinning".equals(radarType);
-    }
+    private List<RadarSource> getRunningRadarSources() {
+        if (level == null) {
+            return List.of();
+        }
 
-    private static @Nullable RadarTrack findTrack(IRadar radar, String selectedId) {
-        for (RadarTrack track : radar.getReportedTracks()) {
-            if (track == null) {
-                continue;
-            }
-            if (selectedId.equals(track.getId()) || selectedId.equals(track.id())) {
-                return track;
+        List<RadarSource> sources = new ArrayList<>();
+
+        for (RadarDisplayInfo info : radarInfos) {
+            BlockEntity be = level.getBlockEntity(info.pos());
+
+            if (be instanceof RadarSource source
+                    && source.isRunning()) {
+                sources.add(source);
             }
         }
+
+        return List.copyOf(sources);
+    }
+
+    private static @Nullable RadarContact findContact(RadarSource source, String selectedId) {
+        Collection<? extends RadarContact> contacts = source.getContacts();
+
+        if (contacts == null) {
+            return null;
+        }
+
+        for (RadarContact contact : contacts) {
+            if (contact == null) {
+                continue;
+            }
+
+            String id = contact.getId();
+
+            if (selectedId.equals(id)) {
+                return contact;
+            }
+        }
+
         return null;
     }
 
@@ -760,7 +894,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
 
         // Server: rebuild and apply filter
-        List<IRadar> radars = getRunningRadars();
+        List<RadarSource> radars = getRunningRadarSources();
+
         if (radars.isEmpty()) {
             cachedTracks = List.of();
             activetrack = null;
@@ -768,17 +903,34 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             return;
         }
 
-        DetectionConfig det = this.filter; // already synced from network (or legacy)
+        DetectionConfig det = this.filter;
         LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
-        for (IRadar radar : radars) {
-            for (RadarTrack track : radar.getReportedTracks()) {
-                if (track == null || !det.test(track)) continue;
+        long gameTime = level.getGameTime();
+
+        for (RadarSource radar : radars) {
+            Collection<? extends RadarContact> contacts = radar.getContacts();
+
+            if (contacts == null) {
+                continue;
+            }
+
+            for (RadarContact contact : contacts) {
+                RadarTrack track = RadarContactTrackAdapter.toTrack(contact, gameTime);
+
+                if (track == null || !det.test(track)) {
+                    continue;
+                }
+
                 String id = track.getId();
-                if (id == null || id.isBlank()) id = track.id();
-                if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
-                merged.merge(id, track.copy(), DirectionalJammingService::preferObservation);
+
+                if (id == null || id.isBlank()) {
+                    continue;
+                }
+
+                merged.merge(id, track, DirectionalJammingService::preferObservation);
             }
         }
+
         if (Mods.SABLE.isLoaded() && level instanceof ServerLevel serverLevel) {
             String networkSecret = monitorNetworkSecret(serverLevel);
             for (RadarTrack track : merged.values()) {
@@ -856,13 +1008,20 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (ponderJammingTier == null) {
             return;
         }
-        long now = level == null ? ponderJammingStartTick
-                : level.getGameTime();
+        long now = level == null ? ponderJammingStartTick : level.getGameTime();
         Vec3 center = Vec3.atCenterOf(worldPosition);
+
         radarInfos = List.of(new RadarDisplayInfo(
-                worldPosition, center, 64.0F, true, "spinning",
-                0.0F, 6.0F, now, 360.0F, null,
-                false, null, null));
+                worldPosition, center, 64.0F, true,
+                new RadarDisplayProfile(
+                        RadarDisplayProfiles.GROUND.typeId(), RadarSweepStyle.ROTATING,
+                        false, false),
+                0.0F, 6.0F, now, 360.0F,
+                null, null, null,
+                MonitorRadarData.empty(),
+                MonitorExtensionState.empty()
+        ));
+
         boolean fakeHullEnabled = Mods.SABLE.isLoaded()
                 && RadarConfig.server() != null
                 && RadarConfig.server().directionalJammingGenerateFakeHulls.get();
@@ -894,27 +1053,27 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public void showPonderGroundRadarIcon() {
-        showPonderRwrIcon(RadarType.GROUND, false, false, false);
+        showPonderRwrIcon(RadarRwrTypes.GROUND, false, false, false);
     }
 
     public void showPonderAirborneRadarIcon() {
-        showPonderRwrIcon(RadarType.AIRBORNE, false, false, false);
+        showPonderRwrIcon(RadarRwrTypes.AIRBORNE, false, false, false);
     }
 
     public void showPonderSkyRadarIcon() {
-        showPonderRwrIcon(RadarType.SKY, false, false, false);
+        showPonderRwrIcon(RadarRwrTypes.SKY, false, false, false);
     }
 
     public void showPonderFriendlySkyRadarIcon() {
-        showPonderRwrIcon(RadarType.SKY, true, false, false);
+        showPonderRwrIcon(RadarRwrTypes.SKY, true, false, false);
     }
 
     public void showPonderHighThreatSkyRadarIcon() {
-        showPonderRwrIcon(RadarType.SKY, false, true, false);
+        showPonderRwrIcon(RadarRwrTypes.SKY, false, true, false);
     }
 
     public void showPonderLockingSkyRadarIcon() {
-        showPonderRwrIcon(RadarType.SKY, false, false, true);
+        showPonderRwrIcon(RadarRwrTypes.SKY, false, false, true);
     }
 
     public void showPonderCenterRingContacts() {
@@ -923,7 +1082,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         rwrInfos = List.of(
                 new RwrDisplayInfo(
                         "ponder_center_contact",
-                        RadarType.GROUND,
+                        RadarRwrTypes.GROUND,
                         90.0f,
                         0.0f,
                         true,
@@ -934,7 +1093,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 ),
                 new RwrDisplayInfo(
                         "ponder_center_high_threat",
-                        RadarType.GROUND,
+                        RadarRwrTypes.GROUND,
                         270.0f,
                         0.0f,
                         true,
@@ -951,7 +1110,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         ponderRwrIconEnlarged = false;
         rwrInfos = List.of(new RwrDisplayInfo(
                 "ponder_outer_friendly",
-                RadarType.SKY,
+                RadarRwrTypes.SKY,
                 0.0f,
                 0.0f,
                 false,
@@ -967,7 +1126,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         ponderRwrIconEnlarged = false;
         rwrInfos = List.of(new RwrDisplayInfo(
                 "ponder_inner_high_threat",
-                RadarType.GROUND,
+                RadarRwrTypes.GROUND,
                 180.0f,
                 0.0f,
                 true,
@@ -979,7 +1138,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     private void showPonderRwrIcon(
-            RadarType radarType,
+            ResourceLocation radarTypeId,
             boolean friendly,
             boolean primaryThreat,
             boolean exactLocked
@@ -994,7 +1153,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 : AradMonitorGeometry.OUTER_RING_RADIUS;
         rwrInfos = List.of(new RwrDisplayInfo(
                 "ponder_rwr_icon",
-                radarType,
+                radarTypeId,
                 0.0f,
                 -ringRadius,
                 withinRadarRange,
@@ -1137,6 +1296,15 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         return radarInfos;
     }
 
+    @Override
+    public List<MonitorRadarSnapshot> getRadarSnapshots() {
+        if (radarInfos.isEmpty()) {
+            return List.of();
+        }
+
+        return radarInfos.stream().map(RadarDisplayInfo::toApiSnapshot).toList();
+    }
+
     public List<RadarDisplayInfo> getRunningRadarInfos() {
         if (radarInfos.isEmpty()) return List.of();
         List<RadarDisplayInfo> running = new ArrayList<>();
@@ -1146,13 +1314,26 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         return List.copyOf(running);
     }
 
+    @Override
+    public List<MonitorRadarSnapshot> getRunningRadarSnapshots() {
+        List<RadarDisplayInfo> running = getRunningRadarInfos();
+
+        if (running.isEmpty()) {
+            return List.of();
+        }
+
+        return running.stream().map(RadarDisplayInfo::toApiSnapshot).toList();
+    }
+
     private boolean shouldDisplayRadarInfo(RadarDisplayInfo info) {
         if (info.running()) {
             return true;
         }
-        if (!"sky".equals(info.type())) {
+
+        if (!info.displayProfile().typeId().equals(RadarDisplayProfiles.SKY.typeId())) {
             return false;
         }
+
         IRadar radar = resolveRadar(info.pos());
         return radar instanceof SkyRadarBlockEntity skyRadar && skyRadar.isAssembled();
     }
@@ -1388,6 +1569,28 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         readSafeZones(tag);
     }
 
+    private int getMonitorSyncIntervalTicks(ServerLevel level) {
+        int interval = 5;
+
+        NetworkData.Group group = getNetworkGroup(level);
+
+        if (group == null) {
+            return interval;
+        }
+
+        for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
+            BlockEntity be = level.getBlockEntity(endpoint.pos());
+
+            if (!(be instanceof MonitorSyncIntervalProvider provider)) {
+                continue;
+            }
+
+            interval = Math.min(interval, Math.max(1, provider.getMonitorSyncIntervalTicks()));
+        }
+
+        return interval;
+    }
+
 
     private void readSafeZones(CompoundTag tag) {
         safeZones.clear(); // IMPORTANT: avoid duplicates on every packet
@@ -1453,50 +1656,138 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.putDouble("CenterZ", info.center().z);
             tag.putFloat("Range", info.range());
             tag.putBoolean("Running", info.running());
-            tag.putString("Type", info.type() == null ? "" : info.type());
+            RadarDisplayProfile profile = info.displayProfile();
+            tag.putString("RadarTypeId", profile.typeId().toString());
+            tag.putString("RadarSweepStyle", profile.sweepStyle().name());
+            tag.putBoolean("RadarLockCapable", profile.lockCapable());
+            tag.putBoolean("RadarRenderRelative", profile.renderRelativeToMonitor());
             tag.putFloat("GlobalAngle", info.globalAngle());
             tag.putFloat("AngularSpeed", info.angularSpeed());
             tag.putLong("AngleSnapshotTime", info.angleSnapshotTime());
             tag.putFloat("FovDegrees", info.fovDegrees());
             if (info.direction() != null) tag.putString("Direction", info.direction().getName());
-            tag.putBoolean("RenderRelative", info.renderRelativeToMonitor());
             if (info.ownedLockedTargetId() != null && info.ownedLockedTargetPos() != null) {
                 tag.putString("OwnedLockedTargetId", info.ownedLockedTargetId());
                 tag.putDouble("OwnedTargetX", info.ownedLockedTargetPos().x);
                 tag.putDouble("OwnedTargetY", info.ownedLockedTargetPos().y);
                 tag.putDouble("OwnedTargetZ", info.ownedLockedTargetPos().z);
             }
+
+            CompoundTag monitorDataTag = new CompoundTag();
+
+            for (Map.Entry<ResourceLocation, CompoundTag> entry : info.data().entries().entrySet()) {
+                monitorDataTag.put(entry.getKey().toString(), entry.getValue());
+            }
+
+            if (!monitorDataTag.isEmpty()) {
+                tag.put("MonitorData", monitorDataTag);
+            }
+
+            MonitorExtensionState extensionState = info.extensionState();
+
+            tag.putInt("MonitorWidth", extensionState.monitorWidth());
+            tag.putInt("MonitorHeight", extensionState.monitorHeight());
+            tag.putBoolean("Synthetic", extensionState.synthetic());
+
             list.add(tag);
         }
         return list;
     }
 
+    private static RadarDisplayProfile readRadarDisplayProfile(
+            CompoundTag tag
+    ) {
+        if (tag.contains("RadarTypeId", Tag.TAG_STRING)) {
+            ResourceLocation typeId = ResourceLocation.tryParse(tag.getString("RadarTypeId"));
+
+            if (typeId == null) {
+                typeId = RadarDisplayProfiles.GENERIC.typeId();
+            }
+
+            RadarSweepStyle sweepStyle = RadarSweepStyle.NONE;
+
+            if (tag.contains("RadarSweepStyle", Tag.TAG_STRING)) {
+                try {
+                    sweepStyle = RadarSweepStyle.valueOf(tag.getString("RadarSweepStyle"));
+                } catch (IllegalArgumentException ignored) {}
+            }
+
+            return new RadarDisplayProfile(typeId, sweepStyle, tag.getBoolean("RadarLockCapable"), tag.getBoolean("RadarRenderRelative"));
+        }
+
+        // Old monitor packet/save compatibility.
+        String legacyType = tag.getString("Type");
+
+        RadarDisplayProfile base = switch (legacyType) {
+            case "spinning" -> RadarDisplayProfiles.GROUND;
+            case "sky" -> RadarDisplayProfiles.SKY;
+            case "nonspinning" -> RadarDisplayProfiles.AIRBORNE;
+            case "sonar" -> RadarDisplayProfiles.SONAR;
+            default -> RadarDisplayProfiles.GENERIC;
+        };
+
+        boolean renderRelative = !tag.contains("RenderRelative", Tag.TAG_BYTE) || tag.getBoolean("RenderRelative");
+        return new RadarDisplayProfile(base.typeId(), base.sweepStyle(), base.lockCapable(), renderRelative);
+    }
+
     private List<RadarDisplayInfo> readRadarInfos(ListTag list) {
         List<RadarDisplayInfo> infos = new ArrayList<>();
+
         for (int i = 0; i < list.size(); i++) {
             CompoundTag tag = list.getCompound(i);
             BlockPos pos = NbtUtils.readBlockPos(tag, "Pos").orElse(null);
             if (pos == null) continue;
             net.minecraft.core.Direction direction = null;
+
             if (tag.contains("Direction", Tag.TAG_STRING)) {
                 direction = net.minecraft.core.Direction.byName(tag.getString("Direction"));
             }
+
+            RadarDisplayProfile profile = readRadarDisplayProfile(tag);
+            MonitorRadarData monitorData = MonitorRadarData.empty();
+
+            if (tag.contains("MonitorData", Tag.TAG_COMPOUND)) {
+                CompoundTag monitorDataTag = tag.getCompound("MonitorData");
+                Map<ResourceLocation, CompoundTag> entries = new LinkedHashMap<>();
+
+                for (String key : monitorDataTag.getAllKeys()) {
+                    ResourceLocation id = ResourceLocation.tryParse(key);
+
+                    if (id == null || !monitorDataTag.contains(key, Tag.TAG_COMPOUND)) {
+                        continue;
+                    }
+
+                    entries.put(id, monitorDataTag.getCompound(key));
+                }
+
+                monitorData = new MonitorRadarData(entries);
+            }
+
+            int monitorWidth = tag.contains("MonitorWidth", Tag.TAG_INT) ? tag.getInt("MonitorWidth") : 1;
+            int monitorHeight = tag.contains("MonitorHeight", Tag.TAG_INT) ? tag.getInt("MonitorHeight") : 1;
+
+            boolean synthetic = tag.contains("Synthetic", Tag.TAG_BYTE) && tag.getBoolean("Synthetic");
+            MonitorExtensionState extensionState = new MonitorExtensionState(monitorWidth, monitorHeight, synthetic, monitorData);
+
             infos.add(new RadarDisplayInfo(
                     pos,
                     new Vec3(tag.getDouble("CenterX"), tag.getDouble("CenterY"), tag.getDouble("CenterZ")),
                     tag.getFloat("Range"),
                     tag.getBoolean("Running"),
-                    tag.getString("Type"),
+                    profile,
                     tag.getFloat("GlobalAngle"),
                     tag.getFloat("AngularSpeed"),
                     tag.getLong("AngleSnapshotTime"),
                     tag.contains("FovDegrees", Tag.TAG_FLOAT) ? tag.getFloat("FovDegrees") : 360.0F,
                     direction,
-                    tag.getBoolean("RenderRelative"),
                     tag.contains("OwnedLockedTargetId", Tag.TAG_STRING) ? tag.getString("OwnedLockedTargetId") : null,
-                    tag.contains("OwnedTargetX", Tag.TAG_DOUBLE)
-                            ? new Vec3(tag.getDouble("OwnedTargetX"), tag.getDouble("OwnedTargetY"), tag.getDouble("OwnedTargetZ"))
-                            : null
+                    tag.contains("OwnedTargetX", Tag.TAG_DOUBLE) ? new Vec3(
+                            tag.getDouble("OwnedTargetX"),
+                            tag.getDouble("OwnedTargetY"),
+                            tag.getDouble("OwnedTargetZ")
+                    ) : null,
+                    monitorData,
+                    extensionState
             ));
         }
         return List.copyOf(infos);
@@ -1504,10 +1795,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     private ListTag writeRwrInfos() {
         ListTag list = new ListTag();
+
         for (RwrDisplayInfo info : rwrInfos) {
             CompoundTag tag = new CompoundTag();
             tag.putString("SourceId", info.sourceId() == null ? "" : info.sourceId());
-            tag.putString("RadarType", info.radarType().name());
+            tag.putString("RadarTypeId", info.radarTypeId() == null ? RadarRwrTypes.GROUND.toString() : info.radarTypeId().toString());
             tag.putFloat("BearingDegrees", info.bearingDegrees());
             tag.putFloat("RadiusOffset", info.radiusOffset());
             tag.putBoolean("WithinRadarRange", info.withinRadarRange());
@@ -1517,22 +1809,46 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.putBoolean("Friendly", info.friendly());
             list.add(tag);
         }
+
         return list;
     }
 
     private List<RwrDisplayInfo> readRwrInfos(ListTag list) {
         List<RwrDisplayInfo> infos = new ArrayList<>();
+
         for (int i = 0; i < list.size(); i++) {
             CompoundTag tag = list.getCompound(i);
-            RadarType radarType;
-            try {
-                radarType = RadarType.valueOf(tag.getString("RadarType"));
-            } catch (IllegalArgumentException ignored) {
-                radarType = RadarType.GROUND;
+            ResourceLocation radarTypeId = RadarRwrTypes.GROUND;
+            String rawTypeId = tag.getString("RadarTypeId");
+
+            if (!rawTypeId.isBlank()) {
+                ResourceLocation parsed = ResourceLocation.tryParse(rawTypeId);
+
+                if (parsed != null) {
+                    radarTypeId = parsed;
+                }
+            } else {
+                // Legacy enum migration
+                String legacyType = tag.getString("RadarType");
+
+                if (!legacyType.isBlank()) {
+                    try {
+                        RadarType oldType = RadarType.valueOf(legacyType);
+
+                        radarTypeId = switch (oldType) {
+                            case SKY -> RadarRwrTypes.SKY;
+                            case AIRBORNE -> RadarRwrTypes.AIRBORNE;
+                            case GROUND -> RadarRwrTypes.GROUND;
+                        };
+                    } catch (IllegalArgumentException ignored) {
+                        radarTypeId = RadarRwrTypes.GROUND;
+                    }
+                }
             }
+
             infos.add(new RwrDisplayInfo(
                     tag.getString("SourceId"),
-                    radarType,
+                    radarTypeId,
                     tag.getFloat("BearingDegrees"),
                     tag.getFloat("RadiusOffset"),
                     tag.getBoolean("WithinRadarRange"),
@@ -1542,6 +1858,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     tag.getBoolean("Friendly")
             ));
         }
+
         return List.copyOf(infos);
     }
 

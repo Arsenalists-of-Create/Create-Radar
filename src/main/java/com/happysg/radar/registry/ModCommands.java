@@ -705,7 +705,7 @@ public class  ModCommands {
             ));
 
             source.sendSystemMessage(Component.literal(
-                    " Radar: " + group.radarPos + " (" + group.radarKind + ")"
+                    " Radars (" + group.radarEndpoints.size() + "): " + group.radarEndpoints
             ));
 
             source.sendSystemMessage(Component.literal(

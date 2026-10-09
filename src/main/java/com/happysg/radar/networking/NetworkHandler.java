@@ -14,8 +14,7 @@ import static com.happysg.radar.CreateRadar.MODID;
 
 @EventBusSubscriber(modid = MODID, bus = EventBusSubscriber.Bus.MOD)
 public final class NetworkHandler {
-    private NetworkHandler() {
-    }
+    private NetworkHandler() {}
 
     @SubscribeEvent
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {

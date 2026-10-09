@@ -398,18 +398,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     }
 
     public BlockPos getSourcePosition() {
-        if (!(level instanceof ServerLevel sl) || linkedShipId == null)
-            return worldPosition.relative(getDirection());
-
-        var ship = SableCompanion.INSTANCE.getContaining(sl, worldPosition);
-        if (ship == null || !ship.getUniqueId().equals(linkedShipId)) {
-            linkedShipId = null;
-            return worldPosition.relative(getDirection());
-        }
-
-        BlockPos selfShipPos = toShipBlockPos(ship, worldPosition);
-        BlockPos sourceShipPos = selfShipPos.relative(getDirection());
-        return toWorldBlockPos(ship, sourceShipPos);
+        return worldPosition.relative(getDirection());
     }
 
     public CompoundTag getSourceConfig() {
@@ -441,9 +430,16 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
             return worldPosition.offset(targetOffset);
         }
 
+
+        BlockPos storedTargetPos = worldPosition.offset(targetOffset);
+
+        var targetShip = SableCompanion.INSTANCE.getContaining(sl, storedTargetPos);
+        if (targetShip != null && targetShip.getUniqueId().equals(linkedShipId)) {
+            return storedTargetPos;
+        }
+
         BlockPos selfShipPos = toShipBlockPos(ship, worldPosition);
         BlockPos targetShipPos = selfShipPos.offset(targetOffsetShip);
-
         return toWorldBlockPos(ship, targetShipPos);
     }
 

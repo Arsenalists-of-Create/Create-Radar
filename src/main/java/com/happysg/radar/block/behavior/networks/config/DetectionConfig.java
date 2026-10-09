@@ -1,5 +1,6 @@
 package com.happysg.radar.block.behavior.networks.config;
 
+import com.happysg.radar.api.radar.RadarDetectionSettings;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
@@ -19,6 +20,18 @@ public record DetectionConfig(boolean player, boolean sable, boolean contraption
 
     public DetectionConfig(boolean player, boolean sable, boolean contraption, boolean mob, boolean projectile,boolean animal, boolean item) {
         this(player, sable, contraption, mob, projectile,animal, item, List.of(), List.of(), List.of(), List.of());
+    }
+
+    public RadarDetectionSettings toApiSettings() {
+        return new RadarDetectionSettings(
+                player,
+                sable,
+                contraption,
+                mob,
+                projectile,
+                animal,
+                item
+        );
     }
 
     public CompoundTag toTag() {

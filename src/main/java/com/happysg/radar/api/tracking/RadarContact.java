@@ -1,6 +1,5 @@
 package com.happysg.radar.api.tracking;
 
-import com.happysg.radar.block.radar.track.TrackCategory;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -24,7 +23,7 @@ public interface RadarContact {
     Vec3 getVelocity();
 
     /**
-     * @return category of this contact
+     * @return public classification of this contact
      */
-    TrackCategory getTrackCategory();
+    com.happysg.radar.api.tracking.RadarContactCategory getCategory();
 }

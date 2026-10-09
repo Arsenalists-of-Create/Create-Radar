@@ -1,5 +1,7 @@
 package com.happysg.radar.block.radar.sonar.bearing;
 
+import com.happysg.radar.api.radar.RadarDetectionConfigurable;
+import com.happysg.radar.api.radar.RadarDetectionSettings;
 import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
@@ -13,13 +15,13 @@ import com.simibubi.create.AllSoundEvents;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.contraptions.AssemblyException;
 import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
-import com.simibubi.create.content.contraptions.IControlContraption;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import com.simibubi.create.content.contraptions.bearing.MechanicalBearingBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
@@ -28,26 +30,19 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.*;
 
-public class SonarBearingBlockEntity extends KineticBlockEntity implements IRadar, IControlContraption {
+public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar, RadarDetectionConfigurable {
 
     public static final int RANGE_PER_PANEL = 8;
     public static final int MAX_EFFECTIVE_PANELS = 8;
     public static final int MAX_RANGE = 64;
-
     public static final int MAX_BEARING_Y_EXCLUSIVE = 64;
-
     public static final int MAX_GROUND_AIR_GAP = 2;
 
     private SonarScanningBlockBehavior scanningBehavior;
-    private ControlledContraptionEntity movedContraption;
-
     private int panelCount;
-
     private boolean structureValid;
-    private boolean assembled;
-
     private UUID emitterId = UUID.randomUUID();
-
+    private final Set<BlockPos> savedSensorPositions = new HashSet<>();
     private BlockPos lastKnownPos = BlockPos.ZERO;
 
     public SonarBearingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
@@ -64,8 +59,31 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
         super.addBehaviours(behaviours);
 
+        movementMode.setValue(MovementMode.MOVE_NEVER_PLACE.ordinal());
         scanningBehavior = new SonarScanningBlockBehavior(this);
         behaviours.add(scanningBehavior);
+    }
+
+    @Override
+    public void applyRadarDetectionSettings(RadarDetectionSettings settings) {
+        if (scanningBehavior != null) {
+            scanningBehavior.applyDetectionSettings(settings);
+        }
+    }
+
+    @Override
+    public float getAngularSpeed() {
+        return 0;
+    }
+
+    @Override
+    protected void applyRotation() {
+        angle = 0;
+
+        if (movedContraption != null) {
+            movedContraption.setAngle(0);
+            movedContraption.setRotationAxis(getradarDirection().getAxis());
+        }
     }
 
     @Override
@@ -91,40 +109,62 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
         updateScanningBehavior();
     }
 
+    @Override
     public void assemble() {
-        tryAssemble();
-    }
-
-    private boolean tryAssemble() {
         if (level == null || level.isClientSide) {
-            return false;
+            return;
         }
 
-        if (!(level.getBlockState(getBlockPos()).getBlock()
-                instanceof SonarBearingBlock)) {
-            return false;
+        if (!(getBlockState().getBlock() instanceof SonarBearingBlock)) {
+            return;
         }
 
-        if (assembled || movedContraption != null) {
-            return true;
+        if (running || movedContraption != null) {
+            return;
         }
 
-        SonarContraption contraption = createContraption();
+        SonarContraption contraption = new SonarContraption();
 
-        if (contraption == null) {
-            return false;
+        try {
+            if (!contraption.assemble(level, worldPosition)) {
+                return;
+            }
+
+            lastException = null;
+        } catch (AssemblyException e) {
+            lastException = e;
+            sendData();
+            return;
         }
 
         panelCount = contraption.getPanelCount();
-        assembled = true;
+
+        savedSensorPositions.clear();
+        savedSensorPositions.addAll(contraption.getSensorPositions());
+
+        Direction direction = getradarDirection();
+        contraption.removeBlocksFromWorld(level, BlockPos.ZERO);
+        movedContraption = ControlledContraptionEntity.create(level, this, contraption);
+        movedContraption.setCustomName(Component.literal("Ground Penetrating Sonar"));
+        BlockPos anchor = worldPosition.relative(direction);
+
+        movedContraption.setPos(anchor.getX(), anchor.getY(), anchor.getZ());
+        movedContraption.setRotationAxis(direction.getAxis());
+        movedContraption.setAngle(0);
+
+        level.addFreshEntity(movedContraption);
+
+        running = true;
+        angle = 0;
 
         refreshStructureValidity();
         updateScanningBehavior();
 
-        setChanged();
-        notifyUpdate();
+        AllSoundEvents.CONTRAPTION_ASSEMBLE.playOnServer(level, worldPosition);
 
-        return true;
+        setChanged();
+        sendData();
+        updateGeneratedRotation();
     }
 
     private SonarContraption createContraption() {
@@ -162,67 +202,49 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
         return contraption;
     }
 
+    @Override
     public void disassemble() {
-        if (level == null) {
+        if (level == null || level.isClientSide) {
             return;
         }
 
-        if (!assembled && movedContraption == null) {
-            return;
-        }
+        super.disassemble();
 
-        if (movedContraption != null) {
-            movedContraption.setAngle(0.0f);
-            movedContraption.disassemble();
-
-            if (!level.isClientSide) {
-                AllSoundEvents.CONTRAPTION_DISASSEMBLE.playOnServer(level, getBlockPos());
-            }
-        }
-
-        movedContraption = null;
-        assembled = false;
         panelCount = 0;
         structureValid = false;
+        savedSensorPositions.clear();
 
         updateScanningBehavior();
 
         setChanged();
-        notifyUpdate();
+        sendData();
     }
 
     @Override
-    public void remove() {
-        if (level != null && !level.isClientSide) {
-            disassemble();
-        }
-
-        super.remove();
+    public boolean isRwrEmitting() {
+        return false;
     }
 
     private void refreshStructureValidity() {
-        if (level == null) {
-            structureValid = false;
-            return;
-        }
-
         boolean oldValid = structureValid;
-        boolean yValid = worldPosition.getY() < MAX_BEARING_Y_EXCLUSIVE;
-        boolean hasSensors = assembled && movedContraption != null && panelCount > 0;
 
-        structureValid = yValid && hasSensors;
+        structureValid = worldPosition.getY() < MAX_BEARING_Y_EXCLUSIVE
+                && running
+                && movedContraption != null
+                && panelCount > 0
+                && !savedSensorPositions.isEmpty();
 
         if (oldValid != structureValid) {
             setChanged();
 
-            if (!level.isClientSide) {
-                notifyUpdate();
+            if (level != null && !level.isClientSide) {
+                sendData();
             }
         }
     }
 
     public Collection<BlockPos> getSensorPositions() {
-        return getContraption().map(SonarContraption::getSensorPositions).orElse(Set.of());
+        return Set.copyOf(savedSensorPositions);
     }
 
     private void updateScanningBehavior() {
@@ -248,39 +270,31 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
             return;
         }
 
-        if (data.updateRadarPosition(dimension, lastKnownPos, worldPosition)) {
+        if (data.updateRadarPosition(serverLevel, lastKnownPos, worldPosition)) {
             lastKnownPos = worldPosition;
             setChanged();
         }
     }
 
     @Override
-    public boolean isAttachedTo(AbstractContraptionEntity contraption) {
-        return movedContraption == contraption;
-    }
-
-    @Override
     public void attach(ControlledContraptionEntity contraption) {
-        if (!(contraption.getContraption() instanceof SonarContraption sonar)) {
+        super.attach(contraption);
+
+        if (movedContraption != contraption) {
             return;
         }
 
-        movedContraption = contraption;
-        assembled = true;
-        panelCount = sonar.getPanelCount();
+        angle = 0;
+        applyRotation();
 
-        Direction sensorDirection = sonar.getFacingDirection();
-
-        movedContraption.setRotationAxis(sensorDirection.getAxis());
-
-        movedContraption.setAngle(0.0f);
-
+        refreshStructureValidity();
         updateScanningBehavior();
-    }
 
-    @Override
-    public void onStall() {
-        notifyUpdate();
+        setChanged();
+
+        if (level != null && !level.isClientSide) {
+            sendData();
+        }
     }
 
     @Override
@@ -288,20 +302,8 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
         return !isRemoved() && level != null && ModBlocks.SONAR_BEARING.has(getBlockState());
     }
 
-    @Override
-    public BlockPos getBlockPosition() {
-        return getBlockPos();
-    }
-
-    public Optional<SonarContraption> getContraption() {
-        return Optional.ofNullable(movedContraption)
-                .map(ControlledContraptionEntity::getContraption)
-                .filter(SonarContraption.class::isInstance)
-                .map(SonarContraption.class::cast);
-    }
-
     public boolean isAssembled() {
-        return assembled;
+        return running && movedContraption != null;
     }
 
     public int getPanelCount() {
@@ -332,7 +334,7 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
 
     @Override
     public boolean isRunning() {
-        return assembled && movedContraption != null && structureValid && getRange() > 0 && getSpeed() != 0;
+        return running && movedContraption != null && structureValid && getRange() > 0 && getSpeed() != 0;
     }
 
     @Override
@@ -400,10 +402,13 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
     @Override
     protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
-
         panelCount = tag.getInt("PanelCount");
         structureValid = tag.getBoolean("StructureValid");
-        assembled = tag.getBoolean("Assembled");
+        savedSensorPositions.clear();
+
+        for (long packed : tag.getLongArray("SensorPositions")) {
+            savedSensorPositions.add(BlockPos.of(packed));
+        }
 
         if (tag.hasUUID("EmitterId")) {
             emitterId = tag.getUUID("EmitterId");
@@ -415,7 +420,7 @@ public class SonarBearingBlockEntity extends KineticBlockEntity implements IRada
         super.write(tag, registries, clientPacket);
         tag.putInt("PanelCount", panelCount);
         tag.putBoolean("StructureValid", structureValid);
-        tag.putBoolean("Assembled", assembled);
+        tag.putLongArray("SensorPositions", savedSensorPositions.stream().mapToLong(BlockPos::asLong).toArray());
         tag.putUUID("EmitterId", emitterId);
     }
 }

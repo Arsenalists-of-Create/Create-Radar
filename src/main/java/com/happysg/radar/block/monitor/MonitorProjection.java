@@ -1,5 +1,6 @@
 package com.happysg.radar.block.monitor;
 
+import com.happysg.radar.api.monitor.MonitorRadarSnapshot;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
@@ -41,9 +42,10 @@ public class MonitorProjection {
     }
 
     public static MonitorProjection create(MonitorBlockEntity monitor, View view) {
-        List<MonitorBlockEntity.RadarDisplayInfo> radars = monitor.getRunningRadarInfos();
+        List<MonitorRadarSnapshot> radars = monitor.getRunningRadarSnapshots();
         Direction facing = monitor.getBlockState().getValue(MonitorBlock.FACING);
-        boolean renderRelative = radars.stream().anyMatch(MonitorBlockEntity.RadarDisplayInfo::renderRelativeToMonitor);
+        boolean renderRelative = radars.stream().anyMatch(info -> info.displayProfile().renderRelativeToMonitor());
+
         SubLevelAccess monitorShip = Mods.SABLE.isLoaded() && (renderRelative || (view != null && view.lockedToSublevel()))
                 ? monitor.getShip()
                 : null;
@@ -51,6 +53,7 @@ public class MonitorProjection {
                 && view.lockedToSublevel()
                 && monitorShip != null
                 && Objects.equals(monitorShip.getUniqueId(), view.lockedSublevelId());
+
         SubLevelAccess ship = (renderRelative || locked) ? monitorShip : null;
 
         if (view != null) {
@@ -70,9 +73,11 @@ public class MonitorProjection {
         double maxX = Double.NEGATIVE_INFINITY;
         double maxZ = Double.NEGATIVE_INFINITY;
 
-        for (MonitorBlockEntity.RadarDisplayInfo radar : radars) {
+        for (MonitorRadarSnapshot radar : radars) {
             Vec3 p = framePosition(monitor, ship, radar.center());
+
             double r = Math.max(1f, radar.range());
+
             minX = Math.min(minX, p.x - r);
             minZ = Math.min(minZ, p.z - r);
             maxX = Math.max(maxX, p.x + r);

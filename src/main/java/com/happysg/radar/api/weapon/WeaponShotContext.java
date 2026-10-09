@@ -1,53 +1,48 @@
 package com.happysg.radar.api.weapon;
 
 import com.happysg.radar.api.mount.RadarMountAdapter;
-import com.happysg.radar.compat.cbc.CannonMountContext;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
-import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
-import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
 import javax.annotation.Nullable;
+import java.util.Objects;
 
-public record WeaponShotContext(
-        ServerLevel level,
-        @Nullable RadarWeaponContext weaponContext,
-        @Nullable CannonMountContext mount,
-        @Nullable PitchOrientedContraptionEntity entity,
-        @Nullable AbstractMountedCannonContraption weapon
-) {
+/**
+ * Public context supplied to weapon shot adapters and fire-preparation hooks.
+ *
+ */
+public record WeaponShotContext(ServerLevel level, BlockPos mountPos, @Nullable RadarMountAdapter mount, @Nullable RadarWeaponAdapter weapon) {
 
-    public WeaponShotContext(ServerLevel level, RadarWeaponContext weaponContext) {
-        this(level, weaponContext, null, null, null);
+    public WeaponShotContext {
+        level = Objects.requireNonNull(level, "level");
+        mountPos = Objects.requireNonNull(mountPos, "mountPos").immutable();
     }
 
-    public WeaponShotContext(
-            ServerLevel level,
-            CannonMountContext mount,
-            PitchOrientedContraptionEntity entity,
-            AbstractMountedCannonContraption weapon
-    ) {
-        this(level, null, mount, entity, weapon);
+    public WeaponShotContext(ServerLevel level, RadarWeaponContext weaponContext) {
+        this(
+                level,
+                Objects.requireNonNull(weaponContext, "weaponContext").mountPos(),
+                weaponContext.mount(),
+                weaponContext.weapon()
+        );
+    }
+
+    @Nullable
+    public RadarWeaponContext weaponContext() {
+        if (weapon == null) {
+            return null;
+        }
+
+        return new RadarWeaponContext(level, mountPos, mount, weapon);
     }
 
     @Nullable
     public RadarWeaponAdapter radarWeapon() {
-        return weaponContext == null ? null : weaponContext.weapon();
+        return weapon;
     }
 
     @Nullable
     public RadarMountAdapter radarMount() {
-        RadarWeaponAdapter weapon = radarWeapon();
-
-        return weapon == null ? null : weapon.getMount();
-    }
-
-    @Nullable
-    public BlockPos mountPos() {
-        if (weaponContext != null) {
-            return weaponContext.mountPos();
-        }
-
-        return mount != null ? mount.getBlockPos() : null;
+        return mount;
     }
 }

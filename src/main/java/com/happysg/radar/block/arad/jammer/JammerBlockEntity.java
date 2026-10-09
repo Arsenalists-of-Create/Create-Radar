@@ -3,9 +3,10 @@ package com.happysg.radar.block.arad.jammer;
 import com.happysg.radar.api.arad.ARADTargetDesignationEvent;
 import com.happysg.radar.api.arad.ARADTargeting;
 import com.happysg.radar.api.arad.RollingRpmTracker;
+import com.happysg.radar.api.radar.rwr.RadarRwrEmitter;
+import com.happysg.radar.api.radar.rwr.RadarRwrTypes;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
-import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
@@ -15,6 +16,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -41,7 +43,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
             @Nullable UUID emitterId,
             BlockPos radarPos,
             Vec3 position,
-            RadarType radarType,
+            ResourceLocation radarTypeId,
             float rollingRpm,
             float rollingRate
     ) {
@@ -49,7 +51,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
             Objects.requireNonNull(sourceId, "sourceId");
             radarPos = Objects.requireNonNull(radarPos, "radarPos").immutable();
             Objects.requireNonNull(position, "position");
-            Objects.requireNonNull(radarType, "radarType");
+            Objects.requireNonNull(radarTypeId, "radarTypeId");
         }
     }
 
@@ -70,7 +72,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
     private @Nullable BlockPos selectingMonitorPos;
     private @Nullable ARADTargetDesignationEvent.Target selectedTarget;
     private @Nullable Vec3 selectedEmitterPosition;
-    private RadarType selectedRadarType = RadarType.GROUND;
+    private ResourceLocation selectedRadarTypeId = RadarRwrTypes.GROUND;;
     private float selectedRollingRpm;
     private float selectedRollingRate;
     private DirectionalJammingService.Profile jammingProfile =
@@ -156,26 +158,24 @@ public class JammerBlockEntity extends KineticBlockEntity {
         notifyUpdate();
     }
 
-    void receiveAradSelection(
-            BlockPos monitorPos,
-            @Nullable String sourceId,
-            @Nullable ARADTargetDesignationEvent.Target target,
-            RadarType radarType
-    ) {
+    void receiveAradSelection(BlockPos monitorPos, @Nullable String sourceId, @Nullable ARADTargetDesignationEvent.Target target, ResourceLocation radarTypeId) {
         if (sourceId == null || sourceId.isBlank() || target == null) {
             return;
         }
+
         aradLinked = true;
         selectingMonitorPos = monitorPos.immutable();
         selectedEmitterSource = sourceId;
         selectedTarget = target;
         selectedEmitterPosition = target.noisyWorldPosition();
-        selectedRadarType = radarType;
+        selectedRadarTypeId = radarTypeId == null ? RadarRwrTypes.GROUND : radarTypeId;
         selectedRollingRpm = 0.0f;
         selectedRollingRate = 0.0f;
+
         if (level instanceof ServerLevel serverLevel) {
             refreshSelectedEmitterInfo(serverLevel);
         }
+
         setChanged();
         notifyUpdate();
     }
@@ -207,7 +207,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
         selectedEmitterSource = null;
         selectedTarget = null;
         selectedEmitterPosition = null;
-        selectedRadarType = RadarType.GROUND;
+        selectedRadarTypeId = RadarRwrTypes.GROUND;
         selectedRollingRpm = 0.0f;
         selectedRollingRate = 0.0f;
     }
@@ -217,48 +217,49 @@ public class JammerBlockEntity extends KineticBlockEntity {
             return;
         }
 
-        var radar = ARADTargeting.resolveNativeRadar(serverLevel,
-                selectedEmitterSource).orElse(null);
+        var emitter = ARADTargeting.resolveRwrEmitter(serverLevel, selectedEmitterSource).orElse(null);
+
         Vec3 position;
-        RadarType radarType;
+        ResourceLocation radarTypeId;
         RollingRpmTracker.Snapshot telemetry;
-        if (radar != null) {
-            telemetry = ARADTargeting.resolveRpmTelemetry(serverLevel,
-                    selectedEmitterSource);
-            position = ARADTargeting.resolveTargetPosition(serverLevel,
-                    selectedTarget).orElse(selectedTarget.noisyWorldPosition());
-            radarType = radar.getRadarTypeEnum();
+
+        if (emitter != null) {
+            telemetry = ARADTargeting.resolveRpmTelemetry(serverLevel, selectedEmitterSource);
+            position = ARADTargeting.resolveTargetPosition(serverLevel, selectedTarget).orElse(selectedTarget.noisyWorldPosition());
+            radarTypeId = emitter.getRwrEmitterTypeId();
         } else {
-            ExternalRwrEmitterRegistry.EmitterState external =
-                    ExternalRwrEmitterRegistry.resolveSelectable(serverLevel,
-                            selectedEmitterSource).orElse(null);
+            ExternalRwrEmitterRegistry.EmitterState external = ExternalRwrEmitterRegistry.resolveSelectable(serverLevel, selectedEmitterSource).orElse(null);
+
             if (external == null || external.selectionMetadata() == null) {
                 return;
             }
+
             position = external.position();
-            radarType = external.radarType();
-            telemetry = new RollingRpmTracker.Snapshot(
-                    external.selectionMetadata().rollingRpm(),
-                    external.selectionMetadata().rollingRate()
-            );
+            radarTypeId = external.radarTypeId();
+
+            telemetry = new RollingRpmTracker.Snapshot(external.selectionMetadata().rollingRpm(), external.selectionMetadata().rollingRate());
         }
+
         AimAngles aim = aimAnglesForWorldPosition(position);
+
         boolean changed = selectedEmitterPosition == null
                 || selectedEmitterPosition.distanceToSqr(position) > 1.0e-8
-                || selectedRadarType != radarType
+                || !Objects.equals(selectedRadarTypeId, radarTypeId)
                 || Math.abs(selectedRollingRpm - telemetry.rollingRpm()) > ANGLE_EPSILON
                 || Math.abs(selectedRollingRate - telemetry.rollingRate()) > ANGLE_EPSILON
-                || (aim != null
-                && (Math.abs(Mth.wrapDegrees(aim.yaw() - targetYaw)) > ANGLE_EPSILON
+                || (aim != null && (Math.abs(Mth.wrapDegrees(aim.yaw() - targetYaw)) > ANGLE_EPSILON
                 || Math.abs(aim.pitch() - targetPitch) > ANGLE_EPSILON));
+
         selectedEmitterPosition = position;
-        selectedRadarType = radarType;
+        selectedRadarTypeId = radarTypeId;
         selectedRollingRpm = telemetry.rollingRpm();
         selectedRollingRate = telemetry.rollingRate();
+
         if (aim != null) {
             targetYaw = aim.yaw();
             targetPitch = aim.pitch();
         }
+
         if (changed) {
             setChanged();
             notifyUpdate();
@@ -300,7 +301,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
                 selectedTarget.emitterId(),
                 selectedTarget.radarPos(),
                 selectedEmitterPosition,
-                selectedRadarType,
+                selectedRadarTypeId,
                 selectedRollingRpm,
                 selectedRollingRate
         );
@@ -396,47 +397,53 @@ public class JammerBlockEntity extends KineticBlockEntity {
     }
 
     private void updateJammingContribution(ServerLevel serverLevel) {
-        IRadar nativeRadar = selectedEmitterSource == null ? null
-                : ARADTargeting.resolveNativeRadar(serverLevel,
-                selectedEmitterSource).orElse(null);
-        ExternalRwrEmitterRegistry.EmitterState externalEmitter =
-                selectedEmitterSource == null || nativeRadar != null ? null
-                        : ExternalRwrEmitterRegistry.resolveSelectable(serverLevel,
-                        selectedEmitterSource).orElse(null);
-        if (!enabled || selectedEmitterSource == null
-                || selectedEmitterPosition == null
-                || nativeRadar == null && externalEmitter == null) {
+        RadarRwrEmitter emitter = selectedEmitterSource == null ? null
+                : ARADTargeting.resolveRwrEmitter(serverLevel, selectedEmitterSource).orElse(null);
+
+        ExternalRwrEmitterRegistry.EmitterState externalEmitter = selectedEmitterSource == null || emitter != null ? null
+                        : ExternalRwrEmitterRegistry.resolveSelectable(serverLevel, selectedEmitterSource).orElse(null);
+
+        if (!enabled || selectedEmitterSource == null || selectedEmitterPosition == null || (emitter == null && externalEmitter == null)) {
             DirectionalJammingService.remove(serverLevel, worldPosition);
             jammingProfile = DirectionalJammingService.Profile.INACTIVE;
             return;
         }
 
-        Vec3 targetWorldPosition = nativeRadar == null
-                ? externalEmitter.position()
-                : PhysicsHandler.getWorldVec(serverLevel,
-                nativeRadar.getWorldPos().getCenter());
-        Vec3 localTarget = PhysicsHandler.getShipVec(targetWorldPosition,
-                this);
+        Vec3 targetWorldPosition;
+
+        if (emitter != null) {
+            targetWorldPosition = PhysicsHandler.getWorldVec(serverLevel, emitter.getRwrEmitterPosition().getCenter());
+        } else {
+            targetWorldPosition = externalEmitter.position();
+        }
+
+        Vec3 localTarget = PhysicsHandler.getShipVec(targetWorldPosition, this);
         Vec3 localDirection = localTarget.subtract(getTurretPivotLocal());
-        if (!finite(localDirection)
-                || localDirection.lengthSqr() <= DIRECTION_EPSILON_SQR) {
+
+        if (!finite(localDirection) || localDirection.lengthSqr() <= DIRECTION_EPSILON_SQR) {
             DirectionalJammingService.remove(serverLevel, worldPosition);
             jammingProfile = DirectionalJammingService.Profile.INACTIVE;
             return;
         }
+
         org.joml.Vector3f forward = JammerOrientation.forward(yaw, pitch);
+
         Vec3 normalized = localDirection.normalize();
-        double dot = Mth.clamp(normalized.x * forward.x()
-                + normalized.y * forward.y()
-                + normalized.z * forward.z(), -1.0D, 1.0D);
+        double dot = Mth.clamp(normalized.x * forward.x() + normalized.y * forward.y() + normalized.z * forward.z(), -1.0D, 1.0D);
         float alignmentDegrees = (float) Math.toDegrees(Math.acos(dot));
-        Vec3 jammerWorldPosition = PhysicsHandler.getWorldVec(serverLevel,
-                getTurretPivotLocal());
+        Vec3 jammerWorldPosition = PhysicsHandler.getWorldVec(serverLevel, getTurretPivotLocal());
+
         jammingProfile = DirectionalJammingService.heartbeat(
-                serverLevel, worldPosition, selectedEmitterSource,
-                jammerWorldPosition, targetWorldPosition,
+                serverLevel,
+                worldPosition,
+                selectedEmitterSource,
+                jammerWorldPosition,
+                targetWorldPosition,
                 Math.abs(getSpeed()),
-                selectedRollingRpm, selectedRollingRate, alignmentDegrees);
+                selectedRollingRpm,
+                selectedRollingRate,
+                alignmentDegrees
+        );
     }
 
     public boolean affects(BlockPos radarPos) {
@@ -515,7 +522,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
             putVec3(compound, "SelectedEmitterPosition",
                     selectedEmitterPosition);
         }
-        compound.putString("SelectedRadarType", selectedRadarType.name());
+        compound.putString("SelectedRadarTypeId", selectedRadarTypeId.toString());
         compound.putFloat("SelectedRollingRpm", selectedRollingRpm);
         compound.putFloat("SelectedRollingRate", selectedRollingRate);
     }
@@ -563,13 +570,22 @@ public class JammerBlockEntity extends KineticBlockEntity {
         if (selectedEmitterPosition == null) {
             selectedEmitterPosition = noisyPosition;
         }
-        if (compound.contains("SelectedRadarType", Tag.TAG_STRING)) {
-            try {
-                selectedRadarType = RadarType.valueOf(
-                        compound.getString("SelectedRadarType"));
-            } catch (IllegalArgumentException ignored) {
-                selectedRadarType = RadarType.GROUND;
+
+        selectedRadarTypeId = RadarRwrTypes.GROUND;
+
+        if (compound.contains("SelectedRadarTypeId", Tag.TAG_STRING)) {
+            ResourceLocation parsed = ResourceLocation.tryParse(compound.getString("SelectedRadarTypeId"));
+
+            if (parsed != null) {
+                selectedRadarTypeId = parsed;
             }
+        } else if (compound.contains("SelectedRadarType", Tag.TAG_STRING)) {
+            selectedRadarTypeId = switch (compound.getString("SelectedRadarType")) {
+                case "SKY" -> RadarRwrTypes.SKY;
+                case "AIRBORNE" -> RadarRwrTypes.AIRBORNE;
+                case "GROUND" -> RadarRwrTypes.GROUND;
+                default -> RadarRwrTypes.GROUND;
+            };
         }
         selectedRollingRpm = compound.getFloat("SelectedRollingRpm");
         selectedRollingRate = compound.getFloat("SelectedRollingRate");

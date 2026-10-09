@@ -1,11 +1,12 @@
 package com.happysg.radar.block.arad.rwr;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 
 public record RwrRadarContact(
         String sourceId,
         BlockPos radarPos,
-        RadarType radarType,
+        ResourceLocation radarTypeId,
         float bearingDegrees,
         float signalStrength,
         boolean lockCapable,

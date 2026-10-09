@@ -1,15 +1,15 @@
 package com.happysg.radar.api.arad;
 
+import com.happysg.radar.api.radar.rwr.RadarRwrEmitter;
+import com.happysg.radar.api.radar.rwr.RadarRwrEvaluation;
+import com.happysg.radar.api.radar.rwr.RadarRwrTarget;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.block.radar.behavior.IRadar;
-import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableAradTargetingAccess;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
-import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import dev.ryanhcode.sable.companion.SableCompanion;
-import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -18,7 +18,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
-import org.joml.Vector3d;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -48,18 +47,12 @@ public final class ARADTargeting {
     private static final double OUTER_MIN_RADIUS = 30.0;
     private static final double OUTER_MAX_RADIUS = 50.0;
 
-    private static final Map<ResourceKey<Level>, Map<String, NativeRadarHeartbeat>> NATIVE_RADARS =
-            new HashMap<>();
+    private static final Map<ResourceKey<Level>, Map<String, RwrEmitterHeartbeat>> RWR_EMITTERS = new HashMap<>();
 
-    private ARADTargeting() {
-    }
+    private ARADTargeting() {}
 
     /** A live receiver reference and the world position used for exact range/error calculations. */
-    public record Receiver(
-            RwrTargetReference reference,
-            Vec3 worldPosition,
-            @Nullable UUID sublevelId
-    ) {
+    public record Receiver(RwrTargetReference reference, Vec3 worldPosition, @Nullable UUID sublevelId) {
         public Receiver {
             Objects.requireNonNull(reference, "reference");
             Objects.requireNonNull(worldPosition, "worldPosition");
@@ -95,14 +88,17 @@ public final class ARADTargeting {
 
         UUID emitterId = radar.getEmitterId();
         BlockPos radarPos = radar.getWorldPos();
+
         if (emitterId == null || radarPos == null) {
             return;
         }
 
         String sourceId = RadarContactRegistry.radarSourceId(level, radarPos);
-        NATIVE_RADARS
+
+        RWR_EMITTERS
                 .computeIfAbsent(level.dimension(), ignored -> new LinkedHashMap<>())
-                .put(sourceId, new NativeRadarHeartbeat(emitterId, radarPos.immutable(), level.getGameTime()));
+                .put(sourceId, new RwrEmitterHeartbeat(emitterId, radarPos.immutable(), level.getGameTime()));
+
         RadarRpmTelemetry.heartbeat(level, radar);
     }
 
@@ -116,20 +112,17 @@ public final class ARADTargeting {
     public static Optional<Receiver> sableReceiver(ServerLevel level, UUID sublevelId) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(sublevelId, "sublevelId");
+
         if (!Mods.SABLE.isLoaded()) {
             return Optional.empty();
         }
 
-        SubLevelContainer container = SubLevelContainer.getContainer(level);
-        SubLevelAccess sublevel = container == null ? null : container.getSubLevel(sublevelId);
-        if (sublevel == null) {
-            return Optional.empty();
-        }
+        Vec3 position = SableAradTargetingAccess.getSublevelWorldPosition(level, sublevelId);
 
-        Vec3 position = RadarTrackUtil.getPosition(sublevel);
         if (position == null || !finite(position)) {
             return Optional.empty();
         }
+
         return Optional.of(new Receiver(RwrTargetReference.sableShip(sublevelId), position, sublevelId));
     }
 
@@ -144,11 +137,64 @@ public final class ARADTargeting {
         }
 
         List<NativeRadarContact> contacts = new ArrayList<>();
-        for (IRadar radar : liveNativeRadars(level)) {
-            toContact(level, currentReceiver, radar).ifPresent(contacts::add);
+        for (RadarRwrEmitter emitter : liveRwrEmitters(level)) {
+            toContact(level, currentReceiver, emitter).ifPresent(contacts::add);
         }
         contacts.sort(Comparator.comparing(NativeRadarContact::sourceId));
         return List.copyOf(contacts);
+    }
+
+    public static void heartbeatRwrEmitter(ServerLevel level, RadarRwrEmitter emitter) {
+        Objects.requireNonNull(level, "level");
+        Objects.requireNonNull(emitter, "emitter");
+
+        UUID emitterId = emitter.getRwrEmitterId();
+        BlockPos radarPos = emitter.getRwrEmitterPosition();
+
+        if (emitterId == null || radarPos == null) {
+            return;
+        }
+
+        String sourceId = RadarContactRegistry.radarSourceId(level, radarPos);
+
+        RWR_EMITTERS
+                .computeIfAbsent(level.dimension(), ignored -> new LinkedHashMap<>())
+                .put(sourceId, new RwrEmitterHeartbeat(emitterId, radarPos.immutable(), level.getGameTime()));
+    }
+
+    public static Optional<RadarRwrEmitter>
+    resolveRwrEmitter(ServerLevel level, String sourceId) {
+        Objects.requireNonNull(level, "level");
+
+        if (sourceId == null || sourceId.isBlank()) {
+            return Optional.empty();
+        }
+
+        for (RadarRwrEmitter emitter : liveRwrEmitters(level)) {
+            String currentSourceId = RadarContactRegistry.radarSourceId(level, emitter.getRwrEmitterPosition());
+
+            if (sourceId.equals(currentSourceId) && emitter.isRwrEmitting()) {
+                return Optional.of(emitter);
+            }
+        }
+
+        BlockPos radarPos = parseRadarSource(level, sourceId).orElse(null);
+
+        if (radarPos == null) {
+            return Optional.empty();
+        }
+
+        BlockEntity blockEntity = level.getBlockEntity(radarPos);
+
+        if (!(blockEntity instanceof RadarRwrEmitter emitter)
+                || blockEntity.isRemoved()
+                || !emitter.isRwrEmitting()
+                || !sourceId.equals(RadarContactRegistry.radarSourceId(level, emitter.getRwrEmitterPosition())
+        )) {
+            return Optional.empty();
+        }
+
+        return Optional.of(emitter);
     }
 
     /** Resolves one live, detectable native contact by its stable RWR source ID. */
@@ -165,38 +211,12 @@ public final class ARADTargeting {
             return Optional.empty();
         }
 
-        return resolveNativeRadar(level, sourceId)
-                .flatMap(radar -> toContact(level, currentReceiver, radar));
+        return resolveRwrEmitter(level, sourceId).flatMap(emitter -> toContact(level, currentReceiver, emitter));
     }
 
     /** Resolves a current, running native radar without applying receiver coverage. */
     public static Optional<IRadar> resolveNativeRadar(ServerLevel level, String sourceId) {
-        Objects.requireNonNull(level, "level");
-        if (sourceId == null || sourceId.isBlank()) {
-            return Optional.empty();
-        }
-
-        for (IRadar radar : liveNativeRadars(level)) {
-            String currentSourceId = RadarContactRegistry.radarSourceId(level, radar.getWorldPos());
-            if (sourceId.equals(currentSourceId) && radar.isRunning()) {
-                return Optional.of(radar);
-            }
-        }
-
-        // Point resolution must not depend on tick ordering at chunk/level startup. The heartbeat
-        // index is only the discovery mechanism; a stable source ID can resolve its loaded owner directly.
-        BlockPos radarPos = parseRadarSource(level, sourceId).orElse(null);
-        if (radarPos == null) {
-            return Optional.empty();
-        }
-        BlockEntity blockEntity = level.getBlockEntity(radarPos);
-        if (!(blockEntity instanceof IRadar radar)
-                || blockEntity.isRemoved()
-                || !radar.isRunning()
-                || !sourceId.equals(RadarContactRegistry.radarSourceId(level, radar.getWorldPos()))) {
-            return Optional.empty();
-        }
-        return Optional.of(radar);
+        return resolveRwrEmitter(level, sourceId).filter(IRadar.class::isInstance).map(IRadar.class::cast);
     }
 
     /** Returns the current 20-second rolling shaft telemetry for a native emitter. */
@@ -225,20 +245,18 @@ public final class ARADTargeting {
         Vec3 targetLocalPosition = null;
         Vec3 noisyWorldPosition;
 
-        SubLevelAccess targetSublevel = targetSublevelId == null
-                ? null
-                : resolveSublevel(level, targetSublevelId);
-        if (targetSublevelId != null && targetSublevel == null) {
-            return null;
-        }
-        if (targetSublevel != null) {
+        if (targetSublevelId != null) {
+            if (!Mods.SABLE.isLoaded()) {
+                return null;
+            }
+
             targetLocalPosition = radarPos.getCenter().add(horizontalError);
-            Vector3d transformed = targetSublevel.logicalPose().transformPosition(new Vector3d(
-                    targetLocalPosition.x,
-                    targetLocalPosition.y,
-                    targetLocalPosition.z
-            ));
-            noisyWorldPosition = new Vec3(transformed.x(), transformed.y(), transformed.z());
+            noisyWorldPosition = SableAradTargetingAccess.localToWorld(level, targetSublevelId, targetLocalPosition);
+
+            if (noisyWorldPosition == null) {
+                return null;
+            }
+
         } else {
             targetSublevelId = null;
             noisyWorldPosition = contact.radarWorldPosition().add(horizontalError);
@@ -261,30 +279,29 @@ public final class ARADTargeting {
     ) {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(target, "target");
-        if (target.targetSublevelId() == null || target.targetLocalPosition() == null) {
+
+        if (target.targetSublevelId() == null
+                || target.targetLocalPosition() == null) {
             return Optional.of(target.noisyWorldPosition());
         }
 
-        SubLevelAccess sublevel = resolveSublevel(level, target.targetSublevelId());
-        if (sublevel == null) {
+        if (!Mods.SABLE.isLoaded()) {
             return Optional.empty();
         }
-        Vec3 local = target.targetLocalPosition();
-        Vector3d transformed = sublevel.logicalPose().transformPosition(
-                new Vector3d(local.x, local.y, local.z));
-        Vec3 worldPosition = new Vec3(transformed.x(), transformed.y(), transformed.z());
-        return finite(worldPosition) ? Optional.of(worldPosition) : Optional.empty();
+
+        Vec3 worldPosition = SableAradTargetingAccess.localToWorld(level, target.targetSublevelId(), target.targetLocalPosition());
+        return worldPosition != null && finite(worldPosition) ? Optional.of(worldPosition) : Optional.empty();
     }
 
     /** Clears the transient native-radar index for an unloading server level. */
     public static void clearNativeRadars(ServerLevel level) {
-        NATIVE_RADARS.remove(level.dimension());
+        RWR_EMITTERS.remove(level.dimension());
         RadarRpmTelemetry.clear(level);
     }
 
     /** Prunes expired or no-longer-owned heartbeats at the end of each server-level tick. */
     public static void tickNativeRadars(ServerLevel level) {
-        liveNativeRadars(level);
+        liveRwrEmitters(level);
         RadarRpmTelemetry.tick(level, NATIVE_RADAR_HEARTBEAT_TTL_TICKS);
     }
 
@@ -298,21 +315,24 @@ public final class ARADTargeting {
                 : Optional.empty();
     }
 
-    private static Optional<NativeRadarContact> toContact(
-            ServerLevel level,
-            Receiver receiver,
-            IRadar radar
-    ) {
-        if (!radar.isRunning()) {
+    private static Optional<NativeRadarContact> toContact(ServerLevel level, Receiver receiver, RadarRwrEmitter emitter) {
+        if (!emitter.isRwrEmitting()) {
             return Optional.empty();
         }
 
-        float radarRange = radar.getRange();
+        float radarRange = emitter.getRwrRange();
         if (!Float.isFinite(radarRange) || radarRange <= 0.0F) {
             return Optional.empty();
         }
 
-        Vec3 radarWorldPosition = PhysicsHandler.getWorldVec(level, radar.getWorldPos().getCenter());
+        BlockPos radarPos = emitter.getRwrEmitterPosition();
+
+        if (radarPos == null) {
+            return Optional.empty();
+        }
+
+        Vec3 radarWorldPosition = PhysicsHandler.getWorldVec(level, radarPos.getCenter());
+
         if (radarWorldPosition == null || !finite(radarWorldPosition)) {
             return Optional.empty();
         }
@@ -324,75 +344,108 @@ public final class ARADTargeting {
             return Optional.empty();
         }
 
-        RwrContactEvaluation evaluation = radar.evaluateRwrContact(
-                level,
-                receiver.reference(),
-                receiver.reference()
-        );
-        if (!evaluation.emitting() || !evaluation.detectableByReceiver()
-                || !Float.isFinite(evaluation.signalStrength()) || evaluation.signalStrength() <= 0.0F) {
+        boolean emitting;
+        boolean detectable;
+        float signalStrength;
+
+        if (emitter instanceof IRadar radar) {
+            RwrContactEvaluation evaluation = radar.evaluateRwrContact(
+                    level,
+                    receiver.reference(),
+                    receiver.reference()
+            );
+
+            emitting = evaluation.emitting();
+            detectable = evaluation.detectableByReceiver();
+            signalStrength = evaluation.signalStrength();
+        } else {
+            RadarRwrTarget publicTarget = new RadarRwrTarget(
+                    receiver.worldPosition(),
+                    receiver.sublevelId() == null ? null : receiver.sublevelId().toString()
+            );
+
+            RadarRwrEvaluation evaluation = emitter.evaluateRwrContact(level, publicTarget, publicTarget);
+
+            if (evaluation == null) {
+                return Optional.empty();
+            }
+
+            emitting = evaluation.emitting();
+            detectable = evaluation.detectable();
+            signalStrength = evaluation.signalStrength();
+        }
+
+        if (!emitting || !detectable || !Float.isFinite(signalStrength) || signalStrength <= 0.0F) {
             return Optional.empty();
         }
 
-        BlockPos radarPos = radar.getWorldPos().immutable();
-        SubLevelAccess targetSublevel = Mods.SABLE.isLoaded()
-                ? SableCompanion.INSTANCE.getContaining(level, radarPos)
-                : null;
-        UUID targetSublevelId = targetSublevel == null ? null : targetSublevel.getUniqueId();
+        radarPos = radarPos.immutable();
+        UUID targetSublevelId = Mods.SABLE.isLoaded() ? SableAradTargetingAccess.getContainingSublevelId(level, radarPos) : null;
+
         return Optional.of(new NativeRadarContact(
                 RadarContactRegistry.radarSourceId(level, radarPos),
-                radar.getEmitterId(),
+                emitter.getRwrEmitterId(),
                 radarPos,
                 radarWorldPosition,
                 radarRange,
                 rangeRatio,
-                evaluation.signalStrength(),
+                signalStrength,
                 targetSublevelId
         ));
     }
 
-    private static List<IRadar> liveNativeRadars(ServerLevel level) {
-        Map<String, NativeRadarHeartbeat> dimensionRadars = NATIVE_RADARS.get(level.dimension());
-        if (dimensionRadars == null || dimensionRadars.isEmpty()) {
+    private static List<RadarRwrEmitter> liveRwrEmitters(ServerLevel level) {
+        Map<String, RwrEmitterHeartbeat> dimensionEmitters = RWR_EMITTERS.get(level.dimension());
+
+        if (dimensionEmitters == null || dimensionEmitters.isEmpty()) {
             return List.of();
         }
 
         long now = level.getGameTime();
-        List<IRadar> radars = new ArrayList<>();
-        Iterator<Map.Entry<String, NativeRadarHeartbeat>> iterator = dimensionRadars.entrySet().iterator();
+        List<RadarRwrEmitter> emitters = new ArrayList<>();
+        Iterator<Map.Entry<String, RwrEmitterHeartbeat>> iterator = dimensionEmitters.entrySet().iterator();
+
         while (iterator.hasNext()) {
-            Map.Entry<String, NativeRadarHeartbeat> entry = iterator.next();
-            NativeRadarHeartbeat heartbeat = entry.getValue();
+            Map.Entry<String, RwrEmitterHeartbeat> entry = iterator.next();
+            RwrEmitterHeartbeat heartbeat = entry.getValue();
             long age = now - heartbeat.gameTime();
+
             if (age < 0L || age > NATIVE_RADAR_HEARTBEAT_TTL_TICKS) {
                 iterator.remove();
                 continue;
             }
 
             BlockEntity blockEntity = level.getBlockEntity(heartbeat.radarPos());
-            if (!(blockEntity instanceof IRadar radar)
-                    || blockEntity.isRemoved()
-                    || !heartbeat.emitterId().equals(radar.getEmitterId())
-                    || !heartbeat.radarPos().equals(radar.getWorldPos())
-                    || !entry.getKey().equals(RadarContactRegistry.radarSourceId(level, radar.getWorldPos()))) {
+
+            if (!(blockEntity instanceof RadarRwrEmitter emitter) || blockEntity.isRemoved() || !heartbeat.emitterId()
+                    .equals(emitter.getRwrEmitterId()) || !heartbeat.radarPos()
+                    .equals(emitter.getRwrEmitterPosition()) || !entry.getKey()
+                    .equals(RadarContactRegistry.radarSourceId(level, emitter.getRwrEmitterPosition()))) {
                 iterator.remove();
                 continue;
             }
-            radars.add(radar);
+
+            emitters.add(emitter);
         }
 
-        if (dimensionRadars.isEmpty()) {
-            NATIVE_RADARS.remove(level.dimension());
+        if (dimensionEmitters.isEmpty()) {
+            RWR_EMITTERS.remove(level.dimension());
         }
-        return radars;
+
+        return List.copyOf(emitters);
     }
 
-    private static @Nullable SubLevelAccess resolveSublevel(ServerLevel level, UUID sublevelId) {
-        if (!Mods.SABLE.isLoaded()) {
-            return null;
+    private static List<IRadar> liveNativeRadars(ServerLevel level) {
+        List<IRadar> radars = new ArrayList<>();
+
+        for (RadarRwrEmitter emitter : liveRwrEmitters(level)) {
+
+            if (emitter instanceof IRadar radar) {
+                radars.add(radar);
+            }
         }
-        SubLevelContainer container = SubLevelContainer.getContainer(level);
-        return container == null ? null : container.getSubLevel(sublevelId);
+
+        return List.copyOf(radars);
     }
 
     private static Optional<BlockPos> parseRadarSource(ServerLevel level, String sourceId) {
@@ -440,6 +493,5 @@ public final class ARADTargeting {
         return Double.isFinite(position.x) && Double.isFinite(position.y) && Double.isFinite(position.z);
     }
 
-    private record NativeRadarHeartbeat(UUID emitterId, BlockPos radarPos, long gameTime) {
-    }
+    private record RwrEmitterHeartbeat(UUID emitterId, BlockPos radarPos, long gameTime) { }
 }

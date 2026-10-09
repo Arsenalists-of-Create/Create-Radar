@@ -1,5 +1,8 @@
 package com.happysg.radar.block.arad.rwr;
 
+import com.happysg.radar.api.radar.rwr.RadarRwrEmitter;
+import com.happysg.radar.api.radar.rwr.RadarRwrEvaluation;
+import com.happysg.radar.api.radar.rwr.RadarRwrTarget;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.behavior.networks.NetworkData;
@@ -7,22 +10,17 @@ import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
-import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableRwrReceiverAccess;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
-import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.networking.NetworkHandler;
 import com.happysg.radar.networking.packets.RwrEngagedSoundPacket;
 import com.happysg.radar.networking.packets.RwrLockSoundPacket;
 import com.happysg.radar.registry.ModSounds;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import dev.ryanhcode.sable.api.SubLevelHelper;
-import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import dev.ryanhcode.sable.companion.SableCompanion;
-import dev.ryanhcode.sable.companion.SubLevelAccess;
-import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundSource;
@@ -76,7 +74,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
     private static final class ContactAccumulator {
         private final String sourceId;
         private final BlockPos radarPos;
-        private final RadarType radarType;
+        private final ResourceLocation radarTypeId;
         private final float bearingDegrees;
         private final List<Vec3> receiverPositions = new ArrayList<>();
         private float signalStrength = 0.0F;
@@ -86,15 +84,19 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         private boolean engaged = false;
         private boolean friendly = false;
 
-        private ContactAccumulator(String sourceId, IRadar radar, Vec3 displayReceiverPos, Vec3 radarWorldPos) {
-            this(sourceId, radar.getWorldPos(), radar.getRadarTypeEnum(),
-                    bearingDegrees(displayReceiverPos, radarWorldPos));
+        private ContactAccumulator(String sourceId, RadarRwrEmitter emitter, Vec3 displayReceiverPos, Vec3 radarWorldPos) {
+            this(
+                    sourceId,
+                    emitter.getRwrEmitterPosition(),
+                    emitter.getRwrEmitterTypeId(),
+                    bearingDegrees(displayReceiverPos, radarWorldPos)
+            );
         }
 
-        private ContactAccumulator(String sourceId, BlockPos radarPos, RadarType radarType, float bearingDegrees) {
+        private ContactAccumulator(String sourceId, BlockPos radarPos, ResourceLocation radarTypeId, float bearingDegrees) {
             this.sourceId = sourceId;
             this.radarPos = radarPos.immutable();
-            this.radarType = radarType;
+            this.radarTypeId = radarTypeId;
             this.bearingDegrees = bearingDegrees;
         }
 
@@ -114,7 +116,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
                     new RwrRadarContact(
                             sourceId,
                             radarPos,
-                            radarType,
+                            radarTypeId,
                             bearingDegrees,
                             signalStrength,
                             lockCapable,
@@ -164,17 +166,13 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         if (engagedSoundUpdateTicks > 0) engagedSoundUpdateTicks--;
 
         // ship = VSGameUtilsKt.getShipManagingPos(level, worldPosition);\
-        SubLevelAccess ship = SableCompanion.INSTANCE.getContaining(level, worldPosition);
-        if (ship == null) {
+        if (!Mods.SABLE.isLoaded()) {
             resetSoundState();
             return;
         }
 
-        if(!Mods.SABLE.isLoaded()) {
-            resetSoundState();
-            return;
-        }
-        List<ReceiverTarget> receiverChain = resolveReceiverChain(sl, ship);
+        List<ReceiverTarget> receiverChain = resolveReceiverChain(sl);
+
         if (receiverChain.isEmpty()) {
             resetSoundState();
             return;
@@ -265,12 +263,8 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
             return List.of();
         }
 
-        SubLevelAccess ship = SableCompanion.INSTANCE.getContaining(level, worldPosition);
-        if (ship == null) {
-            return List.of();
-        }
+        List<ReceiverTarget> receiverChain = resolveReceiverChain(level);
 
-        List<ReceiverTarget> receiverChain = resolveReceiverChain(level, ship);
         if (receiverChain.isEmpty()) {
             return List.of();
         }
@@ -279,6 +273,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         for (AggregatedRwrContact aggregated : stabilizeExactLocks(buildAggregatedContacts(level, receiverChain), false)) {
             contacts.add(aggregated.contact());
         }
+
         return List.copyOf(contacts);
     }
 
@@ -302,37 +297,20 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         return Optional.of(radar);
     }
 
-    private List<ReceiverTarget> resolveReceiverChain(ServerLevel level, SubLevelAccess containingShip) {
-        SubLevelContainer container = SubLevelContainer.getContainer(level);
-        if (container == null) {
-            return List.of(receiverTarget(containingShip));
+    private List<ReceiverTarget> resolveReceiverChain(ServerLevel level) {
+        List<SableRwrReceiverAccess.ShipTarget> ships = SableRwrReceiverAccess.resolveReceiverChain(level, worldPosition);
+
+        if (ships.isEmpty()) {
+            return List.of();
         }
 
-        SubLevel source = container.getSubLevel(containingShip.getUniqueId());
-        if (source == null) {
-            return List.of(receiverTarget(containingShip));
+        List<ReceiverTarget> receivers = new ArrayList<>(ships.size());
+
+        for (SableRwrReceiverAccess.ShipTarget ship : ships) {
+            receivers.add(new ReceiverTarget(ship.shipId(), RwrTargetReference.sableShip(ship.shipId()), ship.position()));
         }
 
-        List<ReceiverTarget> targets = new ArrayList<>();
-        Set<UUID> seen = new HashSet<>();
-        targets.add(receiverTarget(containingShip));
-        seen.add(containingShip.getUniqueId());
-        for (SubLevel subLevel : SubLevelHelper.getConnectedChain(source)) {
-            if (subLevel == null || !seen.add(subLevel.getUniqueId())) {
-                continue;
-            }
-            targets.add(receiverTarget(subLevel));
-        }
-
-        if (targets.isEmpty()) {
-            targets.add(receiverTarget(containingShip));
-        }
-        return List.copyOf(targets);
-    }
-
-    private static ReceiverTarget receiverTarget(SubLevelAccess subLevel) {
-        UUID shipId = subLevel.getUniqueId();
-        return new ReceiverTarget(shipId, RwrTargetReference.sableShip(shipId), RadarTrackUtil.getPosition(subLevel));
+        return List.copyOf(receivers);
     }
 
     private List<AggregatedRwrContact> buildAggregatedContacts(ServerLevel level, List<ReceiverTarget> receivers) {
@@ -353,24 +331,65 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
                 }
 
                 BlockEntity be = level.getBlockEntity(radarPos.get());
-                if (!(be instanceof IRadar radar) || !radar.isRunning()) {
+
+                if (!(be instanceof RadarRwrEmitter emitter) || !emitter.isRwrEmitting()) {
                     RadarContactRegistry.removeInRangeSource(level, receiver.shipId(), sourceId);
                     continue;
                 }
 
-                RwrContactEvaluation evaluation = radar.evaluateRwrContact(level, receiver.reference(), receiver.reference());
+                RwrContactEvaluation evaluation;
+
+                if (emitter instanceof IRadar radar) {
+                    evaluation = radar.evaluateRwrContact(level, receiver.reference(), receiver.reference());
+                } else {
+                    RadarRwrTarget publicTarget = new RadarRwrTarget(receiver.position(), receiver.shipId().toString());
+                    RadarRwrEvaluation publicEvaluation = emitter.evaluateRwrContact(level, publicTarget, publicTarget);
+
+                    if (publicEvaluation == null) {
+                        RadarContactRegistry.removeInRangeSource(level, receiver.shipId(), sourceId);
+                        continue;
+                    }
+
+                    evaluation = new RwrContactEvaluation(
+                            publicEvaluation.emitting(),
+                            publicEvaluation.detectable(),
+                            publicEvaluation.lockCapable(),
+                            publicEvaluation.locked(),
+                            publicEvaluation.signalStrength()
+                    );
+                }
+
                 if (!evaluation.emitting() || !evaluation.detectableByReceiver()) {
                     RadarContactRegistry.removeInRangeSource(level, receiver.shipId(), sourceId);
                     continue;
                 }
 
-                Vec3 radarWorldPos = PhysicsHandler.getWorldVec(level, radar.getWorldPos());
-                boolean withinRadarRange = horizontalDistanceSqr(receiver.position(), radarWorldPos) <= radar.getRange() * radar.getRange();
+                BlockPos emitterPos = emitter.getRwrEmitterPosition();
+                Vec3 radarWorldPos = PhysicsHandler.getWorldVec(level, emitterPos);
+                float radarRange = emitter.getRwrRange();
+
+                boolean withinRadarRange = horizontalDistanceSqr(receiver.position(), radarWorldPos) <= radarRange * radarRange;
                 boolean engaged = RadarContactRegistry.isSourceEngaged(level, receiver.shipId(), sourceId);
-                boolean friendly = isFriendlyRadar(level, radarPos.get(), receiverSecrets);
+
+                boolean friendly = isFriendlyRadar(level, emitterPos, receiverSecrets);
+
                 contactsBySource
-                        .computeIfAbsent(sourceId, ignored -> new ContactAccumulator(sourceId, radar, displayReceiverPos, radarWorldPos))
-                        .accept(evaluation, withinRadarRange, engaged, friendly, receiver.position());
+                        .computeIfAbsent(
+                                sourceId,
+                                ignored -> new ContactAccumulator(
+                                        sourceId,
+                                        emitter,
+                                        displayReceiverPos,
+                                        radarWorldPos
+                                )
+                        )
+                        .accept(
+                                evaluation,
+                                withinRadarRange,
+                                engaged,
+                                friendly,
+                                receiver.position()
+                        );
             }
 
             for (RwrRadarContact contact : ExternalRwrEmitterRegistry.contactsFor(
@@ -384,7 +403,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
                 );
                 contactsBySource
                         .computeIfAbsent(contact.sourceId(), ignored -> new ContactAccumulator(
-                                contact.sourceId(), contact.radarPos(), contact.radarType(), contact.bearingDegrees()))
+                                contact.sourceId(), contact.radarPos(), contact.radarTypeId(), contact.bearingDegrees()))
                         .accept(evaluation, contact.withinRadarRange(), contact.engaged(),
                                 contact.friendly(), receiver.position());
             }
@@ -456,7 +475,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
                 new RwrRadarContact(
                         contact.sourceId(),
                         contact.radarPos(),
-                        contact.radarType(),
+                        contact.radarTypeId(),
                         contact.bearingDegrees(),
                         contact.signalStrength(),
                         contact.lockCapable(),
@@ -850,7 +869,11 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
     }
 
     private Vec3 getSoundPos() {
-        return Vec3.atCenterOf(SableUtils.getWorldPos(this));
+        if (Mods.SABLE.isLoaded()) {
+            return SableRwrReceiverAccess.getSoundPos(this);
+        }
+
+        return worldPosition.getCenter();
     }
 
     private void reconcileAradContacts(ServerLevel level) {

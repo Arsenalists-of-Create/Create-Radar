@@ -1,5 +1,11 @@
 package com.happysg.radar.block.radar.behavior;
 
+import com.happysg.radar.api.radar.NetworkRadarSource;
+import com.happysg.radar.api.radar.RadarDisplayProfiles;
+import com.happysg.radar.api.radar.RadarDisplayProfile;
+import com.happysg.radar.api.radar.RadarDisplaySource;
+import com.happysg.radar.api.radar.rwr.RadarRwrEmitter;
+import com.happysg.radar.api.radar.rwr.RadarRwrTypes;
 import com.happysg.radar.api.tracking.RadarContact;
 import com.happysg.radar.api.tracking.RadarSource;
 import com.happysg.radar.block.arad.rwr.RadarType;
@@ -13,11 +19,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.resources.ResourceLocation;
 
 import java.util.Collection;
 import java.util.UUID;
 
-public interface IRadar extends RadarSource, DebugInspectable {
+public interface IRadar extends RadarSource, NetworkRadarSource, RadarDisplaySource, RadarRwrEmitter, DebugInspectable {
     /** Raw, uncorrupted observations produced by this sensor. */
     Collection<RadarTrack> getTracks();
 
@@ -62,6 +69,18 @@ public interface IRadar extends RadarSource, DebugInspectable {
         return 0f;
     }
 
+    @Override
+    default UUID getRwrEmitterId() { return getEmitterId(); }
+
+    @Override
+    default BlockPos getRwrEmitterPosition() { return getWorldPos(); }
+
+    @Override
+    default float getRwrRange() { return getRange(); }
+
+    @Override
+    default boolean isRwrEmitting() { return isRunning(); }
+
 
     default float getInputRpm() {
         return 0f;
@@ -70,6 +89,52 @@ public interface IRadar extends RadarSource, DebugInspectable {
     //todo better name and/or plan to handle different types of radars
     default boolean renderRelativeToMonitor() {
         return true;
+    }
+
+    @Override
+    default BlockPos getRadarPosition() {
+        return getWorldPos();
+    }
+
+    @Override
+    default RadarDisplayProfile getRadarDisplayProfile() {
+        return switch (getRadarType()) {
+            case "sky" -> RadarDisplayProfiles.SKY;
+            case "nonspinning" -> RadarDisplayProfiles.AIRBORNE;
+            case "sonar" -> RadarDisplayProfiles.SONAR;
+            case "spinning" -> RadarDisplayProfiles.GROUND;
+            default -> RadarDisplayProfiles.GENERIC;
+        };
+    }
+
+    @Override
+    default ResourceLocation getRwrEmitterTypeId() {
+        return switch (getRadarType()) {
+            case "sky" -> RadarRwrTypes.SKY;
+            case "nonspinning" -> RadarRwrTypes.AIRBORNE;
+            case "spinning" -> RadarRwrTypes.GROUND;
+            default -> RadarRwrTypes.GENERIC;
+        };
+    }
+
+    @Override
+    default float getDisplayAngleDegrees() {
+        return getGlobalAngle();
+    }
+
+    @Override
+    default float getDisplayAngularSpeedDegreesPerTick() {
+        return getSweepAngularSpeedDegreesPerTick();
+    }
+
+    @Override
+    default float getDisplayFovDegrees() {
+        return getFovDegrees();
+    }
+
+    @Override
+    default Direction getDisplayDirection() {
+        return getradarDirection();
     }
 
     @Override

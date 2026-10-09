@@ -3,6 +3,11 @@ package com.happysg.radar.block.radar.skyradar;
 import com.happysg.radar.api.arad.ARADTargeting;
 
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.api.radar.NetworkRadarSource;
+import com.happysg.radar.api.radar.RadarDetectionConfigurable;
+import com.happysg.radar.api.radar.RadarDetectionSettings;
+import com.happysg.radar.api.tracking.RadarContact;
+import com.happysg.radar.api.tracking.RadarSource;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.radar.behavior.IRadar;
@@ -37,12 +42,13 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
+import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, IControlContraption {
+public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, IControlContraption, RadarDetectionConfigurable {
     private static final float SKY_RADAR_ROTATION_SCALE = 0.125f;
     private static final int ORIENTATION_VERSION = 1;
 
@@ -121,6 +127,13 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         scanningBehavior.setTrackExpiration(100);
         updateScanningBehavior();
         behaviours.add(scanningBehavior);
+    }
+
+    @Override
+    public void applyRadarDetectionSettings(RadarDetectionSettings settings) {
+        if (scanningBehavior != null) {
+            scanningBehavior.applyDetectionSettings(settings);
+        }
     }
 
     @Override
@@ -369,47 +382,81 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         setChanged();
     }
 
-    private OwnedTarget findOwnedTarget(ServerLevel sl, NetworkData.Group group, String selectedId) {
+    private OwnedTarget findOwnedTarget(
+            ServerLevel sl,
+            NetworkData.Group group,
+            String selectedId
+    ) {
         BlockPos closestRadarPos = null;
-        RadarTrack closestTrack = null;
+        Vec3 closestTargetPos = null;
         double closestDistance = Double.MAX_VALUE;
 
-        for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
-            BlockEntity be = sl.getBlockEntity(endpoint.pos());
-            if (!(be instanceof IRadar radar) || !radar.isRunning()) {
+        for (NetworkData.RadarEndpoint endpoint
+                : group.getRadarEndpoints()) {
+
+            BlockEntity be =
+                    sl.getBlockEntity(
+                            endpoint.pos()
+                    );
+
+            if (!(be instanceof RadarSource source) || !source.isRunning()) {
                 continue;
             }
 
-            RadarTrack track = findTrack(radar, selectedId);
-            if (track == null || track.position() == null) {
+            RadarContact contact = findContact(source, selectedId);
+
+            if (contact == null || contact.getPosition() == null) {
                 continue;
             }
 
-            Vec3 radarPos = PhysicsHandler.getWorldVec(sl, endpoint.pos());
-            double distance = radarPos.distanceToSqr(track.position());
+            BlockPos sourcePos =
+                    endpoint.pos();
+
+            if (be instanceof NetworkRadarSource networkRadar) {
+                BlockPos canonicalPos = networkRadar.getRadarPosition();
+
+                if (canonicalPos != null) {
+                    sourcePos = canonicalPos;
+                }
+            }
+
+            Vec3 radarPos = PhysicsHandler.getWorldVec(sl, sourcePos);
+            double distance = radarPos.distanceToSqr(contact.getPosition());
+
             if (distance < closestDistance) {
                 closestDistance = distance;
                 closestRadarPos = endpoint.pos();
-                closestTrack = track;
+                closestTargetPos = contact.getPosition();
             }
         }
 
-        if (closestRadarPos == null || closestTrack == null) {
+        if (closestRadarPos == null || closestTargetPos == null) {
             return null;
         }
 
-        return new OwnedTarget(closestRadarPos, closestTrack.position());
+        return new OwnedTarget(closestRadarPos, closestTargetPos);
     }
 
-    private static RadarTrack findTrack(IRadar radar, String selectedId) {
-        for (RadarTrack track : radar.getReportedTracks()) {
-            if (track == null) {
+    private static @Nullable RadarContact findContact(RadarSource source, String selectedId) {
+        Collection<? extends RadarContact> contacts =
+                source.getContacts();
+
+        if (contacts == null) {
+            return null;
+        }
+
+        for (RadarContact contact : contacts) {
+            if (contact == null) {
                 continue;
             }
-            if (selectedId.equals(track.getId()) || selectedId.equals(track.id())) {
-                return track;
+
+            String id = contact.getId();
+
+            if (selectedId.equals(id)) {
+                return contact;
             }
         }
+
         return null;
     }
 

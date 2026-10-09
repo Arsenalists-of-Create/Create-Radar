@@ -1,10 +1,10 @@
 package com.happysg.radar.block.monitor;
 
+import com.happysg.radar.api.monitor.client.MonitorScreenRegistry;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlockEntityTypes;
-import com.mojang.logging.LogUtils;
 import com.mojang.serialization.MapCodec;
 import com.simibubi.create.foundation.block.IBE;
 import net.createmod.catnip.lang.Lang;
@@ -30,16 +30,12 @@ import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import com.simibubi.create.foundation.utility.DistExecutor;
 import org.jetbrains.annotations.NotNull;
-
 
 public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<MonitorBlockEntity> {
     public MonitorBlock(Properties pProperties) {
         super(pProperties);
-        this.registerDefaultState(this.defaultBlockState()
-                .setValue(FACING, Direction.NORTH)
-                .setValue(SHAPE, Shape.SINGLE));
+        this.registerDefaultState(this.defaultBlockState().setValue(FACING, Direction.NORTH).setValue(SHAPE, Shape.SINGLE));
     }
 
     @Override
@@ -51,9 +47,7 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
-        return this.defaultBlockState()
-                .setValue(FACING, context.getHorizontalDirection()
-                        .getOpposite());
+        return this.defaultBlockState().setValue(FACING, context.getHorizontalDirection().getOpposite());
     }
 
     @Override
@@ -244,7 +238,16 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
             if (controller.isAradLinked()) return;
 
             BlockPos controllerPos = controller.getControllerPos();
-            if (controllerPos == null) controllerPos = controller.getBlockPos();
+            if (controllerPos == null) {
+                controllerPos = controller.getBlockPos();
+            }
+
+            var customScreen = MonitorScreenRegistry.create(mc.level, controllerPos, controller.getRunningRadarSnapshots());
+
+            if (customScreen != null) {
+                mc.setScreen(customScreen);
+                return;
+            }
 
             mc.setScreen(new MonitorScreen(controllerPos));
         }

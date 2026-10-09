@@ -2,6 +2,8 @@ package com.happysg.radar.block.radar.bearing;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.api.arad.ARADTargeting;
+import com.happysg.radar.api.radar.RadarDetectionConfigurable;
+import com.happysg.radar.api.radar.RadarDetectionSettings;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
@@ -41,7 +43,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar {
+public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar, RadarDetectionConfigurable {
     private BlockPos lastKnownPos = BlockPos.ZERO;
     private int dishCount;
     private boolean creative;
@@ -62,6 +64,13 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         movementMode.setValue(MovementMode.MOVE_NEVER_PLACE.ordinal());
         scanningBehavior = new RadarScanningBlockBehavior(this, RadarType.GROUND);
         behaviours.add(scanningBehavior);
+    }
+
+    @Override
+    public void applyRadarDetectionSettings(RadarDetectionSettings settings) {
+        if (scanningBehavior != null) {
+            scanningBehavior.applyDetectionSettings(settings);
+        }
     }
 
     @Override
@@ -104,11 +113,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
                     return;
                 }
 
-                boolean updated = data.updateRadarPosition(
-                        dim,
-                        lastKnownPos,
-                        worldPosition
-                );
+                boolean updated = data.updateRadarPosition(serverLevel, lastKnownPos, worldPosition);
 
                 // only commit the new position if the network accepted it
                 if (updated) {
@@ -202,6 +207,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         contraption.removeBlocksFromWorld(level, BlockPos.ZERO);
         movedContraption = ControlledContraptionEntity.create(level, this, contraption);
         BlockPos anchor = getBlockPosition().above();
+        movedContraption.setCustomName(Component.literal("Radar Array"));
         movedContraption.setPos(anchor.getX(), anchor.getY(), anchor.getZ());
         movedContraption.setRotationAxis(Direction.Axis.Y);
         level.addFreshEntity(movedContraption);

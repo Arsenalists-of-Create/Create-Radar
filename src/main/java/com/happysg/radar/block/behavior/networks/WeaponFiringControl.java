@@ -1,6 +1,10 @@
 package com.happysg.radar.block.behavior.networks;
 
 import com.happysg.radar.api.mount.RadarMountAdapter;
+import com.happysg.radar.api.mount.RadarMountRegistry;
+import com.happysg.radar.api.targeting.RadarTargetingContext;
+import com.happysg.radar.api.targeting.RadarTargetingRegistry;
+import com.happysg.radar.api.targeting.RadarTargetingSolution;
 import com.happysg.radar.api.weapon.*;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
@@ -40,20 +44,10 @@ import com.happysg.radar.debug.DiagnosticRecorder;
 import com.happysg.radar.debug.DiagnosticSnapshotBuilder;
 import com.happysg.radar.debug.ConflictTraceRecorder;
 import com.happysg.radar.item.radarproxfuze.AdvancedProximityFuze;
-import com.happysg.radar.targeting.AimSolution;
-import com.happysg.radar.targeting.ObstructionChecker;
-import com.happysg.radar.targeting.ObstructionResult;
-import com.happysg.radar.targeting.ProjectileModel;
-import com.happysg.radar.targeting.ProjectileSimulator;
-import com.happysg.radar.targeting.PitchConstraint;
-import com.happysg.radar.targeting.TargetingComputer;
-import com.happysg.radar.targeting.TargetMotionClass;
-import com.happysg.radar.targeting.TargetingResult;
-import com.happysg.radar.targeting.TargetingSnapshot;
-import com.happysg.radar.targeting.TargetingMath;
+import com.happysg.radar.compat.sable.SableWeaponFiringAccess;
+import com.happysg.radar.targeting.*;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.contraptions.Contraption;
-import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
@@ -859,7 +853,10 @@ public class WeaponFiringControl {
     }
 
     public SubLevelAccess getShipByUUID(ServerLevel level, String uuid) {
-        return SubLevelContainer.getContainer(level).getSubLevel(UUID.fromString(uuid));
+        if (!Mods.SABLE.isLoaded()) {
+            return null;
+        }
+        return SableWeaponFiringAccess.findSubLevel(level, UUID.fromString(uuid));
     }
 
     public void refreshControllers() {
@@ -1016,8 +1013,8 @@ public class WeaponFiringControl {
                 instanceof AbstractMountedCannonContraption cannon)) {
             return false;
         }
-        WeaponShotProfile adapter = WeaponShotAdapterRegistry.resolve(
-                new WeaponShotContext(level, mount, entity, cannon));
+        WeaponShotProfile adapter = WeaponShotAdapterRegistry.resolve(createNativeShotContext(level, mount));
+
         if (adapter != null) {
             return adapter.aimMode() == WeaponShotProfile.AimMode.DIRECT
                     || adapter.aimMode() == WeaponShotProfile.AimMode.BALLISTIC
@@ -1092,6 +1089,14 @@ public class WeaponFiringControl {
                 ? preferredIndex : 0;
     }
 
+    private static WeaponShotContext createNativeShotContext(ServerLevel level, CannonMountContext mount) {
+        BlockPos mountPos = mount.getBlockPos();
+        RadarWeaponAdapter weapon = RadarWeaponRegistry.find(level, mountPos);
+        RadarMountAdapter radarMount = weapon != null ? weapon.getMount() : RadarMountRegistry.find(level, mountPos);
+
+        return new WeaponShotContext(level, mountPos, radarMount, weapon);
+    }
+
     @Nullable
     private WeaponSide authoritySide() {
         for (WeaponSide side : this.weaponSides) {
@@ -1123,14 +1128,15 @@ public class WeaponFiringControl {
     }
 
     @Nullable
-    private Vec3 solveGenericBallisticAim(ServerLevel serverLevel, WeaponShotProfile shot, Vec3 targetPos) {
-        ProjectileModel model = shot.projectileModel();
+    private Vec3 solveGenericBallisticAim(
+            ServerLevel serverLevel, WeaponShotProfile shot,
+            Vec3 targetPos, Vec3 targetVelocity, Vec3 targetAcceleration
+    ) {
+        ProjectileModel model = shot.projectileModel() == null ? null : ProjectileModelBridge.toInternal(shot.projectileModel());
 
         if (model == null || !finite(shot.muzzlePosition()) || !finite(targetPos)) {
             return null;
         }
-
-        Vec3 targetVelocity = this.activetrack == null ? Vec3.ZERO : finiteOrZero(this.activetrack.velocity());
 
         Vec3 inheritedVelocity = finiteOrZero(shot.inheritedVelocity());
 
@@ -1140,7 +1146,7 @@ public class WeaponFiringControl {
                         .inheritedVelocity(inheritedVelocity)
                         .targetPosition(targetPos)
                         .targetVelocity(targetVelocity)
-                        .targetAcceleration(Vec3.ZERO)
+                        .targetAcceleration(targetAcceleration)
                         .projectileSpeed(model.muzzleSpeed())
                         .gravity(model.gravity())
                         .drag(model.drag())
@@ -1210,12 +1216,20 @@ public class WeaponFiringControl {
             return;
         }
 
+        Vec3 targetVelocity = this.activetrack == null ? Vec3.ZERO : finiteOrZero(this.activetrack.velocity());
+
+        RadarTargetingSolution targetSolution = resolvePublicTargetingSolution(serverLevel, targetPos, targetVelocity, Vec3.ZERO);
+
+        targetPos = targetSolution.position();
+        targetVelocity = targetSolution.velocity();
+        Vec3 targetAcceleration = targetSolution.acceleration();
+
         Vec3 aimDirection;
 
         if (shot.aimMode() == WeaponShotProfile.AimMode.DIRECT) {
             aimDirection = directionFromTo(shot.muzzlePosition(), targetPos);
         } else {
-            aimDirection = solveGenericBallisticAim(serverLevel, shot, targetPos);
+            aimDirection = solveGenericBallisticAim(serverLevel, shot, targetPos, targetVelocity, targetAcceleration);
         }
 
         if (!finite(aimDirection) || aimDirection.lengthSqr() < 1.0E-12) {
@@ -1250,15 +1264,13 @@ public class WeaponFiringControl {
                 return;
             }
 
-            Vec3 targetVelocity = this.activetrack == null ? Vec3.ZERO : finiteOrZero(this.activetrack.velocity());
-
             this.updateDualSideAiming(
                     serverLevel,
                     true,
                     targetPos,
                     Vec3.ZERO,
                     targetVelocity,
-                    Vec3.ZERO,
+                    targetAcceleration,
                     TargetMotionClass.UNKNOWN,
                     0,
                     desiredPitch,
@@ -1428,11 +1440,9 @@ public class WeaponFiringControl {
                         Contraption contraption = this.cannonMount.getContraption().getContraption();
                         if (contraption instanceof AbstractMountedCannonContraption cannon) {
                             if (this.level instanceof ServerLevel serverLevel) {
-                                WeaponShotContext adapterContext = new WeaponShotContext(
-                                        serverLevel, this.cannonMount,
-                                        this.cannonMount.getContraption(), cannon);
-                                WeaponShotProfile adapterShot =
-                                        WeaponShotAdapterRegistry.resolve(adapterContext);
+                                WeaponShotContext adapterContext = createNativeShotContext(serverLevel, this.cannonMount);
+                                WeaponShotProfile adapterShot = WeaponShotAdapterRegistry.resolve(adapterContext);
+
                                 if (adapterShot != null
                                         && adapterShot.aimMode() == WeaponShotProfile.AimMode.DISABLED) {
                                     this.clearTargetingResultCache();
@@ -1440,13 +1450,14 @@ public class WeaponFiringControl {
                                     this.endStructuralRadarTracking();
                                     return;
                                 }
+
                                 if (this.targetEntity != null && !this.targetEntity.isAlive()) {
                                     LOGGER.debug("WFC: target entity died mid-tick, stopping fire (id={})", this.targetEntity.getUUID());
                                     this.stopFireCannon();
                                 } else {
                                     if (this.targetSublevel != null && !this.binoMode) {
                                         UUID id = UUID.fromString(this.activetrack.id());
-                                        SubLevelAccess live = SubLevelContainer.getContainer(serverLevel).getSubLevel(id);
+                                        SubLevelAccess live = SableWeaponFiringAccess.findSubLevel(serverLevel, id);
                                         if (live == null) {
                                             LOGGER.debug("WFC: Sable ship id={} unloaded mid-tick, stopping fire", id);
                                             this.stopFireCannon();
@@ -1541,22 +1552,26 @@ public class WeaponFiringControl {
                                     targetVel = motion.velocity();
                                     targetAccel = motion.acceleration();
 
-                                    RadarTrack guidanceTrack = this.binoMode
-                                            ? null : this.activetrack;
-                                    JammedGuidance guidance =
-                                            applyJammingGuidance(this.target,
-                                                    targetVel, guidanceTrack);
+                                    RadarTrack guidanceTrack = this.binoMode ? null : this.activetrack;
+                                    JammedGuidance guidance = applyJammingGuidance(this.target, targetVel, guidanceTrack);
+
                                     this.target = guidance.position();
                                     targetVel = guidance.velocity();
-                                    if (guidanceTrack != null
-                                            && guidanceTrack.getJammingData()
-                                            != null) {
+
+                                    RadarTargetingSolution publicTarget = resolvePublicTargetingSolution(serverLevel, this.target, targetVel, targetAccel);
+
+                                    this.target = publicTarget.position();
+                                    targetVel = publicTarget.velocity();
+                                    targetAccel = publicTarget.acceleration();
+
+                                    if (guidanceTrack != null && guidanceTrack.getJammingData() != null) {
                                         rawTargetPos = this.target;
                                     }
 
                                     double dist = this.getCannonRayStart().distanceTo(this.target);
                                     double noLeadDist = (double)1.0F;
                                     Vec3 solvePos = this.target;
+
                                     if (!this.binoMode && this.targetEntity != null) {
                                         if (!this.checkLineOfSight(this.target)) {
                                             LOGGER.debug("WFC: LOS blocked to entity, stopping fire (id={})", this.targetEntity.getUUID());
@@ -2259,8 +2274,7 @@ public class WeaponFiringControl {
 
     public void setBinoTarget(@Nullable BlockPos binoTarget, TargetingConfig config, WeaponNetworkRuntime.WeaponGroupView view, boolean reset) {
         this.view = view;
-        this.targetingConfig = config == null
-                ? TargetingConfig.DEFAULT : config;
+        this.targetingConfig = config == null ? TargetingConfig.DEFAULT : config;
         this.activetrack = null;
         this.lastJammingSampleToken = Long.MIN_VALUE;
         this.clearSublevelAimCache();
@@ -2740,12 +2754,12 @@ public class WeaponFiringControl {
         WeaponShotProfile adapterShot =
                 this.resolveAdapterShot(mount, cannon, level);
         if (adapterShot != null) {
-            if (adapterShot.aimMode() != WeaponShotProfile.AimMode.BALLISTIC
-                    || adapterShot.projectileModel() == null) {
+            if (adapterShot.aimMode() != WeaponShotProfile.AimMode.BALLISTIC || adapterShot.projectileModel() == null) {
                 return null;
             }
+
             return new ResolvedProjectileState(
-                    adapterShot.projectileModel(),
+                    ProjectileModelBridge.toInternal(adapterShot.projectileModel()),
                     null,
                     adapterShot.maxFlightTicks(),
                     adapterShot.diagnosticReason(),
@@ -2922,24 +2936,16 @@ public class WeaponFiringControl {
     }
 
     @Nullable
-    private WeaponShotProfile resolveAdapterShot(
-            CannonMountContext mount,
-            AbstractMountedCannonContraption cannon,
-            ServerLevel serverLevel
-    ) {
+    private WeaponShotProfile resolveAdapterShot(CannonMountContext mount, AbstractMountedCannonContraption cannon, ServerLevel serverLevel) {
         if (mount == null || cannon == null || serverLevel == null) {
             return null;
         }
 
-        PitchOrientedContraptionEntity entity = mount.getContraption();
-
-        if (entity == null) {
+        if (mount.getContraption() == null) {
             return null;
         }
 
-        WeaponShotContext context = new WeaponShotContext(serverLevel, mount, entity, cannon);
-
-        return resolveAdapterShot(context);
+        return resolveAdapterShot(createNativeShotContext(serverLevel, mount));
     }
 
     private int solverFlightTicks(ResolvedProjectileState projectile, Vec3 muzzlePosition, Vec3 targetPosition) {
@@ -5500,13 +5506,9 @@ public class WeaponFiringControl {
         if (side.mount == null || side.mount.getContraption() == null) {
             return null;
         }
-        WeaponShotContext context = new WeaponShotContext(
-                serverLevel,
-                side.mount,
-                side.mount.getContraption(),
-                cannon);
-        String fingerprint =
-                shotFingerprint(adapter, projectile, cannon);
+
+        WeaponShotContext context = createNativeShotContext(serverLevel, side.mount);
+        String fingerprint = shotFingerprint(adapter, projectile, cannon);
         boolean ready = adapter == null
                 ? CannonUtil.isCannonReadyToFire(side.mount)
                 : adapter.aimMode()
@@ -5791,7 +5793,7 @@ public class WeaponFiringControl {
         @Nullable
         ProjectileModel projectileModel() {
             if (adapter != null && adapter.projectileModel() != null) {
-                return adapter.projectileModel();
+                return ProjectileModelBridge.toInternal(adapter.projectileModel());
             }
 
             return projectile == null ? null : projectile.model();
@@ -5894,9 +5896,12 @@ public class WeaponFiringControl {
         } catch (IllegalArgumentException ignored) {
             return null;
         }
-        SubLevelContainer container = SubLevelContainer.getContainer(serverLevel);
-        SubLevelAccess subLevel = container == null
-                ? null : container.getSubLevel(id);
+
+        if (!Mods.SABLE.isLoaded()) {
+            return null;
+        }
+
+        SubLevelAccess subLevel = SableWeaponFiringAccess.findSubLevel(serverLevel, id);
         Vec3 origin = this.getCannonRayStart();
         if (subLevel == null || origin == null) {
             return null;
@@ -6217,6 +6222,12 @@ public class WeaponFiringControl {
                 || canFireWithoutLead;
     }
 
+    private RadarTargetingSolution resolvePublicTargetingSolution(ServerLevel level, Vec3 position, Vec3 velocity, Vec3 acceleration) {
+        RadarTargetingSolution defaults = new RadarTargetingSolution(position, finiteOrZero(velocity), finiteOrZero(acceleration));
+        RadarWeaponContext weaponContext = weapon != null ? weapon.createContext(level) : null;
+        return RadarTargetingRegistry.resolve(new RadarTargetingContext(level, binoMode ? null : activetrack, weaponContext, getWeaponMountPos(), defaults));
+    }
+
     static int nextAimStableTicks(
             @Nullable Vec3 previousAim, @Nullable Vec3 currentAim,
             int stableTicks, double epsilon) {
@@ -6314,7 +6325,7 @@ public class WeaponFiringControl {
             return this == CLEAR;
         }
 
-        // $FF: synthetic method
+        // synthetic method
         private static RayResult[] $values() {
             return new RayResult[]{CLEAR, BLOCKED_BLOCK, BLOCKED_SAFEZONE};
         }

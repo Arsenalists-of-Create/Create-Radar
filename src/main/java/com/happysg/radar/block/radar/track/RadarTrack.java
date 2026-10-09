@@ -1,5 +1,6 @@
 package com.happysg.radar.block.radar.track;
 
+import com.happysg.radar.api.tracking.RadarContactCategory;
 import com.happysg.radar.block.monitor.MonitorSprite;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.api.tracking.RadarContact;
@@ -55,6 +56,22 @@ public class RadarTrack implements RadarContact {
             return severeStrength * 100.0F
                     + directionalStrength * 10.0F + outerStrength;
         }
+    }
+
+    @Override
+    public RadarContactCategory getCategory() {
+        return switch (trackCategory) {
+            case PLAYER -> RadarContactCategory.PLAYER;
+            case MOB -> RadarContactCategory.MOB;
+            case HOSTILE -> RadarContactCategory.HOSTILE;
+            case ANIMAL -> RadarContactCategory.ANIMAL;
+            case SABLE -> RadarContactCategory.SABLE;
+            case PROJECTILE -> RadarContactCategory.PROJECTILE;
+            case CONTRAPTION -> RadarContactCategory.CONTRAPTION;
+            case ITEM -> RadarContactCategory.ITEM;
+            case MISC -> RadarContactCategory.MISC;
+            case MISSILE -> RadarContactCategory.MISSILE;
+        };
     }
 
     public RadarTrack(String id, Vec3 position, Vec3 velocity, long scannedTime, TrackCategory trackCategory, String entityType, float entityheight) {
@@ -124,21 +141,49 @@ public class RadarTrack implements RadarContact {
         };
     }
 
+    private static TrackCategory readTrackCategory(CompoundTag tag) {
+        if (tag.contains("CategoryId", Tag.TAG_STRING)) {
+            String name = tag.getString("CategoryId");
+
+            if (!name.isBlank()) {
+                try {
+                    return TrackCategory.valueOf(name);
+                } catch (IllegalArgumentException ignored) {}
+            }
+        }
+
+        if (tag.contains("Category", Tag.TAG_INT)) {
+            int ordinal = tag.getInt("Category");
+            TrackCategory[] values = TrackCategory.values();
+
+            if (ordinal >= 0 && ordinal < values.length) {
+                return values[ordinal];
+            }
+        }
+
+        return TrackCategory.MISC;
+    }
+
 
     public static RadarTrack deserializeNBT(CompoundTag tag) {
-        RadarTrack track = new RadarTrack(tag.getString("id"),
+        TrackCategory category = readTrackCategory(tag);
+
+        RadarTrack track = new RadarTrack(
+                tag.getString("id"),
                 new Vec3(tag.getDouble("x"), tag.getDouble("y"), tag.getDouble("z")),
                 new Vec3(tag.getDouble("vx"), tag.getDouble("vy"), tag.getDouble("vz")),
                 tag.getLong("scannedTime"),
-                TrackCategory.values()[tag.getInt("Category")],
+                category,
                 tag.getString("entityType"),
                 tag.getFloat("eh")
         );
 
         track.friendly = tag.getBoolean("Friendly");
         track.synthetic = tag.getBoolean("Synthetic");
+
         if (tag.contains("Jamming", Tag.TAG_COMPOUND)) {
             CompoundTag jamming = tag.getCompound("Jamming");
+
             track.jammingData = new JammingData(
                     jamming.getString("RadarSource"),
                     jamming.getFloat("OuterStrength"),
@@ -150,6 +195,7 @@ public class RadarTrack implements RadarContact {
                     jamming.getLong("SampleToken")
             );
         }
+
         if (tag.contains("SilhouetteId", Tag.TAG_STRING)) {
             try {
                 track.silhouetteId = UUID.fromString(tag.getString("SilhouetteId"));
@@ -159,6 +205,7 @@ public class RadarTrack implements RadarContact {
                 track.clearSilhouette();
             }
         }
+
         return track;
     }
 
@@ -173,6 +220,7 @@ public class RadarTrack implements RadarContact {
         tag.putDouble("vy", velocity.y);
         tag.putDouble("vz", velocity.z);
         tag.putLong("scannedTime", scannedTime);
+        tag.putString("CategoryId", trackCategory.name());
         tag.putInt("Category", trackCategory.ordinal());
         tag.putString("entityType", entityType);
         tag.putFloat("eh", entityheight );

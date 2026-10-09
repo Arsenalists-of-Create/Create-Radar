@@ -1,6 +1,7 @@
 package com.happysg.radar.item;
 
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.api.network.RadarNetworkApi;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.config.RadarConfig;
 import net.minecraft.core.BlockPos;
@@ -8,8 +9,8 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.CustomData;
@@ -68,13 +69,11 @@ public class GuidedFuzeItem extends FuzeItem {
         if (monitorPos == null)
             return detonate;
 
-        if (!(projectile.level().getBlockEntity(monitorPos) instanceof NetworkFiltererBlockEntity monitor))
+        if (!(projectile.level() instanceof ServerLevel serverLevel))
             return detonate;
 
-        if (monitor.activeTrackCache == null)
-            return detonate;
+        Vec3 target = RadarNetworkApi.getSelectedTargetPosition(serverLevel, monitorPos).orElse(null);
 
-        Vec3 target = monitor.activeTrackCache.getPosition();
         if (target == null)
             return detonate;
 

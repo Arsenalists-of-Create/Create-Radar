@@ -1,5 +1,9 @@
 package com.happysg.radar.block.radar.behavior;
 
+import com.happysg.radar.api.radar.RadarDetectionSettings;
+import com.happysg.radar.api.radar.scan.RadarScanPolicy;
+import com.happysg.radar.api.radar.scan.RadarScanPolicyProvider;
+import com.happysg.radar.api.radar.scan.RadarVisibilityResult;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlockEntity;
 
@@ -36,6 +40,7 @@ import net.minecraft.world.phys.Vec3;
 import redstonedubstep.mods.vanishmod.VanishUtil;
 
 import java.util.*;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
@@ -69,19 +74,29 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         this.radarType = radarType;
     }
 
-    public void applyDetectionConfig(DetectionConfig cfg) {
-        if (cfg == null) cfg = DetectionConfig.DEFAULT;
-        setScanFlags(
-                cfg.player(),
-                cfg.sable(),
-                cfg.contraption(),
-                cfg.mob(),
-                cfg.animal(),
-                cfg.projectile(),
-                cfg.item()
-        );
+    public void applyDetectionConfig(DetectionConfig config) {
+        if (config == null) {
+            config = DetectionConfig.DEFAULT;
+        }
+
+        applyDetectionSettings(config.toApiSettings());
     }
 
+    public void applyDetectionSettings(RadarDetectionSettings settings) {
+        if (settings == null) {
+            settings = DetectionConfig.DEFAULT.toApiSettings();
+        }
+
+        setScanFlags(
+                settings.player(),
+                settings.sable(),
+                settings.contraption(),
+                settings.mob(),
+                settings.animal(),
+                settings.projectile(),
+                settings.item()
+        );
+    }
 
     private boolean scanPlayers = true;
     private boolean scanSable = true;
@@ -157,18 +172,31 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
 
         for (Entity entity : scannedEntities) {
-            if (entity.isAlive()
-                    && isInFovAndRange(entity.position())
-                    && !RadarOcclusion.isOccluded(bearingEntity, scanPos, entity, radarType)) {
+            if (!entity.isAlive() || !isInFovAndRange(entity.position())) {
+                continue;
+            }
+
+            boolean occluded;
+
+            if (sl != null) {
+                occluded = isOccludedWithPolicy(sl, scanPos, entity.position(), () -> RadarOcclusion.isOccluded(bearingEntity, scanPos, entity, radarType));
+            } else {
+                occluded = RadarOcclusion.isOccluded(bearingEntity, scanPos, entity, radarType);
+            }
+
+            if (!occluded) {
                 radarTracks.compute(entity.getUUID().toString(), (id, track) -> {
-                    if (track == null) return new RadarTrack(entity);
+                    if (track == null) {
+                        return new RadarTrack(entity);
+                    }
+
                     track.updateRadarTrack(entity);
                     return track;
                 });
 
-
-                if (entity instanceof Projectile)
-                    scannedProjectiles.add((Projectile) entity);
+                if (entity instanceof Projectile projectile) {
+                    scannedProjectiles.add(projectile);
+                }
             }
         }
 
@@ -180,7 +208,14 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
                 continue;
             }
 
-            boolean occluded = RadarOcclusion.isOccluded(bearingEntity, scanPos, pos, radarType, ship);
+            boolean occluded;
+
+            if (sl != null) {
+                occluded = isOccludedWithPolicy(sl, scanPos, pos, () -> RadarOcclusion.isOccluded(bearingEntity, scanPos, pos, radarType, ship));
+            } else {
+                occluded = RadarOcclusion.isOccluded(bearingEntity, scanPos, pos, radarType, ship);
+            }
+
             if (inPassiveCoverage && isServer && !occluded) {
                 RadarContactRegistry.markInRange(sl, ship.getUniqueId(), radarSourceId(sl), 40, redstoneSignalFor(pos));
             }
@@ -228,6 +263,26 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         return horizontalDistance <= range && verticalDistance <= yScanRange;
     }
 
+    private boolean isOccludedWithPolicy(ServerLevel level, Vec3 sensorPosition, Vec3 targetPosition, BooleanSupplier defaultOcclusion) {
+        if (bearingEntity instanceof RadarScanPolicyProvider provider) {
+            RadarScanPolicy policy = provider.getRadarScanPolicy();
+
+            if (policy != null) {
+                RadarVisibilityResult result = policy.test(level, sensorPosition, targetPosition);
+
+                if (result != null) {
+                    switch (result) {
+                        case VISIBLE -> { return false; }
+                        case BLOCKED -> { return true; }
+                        case PASS -> {}
+                    }
+                }
+            }
+        }
+
+        return defaultOcclusion.getAsBoolean();
+    }
+
     private boolean isInPassiveRwrCoverage(Vec3 target) {
         return isInPassiveRwrCoverage(target, scanPos);
     }
@@ -267,9 +322,19 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return false;
         }
         Vec3 radarPos = PhysicsHandler.getWorldVec(bearingEntity);
-        return isInPassiveRwrCoverage(pos.get(), radarPos)
-                && !RadarOcclusion.isOccluded(
-                bearingEntity, radarPos, level, receiver, pos.get(), radarType);
+
+        if (!isInPassiveRwrCoverage(pos.get(), radarPos)) {
+            return false;
+        }
+
+        return !isOccludedWithPolicy(level, radarPos, pos.get(), () -> RadarOcclusion.isOccluded(
+                bearingEntity,
+                radarPos,
+                level,
+                receiver,
+                pos.get(),
+                radarType
+        ));
     }
 
     public boolean canLockRwrTarget(RwrTargetReference target, ServerLevel level) {
@@ -284,10 +349,20 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return false;
         }
         Vec3 radarPos = PhysicsHandler.getWorldVec(bearingEntity);
-        // Lock capability reuses the scanner's real FOV/range test, not a separate distance approximation.
-        return isInFovAndRange(pos.get(), radarPos)
-                && !RadarOcclusion.isOccluded(
-                bearingEntity, radarPos, level, target, pos.get(), radarType);
+
+        // Lock capability reuses the scanner's real FOV/range test
+        if (!isInFovAndRange(pos.get(), radarPos)) {
+            return false;
+        }
+
+        return !isOccludedWithPolicy(level, radarPos, pos.get(), () -> RadarOcclusion.isOccluded(
+                bearingEntity,
+                radarPos,
+                level,
+                target,
+                pos.get(),
+                radarType
+        ));
     }
 
     public float signalStrengthForRwrReceiver(RwrTargetReference receiver, ServerLevel level) {
@@ -295,12 +370,22 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         if (pos.isEmpty()) {
             return 0.0F;
         }
+
         Vec3 radarPos = PhysicsHandler.getWorldVec(bearingEntity);
-        return isInPassiveRwrCoverage(pos.get(), radarPos)
-                && !RadarOcclusion.isOccluded(
-                bearingEntity, radarPos, level, receiver, pos.get(), radarType)
-                ? redstoneSignalFor(pos.get(), radarPos)
-                : 0.0F;
+        if (!isInPassiveRwrCoverage(pos.get(), radarPos)) {
+            return 0.0F;
+        }
+
+        boolean occluded = isOccludedWithPolicy(level, radarPos, pos.get(), () -> RadarOcclusion.isOccluded(
+                bearingEntity,
+                radarPos,
+                level,
+                receiver,
+                pos.get(),
+                radarType
+        ));
+
+        return occluded ? 0.0F : redstoneSignalFor(pos.get(), radarPos);
     }
 
     private boolean canScanTarget(RwrTargetReference target, ServerLevel level) {
@@ -366,12 +451,9 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         Level level = blockEntity.getLevel();
         if (level == null) return;
         Predicate<Entity> radarFilter = this::shouldRadarSee;
-        boolean scanAll =
-                scanPlayers && scanContraptions && scanMobs && scanAnimals && scanProjectiles && scanItems;
+        boolean scanAll = scanPlayers && scanContraptions && scanMobs && scanAnimals && scanProjectiles && scanItems;
 
         for (AABB aabb : splitAABB(getRadarAABB(range), 256)) {
-
-
             if (scanPlayers)
                 scannedEntities.addAll(level.getEntitiesOfClass(Player.class, aabb, radarFilter));
 
@@ -390,8 +472,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
                 scannedEntities.addAll(level.getEntitiesOfClass(Animal.class, aabb));
 
             if (scanMobs) {
-                scannedEntities.addAll(level.getEntitiesOfClass(net.minecraft.world.entity.Mob.class, aabb,
-                        e -> !(e instanceof Animal)));
+                scannedEntities.addAll(level.getEntitiesOfClass(net.minecraft.world.entity.Mob.class, aabb, e -> !(e instanceof Animal)));
             }
         }
     }
@@ -422,6 +503,8 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
         scannedShips.remove(SableUtils.getShipManagingPos(blockEntity));
     }
+
+
     private AABB getRadarAABB(double horizontalRange) {
         Vec3 radarPos = PhysicsHandler.getWorldVec(blockEntity);
         double x = radarPos.x;

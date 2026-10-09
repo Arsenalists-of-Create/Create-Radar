@@ -19,7 +19,6 @@ public class BinocularHandler {
     private static boolean pressWasValid = false;
     private static final float SENS_MULTIPLIER = 0.25f;
     private static final float BINOCULAR_FOV = 0.1f;
-    private static int updateCooldown = 0;
 
     private static Double savedSensitivity = null;
 
@@ -65,21 +64,6 @@ public class BinocularHandler {
 
             if (pressWasValid) {
                 FirePacket.send(true);
-                RaycastPacket.send();
-                // This block also runs through the held-key update below, so starting
-                // at 2 prevents a duplicate refresh on the initial press. The next
-                // client tick refreshes normally.
-                updateCooldown = 2;
-            }
-        }
-
-        if (isDown && pressWasValid) {
-            if (--updateCooldown <= 0) {
-                // i refresh both the slave command and the target
-                FirePacket.send(true);
-                RaycastPacket.send();
-
-                updateCooldown = 1;
             }
         }
 
@@ -89,7 +73,6 @@ public class BinocularHandler {
             }
 
             pressWasValid = false;
-            updateCooldown = 0;
         }
 
         wasDown = isDown;

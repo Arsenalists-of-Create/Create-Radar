@@ -3,7 +3,9 @@ package com.happysg.radar.block.radar.sonar.bearing;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.registry.ModBlocks;
-import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
+import com.simibubi.create.AllItems;
+import com.simibubi.create.content.contraptions.bearing.BearingBlock;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -23,7 +25,7 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 
-public class SonarBearingBlock extends DirectionalKineticBlock implements IBE<SonarBearingBlockEntity> {
+public class SonarBearingBlock extends BearingBlock implements IBE<SonarBearingBlockEntity> {
 
     public SonarBearingBlock(Properties properties) {
         super(properties);
@@ -66,6 +68,11 @@ public class SonarBearingBlock extends DirectionalKineticBlock implements IBE<So
     }
 
     @Override
+    protected boolean areStatesKineticallyEquivalent(BlockState oldState, BlockState newState) {
+        return super.areStatesKineticallyEquivalent(oldState, newState) && oldState.getValue(FACING) == newState.getValue(FACING);
+    }
+
+    @Override
     public Class<SonarBearingBlockEntity> getBlockEntityClass() {
         return SonarBearingBlockEntity.class;
     }
@@ -77,14 +84,28 @@ public class SonarBearingBlock extends DirectionalKineticBlock implements IBE<So
 
     @Override
     public InteractionResult onWrenched(BlockState state, UseOnContext context) {
-        if (!context.getLevel().isClientSide) {
-            BlockEntity be = context.getLevel().getBlockEntity(context.getClickedPos());
+        Level level = context.getLevel();
+        BlockPos pos = context.getClickedPos();
 
-            if (be instanceof SonarBearingBlockEntity sonar) {
-                sonar.disassemble();
-            }
+        if (level.isClientSide) {
+            return InteractionResult.SUCCESS;
         }
 
+        BlockEntity be = level.getBlockEntity(pos);
+
+        if (be instanceof SonarBearingBlockEntity sonar && sonar.isAssembled()) {
+            sonar.disassemble();
+        }
+
+        BlockState currentState = level.getBlockState(pos);
+
+        if (!currentState.is(this)) {
+            return InteractionResult.FAIL;
+        }
+
+        Direction current = currentState.getValue(FACING);
+        Direction flipped = current == Direction.UP ? Direction.DOWN : Direction.UP;
+        KineticBlockEntity.switchToBlockState(level, pos, currentState.setValue(FACING, flipped));
         return InteractionResult.SUCCESS;
     }
 
@@ -107,6 +128,10 @@ public class SonarBearingBlock extends DirectionalKineticBlock implements IBE<So
 
     @Override
     protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+        if (AllItems.WRENCH.isIn(stack)) {
+            return ItemInteractionResult.SKIP_DEFAULT_BLOCK_INTERACTION;
+        }
+
         if (stack.getItem() instanceof BlockItem) {
             return ItemInteractionResult.SKIP_DEFAULT_BLOCK_INTERACTION;
         }

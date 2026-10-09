@@ -1,5 +1,12 @@
 package com.happysg.radar.block.controller.networkcontroller;
 
+import com.happysg.radar.api.radar.RadarDetectionConfigurable;
+import com.happysg.radar.api.radar.RadarDetectionSettings;
+import com.happysg.radar.api.radar.rwr.RadarRwrEmitter;
+import com.happysg.radar.api.radar.rwr.RadarRwrEvaluation;
+import com.happysg.radar.api.radar.rwr.RadarRwrTarget;
+import com.happysg.radar.api.tracking.RadarContact;
+import com.happysg.radar.api.tracking.RadarSource;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.arad.jammer.DirectionalJammingService;
 import com.happysg.radar.block.behavior.networks.NetworkData;
@@ -9,16 +16,14 @@ import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
-import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
-import com.happysg.radar.block.radar.behavior.SkyRadarScanningBehavior;
-import com.happysg.radar.block.radar.behavior.SonarScanningBlockBehavior;
+import com.happysg.radar.block.radar.track.RadarContactTrackAdapter;
 import com.happysg.radar.block.radar.track.RadarTrack;
-import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.create.CreateSchematicLinkPersistence;
 import com.happysg.radar.compat.sable.SableLinkPersistence;
+import com.happysg.radar.compat.sable.SableNetworkFiltererAccess;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.block.radar.behavior.IRadar;
@@ -26,15 +31,11 @@ import com.happysg.radar.block.radar.track.TrackCategory;
 import com.simibubi.create.api.contraption.transformable.TransformableBlockEntity;
 import com.simibubi.create.api.schematic.nbt.PartialSafeNBT;
 import com.simibubi.create.content.contraptions.StructureTransform;
-import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
 import com.mojang.logging.LogUtils;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -58,8 +59,7 @@ import java.util.*;
 
 public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSafeNBT, TransformableBlockEntity {
 
-    public record ChaffSuppression(String targetId, long untilTick) {
-    }
+    public record ChaffSuppression(String targetId, long untilTick) {}
     private static final String NBT_INVENTORY = "Inventory";
     private static final String NBT_SLOT_NBT  = "SlotNbt";
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -87,7 +87,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private List<SafeZone> safeZones = new ArrayList<>();
     private BlockPos lastKnownPos = BlockPos.ZERO;
     private RadarTrack currenttrack;
-    private final Map<BlockPos, IRadar> radarCache = new HashMap<>();
     private List<RadarTrack> cachedTracks = List.of();
     private DetectionConfig detectionCache = DetectionConfig.DEFAULT;
     public @Nullable RadarTrack activeTrackCache;
@@ -122,22 +121,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         if (level.isClientSide) return;
 
         NetworkData data = NetworkData.get(sl);
+
         if (!be.lastKnownPos.equals(pos)) {
-            if (data.getGroup(sl.dimension(), pos) != null) {
-                be.lastKnownPos = pos;
-                be.setChanged();
-            } else if (sl.isLoaded(be.lastKnownPos)
-                    && !(sl.getBlockEntity(be.lastKnownPos) instanceof NetworkFiltererBlockEntity)
-                    && sl.getBlockState(be.lastKnownPos).getBlock() != state.getBlock()
-                    && data.updateFiltererPosition(sl.dimension(), be.lastKnownPos, pos)) {
-                be.lastKnownPos = pos;
-                be.setChanged();
-            } else {
-                be.lastKnownPos = pos;
-                be.applyFiltersToNetwork();
+            if (!be.relocateNetworkIfNeeded(sl)) {
+                be.lastKnownPos = pos.immutable();
                 be.setChanged();
             }
         }
+
         NetworkData.Group group = data.getOrCreateGroup(sl.dimension(), pos);
         if (sl.getGameTime() % 5 == 0 && data.reconcileContactLinks(sl, group)) {
             be.endpointCacheUntilTick = -1;
@@ -149,16 +140,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         if (Mods.SABLE.isLoaded() && selectedId != null && !be.isChaffSuppressed(selectedId)) {
             Optional<UUID> selectedShipId = parseUuid(selectedId);
-            if (selectedShipId.isPresent()) {
-                SubLevelContainer container = SubLevelContainer.getContainer(level);
-                SubLevelAccess ship = container == null ? null : container.getSubLevel(selectedShipId.get());
-                if (ship != null) {
-                    if (sl.getGameTime() % 10 == 0) {
-                        RadarContactRegistry.markLocked(sl, selectedShipId.get(), 10);
-                    }
-                    if (sl.getGameTime() % 5 == 0) {
-                        be.markExactLocksForSelectedShip(sl, group, selectedShipId.get());
-                    }
+
+            if (selectedShipId.isPresent() && SableNetworkFiltererAccess.isShipLoaded(sl, selectedShipId.get())) {
+                if (sl.getGameTime() % 10 == 0) {
+                    RadarContactRegistry.markLocked(sl, selectedShipId.get(), 10);
+                }
+
+                if (sl.getGameTime() % 5 == 0) {
+                    be.markExactLocksForSelectedShip(sl, group, selectedShipId.get());
                 }
             }
         }
@@ -183,7 +172,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         Boolean cached = vsLoadedCache.get(shipId);
         if (cached != null) return cached;
 
-        boolean loaded = SubLevelContainer.getContainer(sl).getSubLevel(shipId) != null;
+        boolean loaded = SableNetworkFiltererAccess.isShipLoaded(sl, shipId);
         vsLoadedCache.put(shipId, loaded);
         return loaded;
     }
@@ -212,6 +201,29 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         };
     }
 
+    private boolean relocateNetworkIfNeeded(ServerLevel level) {
+        if (lastKnownPos == null || lastKnownPos.equals(worldPosition)) {
+            return false;
+        }
+
+        NetworkData data = NetworkData.get(level);
+
+        if (data.getGroup(level.dimension(), lastKnownPos) == null) {
+            return false;
+        }
+
+        if (!data.updateFiltererPosition(level, lastKnownPos, worldPosition)) {
+            return false;
+        }
+
+        lastKnownPos = worldPosition.immutable();
+        endpointCacheUntilTick = -1;
+        endpointRepushRequired = true;
+        setChanged();
+
+        return true;
+    }
+
     private void headlessTick(ServerLevel sl) {
         NetworkData data = NetworkData.get(sl);
         NetworkData.Group group = data.getGroup(sl.dimension(), worldPosition);
@@ -222,30 +234,56 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         detectionCache = DetectionConfig.fromTag(group.detectionTag);
 
         // resolve radar
-        List<IRadar> radars = getRunningRadars(sl, group);
+        List<RadarSource> radars =
+                getRunningRadarSources(sl, group);
+
         if (radars.isEmpty()) {
             cachedTracks = List.of();
             activeTrackCache = null;
 
             if (group.selectedTargetId != null) {
                 selectedWasAuto = false;
-                applySelectedTarget(sl, data, group, null, false);
+                applySelectedTarget(
+                        sl,
+                        data,
+                        group,
+                        null,
+                        false
+                );
             }
+
             return;
         }
 
         // rebuild track cache filtered
-
         LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
-        for (IRadar radar : radars) {
-            for (RadarTrack track : radar.getReportedTracks()) {
-                if (track == null || !detectionCache.test(track)) continue;
+
+        long gameTime = sl.getGameTime();
+
+        for (RadarSource radar : radars) {
+            Collection<? extends RadarContact> contacts = radar.getContacts();
+
+            if (contacts == null) {
+                continue;
+            }
+
+            for (RadarContact contact : contacts) {
+                RadarTrack track = RadarContactTrackAdapter.toTrack(contact, gameTime);
+
+                if (track == null || !detectionCache.test(track)) {
+                    continue;
+                }
+
                 String id = track.getId();
-                if (id == null || id.isBlank()) id = track.id();
-                if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
+
+                if (id == null || id.isBlank()) {
+                    continue;
+                }
+
                 merged.merge(id, track, DirectionalJammingService::preferObservation);
             }
         }
+
         cachedTracks = List.copyOf(merged.values());
 
         // resolve current selected track from group.selectedTargetId
@@ -341,98 +379,152 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
     }
 
+    private List<RadarRwrEmitter> getRunningRwrEmitters(ServerLevel sl, NetworkData.Group group) {
+        List<RadarRwrEmitter> emitters = new ArrayList<>();
 
-    private List<IRadar> getRunningRadars(ServerLevel sl, NetworkData.Group group) {
-        List<IRadar> radars = new ArrayList<>();
         for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
-            IRadar radar = resolveRadar(sl, endpoint.pos());
-            if (radar != null && radar.isRunning()) radars.add(radar);
+            BlockEntity be = sl.getBlockEntity(endpoint.pos());
+
+            if (be instanceof RadarRwrEmitter emitter && emitter.isRwrEmitting()) {
+                emitters.add(emitter);
+            }
         }
-        return radars;
+
+        return List.copyOf(emitters);
+    }
+
+    private List<RadarSource> getRunningRadarSources(ServerLevel sl, NetworkData.Group group) {
+        List<RadarSource> sources = new ArrayList<>();
+
+        for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
+            BlockEntity be = sl.getBlockEntity(endpoint.pos());
+
+            if (be instanceof RadarSource source && source.isRunning()) {
+                sources.add(source);
+            }
+        }
+
+        return List.copyOf(sources);
+    }
+
+    private @Nullable RadarRwrEvaluation evaluateRwrEmitter(ServerLevel sl, RadarRwrEmitter emitter, RwrTargetReference target) {
+        Optional<Vec3> targetPosition = target.resolvePosition(sl);
+
+        if (targetPosition.isEmpty()) {
+            return null;
+        }
+
+        if (emitter instanceof IRadar radar) {
+            RwrContactEvaluation evaluation = radar.evaluateRwrContact(sl, target, target);
+
+            return new RadarRwrEvaluation(
+                    evaluation.emitting(),
+                    evaluation.detectableByReceiver(),
+                    evaluation.lockCapable(),
+                    evaluation.lockedOnExactTarget(),
+                    evaluation.signalStrength()
+            );
+        }
+
+        String targetId = null;
+
+        if (target.kind() == RwrTargetReference.Kind.SABLE_SHIP && Mods.SABLE.isLoaded()) {
+            targetId = SableNetworkFiltererAccess.resolveShipId(sl, target);
+        }
+
+        RadarRwrTarget publicTarget = new RadarRwrTarget(targetPosition.get(), targetId);
+        RadarRwrEvaluation evaluation = emitter.evaluateRwrContact(sl, publicTarget, publicTarget);
+        return evaluation == null ? RadarRwrEvaluation.notEmitting() : evaluation;
     }
 
     public @Nullable String getCommandGuidanceRadarSourceId(ServerLevel sl, UUID shipId) {
         NetworkData.Group group = NetworkData.get(sl).getGroup(sl.dimension(), worldPosition);
+
         if (group == null) {
             return null;
         }
 
-        if (isChaffSuppressed(shipId.toString())) {
+        String targetId = shipId.toString();
+
+        if (isChaffSuppressed(targetId)) {
             return null;
         }
 
         RwrTargetReference target = RwrTargetReference.sableShip(shipId);
-        IRadar strongestRadar = null;
+
+        RadarRwrEmitter strongestEmitter = null;
         float strongestSignal = Float.NEGATIVE_INFINITY;
-        String targetId = shipId.toString();
-        for (IRadar radar : getRunningRadars(sl, group)) {
-            boolean tracksTarget = radar.getReportedTracks().stream()
-                    .anyMatch(track -> track != null && targetId.equals(track.getId()));
+
+        for (RadarRwrEmitter emitter : getRunningRwrEmitters(sl, group)) {
+
+            if (!(emitter instanceof RadarSource source)) {
+                continue;
+            }
+
+            Collection<? extends RadarContact> contacts = source.getContacts();
+
+            if (contacts == null) {
+                continue;
+            }
+
+            boolean tracksTarget = contacts.stream().anyMatch(contact -> contact != null && targetId.equals(contact.getId()));
+
             if (!tracksTarget) {
                 continue;
             }
 
-            RwrContactEvaluation evaluation = radar.evaluateRwrContact(sl, target, target);
-            if (!evaluation.emitting() || !evaluation.detectableByReceiver()) {
+            RadarRwrEvaluation evaluation = evaluateRwrEmitter(sl, emitter, target);
+
+            if (evaluation == null || !evaluation.emitting() || !evaluation.detectable()) {
                 continue;
             }
-            if (strongestRadar == null || evaluation.signalStrength() > strongestSignal) {
-                strongestRadar = radar;
+
+            if (strongestEmitter == null || evaluation.signalStrength() > strongestSignal) {
+                strongestEmitter = emitter;
                 strongestSignal = evaluation.signalStrength();
             }
         }
 
-        if (strongestRadar == null) {
-            strongestRadar = findStrongestLockingRadar(sl, group, target);
+        if (strongestEmitter == null) {
+            strongestEmitter = findStrongestLockingRadar(sl, group, target);
         }
-        return strongestRadar == null
-                ? null
-                : RadarContactRegistry.radarSourceId(sl, strongestRadar.getWorldPos());
+
+        return strongestEmitter == null ? null : RadarContactRegistry.radarSourceId(sl, strongestEmitter.getRwrEmitterPosition());
     }
 
     private void markExactLocksForSelectedShip(ServerLevel sl, NetworkData.Group group, UUID shipId) {
         RwrTargetReference target = RwrTargetReference.sableShip(shipId);
-        IRadar strongestRadar = findStrongestLockingRadar(sl, group, target);
-        if (strongestRadar != null) {
-            RadarContactRegistry.markExactLocked(sl, strongestRadar.getEmitterId(), target, 10);
+        RadarRwrEmitter strongestEmitter = findStrongestLockingRadar(sl, group, target);
+
+        if (strongestEmitter != null) {
+            RadarContactRegistry.markExactLocked(sl, strongestEmitter.getRwrEmitterId(), target, 10);
         }
     }
 
-    private IRadar findStrongestLockingRadar(ServerLevel sl, NetworkData.Group group, RwrTargetReference target) {
-        IRadar strongestRadar = null;
-        float strongestSignal = 0.0F;
+    private @Nullable RadarRwrEmitter findStrongestLockingRadar(ServerLevel sl, NetworkData.Group group, RwrTargetReference target) {
+        RadarRwrEmitter strongestEmitter = null;
 
-        for (IRadar radar : getRunningRadars(sl, group)) {
-            RwrContactEvaluation evaluation = radar.evaluateRwrContact(sl, target, target);
-            if (!evaluation.emitting() || !evaluation.lockCapable()) {
+        float strongestSignal = Float.NEGATIVE_INFINITY;
+
+        for (RadarRwrEmitter emitter : getRunningRwrEmitters(sl, group)) {
+            RadarRwrEvaluation evaluation = evaluateRwrEmitter(sl, emitter, target);
+
+            if (evaluation == null || !evaluation.emitting() || !evaluation.lockCapable()) {
                 continue;
             }
-            if (strongestRadar == null || evaluation.signalStrength() > strongestSignal) {
-                strongestRadar = radar;
+
+            if (strongestEmitter == null || evaluation.signalStrength() > strongestSignal) {
+                strongestEmitter = emitter;
                 strongestSignal = evaluation.signalStrength();
             }
         }
-        return strongestRadar;
+
+        return strongestEmitter;
     }
 
     private static long jammingToken(@Nullable RadarTrack track) {
         RadarTrack.JammingData jamming = track == null ? null : track.getJammingData();
         return jamming == null ? Long.MIN_VALUE : jamming.sampleToken();
-    }
-
-    private @Nullable IRadar resolveRadar(ServerLevel sl, BlockPos pos) {
-        IRadar cached = radarCache.get(pos);
-        if (cached instanceof BlockEntity be && be.getBlockPos().equals(pos)) {
-            return cached;
-        }
-
-        if (sl.getBlockEntity(pos) instanceof IRadar radar) {
-            radarCache.put(pos, radar);
-            return radar;
-        }
-
-        radarCache.remove(pos);
-        return null;
     }
 
     private @Nullable RadarTrack resolveSelectedTrack(@Nullable String selectedId) {
@@ -585,9 +677,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 return null;
             }
 
-            SubLevelContainer container = SubLevelContainer.getContainer(serverLevel);
-            SubLevelAccess subLevel = container == null ? null : container.getSubLevel(targetId);
-            return subLevel == null ? null : RadarTrackUtil.getPosition(subLevel);
+            return SableNetworkFiltererAccess.resolveShipPosition(serverLevel, targetId);
         }
 
         Entity entity = serverLevel.getEntity(targetId);
@@ -611,17 +701,30 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
 
         long gameTime = serverLevel.getGameTime();
-        if (compassTrackValidationTick == gameTime
-                && Objects.equals(compassTrackValidationId, selectedId)) {
+        if (compassTrackValidationTick == gameTime && Objects.equals(compassTrackValidationId, selectedId)) {
             return compassTrackValidationResult;
         }
 
         RadarTrack liveTrack = null;
-        for (IRadar radar : getRunningRadars(serverLevel, group)) {
-            for (RadarTrack track : radar.getReportedTracks()) {
+
+        for (RadarSource radar : getRunningRadarSources(serverLevel, group)) {
+            Collection<? extends RadarContact> contacts = radar.getContacts();
+
+            if (contacts == null) {
+                continue;
+            }
+
+            for (RadarContact contact : contacts) {
+                if (contact == null) {
+                    continue;
+                }
+
+                RadarTrack track = RadarContactTrackAdapter.toTrack(contact, gameTime);
+
                 if (track == null || !selectedId.equals(track.getId())) {
                     continue;
                 }
+
                 liveTrack = liveTrack == null ? track : DirectionalJammingService.preferObservation(liveTrack, track);
             }
         }
@@ -726,9 +829,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         RwrTargetReference target = RwrTargetReference.sableShip(shipId);
         for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
-            IRadar radar = resolveRadar(sl, endpoint.pos());
-            if (radar != null) {
-                RadarContactRegistry.clearExactLocked(sl, radar.getEmitterId(), target);
+            BlockEntity be = sl.getBlockEntity(endpoint.pos());
+
+            if (be instanceof RadarRwrEmitter emitter) {
+                RadarContactRegistry.clearExactLocked(sl, emitter.getRwrEmitterId(), target);
             }
         }
     }
@@ -980,6 +1084,13 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return null;
     }
 
+    public @Nullable RadarContact getActiveRadarContact() {
+        return activeTrackCache;
+    }
+
+    public List<? extends RadarContact> getRadarContacts() {
+        return List.copyOf(cachedTracks);
+    }
 
     private void saveSlotNbt(CompoundTag nbt) {
         ListTag list = new ListTag();
@@ -1123,22 +1234,29 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     @Override
     public void onLoad() {
         super.onLoad();
-        for (int i = 0; i < inventory.getSlots(); i++) updateSlotNbtFromInventory(i);
+
+        for (int i = 0; i < inventory.getSlots(); i++) {
+            updateSlotNbtFromInventory(i);
+        }
 
         if (level instanceof ServerLevel sl) {
             if (pendingCreateSchematicSnapshot != null) {
                 CompoundTag snapshot = pendingCreateSchematicSnapshot;
                 pendingCreateSchematicSnapshot = null;
+
                 if (NetworkData.get(sl).getGroup(sl.dimension(), worldPosition) == null) {
                     if (Mods.SABLE.isLoaded()) {
                         SableLinkPersistence.restoreControllerSnapshot(sl, worldPosition, snapshot);
                     } else {
                         CreateSchematicLinkPersistence.restoreControllerSnapshot(sl, worldPosition, snapshot);
                     }
+
                     lastKnownPos = worldPosition;
                     setChanged();
                 }
             }
+
+            relocateNetworkIfNeeded(sl);
             applyFiltersToNetwork();
         }
     }
@@ -1165,27 +1283,18 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         applyDetectionToRadar(sl, group, detection);
     }
 
-    private void applyDetectionToRadar(ServerLevel sl, NetworkData.Group group, DetectionConfig detection) {
-        // group needs to know where the radar is
+    private void applyDetectionToRadar(
+            ServerLevel level,
+            NetworkData.Group group,
+            DetectionConfig detection
+    ) {
+        RadarDetectionSettings settings = detection.toApiSettings();
+
         for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
-            BlockEntity be = sl.getBlockEntity(endpoint.pos());
-            if (!(be instanceof SmartBlockEntity sbe)) continue;
+            BlockEntity be = level.getBlockEntity(endpoint.pos());
 
-            RadarScanningBlockBehavior scan = BlockEntityBehaviour.get(sbe, RadarScanningBlockBehavior.TYPE);
-            if (scan != null) {
-                scan.applyDetectionConfig(detection);
-                continue;
-            }
-
-            SkyRadarScanningBehavior skyScan = BlockEntityBehaviour.get(sbe, SkyRadarScanningBehavior.TYPE);
-            if (skyScan != null) {
-                skyScan.applyDetectionConfig(detection);
-            }
-
-            SonarScanningBlockBehavior sonarScan = BlockEntityBehaviour.get(sbe, SonarScanningBlockBehavior.TYPE);
-
-            if (sonarScan != null) {
-                sonarScan.applyDetectionConfig(detection);
+            if (be instanceof RadarDetectionConfigurable configurable) {
+                configurable.applyRadarDetectionSettings(settings);
             }
         }
     }

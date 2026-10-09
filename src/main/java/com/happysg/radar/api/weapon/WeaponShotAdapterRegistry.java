@@ -1,36 +1,40 @@
 package com.happysg.radar.api.weapon;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
 import javax.annotation.Nullable;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 public final class WeaponShotAdapterRegistry {
     private static final Map<String, WeaponShotAdapter> ADAPTERS = new LinkedHashMap<>();
+    private WeaponShotAdapterRegistry() {}
 
-    private WeaponShotAdapterRegistry() {
-    }
-
-    /**
-     * Registers or replaces an adapter while preserving deterministic insertion order.
-     */
     public static synchronized void register(String id, WeaponShotAdapter adapter) {
-        if (id == null || id.isBlank() || adapter == null) {
-            throw new IllegalArgumentException("Weapon adapter id and adapter must be non-null");
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("Weapon shot adapter id must not be blank");
         }
-        ADAPTERS.put(id, adapter);
+
+        ADAPTERS.put(id, Objects.requireNonNull(adapter, "adapter"));
     }
 
     @Nullable
-    public static synchronized WeaponShotProfile resolve(WeaponShotContext context) {
-        if (context == null) {
-            return null;
+    public static WeaponShotProfile resolve(WeaponShotContext context) {
+        Objects.requireNonNull(context, "context");
+        List<WeaponShotAdapter> adapters;
+
+        synchronized (WeaponShotAdapterRegistry.class) {
+            adapters = List.copyOf(ADAPTERS.values());
         }
-        for (WeaponShotAdapter adapter : ADAPTERS.values()) {
+
+        for (WeaponShotAdapter adapter : adapters) {
             WeaponShotProfile profile = adapter.resolve(context);
+
             if (profile != null) {
                 return profile;
             }
         }
+
         return null;
     }
 }

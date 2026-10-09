@@ -6,12 +6,8 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.vs2.SableUtils;
+import com.happysg.radar.compat.sable.SableChaffAccess;
 import com.happysg.radar.config.RadarConfig;
-import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import dev.ryanhcode.sable.companion.SubLevelAccess;
-import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
-import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
@@ -69,9 +65,7 @@ public final class ChaffManager {
         }
 
         if (Mods.SABLE.isLoaded()) {
-            for (SubLevel subLevel : SableUtils.getLoadedShips(level, launchVolume)) {
-                sourceTargetIds.add(subLevel.getUniqueId().toString());
-            }
+            sourceTargetIds.addAll(SableChaffAccess.getLoadedShipIds(level, launchVolume));
         }
 
         launches.put(rocket.getUUID(), new LaunchContext(Set.copyOf(sourceTargetIds), level.getGameTime()));
@@ -267,17 +261,18 @@ public final class ChaffManager {
 
     private static AABB resolveTargetBounds(ServerLevel level, String targetId, Vec3 fallbackPosition) {
         UUID targetUuid = parseUuid(targetId);
+
         if (targetUuid != null) {
             if (Mods.SABLE.isLoaded()) {
-                SubLevelContainer container = SubLevelContainer.getContainer(level);
-                SubLevelAccess subLevel = container == null ? null : container.getSubLevel(targetUuid);
-                AABB subLevelBounds = toAabb(subLevel);
-                if (subLevelBounds != null) {
-                    return subLevelBounds;
+                AABB shipBounds = SableChaffAccess.getShipBounds(level, targetUuid);
+
+                if (shipBounds != null) {
+                    return shipBounds;
                 }
             }
 
             Entity entity = level.getEntity(targetUuid);
+
             if (entity != null && entity.isAlive()) {
                 return entity.getBoundingBox();
             }
@@ -286,22 +281,13 @@ public final class ChaffManager {
         return fallbackPosition == null ? null : new AABB(fallbackPosition, fallbackPosition);
     }
 
-    private static AABB toAabb(SubLevelAccess subLevel) {
-        if (subLevel == null || subLevel.boundingBox() == null) {
-            return null;
-        }
-        BoundingBox3dc box = subLevel.boundingBox();
-        return new AABB(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ());
-    }
-
     private static void clearCoarseRwrLockIfFullySuppressed(ServerLevel level, NetworkData data, String targetId) {
         UUID targetUuid = parseUuid(targetId);
         if (targetUuid == null || !Mods.SABLE.isLoaded()) {
             return;
         }
 
-        SubLevelContainer container = SubLevelContainer.getContainer(level);
-        if (container == null || container.getSubLevel(targetUuid) == null) {
+        if (!SableChaffAccess.isShipLoaded(level, targetUuid)) {
             return;
         }
 

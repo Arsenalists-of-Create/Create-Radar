@@ -2,6 +2,7 @@ package com.happysg.radar.block.arad.jammer;
 
 import com.happysg.radar.api.arad.RollingRpmTracker;
 import com.happysg.radar.api.jamming.DirectionalJammingApi;
+import com.happysg.radar.api.tracking.RadarContactCategory;
 import com.happysg.radar.block.monitor.MonitorPonderJammingSelfTest;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
@@ -51,29 +52,56 @@ public final class JammerSelfTest {
     }
 
     private static void verifyExternalGuidanceObservation() {
-        RadarTrack track = new RadarTrack(UUID.randomUUID().toString(),
-                new Vec3(12.0, 3.0, 4.0), new Vec3(0.5, 0.0, 0.0), 42L,
-                TrackCategory.CONTRAPTION, "test:target", 1.0F);
-        track.setJammingData(new RadarTrack.JammingData("test:emitter",
-                1.0F, 0.5F, 0.0F, 0.0F,
-                new Vec3(2.0, -1.0, 3.0), new Vec3(0.1, 0.2, 0.3), 99L));
-        DirectionalJammingApi.GuidanceObservation observation =
-                DirectionalJammingApi.resolveGuidance(track,
-                        new Vec3(10.0, 10.0, 10.0), new Vec3(1.0, 2.0, 3.0));
-        require(observation != null && observation.jammed(),
-                "external guidance observation should retain jamming metadata");
-        require(observation.position().equals(new Vec3(12.0, 9.0, 13.0)),
-                "external guidance should apply the full offset once");
-        require(observation.velocity().equals(new Vec3(1.1, 2.2, 3.3)),
-                "external guidance should apply the velocity offset once");
+        DirectionalJammingApi.JammingState jamming =
+                new DirectionalJammingApi.JammingState(
+                        "test:emitter",
+                        1.0F,
+                        0.5F,
+                        0.0F,
+                        0.0F,
+                        new Vec3(2.0, -1.0, 3.0),
+                        new Vec3(0.1, 0.2, 0.3),
+                        99L
+                );
 
-        track.setSynthetic(true);
+        DirectionalJammingApi.ReportedContact contact =
+                new DirectionalJammingApi.ReportedContact(
+                        UUID.randomUUID().toString(),
+                        new Vec3(12.0, 3.0, 4.0),
+                        new Vec3(0.5, 0.0, 0.0),
+                        RadarContactCategory.CONTRAPTION,
+                        42L,
+                        "test:target",
+                        1.0F,
+                        false,
+                        false,
+                        jamming
+                );
+
+        DirectionalJammingApi.GuidanceObservation observation = DirectionalJammingApi.resolveGuidance(contact, new Vec3(10.0, 10.0, 10.0), new Vec3(1.0, 2.0, 3.0));
+
+        require(observation != null && observation.jammed(), "external guidance observation should retain jamming metadata");
+        require(observation.position().equals(new Vec3(12.0, 9.0, 13.0)), "external guidance should apply the full offset once");
+        require(observation.velocity().equals(new Vec3(1.1, 2.2, 3.3)), "external guidance should apply the velocity offset once");
+
+        DirectionalJammingApi.ReportedContact syntheticContact =
+                new DirectionalJammingApi.ReportedContact(
+                        contact.id(),
+                        contact.position(),
+                        contact.velocity(),
+                        contact.category(),
+                        contact.scannedTime(),
+                        contact.entityType(),
+                        contact.entityHeight(),
+                        contact.friendly(),
+                        true,
+                        contact.jamming()
+                );
+
         DirectionalJammingApi.GuidanceObservation synthetic =
-                DirectionalJammingApi.resolveGuidance(track,
-                        new Vec3(100.0, 100.0, 100.0), Vec3.ZERO);
-        require(synthetic != null && synthetic.synthetic()
-                        && synthetic.position().equals(track.position()),
-                "synthetic guidance should use its reported coordinates");
+                DirectionalJammingApi.resolveGuidance(syntheticContact, new Vec3(100.0, 100.0, 100.0), Vec3.ZERO);
+
+        require(synthetic != null && synthetic.synthetic() && synthetic.position().equals(syntheticContact.position()), "synthetic guidance should use its reported coordinates");
     }
 
     private static void verifyPlacementDefaults() {

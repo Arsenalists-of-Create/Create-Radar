@@ -16,7 +16,7 @@ import org.lwjgl.glfw.GLFW;
 @EventBusSubscriber(value = Dist.CLIENT, modid = CreateRadar.MODID, bus = EventBusSubscriber.Bus.MOD)
 public class ModKeybinds {
 
-    public static final String CATEGORY = String.valueOf(Component.translatable(CreateRadar.MODID + ".key.categories.create_radar "));
+    public static final String CATEGORY = CreateRadar.MODID + ".key.categories.create_radar";
 
     public static final KeyMapping SCOPE_ACTION = new KeyMapping(
             CreateRadar.MODID+ ".key.binocular.use",
