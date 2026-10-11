@@ -807,9 +807,24 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         return true;
     }
 
+
     @Nullable
     private ContactEndpoint classifyContactEndpoint(ServerLevel level, BlockPos pos) {
         BlockEntity be = level.getBlockEntity(pos);
+
+        if (be instanceof MonitorBlockEntity monitor) {
+            BlockPos controllerPos = monitor.getControllerPos();
+
+            return new ContactEndpoint(ContactKind.MONITOR, controllerPos != null ? controllerPos : pos, null);
+        }
+
+        if (be instanceof AutoPitchControllerBlockEntity) {
+            BlockPos mountPos = WeaponNetworkRuntime.get(level).getMountForController(pos);
+
+            if (mountPos != null) {
+                return new ContactEndpoint(ContactKind.WEAPON, pos, mountPos);
+            }
+        }
 
         if (be instanceof NetworkRadarSource radar) {
             BlockPos radarPos = radar.getRadarPosition();
