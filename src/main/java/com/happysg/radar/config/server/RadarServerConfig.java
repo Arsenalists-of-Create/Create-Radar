@@ -104,7 +104,7 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigInt sonarRangeIncrease = i(16, 1, "sonarRangeIncrease", "Range increase per sonar sensor in blocks");
     public final ConfigInt sonarMaxEffectivePanels = i(32, 1, 256, "sonarMaxEffectivePanels", "Maximum number of sonar sensors contributing to range");
     public final ConfigFloat sonarFOV = f(20.2F, 19.2F, 360.0F, "sonarFOV", "Horizontal detection field of view of the sonar sweep in degrees");
-    public final ConfigInt sonarMaxAirBlocks = i(16, 0, 512, "sonarMaxAirBlocks", "Maximum number of air blocks a sonar signal can pass through");
+    public final ConfigInt sonarAirRangePenalty = i(16, 0, 512, "sonarAirRangePenalty", "Detection range lost per air block crossed by a sonar signal");
 
     public final ConfigGroup guidedFuzeConfig = group(3, "guidedFuzeConfig", "Configs for the guided fuze");
     public final ConfigFloat guidedFuzeMaxSeekDegrees = f(180.0F, 1.0F, 180.0F, "guidedFuzeMaxSeekDegrees", "The size of the cone the guided fuze can track targets from. Values are in degrees and are bi-directional (180 = full circle)");

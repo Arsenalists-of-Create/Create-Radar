@@ -45,14 +45,12 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     public static final int SCAN_PERIOD_TICKS = 20;
-    public static final int MAX_AIR_BLOCKS = 16;
     private static final int TRACK_EXPIRATION_TICKS = 100;
     private static final int CANDIDATE_REFRESH_TICKS = 5;
     public static final double SWEEP_DEGREES_PER_TICK = 19.2;
     private static final int MAX_RAYS_PER_TICK = 64;
     private static final int MAX_SENSOR_VISITS_PER_TICK = 256;
     private static final int MAX_CONTACTS_PER_TICK = 64;
-
 
     private final SonarBearingBlockEntity sonar;
     private final Map<String, RadarTrack> radarTracks = new HashMap<>();
@@ -422,7 +420,9 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         int worldBlocks = 0;
         int sableBlocks = 0;
 
-        int maxAirBlocks = RadarConfig.server().sonarMaxAirBlocks.get();
+        int airRangePenalty = RadarConfig.server().sonarAirRangePenalty.get();
+        double pathDistance = start.distanceTo(end);
+        BlockPos originBlock = BlockPos.containing(start);
 
         double entryT = 0.0;
         int guard = Math.abs(endX - x) + Math.abs(endY - y) + Math.abs(endZ - z) + 8;
@@ -452,10 +452,12 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
                 }
             }
 
-            if (isAir) {
+            if (isAir && !pos.equals(originBlock)) {
                 airBlocks++;
 
-                if (airBlocks > maxAirBlocks) {
+                double effectiveRange = range - (double) airBlocks * airRangePenalty;
+
+                if (pathDistance > effectiveRange) {
                     return false;
                 }
             }

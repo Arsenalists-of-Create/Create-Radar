@@ -10,6 +10,7 @@ import com.happysg.radar.api.radar.RadarDisplayProfile;
 import com.happysg.radar.api.radar.RadarSweepStyle;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.controller.id.IDManager;
+import com.happysg.radar.block.radar.behavior.SonarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
@@ -592,6 +593,11 @@ public class MonitorScreen extends Screen {
         RadarDisplayProfile profile = radar.displayProfile();
         RadarSweepStyle sweepStyle = profile.sweepStyle();
 
+        if (sweepStyle == RadarSweepStyle.PULSE) {
+            renderSonarPulse(gg, monitor, radar, center, scale, partialTicks);
+            return;
+        }
+
         if (isOwnedLock(radar)) {
             return;
         }
@@ -811,6 +817,27 @@ public class MonitorScreen extends Screen {
         RenderSystem.enableBlend();
         drawSolidLine(gg, cx, cy, x2, y2, thickness, argb);
         RenderSystem.disableBlend();
+    }
+
+    private void renderSonarPulse(
+            GuiGraphics gg,
+            MonitorBlockEntity monitor,
+            MonitorRadarSnapshot radar,
+            MonitorProjection.DisplayPoint center,
+            float scale,
+            float partialTicks
+    ) {
+        if (!radar.running() || monitor.getLevel() == null) return;
+
+        float progress = ((monitor.getLevel().getGameTime() % SonarScanningBlockBehavior.SCAN_PERIOD_TICKS) + partialTicks) / SonarScanningBlockBehavior.SCAN_PERIOD_TICKS;
+        progress = Mth.clamp(progress, 0f, 1f);
+
+        if (progress <= 0f) return;
+
+        float fade = progress > 0.8f ? 1f - ((progress - 0.8f) / 0.2f) : 1f;
+        float alpha = 0.9f * Mth.clamp(fade, 0f, 1f);
+
+        renderBG(gg, MonitorSprite.RADAR_BG_CIRCLE, alpha, center, scale * progress);
     }
 
     private void drawSolidLine(GuiGraphics gg, float x1, float y1, float x2, float y2, int thickness, int argb) {

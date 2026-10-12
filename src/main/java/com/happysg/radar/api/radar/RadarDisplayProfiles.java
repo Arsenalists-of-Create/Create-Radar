@@ -34,7 +34,7 @@ public final class RadarDisplayProfiles {
 
     public static final RadarDisplayProfile SONAR = new RadarDisplayProfile(
             CreateRadar.asResource("sonar"),
-            RadarSweepStyle.ROTATING,
+            RadarSweepStyle.PULSE,
             false,
             true
     );
