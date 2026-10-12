@@ -1,7 +1,5 @@
-package com.happysg.radar.block.radar.sonar;
+package com.happysg.radar.block.radar.sonar.bearing;
 
-import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlock;
-import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlockEntity;
 import com.happysg.radar.registry.ModBlocks;
 import com.simibubi.create.AllContraptionTypes;
 import com.simibubi.create.api.contraption.ContraptionType;
@@ -27,8 +25,7 @@ public class SonarContraption extends BearingContraption {
     private final Set<BlockPos> sensorPositions = new HashSet<>();
     private int panelCount;
 
-    public SonarContraption() {
-    }
+    public SonarContraption() {}
 
     @Override
     public boolean assemble(Level level, BlockPos pos) throws AssemblyException {
@@ -37,10 +34,6 @@ public class SonarContraption extends BearingContraption {
 
         sensorPositions.clear();
         panelCount = 0;
-
-        if (pos.getY() >= SonarBearingBlockEntity.MAX_BEARING_Y_EXCLUSIVE) {
-            throw new AssemblyException(Component.literal("Sonar bearing must be below Y 64"));
-        }
 
         BlockState bearingState = level.getBlockState(pos);
 
@@ -70,13 +63,7 @@ public class SonarContraption extends BearingContraption {
             throw new AssemblyException(Component.literal("Sonar root sensor was not assembled"));
         }
 
-        validateSensorPlane();
-        panelCount = calculatePanelCount();
-
-        if (!isRootNearSurface(level)) {
-            throw new AssemblyException(Component.literal("The sonar root must be near a surface"));
-        }
-
+        panelCount = sensorPositions.size();
         return true;
     }
 
@@ -106,80 +93,14 @@ public class SonarContraption extends BearingContraption {
         super.addBlock(level, pos, capture);
     }
 
-    private boolean isRootNearSurface(Level level) {
-        if (rootPos == null || facing == null) {
-            return false;
-        }
-
-        Direction contactFace = facing.getOpposite();
-
-        for (int gap = 0;
-             gap <= SonarBearingBlockEntity.MAX_GROUND_AIR_GAP;
-             gap++) {
-
-            BlockPos surfacePos = rootPos.relative(facing, gap + 1);
-            BlockState surfaceState = level.getBlockState(surfacePos);
-
-            if (surfaceState.isFaceSturdy(level, surfacePos, contactFace)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     public Set<BlockPos> getSensorPositions() {
         return Set.copyOf(sensorPositions);
     }
-
     public int getPanelCount() {
         return panelCount;
     }
-
     public Direction getFacingDirection() {
         return facing;
-    }
-
-    private void validateSensorPlane() throws AssemblyException {
-        if (rootPos == null) {
-            throw new AssemblyException(
-                    Component.literal("Sonar root is missing")
-            );
-        }
-
-        int rootY = rootPos.getY();
-
-        for (BlockPos sensorPos : sensorPositions) {
-            if (sensorPos.getY() != rootY) {
-                throw new AssemblyException(
-                        Component.literal("All sonar sensors must be on the same horizontal plane")
-                );
-            }
-        }
-    }
-
-    private int calculatePanelCount() {
-        if (sensorPositions.isEmpty()) {
-            return 0;
-        }
-
-        int minX = Integer.MAX_VALUE;
-        int maxX = Integer.MIN_VALUE;
-        int minZ = Integer.MAX_VALUE;
-        int maxZ = Integer.MIN_VALUE;
-
-        for (BlockPos sensorPos : sensorPositions) {
-            minX = Math.min(minX, sensorPos.getX());
-            maxX = Math.max(maxX, sensorPos.getX());
-
-            minZ = Math.min(minZ, sensorPos.getZ());
-            maxZ = Math.max(maxZ, sensorPos.getZ());
-        }
-
-        int width = maxX - minX + 1;
-        int depth = maxZ - minZ + 1;
-
-        return Math.min(width, depth);
     }
 
     @Override

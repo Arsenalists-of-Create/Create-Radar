@@ -1,18 +1,15 @@
 package com.happysg.radar.block.radar.sonar.bearing;
 
-import com.happysg.radar.api.radar.RadarDetectionConfigurable;
-import com.happysg.radar.api.radar.RadarDetectionSettings;
+import com.happysg.radar.api.radar.*;
 import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.behavior.SonarScanningBlockBehavior;
-import com.happysg.radar.block.radar.sonar.SonarContraption;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.registry.ModBlocks;
 import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.contraptions.AssemblyException;
 import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
 import com.simibubi.create.content.contraptions.bearing.MechanicalBearingBlockEntity;
@@ -30,13 +27,11 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.*;
 
-public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar, RadarDetectionConfigurable {
-
-    public static final int RANGE_PER_PANEL = 8;
-    public static final int MAX_EFFECTIVE_PANELS = 8;
-    public static final int MAX_RANGE = 64;
-    public static final int MAX_BEARING_Y_EXCLUSIVE = 64;
-    public static final int MAX_GROUND_AIR_GAP = 2;
+public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar, RadarDetectionConfigurable, NetworkRadarSource, RadarDisplaySource {
+    public static final int RANGE_PER_PANEL = 16;
+    public static final int MAX_EFFECTIVE_PANELS = 32;
+    public static final int MAX_RANGE = 512;
+    private static final float VIRTUAL_SWEEP_DEGREES_PER_TICK = 360.0f / SonarScanningBlockBehavior.SCAN_PERIOD_TICKS;
 
     private SonarScanningBlockBehavior scanningBehavior;
     private int panelCount;
@@ -145,7 +140,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         Direction direction = getradarDirection();
         contraption.removeBlocksFromWorld(level, BlockPos.ZERO);
         movedContraption = ControlledContraptionEntity.create(level, this, contraption);
-        movedContraption.setCustomName(Component.literal("Ground Penetrating Sonar"));
+        movedContraption.setCustomName(Component.literal("Sonar Array"));
         BlockPos anchor = worldPosition.relative(direction);
 
         movedContraption.setPos(anchor.getX(), anchor.getY(), anchor.getZ());
@@ -227,12 +222,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     private void refreshStructureValidity() {
         boolean oldValid = structureValid;
-
-        structureValid = worldPosition.getY() < MAX_BEARING_Y_EXCLUSIVE
-                && running
-                && movedContraption != null
-                && panelCount > 0
-                && !savedSensorPositions.isEmpty();
+        structureValid = running && movedContraption != null && panelCount > 0 && !savedSensorPositions.isEmpty();
 
         if (oldValid != structureValid) {
             setChanged();
@@ -343,8 +333,26 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     @Override
+    public BlockPos getRadarPosition() { return getBlockPos(); }
+
+    @Override
+    public RadarDisplayProfile getRadarDisplayProfile() { return RadarDisplayProfiles.SONAR; }
+
+    @Override
+    public float getDisplayAngleDegrees() { return getGlobalAngle(); }
+
+    @Override
+    public float getDisplayAngularSpeedDegreesPerTick() {
+        return getSweepAngularSpeedDegreesPerTick();
+    }
+
+    @Override
     public float getGlobalAngle() {
-        return 0f;
+        if (level == null) {
+            return 0f;
+        }
+
+        return (float) ((level.getGameTime() * SonarScanningBlockBehavior.SWEEP_DEGREES_PER_TICK) % 360.0);
     }
 
     @Override
@@ -359,12 +367,6 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     @Override
     public RadarType getRadarTypeEnum() {
-        /*
-         * Compatibility value only.
-         *
-         * Sonar never emits into ARAD/RWR because
-         * evaluateRwrContact() always returns notEmitting().
-         */
         return RadarType.GROUND;
     }
 
@@ -391,7 +393,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     @Override
     public float getSweepAngularSpeedDegreesPerTick() {
-        return 0f;
+        return (float) SonarScanningBlockBehavior.SWEEP_DEGREES_PER_TICK;
     }
 
     @Override

@@ -12,7 +12,9 @@ import com.happysg.radar.debug.ConflictTraceRecorder;
 import com.happysg.radar.targeting.ProjectileSimulator;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
+import net.arsenalists.createenergycannons.content.cannons.magnetic.coilgun.CoilGunBlock;
 import net.arsenalists.createenergycannons.content.cannons.magnetic.railgun.MountedEnergyCannonContraption;
+import net.arsenalists.createenergycannons.content.cannons.magnetic.railgun.RailGunBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -246,7 +248,8 @@ public class CannonUtil {
             return new BigCannonShotState(0.0F, fallback, null, null, null, CBCMuzzleUtil.getBigCannonSpawnForwardOffset(cannon), 0, 0.0F, 0.0F, "missing_cannon_geometry");
         }
 
-        CBCATCompat.BigCannonPhysicsResult cbcAtPhysics = resolveCBCATBigCannonPhysics(cannon, level);
+        boolean magneticEnergyCannon = isMagneticEnergyCannon(cannon);
+        CBCATCompat.BigCannonPhysicsResult cbcAtPhysics = magneticEnergyCannon ? null : resolveCBCATBigCannonPhysics(cannon, level);
 
         float speed = 0.0F;
         float propellantPower = 0.0F;
@@ -403,13 +406,15 @@ public class CannonUtil {
                 );
                 ballistics = fallback;
             }
-            float effectiveSpeed = effectiveBigCannonSpeed(speed, cbcAtPhysics);
+            float effectiveSpeed = magneticEnergyCannon ? ((MountedEnergyCannonContraption) cannon).getMuzzleVelocity(level) : effectiveBigCannonSpeed(speed, cbcAtPhysics);
             if (effectiveSpeed <= 0.0F && shouldLogBallisticWarning(level, cannon,
                     "non_positive_charge", projectileLocalPos)) {
                 LOGGER.warn("Big cannon loaded projectile at {} resolved non-positive charge power {}; using projectile ballistics but speed is invalid",
                         projectileLocalPos, effectiveSpeed);
             }
-            String reason = projectile == null
+            String reason = magneticEnergyCannon
+                    ? "loaded_magnetic_energy_projectile"
+                    : projectile == null
                     ? "loaded_cbc_at_cartridge"
                     : "loaded_projectile";
             BigCannonShotState state = new BigCannonShotState(
@@ -661,11 +666,11 @@ public class CannonUtil {
         }
 
 
-        if (isEnergyCannon(cannon)) {
-            float velocity = ((MountedEnergyCannonContraption) cannon).getMuzzleVelocity(level);
-            LOGGER.debug("   • EnergyCannon speed = {}", velocity);
-            return velocity;
-        }
+//        if (isEnergyCannon(cannon)) {
+//            float velocity = ((MountedEnergyCannonContraption) cannon).getMuzzleVelocity(level);
+//            LOGGER.debug("   • EnergyCannon speed = {}", velocity);
+//            return velocity;
+//        }
 
         if (isBigCannon(cannon)) {
             LOGGER.debug("   • BigCannon speed = {}", getBigCannonSpeed(level,cannon, (PitchOrientedContraptionEntity)cannon.entity));
@@ -897,6 +902,14 @@ public class CannonUtil {
     public static boolean isEnergyCannon(AbstractMountedCannonContraption cannonContraption){
         if(!Mods.CREATEENERGYCANNONS.isLoaded()) return false;
         return cannonContraption instanceof MountedEnergyCannonContraption;
+    }
+
+    public static boolean isMagneticEnergyCannon(AbstractMountedCannonContraption cannon) {
+        if (!isEnergyCannon(cannon) || cannon.getBlocks() == null) {
+            return false;
+        }
+
+        return cannon.getBlocks().values().stream().anyMatch(info -> info.state().getBlock() instanceof RailGunBlock || info.state().getBlock() instanceof CoilGunBlock);
     }
 
     public static boolean isLaserCannon(AbstractMountedCannonContraption cannonContraption){

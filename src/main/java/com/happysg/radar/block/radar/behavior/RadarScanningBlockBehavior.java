@@ -23,7 +23,6 @@ import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
@@ -303,6 +302,10 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         if (!isInRadarCoverage(target, radarPos))
             return false;
 
+        return isWithinHorizontalFov(radarPos, target, angle, fov);
+    }
+
+    public static boolean isWithinHorizontalFov(Vec3 radarPos, Vec3 target, double angle, double fov) {
         double horizontalDistance = Math.sqrt(Math.pow(target.x() - radarPos.x(), 2) + Math.pow(target.z() - radarPos.z(), 2));
 
         if (horizontalDistance < 2)
@@ -311,8 +314,8 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         double angleToEntity = Math.toDegrees(Math.atan2(target.x() - radarPos.x(), target.z() - radarPos.z()));
         angleToEntity = (angleToEntity + 360) % 360;
         double angleDiff = Math.abs(angleToEntity - angle);
-        if (angleDiff > 180) angleDiff = 360 - angleDiff;
 
+        if (angleDiff > 180) angleDiff = 360 - angleDiff;
         return angleDiff <= fov / 2.0;
     }
 
