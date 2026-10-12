@@ -30,5 +30,4 @@ public class RadarClientConfig extends ConfigBase {
     public ConfigFloat sableSilhouetteCellSize = f(0.35f, 0.1f, "sableSilhouetteCellSize", "Projected grid cell size for Sable radar silhouettes. Lower values make diagonals smoother but cost more render work");
     public ConfigBool sableSilhouetteDebugOverlay = b(false, "sableSilhouetteDebugOverlay", "Render Sable radar silhouettes in a distinct debug color");
     public ConfigBool sableSilhouetteDebugFallbackRectangle = b(false, "sableSilhouetteDebugFallbackRectangle", "Render a simple debug rectangle for Sable contacts whose silhouette geometry is missing");
-
 }

@@ -42,15 +42,10 @@ public class SonarContraption extends BearingContraption {
         }
 
         facing = bearingState.getValue(SonarBearingBlock.FACING);
-
-        if (facing != Direction.UP && facing != Direction.DOWN) {
-            throw new AssemblyException(Component.literal("Sonar bearing must face up or down"));
-        }
-
         rootPos = bearingPos.relative(facing);
 
         if (!ModBlocks.SONAR_SENSOR.has(level.getBlockState(rootPos))) {
-            throw new AssemblyException(Component.literal("Sonar requires a sensor directly above or below the bearing"));
+            throw new AssemblyException(Component.literal("Sonar requires a sensor directly in front of the bearing"));
         }
 
         boolean assembled = super.assemble(level, pos);

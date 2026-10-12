@@ -46,9 +46,9 @@ public class ModPonderIndex implements PonderPlugin {
                 .addStoryBoard("rwr_ponder",PonderScenes::rwrPonder)
                 .addStoryBoard("rwr_ponder",PonderScenes::rwrContactsPonder);
 
-//        HELPER.forComponents(ModBlocks.SONAR_BEARING)
-//                .addStoryBoard("sonar_ponder", PonderScenes::sonarSetup, ModPonderTags.RADAR_COMPONENT);
-//        HELPER.addStoryBoard(ModBlocks.SONAR_SENSOR, "sonar_ponder", PonderScenes::sonarSetup, ModPonderTags.RADAR_COMPONENT);
+        HELPER.forComponents(ModBlocks.SONAR_BEARING)
+                .addStoryBoard("sonar_ponder", PonderScenes::sonarSetup, ModPonderTags.RADAR_COMPONENT);
+        HELPER.addStoryBoard(ModBlocks.SONAR_SENSOR, "sonar_ponder", PonderScenes::sonarSetup, ModPonderTags.RADAR_COMPONENT);
 
 //        HELPER.forComponents(ModBlocks.DIRECTIONAL_JAMMER)
 //                .addStoryBoard("jammer_ponder", PonderScenes::jammerSetup, ModPonderTags.RADAR_COMPONENT);

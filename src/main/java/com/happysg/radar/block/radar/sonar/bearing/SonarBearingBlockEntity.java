@@ -9,6 +9,7 @@ import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.behavior.SonarScanningBlockBehavior;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.registry.ModBlocks;
+import com.happysg.radar.config.RadarConfig;
 import com.simibubi.create.AllSoundEvents;
 import com.simibubi.create.content.contraptions.AssemblyException;
 import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
@@ -28,11 +29,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.*;
 
 public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar, RadarDetectionConfigurable, NetworkRadarSource, RadarDisplaySource {
-    public static final int RANGE_PER_PANEL = 16;
-    public static final int MAX_EFFECTIVE_PANELS = 32;
-    public static final int MAX_RANGE = 512;
-    private static final float VIRTUAL_SWEEP_DEGREES_PER_TICK = 360.0f / SonarScanningBlockBehavior.SCAN_PERIOD_TICKS;
-
     private SonarScanningBlockBehavior scanningBehavior;
     private int panelCount;
     private boolean structureValid;
@@ -301,7 +297,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     public int getEffectivePanelCount() {
-        return Math.min(panelCount, MAX_EFFECTIVE_PANELS);
+        return Math.min(panelCount, RadarConfig.server().sonarMaxEffectivePanels.get());
     }
 
     public boolean isStructureValid() {
@@ -319,7 +315,10 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     @Override
     public float getRange() {
-        return Math.min(getEffectivePanelCount() * RANGE_PER_PANEL, MAX_RANGE);
+        return Math.min(
+                RadarConfig.server().sonarBaseRange.get() + getEffectivePanelCount() * RadarConfig.server().sonarRangeIncrease.get(),
+                RadarConfig.server().maxSonarRange.get()
+        );
     }
 
     @Override

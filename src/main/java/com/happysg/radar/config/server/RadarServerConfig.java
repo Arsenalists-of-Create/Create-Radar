@@ -98,6 +98,13 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigInt skyRadarMinY = i(85,-64,256, "skyRadarMinY", "The minimum Y level for a sky radar to function");
     public final ConfigInt skyRadarDishRangeIncrease = i(64,1,"skyRadarDishRangeIncrease", "Range increase per dish block in blocks for the sky radar");
 
+    public final ConfigGroup sonarStats = group(3, "sonarStatsConfig", "Configs for sonar bearing and sonar stats");
+    public final ConfigInt maxSonarRange = i(512, 1, "maxSonarRange", "Maximum range of a sonar contraption in blocks");
+    public final ConfigInt sonarBaseRange = i(0, 0, "sonarBaseRange", "Base range of a sonar in blocks");
+    public final ConfigInt sonarRangeIncrease = i(16, 1, "sonarRangeIncrease", "Range increase per sonar sensor in blocks");
+    public final ConfigInt sonarMaxEffectivePanels = i(32, 1, 256, "sonarMaxEffectivePanels", "Maximum number of sonar sensors contributing to range");
+    public final ConfigFloat sonarFOV = f(20.2F, 19.2F, 360.0F, "sonarFOV", "Horizontal detection field of view of the sonar sweep in degrees");
+    public final ConfigInt sonarMaxAirBlocks = i(16, 0, 512, "sonarMaxAirBlocks", "Maximum number of air blocks a sonar signal can pass through");
 
     public final ConfigGroup guidedFuzeConfig = group(3, "guidedFuzeConfig", "Configs for the guided fuze");
     public final ConfigFloat guidedFuzeMaxSeekDegrees = f(180.0F, 1.0F, 180.0F, "guidedFuzeMaxSeekDegrees", "The size of the cone the guided fuze can track targets from. Values are in degrees and are bi-directional (180 = full circle)");

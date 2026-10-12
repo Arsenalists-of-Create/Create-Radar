@@ -34,27 +34,20 @@ public class SonarBearingBlock extends BearingBlock implements IBE<SonarBearingB
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         Level level = context.getLevel();
-        BlockPos pos = context.getClickedPos().relative(context.getClickedFace());
+        BlockPos pos = context.getClickedPos();
+        Direction preferred = context.getClickedFace().getOpposite();
 
-        boolean sensorAbove = ModBlocks.SONAR_SENSOR.has(level.getBlockState(pos.above()));
-        boolean sensorBelow = ModBlocks.SONAR_SENSOR.has(level.getBlockState(pos.below()));
+        if (ModBlocks.SONAR_SENSOR.has(level.getBlockState(pos.relative(preferred)))) {
+            return defaultBlockState().setValue(FACING, preferred);
+        }
 
-        Direction facing;
-
-        if (sensorAbove && !sensorBelow) {
-            facing = Direction.UP;
-        } else if (sensorBelow && !sensorAbove) {
-            facing = Direction.DOWN;
-        } else {
-            // Fallback when there are no panels yet
-            facing = context.getClickedFace();
-
-            if (facing.getAxis() != Direction.Axis.Y) {
-                facing = Direction.UP;
+        for (Direction direction : Direction.values()) {
+            if (ModBlocks.SONAR_SENSOR.has(level.getBlockState(pos.relative(direction)))) {
+                return defaultBlockState().setValue(FACING, direction);
             }
         }
 
-        return defaultBlockState().setValue(FACING, facing);
+        return defaultBlockState().setValue(FACING, context.getClickedFace());
     }
 
     @Override
@@ -104,8 +97,16 @@ public class SonarBearingBlock extends BearingBlock implements IBE<SonarBearingB
         }
 
         Direction current = currentState.getValue(FACING);
-        Direction flipped = current == Direction.UP ? Direction.DOWN : Direction.UP;
-        KineticBlockEntity.switchToBlockState(level, pos, currentState.setValue(FACING, flipped));
+        Direction next = switch (current) {
+            case UP -> Direction.NORTH;
+            case NORTH -> Direction.EAST;
+            case EAST -> Direction.SOUTH;
+            case SOUTH -> Direction.WEST;
+            case WEST -> Direction.DOWN;
+            case DOWN -> Direction.UP;
+        };
+
+        KineticBlockEntity.switchToBlockState(level, pos, currentState.setValue(FACING, next));
         return InteractionResult.SUCCESS;
     }
 

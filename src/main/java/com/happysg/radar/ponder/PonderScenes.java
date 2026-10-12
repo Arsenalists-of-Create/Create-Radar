@@ -7,6 +7,7 @@ import com.happysg.radar.registry.ModBlocks;
 
 import com.happysg.radar.registry.ModSounds;
 import com.simibubi.create.foundation.ponder.CreateSceneBuilder;
+import net.createmod.catnip.math.Pointing;
 import net.createmod.ponder.api.PonderPalette;
 import net.createmod.ponder.api.element.*;
 import net.createmod.ponder.api.scene.SceneBuilder;
@@ -682,7 +683,109 @@ public class PonderScenes {
         scene.idle(5);
     }
 
-    public static void sonarSetup(SceneBuilder scene, SceneBuildingUtil util) {}
+    public static void sonarSetup(SceneBuilder scene, SceneBuildingUtil util) {
+        CreateSceneBuilder createScene = new CreateSceneBuilder(scene);
+        scene.title("sonar_ponder", "Using Sonar Arrays");
+        scene.rotateCameraY(180);
+        scene.configureBasePlate(0, 0, 5);
+
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.world().showSection(util.select().layer(1), Direction.DOWN);
+        scene.idle(20);
+
+        BlockPos bearingPos = util.grid().at(2, 2, 2);
+        Selection bearing = util.select().position(bearingPos);
+        scene.world().showSection(bearing, Direction.DOWN);
+
+        scene.overlay().showText(70)
+                .text("The Sonar Bearing controls a sonar array")
+                .pointAt(bearing.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+
+        scene.idle(80);
+        BlockPos rootSensorPos = util.grid().at(2, 3, 2);
+        Selection rootSensor = util.select().position(rootSensorPos);
+        scene.world().showSection(rootSensor, Direction.DOWN);
+
+        scene.overlay().showText(80)
+                .text("A Sonar Sensor must be placed directly in front of the bearing")
+                .pointAt(rootSensor.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+
+        scene.idle(90);
+        Selection lowerSensors = util.select().position(1, 3, 2).add(util.select().position(3, 3, 2));
+        scene.world().showSection(lowerSensors, Direction.DOWN);
+
+        scene.overlay().showText(80)
+                .text("Connected Sonar Sensors become part of the sonar contraption")
+                .pointAt(lowerSensors.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+
+        scene.idle(90);
+        Selection upperSensors = util.select().fromTo(1, 4, 2, 3, 4, 2);
+        scene.world().showSection(upperSensors, Direction.DOWN);
+
+        scene.overlay().showText(90)
+                .text("More assembled sensors increase the sonar's detection range")
+                .pointAt(upperSensors.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+
+        scene.idle(100);
+        scene.overlay().showText(80)
+                .text("Right-click the Sonar Bearing to assemble the sensor array")
+                .pointAt(bearing.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+
+        scene.idle(90);
+        scene.overlay().showControls(bearing.getCenter(), Pointing.DOWN, 40).rightClick();
+
+        scene.idle(20);
+        scene.world().hideSection(rootSensor, Direction.UP);
+        scene.world().hideSection(lowerSensors, Direction.UP);
+        scene.world().hideSection(upperSensors, Direction.UP);
+
+        scene.idle(20);
+
+        Selection sonarArray = util.select().fromTo(1, 3, 2, 3, 4, 2);
+        scene.world().showIndependentSectionImmediately(sonarArray);
+
+        scene.idle(30);
+        scene.overlay().showText(80)
+                .text("The sonar array remains stationary after assembly")
+                .pointAt(lowerSensors.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+
+        scene.idle(90);
+        scene.overlay().showText(90)
+                .text("Instead, the sonar performs an electronic sweep around the array")
+                .pointAt(bearing.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+
+        scene.idle(100);
+        scene.overlay().showText(100)
+                .text("Solid blocks and fluids carry the sonar signal, while too much open air blocks detection")
+                .pointAt(lowerSensors.getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+
+        scene.idle(110);
+        createScene.world().setKineticSpeed(util.select().fromTo(0, 1, 2, 2, 1, 2), 32);
+        scene.overlay().showText(90)
+                .text("Provide rotational power to the bearing for the sonar to operate")
+                .pointAt(util.grid().at(1, 1, 2).getCenter())
+                .attachKeyFrame()
+                .placeNearTarget();
+
+        scene.idle(100);
+        scene.markAsFinished();
+    }
 
     public static void jammerSetup(SceneBuilder scene, SceneBuildingUtil util){}
 

@@ -10,6 +10,7 @@ import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.SableUtils;
+import com.happysg.radar.config.RadarConfig;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
@@ -51,7 +52,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     private static final int MAX_RAYS_PER_TICK = 64;
     private static final int MAX_SENSOR_VISITS_PER_TICK = 256;
     private static final int MAX_CONTACTS_PER_TICK = 64;
-    private static final double SWEEP_FOV_DEGREES = SWEEP_DEGREES_PER_TICK + 1.0;
+
 
     private final SonarBearingBlockEntity sonar;
     private final Map<String, RadarTrack> radarTracks = new HashMap<>();
@@ -204,7 +205,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
 
             Vec3 target = entity.position();
 
-            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, SWEEP_FOV_DEGREES))
+            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, RadarConfig.server().sonarFOV.get()))
                 continue;
 
             if (!isWithinSensorRange(target, sensors))
@@ -264,7 +265,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             if (target == null)
                 continue;
 
-            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, SWEEP_FOV_DEGREES))
+            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, RadarConfig.server().sonarFOV.get()))
                 continue;
 
             if (!isWithinSensorRange(target, sensors))
@@ -370,8 +371,8 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
      *
      * solid -> propagates
      * fluid -> propagates
-     * total air <= 16 blocks along ray -> propagates
-     * total air > 16 blocks along ray -> signal dies
+     * total air <= configured limit -> propagates
+     * total air > configured limit -> signal dies
      */
     private boolean signalSurvives(ServerLevel level, Vec3 start, Vec3 end) {
         if (traceSignal(level, start, end, List.of())) {
@@ -421,6 +422,8 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         int worldBlocks = 0;
         int sableBlocks = 0;
 
+        int maxAirBlocks = RadarConfig.server().sonarMaxAirBlocks.get();
+
         double entryT = 0.0;
         int guard = Math.abs(endX - x) + Math.abs(endY - y) + Math.abs(endZ - z) + 8;
 
@@ -452,7 +455,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             if (isAir) {
                 airBlocks++;
 
-                if (airBlocks > MAX_AIR_BLOCKS) {
+                if (airBlocks > maxAirBlocks) {
                     return false;
                 }
             }
