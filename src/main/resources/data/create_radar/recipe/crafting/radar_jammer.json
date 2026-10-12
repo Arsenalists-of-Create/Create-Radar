@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "key": {
+    "A": { "item": "create:transmitter" },
+    "B": { "tag": "create:shaft" },
+    "C": { "item": "minecraft:quartz_block" },
+    "E": { "item": "create:electron_tube" }
+  },
+  "pattern": [
+    "CCC",
+    "CAC",
+    "EBE"
+  ],
+  "result": { "id": "create_radar:jammer" },
+  "show_notification": true
+}
