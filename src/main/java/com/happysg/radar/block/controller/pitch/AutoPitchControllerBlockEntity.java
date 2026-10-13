@@ -123,6 +123,14 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         this.apiHandler = new ApiMountPitch(this);
     }
 
+    public void beginAutoTargetRangeBatch() {
+        cannonHandler.beginRangeSelection();
+    }
+
+    public void endAutoTargetRangeBatch() {
+        cannonHandler.endRangeSelection();
+    }
+
     @Override
     public void tick() {
         initializeIsolatedGenerator();
@@ -197,7 +205,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
 
-        if (validWeapon && firingControl != null && firingControl.matchesWeapon(weapon)) {
+        boolean selectedDifferentCbcMount = validCbcMount && !mountPos.equals(cbcMount.getBlockPos());
+
+        if (selectedDifferentCbcMount) {
+            if (firingControl != null && firingControl.cannonMount != null && firingControl.cannonMount.sameMount(cbcMount) && firingControl.cannonMount.isCurrent()) {
+                return;
+            }
+        } else if (validWeapon && firingControl != null && firingControl.matchesWeapon(weapon)) {
             return;
         }
 
@@ -881,10 +895,6 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (firingControl.weapon != null && firingControl.weapon.isValid() && firingControl.weapon.isAssembled()) {
             return firingControl.hasLineOfSightTo(track, requireLos);
         }
-
-        /*
-         * non-CBC structural/physics fallback.
-         */
         return supportsPhysBearingMounts() && firingControl.hasLineOfSightTo(track, requireLos);
     }
 

@@ -14,6 +14,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 import dev.ryanhcode.sable.companion.SubLevelAccess;
+import org.joml.Vector3d;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
 
@@ -72,22 +73,23 @@ public class VS2TargetingSolver {
     }
 
     private MultivariateFunction createFunction() {
-        return point -> {
+        final Vec3 mountOffset = getCannonMountOffset(level, getBlockPosFromVec3(mountPos));
+        final Vec3 pivotShipyard = mountPos.add(mountOffset);
 
+        final Vector3d barrelScratch = new Vector3d();
+        final Vector3d pivotScratch = new Vector3d();
+
+        return point -> {
             double theta = point[0];
             double zeta = point[1];
             double time = max(MIN_FLIGHT_TICKS, point[2]);
             double thetaRad = toRadians(theta);
             double zetaRad = toRadians(zeta);
-            Vec3 pivotPoint = mountPos;
-            Vec3 shipyardFrontOfBarrel = mountPos.add(cos(zetaRad+PI/2)*cos(thetaRad)*l, sin(thetaRad)*l, sin(zetaRad+PI/2)*cos(thetaRad)*l); //+90 degrees cuz used a space offset by that in my math and was too lazy to rewrite it all
+            Vec3 pivotPoint = pivotShipyard;
+            Vec3 shipyardFrontOfBarrel = mountPos.add(cos(zetaRad + PI / 2) * cos(thetaRad) * l, sin(thetaRad) * l, sin(zetaRad + PI / 2) * cos(thetaRad) * l).add(mountOffset);
 
-            Vec3 offset = getCannonMountOffset(level, getBlockPosFromVec3(mountPos));
-            pivotPoint = pivotPoint.add(offset);
-            shipyardFrontOfBarrel = shipyardFrontOfBarrel.add(offset);
-
-            Vec3 frontOfBarrel = getVec3FromVector(ship.logicalPose().transformPosition(getVector3dFromVec3(shipyardFrontOfBarrel)));
-            pivotPoint = getVec3FromVector(ship.logicalPose().transformPosition(getVector3dFromVec3(pivotPoint)));
+            Vec3 frontOfBarrel = getVec3FromVector(ship.logicalPose().transformPosition(barrelScratch.set(shipyardFrontOfBarrel.x, shipyardFrontOfBarrel.y, shipyardFrontOfBarrel.z)));
+            pivotPoint = getVec3FromVector(ship.logicalPose().transformPosition(pivotScratch.set(pivotPoint.x, pivotPoint.y, pivotPoint.z)));
 
             Vector3f pivotVector = frontOfBarrel.subtract(pivotPoint).toVector3f();
             pivotVector = pivotVector.normalize();
@@ -170,9 +172,7 @@ public class VS2TargetingSolver {
 
     public List<List<Double>> solveThetaZeta() {
         int numStarts = 8; // Number of starting points for multi-start optimization.
-        MultiStartMultivariateOptimizer optimizer = new MultiStartMultivariateOptimizer(
-                new BOBYQAOptimizer(7), numStarts, randomVectorGenerator
-        );
+        MultiStartMultivariateOptimizer optimizer = new MultiStartMultivariateOptimizer(new BOBYQAOptimizer(7), numStarts, randomVectorGenerator);
 
         // Define search bounds (theta in [-90, 90], zeta in [0, 360], time in ticks).
         double[] lowerBounds = {-90, 0, MIN_FLIGHT_TICKS};

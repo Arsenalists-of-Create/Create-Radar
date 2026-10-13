@@ -588,14 +588,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         endpointRepushRequired = false;
     }
 
-    private double distSqFromFilterer(Vec3 pos) {
-        Vec3 filtererPos = worldPosition.getCenter();
-        if (Mods.SABLE.isLoaded() && level != null && PhysicsHandler.isBlockInPlotyard(level, worldPosition)) {
-            filtererPos = PhysicsHandler.getWorldVec(level, filtererPos);
-        }
-        return filtererPos.distanceToSqr(pos);
-    }
-
     private boolean anyCannonCanEngage(ServerLevel sl, RadarTrack track, boolean requireLos) {
         Vec3 target = track != null ? track.position() : null;
         if (target == null) return false;
@@ -1067,21 +1059,46 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             candidates.add(track);
         }
 
-        candidates.sort(Comparator.comparingDouble(t -> distSqFromFilterer(t.position())));
+        Vec3 filtererPos = worldPosition.getCenter();
+
+        if (Mods.SABLE.isLoaded() && level != null && PhysicsHandler.isBlockInPlotyard(level, worldPosition)) {
+            filtererPos = PhysicsHandler.getWorldVec(level, filtererPos);
+        }
+
+        final Vec3 sortOrigin = filtererPos;
+        candidates.sort(Comparator.comparingDouble(t -> sortOrigin.distanceToSqr(t.position())));
 
         List<AutoPitchControllerBlockEntity> weaponEndpoints = getTargetConstrainedWeaponEndpoints(sl);
         if (weaponEndpoints.isEmpty()) {
+            if (requireLos) {
+                return null;
+            }
+
             return candidates.isEmpty() ? null : candidates.get(0);
         }
 
         // per-cannon gating (range + angle + safezone segment + LOS if enabled)
-        for (RadarTrack t : candidates) {
-            if (anyCannonCanEngage(sl, t, requireLos)) {
-                return t;
+        List<AutoPitchControllerBlockEntity> rangeBatchEndpoints = getWeaponEndpointsCached(sl);
+        int startedBatches = 0;
+
+        try {
+            for (AutoPitchControllerBlockEntity pitch : rangeBatchEndpoints) {
+                pitch.beginAutoTargetRangeBatch();
+                startedBatches++;
+            }
+
+            for (RadarTrack t : candidates) {
+                if (anyCannonCanEngage(sl, t, requireLos)) {
+                    return t;
+                }
+            }
+
+            return null;
+        } finally {
+            for (int i = 0; i < startedBatches; i++) {
+                rangeBatchEndpoints.get(i).endAutoTargetRangeBatch();
             }
         }
-
-        return null;
     }
 
     public @Nullable RadarContact getActiveRadarContact() {

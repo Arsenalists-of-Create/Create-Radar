@@ -29,6 +29,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
@@ -36,13 +37,8 @@ import redstonedubstep.mods.vanishmod.VanishUtil;
 
 import java.util.*;
 
-import com.mojang.logging.LogUtils;
-import org.slf4j.Logger;
-
 public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     public static final BehaviourType<SonarScanningBlockBehavior> TYPE = new BehaviourType<>();
-
-    private static final Logger LOGGER = LogUtils.getLogger();
 
     public static final int SCAN_PERIOD_TICKS = 20;
     private static final int TRACK_EXPIRATION_TICKS = 100;
@@ -94,19 +90,6 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         if (!(sonar.getLevel() instanceof ServerLevel serverLevel)) return;
         long gameTime = serverLevel.getGameTime();
 
-        if (gameTime % 100 == 0) {
-            LOGGER.debug(
-                    "[SONAR] pos={} speed={} running={} sensors={} candidates={} ships={} tracks={}",
-                    sonar.getBlockPos(),
-                    sonar.getSpeed(),
-                    running,
-                    sonar.getSensorPositions().size(),
-                    entityCandidates.size(),
-                    shipCandidates.size(),
-                    radarTracks.size()
-            );
-        }
-
         expireOldTracks(gameTime);
 
         if (!running || range <= 0) {
@@ -115,7 +98,6 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         }
 
         if (lastCandidateRefreshTick == Long.MIN_VALUE || gameTime < lastCandidateRefreshTick || gameTime - lastCandidateRefreshTick >= CANDIDATE_REFRESH_TICKS) {
-
             refreshEntityCandidates(serverLevel);
             lastCandidateRefreshTick = gameTime;
         }
@@ -364,37 +346,18 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         );
     }
 
-    /**
-     * Sonar propagation rule:
-     *
-     * solid -> propagates
-     * fluid -> propagates
-     * total air <= configured limit -> propagates
-     * total air > configured limit -> signal dies
-     */
     private boolean signalSurvives(ServerLevel level, Vec3 start, Vec3 end) {
-        if (traceSignal(level, start, end, List.of())) {
-            return true;
-        }
-
-        if (!Mods.SABLE.isLoaded()) {
-            return false;
-        }
-
-        List<SubLevel> intersectingShips = new ArrayList<>();
-        SableUtils.getLoadedShips(level, new AABB(start, end).inflate(1.0E-4)).forEach(intersectingShips::add);
-
-        if (intersectingShips.isEmpty()) {
-            return false;
-        }
-
-        return traceSignal(level, start, end, intersectingShips);
+        return traceSignal(level, start, end);
     }
 
-    private boolean traceSignal(ServerLevel level, Vec3 start, Vec3 end, Collection<SubLevel> intersectingShips) {
+    private boolean traceSignal(ServerLevel level, Vec3 start, Vec3 end) {
         int x = Mth.floor(start.x);
         int y = Mth.floor(start.y);
         int z = Mth.floor(start.z);
+
+        final int startX = x;
+        final int startY = y;
+        final int startZ = z;
 
         int endX = Mth.floor(end.x);
         int endY = Mth.floor(end.y);
@@ -417,66 +380,140 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         double tMaxZ = initialTMax(start.z, z, stepZ, dz);
 
         int airBlocks = 0;
-        int worldBlocks = 0;
-        int sableBlocks = 0;
 
-        int airRangePenalty = RadarConfig.server().sonarAirRangePenalty.get();
-        double pathDistance = start.distanceTo(end);
-        BlockPos originBlock = BlockPos.containing(start);
+        final int airRangePenalty = RadarConfig.server().sonarAirRangePenalty.get();
+        final double pathDistance = start.distanceTo(end);
+
+        if (pathDistance > range) {
+            return false;
+        }
+
+        final boolean sableAvailable = Mods.SABLE.isLoaded() && airRangePenalty > 0;
+
+        double[] pendingAirSamples = null;
+        int pendingAirCount = 0;
+
+        List<SubLevel> intersectingShips = List.of();
+        boolean sableActive = false;
+
+        BlockPos.MutableBlockPos worldPos = new BlockPos.MutableBlockPos();
+        LevelChunk currentChunk = null;
+
+        int currentChunkX = Integer.MIN_VALUE;
+        int currentChunkZ = Integer.MIN_VALUE;
+
+        final var chunkSource = level.getChunkSource();
+
+        BlockPos.MutableBlockPos shipPos = null;
+        Vector3d shipScratch = null;
 
         double entryT = 0.0;
+
         int guard = Math.abs(endX - x) + Math.abs(endY - y) + Math.abs(endZ - z) + 8;
 
         while (guard-- > 0) {
-            BlockPos pos = new BlockPos(x, y, z);
-            if (!level.hasChunkAt(pos)) {
-                return false;
+            int chunkX = x >> 4;
+            int chunkZ = z >> 4;
+
+            if (currentChunk == null || chunkX != currentChunkX || chunkZ != currentChunkZ) {
+                currentChunk = chunkSource.getChunkNow(chunkX, chunkZ);
+
+                if (currentChunk == null) {
+                    return false;
+                }
+
+                currentChunkX = chunkX;
+                currentChunkZ = chunkZ;
             }
+
+            worldPos.set(x, y, z);
 
             double nextT = Math.min(tMaxX, Math.min(tMaxY, tMaxZ));
             double exitT = Math.min(1.0, nextT);
-            double sampleT = Mth.clamp((entryT + Math.max(entryT, exitT)) * 0.5, 0.0, 1.0);
 
-            boolean isAir = level.getBlockState(pos).isAir();
+            boolean isAir = currentChunk.getBlockState(worldPos).isAir();
 
-            if (!isAir) {
-                worldBlocks++;
-            }
+            if (isAir && !(x == startX && y == startY && z == startZ)) {
+                double sampleT = 0.0;
 
-            if (isAir && !intersectingShips.isEmpty()) {
-                Vec3 samplePoint = new Vec3(start.x + dx * sampleT, start.y + dy * sampleT, start.z + dz * sampleT);
-
-                if (isOccupiedInSable(intersectingShips, samplePoint)) {
-                    isAir = false;
-                    sableBlocks++;
+                if (sableAvailable) {
+                    sampleT = Mth.clamp((entryT + Math.max(entryT, exitT)) * 0.5, 0.0, 1.0);
                 }
-            }
 
-            if (isAir && !pos.equals(originBlock)) {
-                airBlocks++;
+                if (!sableActive || !isOccupiedInSable(
+                        intersectingShips,
+                        start.x + dx * sampleT,
+                        start.y + dy * sampleT,
+                        start.z + dz * sampleT,
+                        shipPos, shipScratch
+                )) {
+                    if (sableAvailable && !sableActive) {
 
-                double effectiveRange = range - (double) airBlocks * airRangePenalty;
+                        if (pendingAirSamples == null) {
+                            pendingAirSamples = new double[8];
+                        }
 
-                if (pathDistance > effectiveRange) {
-                    return false;
+                        if (pendingAirCount == pendingAirSamples.length) {
+                            pendingAirSamples = Arrays.copyOf(pendingAirSamples, pendingAirSamples.length * 2);
+                        }
+
+                        pendingAirSamples[pendingAirCount++] = sampleT;
+                    }
+
+                    airBlocks++;
+                    double effectiveRange = range - (double) airBlocks * airRangePenalty;
+
+                    if (pathDistance > effectiveRange) {
+                        if (!sableAvailable || sableActive) {
+                            return false;
+                        }
+
+                        List<SubLevel> ships = new ArrayList<>();
+                        SableUtils.getLoadedShips(level, new AABB(start, end).inflate(1.0E-4)).forEach(ships::add);
+
+                        if (ships.isEmpty()) {
+                            return false;
+                        }
+
+                        intersectingShips = ships;
+
+                        shipPos = new BlockPos.MutableBlockPos();
+                        shipScratch = new Vector3d();
+                        int correctedAirBlocks = 0;
+
+                        for (int i = 0; i < pendingAirCount; i++) {
+                            double t = pendingAirSamples[i];
+                            boolean occupied = isOccupiedInSable(
+                                    intersectingShips,
+                                    start.x + dx * t,
+                                    start.y + dy * t,
+                                    start.z + dz * t,
+                                    shipPos,
+                                    shipScratch
+                            );
+
+                            if (occupied) {
+                                continue;
+                            }
+
+                            correctedAirBlocks++;
+                            double correctedRange = range - (double) correctedAirBlocks * airRangePenalty;
+
+                            if (pathDistance > correctedRange) {
+                                return false;
+                            }
+                        }
+
+                        airBlocks = correctedAirBlocks;
+                        sableActive = true;
+
+                        pendingAirSamples = null;
+                        pendingAirCount = 0;
+                    }
                 }
             }
 
             if (x == endX && y == endY && z == endZ) {
-                if (level.getGameTime() % 20 == 0 && start.distanceToSqr(end) > 256.0) {
-
-                    LOGGER.debug(
-                            "[SONAR RAY] path={} distance={} air={} worldBlocks={} sableBlocks={} origin={} target={}",
-                            intersectingShips.isEmpty() ? "WORLD" : "SABLE",
-                            Math.sqrt(start.distanceToSqr(end)),
-                            airBlocks,
-                            worldBlocks,
-                            sableBlocks,
-                            start,
-                            end
-                    );
-                }
-
                 return true;
             }
 
@@ -503,13 +540,34 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         return false;
     }
 
-    private static boolean isOccupiedInSable(Collection<SubLevel> ships, Vec3 worldPoint) {
+    private static boolean isOccupiedInSable(
+            Collection<SubLevel> ships,
+            double worldX,
+            double worldY,
+            double worldZ,
+            BlockPos.MutableBlockPos localPos,
+            Vector3d worldScratch
+    ) {
         for (SubLevel ship : ships) {
-            Vector3d local = ship.logicalPose().transformPositionInverse(new Vector3d(worldPoint.x, worldPoint.y, worldPoint.z));
-            BlockPos localPos = BlockPos.containing(local.x, local.y, local.z);
+
             Level shipLevel = ship.getLevel();
 
-            if (shipLevel == null || !shipLevel.hasChunkAt(localPos)) {
+            if (shipLevel == null) {
+                continue;
+            }
+
+            Vector3d local = ship.logicalPose()
+                    .transformPositionInverse(
+                            worldScratch.set(worldX, worldY, worldZ)
+                    );
+
+            localPos.set(
+                    Mth.floor(local.x),
+                    Mth.floor(local.y),
+                    Mth.floor(local.z)
+            );
+
+            if (!shipLevel.hasChunkAt(localPos)) {
                 continue;
             }
 

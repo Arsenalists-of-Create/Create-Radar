@@ -591,12 +591,16 @@ public final class WeaponNetworkRuntime {
         allSlots.addAll(contactClaims.keySet());
         for (Slot slot : allSlots) {
             GroupBuilder builder = group(groups, slot.mountPos());
-            LinkedHashSet<BlockPos> explicit =
-                    explicitClaims.getOrDefault(
-                            slot, new LinkedHashSet<>());
-            LinkedHashSet<BlockPos> contact =
-                    contactClaims.getOrDefault(
-                            slot, new LinkedHashSet<>());
+
+            Set<BlockPos> explicit = explicitClaims.get(slot);
+            if (explicit == null) {
+                explicit = Set.of();
+            }
+
+            Set<BlockPos> contact = contactClaims.get(slot);
+            if (contact == null) {
+                contact = Set.of();
+            }
 
             BlockPos selected = null;
             if (explicit.size() > 1) {

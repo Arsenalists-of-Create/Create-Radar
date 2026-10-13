@@ -12,20 +12,26 @@ import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.config.server.RadarServerConfig;
 import com.mojang.logging.LogUtils;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
 import javax.annotation.Nullable;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 public class CannonMountPitch {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private final AutoPitchControllerBlockEntity controller;
-    private final DirectCbcMountMotion.State motionState =
-            new DirectCbcMountMotion.State();
+    private final Map<BlockEntity, DirectCbcMountMotion.State> motionStates = new WeakHashMap<>();
+
+    private final Map<AbstractMountedCannonContraption, Double> selectionRangeCache = new IdentityHashMap<>();
+    private int selectionRangeDepth = 0;
 
     public CannonMountPitch(AutoPitchControllerBlockEntity controller) {
         this.controller = controller;
@@ -43,10 +49,8 @@ public class CannonMountPitch {
         return atTargetPitch(mount, lag, 0.0);
     }
 
-    public boolean atTargetPitch(CannonMountContext mount, boolean lag,
-                                 double minimumToleranceDegrees) {
-        return atTargetPitch(mount, lag, minimumToleranceDegrees,
-                Double.POSITIVE_INFINITY);
+    public boolean atTargetPitch(CannonMountContext mount, boolean lag, double minimumToleranceDegrees) {
+        return atTargetPitch(mount, lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
     }
 
     public boolean atTargetPitch(CannonMountContext mount, boolean lag,
@@ -84,6 +88,18 @@ public class CannonMountPitch {
                 ? Math.max(0.0, tolerance) : Double.POSITIVE_INFINITY;
     }
 
+    public void beginRangeSelection() {
+        if (selectionRangeDepth++ == 0) {
+            selectionRangeCache.clear();
+        }
+    }
+
+    public void endRangeSelection() {
+        if (selectionRangeDepth > 0 && --selectionRangeDepth == 0) {
+            selectionRangeCache.clear();
+        }
+    }
+
     public double getMaxEngagementRangeBlocks(CannonMountContext mount, ServerLevel sl) {
         PitchOrientedContraptionEntity ce = mount.getContraption();
         if (ce == null) {
@@ -93,7 +109,14 @@ public class CannonMountPitch {
             return 0;
         }
 
-        double r = CannonUtil.getMaxProjectileRangeBlocks(cannon, sl);
+        double r;
+
+        if (selectionRangeDepth > 0) {
+            r = selectionRangeCache.computeIfAbsent(cannon, c -> CannonUtil.getMaxProjectileRangeBlocks(c, sl));
+        } else {
+            r = CannonUtil.getMaxProjectileRangeBlocks(cannon, sl);
+        }
+
         LOGGER.debug("RANGE DBG endpoint={} cannon={} range={} blocks", controller.getBlockPos(), cannon.getClass().getSimpleName(), r);
         return r;
     }
@@ -105,10 +128,10 @@ public class CannonMountPitch {
         if (controller.firingControl == null) {
             return false;
         }
-        if (mount.getContraption() == null) {
-            return false;
-        }
-        if (!(mount.getContraption().getContraption() instanceof AbstractMountedCannonContraption)) {
+
+        PitchOrientedContraptionEntity contraption = mount.getContraption();
+
+        if (contraption == null || !(contraption.getContraption() instanceof AbstractMountedCannonContraption)) {
             return false;
         }
 
@@ -132,8 +155,11 @@ public class CannonMountPitch {
             }
         }
 
-        if (Mods.SABLE.isLoaded()
-                && controller.firingControl.usesSublevelAimFrame()) {
+        if (requireLos && !"Sable:ship".equals(track.entityType()) && !controller.firingControl.hasLineOfSightTo(track, true)) {
+            return false;
+        }
+
+        if (Mods.SABLE.isLoaded() && controller.firingControl.usesSublevelAimFrame()) {
             List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, p, sl);
             boolean hasLegalAngles = angles != null && angles.stream()
                     .anyMatch(candidate -> candidate != null
@@ -156,11 +182,12 @@ public class CannonMountPitch {
             }
         }
 
-        return !requireLos || "Sable:ship".equals(track.entityType())
-                || controller.firingControl.hasLineOfSightTo(track, true);
+        return true;
     }
 
     private void rotateCBC(CannonMountContext mount) {
+        DirectCbcMountMotion.State motionState = motionStates.computeIfAbsent(mount.blockEntity(), ignored -> new DirectCbcMountMotion.State());
+
         if (!controller.isRunningController()) {
             motionState.reset();
             LOGGER.debug("PITCH.rotateCBC aborted: isRunning=false");

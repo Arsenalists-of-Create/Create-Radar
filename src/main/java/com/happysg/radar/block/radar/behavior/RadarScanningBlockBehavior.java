@@ -450,34 +450,52 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return dead;
         });
     }
+
     private void scanForEntityTracks() {
         Level level = blockEntity.getLevel();
         if (level == null) return;
-        Predicate<Entity> radarFilter = this::shouldRadarSee;
-        boolean scanAll = scanPlayers && scanContraptions && scanMobs && scanAnimals && scanProjectiles && scanItems;
 
         for (AABB aabb : splitAABB(getRadarAABB(range), 256)) {
-            if (scanPlayers)
-                scannedEntities.addAll(level.getEntitiesOfClass(Player.class, aabb, radarFilter));
-
-            if (scanProjectiles)
-                scannedEntities.addAll(level.getEntitiesOfClass(Projectile.class, aabb));
-
-            scannedEntities.addAll(level.getEntitiesOfClass(Entity.class, aabb, RadarScanningBlockBehavior::isMissile));
-
-            if (scanItems)
-                scannedEntities.addAll(level.getEntitiesOfClass(ItemEntity.class, aabb));
-
-            if (scanContraptions)
-                scannedEntities.addAll(level.getEntitiesOfClass(AbstractContraptionEntity.class, aabb));
-
-            if (scanAnimals)
-                scannedEntities.addAll(level.getEntitiesOfClass(Animal.class, aabb));
-
-            if (scanMobs) {
-                scannedEntities.addAll(level.getEntitiesOfClass(net.minecraft.world.entity.Mob.class, aabb, e -> !(e instanceof Animal)));
-            }
+            scannedEntities.addAll(
+                    level.getEntitiesOfClass(
+                            Entity.class,
+                            aabb,
+                            this::shouldCollectEntity
+                    )
+            );
         }
+    }
+
+    private boolean shouldCollectEntity(Entity entity) {
+        if (isMissile(entity)) {
+            return true;
+        }
+
+        if (entity instanceof Player) {
+            return scanPlayers && shouldRadarSee(entity);
+        }
+
+        if (entity instanceof Projectile) {
+            return scanProjectiles;
+        }
+
+        if (entity instanceof ItemEntity) {
+            return scanItems;
+        }
+
+        if (entity instanceof AbstractContraptionEntity) {
+            return scanContraptions;
+        }
+
+        if (entity instanceof Animal) {
+            return scanAnimals;
+        }
+
+        if (entity instanceof Mob) {
+            return scanMobs;
+        }
+
+        return false;
     }
 
     private static boolean isMissile(Entity entity) {

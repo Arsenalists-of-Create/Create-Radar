@@ -11,13 +11,7 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -32,12 +26,11 @@ public final class DiagnosticRecorder {
     private static final int MAX_TEXT_CHARS = 512;
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Object LOCK = new Object();
-    private static final LinkedHashMap<String, MutableEvent> EVENTS =
-            new LinkedHashMap<>();
+    private static final LinkedHashMap<String, MutableEvent> EVENTS = new LinkedHashMap<>();
     private static final AtomicLong NEXT_SEQUENCE = new AtomicLong(1L);
+    private static final String NO_EXCEPTION_FINGERPRINT = fingerprint("", "");
 
-    private DiagnosticRecorder() {
-    }
+    private DiagnosticRecorder() {}
 
     public static void info(String subsystem, String operation, String reason,
                             @Nullable Level level, @Nullable BlockPos position,
@@ -80,7 +73,7 @@ public final class DiagnosticRecorder {
         String exceptionMessage = throwable == null ? "" :
                 sanitize(throwable.getMessage(), MAX_TEXT_CHARS);
         String stack = throwable == null ? "" : stackTrace(throwable);
-        String fingerprint = fingerprint(exceptionType, stack);
+        String fingerprint = throwable == null ? NO_EXCEPTION_FINGERPRINT : fingerprint(exceptionType, stack);
         String side = level == null ? "unknown" :
                 (level.isClientSide ? "client" : "server");
         String dimension = level == null ? "unknown" :
@@ -219,11 +212,7 @@ public final class DiagnosticRecorder {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(material.getBytes(StandardCharsets.UTF_8));
-            StringBuilder result = new StringBuilder(16);
-            for (int index = 0; index < 8; index++) {
-                result.append(String.format("%02x", digest[index]));
-            }
-            return result.toString();
+            return HexFormat.of().formatHex(digest, 0, 8);
         } catch (NoSuchAlgorithmException impossible) {
             LOGGER.debug("SHA-256 unavailable for diagnostic fingerprint", impossible);
             return Integer.toHexString(material.hashCode());

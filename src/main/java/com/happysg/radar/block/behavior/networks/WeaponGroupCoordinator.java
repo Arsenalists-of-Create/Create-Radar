@@ -51,14 +51,13 @@ public final class WeaponGroupCoordinator {
         runtime.reconcile();
 
         // Ensure each mount group is processed only once per tick
-        Set<String> processedMounts = new HashSet<>();
+        Set<BlockPos> processedMounts = new HashSet<>();
         Set<BlockPos> processedPitchEndpoints = new HashSet<>();
 
         for (WeaponNetworkRuntime.WeaponGroupView g : runtime.getGroups()) {
             BlockPos mountPos = g.mountPos();
-            String mountKey = sl.dimension().location() + "|" + mountPos.asLong();
 
-            if (!processedMounts.add(mountKey)) {
+            if (!processedMounts.add(mountPos)) {
                 continue;
             }
 
@@ -82,7 +81,7 @@ public final class WeaponGroupCoordinator {
             // Keep controller refs fresh (yaw/pitch/fire)
             ConflictTraceRecorder.Scope trace = ConflictTraceRecorder.begin(
                     "weapon_network", "coordinator_tick", sl, mountPos,
-                    Map.of("pitch", g.pitchPos().toShortString()));
+                    ConflictTraceRecorder.isEnabled() ? Map.of("pitch", g.pitchPos().toShortString()) : Map.of());
             try {
                 if (sl.getGameTime() % REFRESH_EVERY_TICKS == 0) {
                     pitch.firingControl.refreshControllers();
@@ -95,6 +94,7 @@ public final class WeaponGroupCoordinator {
                         "network_tick_failed_and_firing_stopped", exception,
                         sl, mountPos, "createbigcannons", "sable");
                 long now = sl.getGameTime();
+                String mountKey = sl.dimension().location() + "|" + mountPos.asLong();
                 long last = LAST_ERROR_LOG.getOrDefault(mountKey, Long.MIN_VALUE);
                 if (last == Long.MIN_VALUE || now - last >= ERROR_LOG_INTERVAL_TICKS) {
                     LAST_ERROR_LOG.put(mountKey, now);

@@ -342,8 +342,18 @@ public class WeaponFiringControl {
         if (result == WeaponFiringControl.RayResult.CLEAR) {
             ClipContext ctx = new ClipContext(start, end, Block.COLLIDER, Fluid.NONE, CollisionContext.empty());
             HitResult hit = this.level.clip(ctx);
+            Vec3 worldHit = hit.getLocation();
+
+            if (Mods.SABLE.isLoaded() && hit instanceof BlockHitResult blockHit) {
+                SubLevelAccess hitSublevel = SableCompanion.INSTANCE.getContaining(this.level, blockHit.getBlockPos());
+
+                if (hitSublevel != null) {
+                    worldHit = SubLevelAimResolver.toWorld(hitSublevel, worldHit);
+                }
+            }
+
             if (hit.getType() != Type.MISS) {
-                double hitDist = hit.getLocation().distanceTo(start);
+                double hitDist = worldHit.distanceTo(start);
                 double targetDist = end.distanceTo(start);
                 if (hitDist < targetDist) {
                     result = WeaponFiringControl.RayResult.BLOCKED_BLOCK;
@@ -672,8 +682,6 @@ public class WeaponFiringControl {
                 Vec3 start = this.getCannonRayStart();
                 if (this.isOutOfKnownRange(target)) {
                     return false;
-                } else if (!this.isPointInShootableRange(target)) {
-                    return false;
                 } else {
                     LOGGER.debug("LOS DBG: trackCat={} entityType={} height={} blocksHigh={} target={}", new Object[]{this.activetrack != null ? this.activetrack.trackCategory() : "null", this.activetrack != null ? this.activetrack.entityType() : "null", height, blocksHigh, target});
 
@@ -788,6 +796,72 @@ public class WeaponFiringControl {
 
                 return false;
             }
+        }
+    }
+
+    private boolean debugDualTick(ServerLevel server) {
+        return isDualNetwork() && RadarConfig.DEBUG_BEAMS && server.getGameTime() % 20L == 0L;
+    }
+
+    private DustParticleOptions dualSideParticle(WeaponSide side, float size) {
+        boolean first = !weaponSides.isEmpty() && weaponSides.get(0).mountPos.equals(side.mountPos);
+        return new DustParticleOptions(first ? new Vector3f(0.0F, 0.9F, 1.0F) : new Vector3f(1.0F, 0.15F, 0.85F), size);
+    }
+
+    private void debugDualBarrel(
+            ServerLevel server,
+            WeaponSide side,
+            SideShot shot,
+            AimGeometry geometry,
+            MountAimFrame frame
+    ) {
+        if (!debugDualTick(server)) {
+            return;
+        }
+
+        Double pitch = currentSidePitchDeg(side, shot);
+        Double yaw = currentSideYawDeg(side);
+
+        if (pitch == null || yaw == null || !Double.isFinite(pitch) || !Double.isFinite(yaw)) {
+            return;
+        }
+
+        Vec3 direction = frame.worldDirection(pitch, wrap360(yaw + 270.0));
+        Vec3 start = geometry.muzzlePosition();
+
+        if (!finite(start) || !finite(direction) || direction.lengthSqr() < 1.0E-12) {
+            return;
+        }
+
+        Vec3 unit = direction.normalize();
+        DustParticleOptions particle = dualSideParticle(side, 0.75F);
+
+        for (double distance = 0.0; distance <= 24.0; distance += 0.75) {
+            Vec3 point = start.add(unit.scale(distance));
+            server.sendParticles(particle, point.x, point.y, point.z, 1, 0.0, 0.0, 0.0, 0.0);
+        }
+    }
+
+    private void debugDualTrajectory(
+            ServerLevel server,
+            WeaponSide side,
+            List<com.happysg.radar.targeting.Trajectory.Sample> samples
+    ) {
+        if (!debugDualTick(server) || samples == null || samples.isEmpty()) {
+            return;
+        }
+
+        DustParticleOptions particle = dualSideParticle(side, 0.65F);
+        int stride = Math.max(1, (samples.size() + 79) / 80);
+
+        for (int i = 0; i < samples.size(); i += stride) {
+            Vec3 point = samples.get(i).position();
+
+            if (!finite(point)) {
+                continue;
+            }
+
+            server.sendParticles(particle, point.x, point.y, point.z, 1, 0.0, 0.0, 0.0, 0.0);
         }
     }
 
@@ -2018,64 +2092,47 @@ public class WeaponFiringControl {
                                             ? CannonUtil.isCannonReadyToFire(this.cannonMount)
                                             : adapterShot.canTriggerFire();
                                     boolean stableOk = this.aimStableTicks >= motion.stableTicksRequired();
-                                    if (this.level.getGameTime() % 20L == 0L) {
-                                        LOGGER.debug("WFC FIREGATES: auto={} lead={} newSolver={} solverFireFresh={} provisional={} freshnessReason={} aimMode={} newConf={} minConf={} laserNoLead={} yawPitchOk={} safeOk={} cannonReady={} stableOk={} firingBE={} target={} aim={} offset={} stable={}/{} motion={} jerk={} eps={} reason={}", new Object[]{auto, hasLeadSolution, hasNewTargetingSolution, targetingResultFreshForFire, targetingResultProvisional, this.lastTargetingFreshnessReason, aimUpdateMode, targetingResult != null ? targetingResult.confidence() : null, motion.minConfidence(), canFireWithoutLead, yawPitchOk, safeOk, cannonReady, stableOk, this.fireController != null, this.target, offsetAim, this.offset, this.aimStableTicks, motion.stableTicksRequired(), motion.motionClass(), motion.jerk(), motion.aimStableEps(), motion.reason()});
-                                        if (!yawPitchOk) {
-                                            LOGGER.debug("WFC AIMCHK: yawCtrl={} pitchCtrl={} atYaw={} atPitch={} targYaw={} targPitch={} minimumTolerance={} rangeTolerance={} range={} axes={}", new Object[]{this.yawController != null ? this.yawController.getBlockPos() : null, this.pitchController != null ? this.pitchController.getBlockPos() : null, this.yawController != null && this.yawController.isAlignedForFiring(lag, minimumFiringTolerance, firingTolerance.maximumDegrees()), this.pitchController != null && this.pitchController.isAlignedForFiring(lag, minimumFiringTolerance, firingTolerance.maximumDegrees()), this.yawController != null ? this.yawController.getTargetAngle() : null, this.pitchController != null ? this.pitchController.getTargetAngle() : null, minimumFiringTolerance, firingTolerance.maximumDegrees(), firingTolerance.distanceBlocks(), firingTolerance.axisCount()});
-                                        }
 
-                                        if (!auto) {
-                                            LOGGER.debug("WFC BLOCK: autoFire disabled");
-                                        }
+                                    WeaponSide liveAuthority = isDualNetwork() ? authoritySide() : null;
+                                    Vec3 liveOrigin = isDualNetwork() ? this.resolveSteeringOrigin(cannon) : null;
 
-                                        if (!hasLeadSolution && !hasNewTargetingSolution && !canFireWithoutLead) {
-                                            LOGGER.debug("WFC BLOCK: {}", rejectCustomLegacy
-                                                    ? "custom_dynamics_unsupported_in_forced_legacy"
-                                                    : "no lead solution");
-                                        }
+                                    boolean stationaryDualRevalidated =
+                                            isDualNetwork()
+                                                    && hasNewTargetingSolution
+                                                    && !targetingResultFreshForFire
+                                                    && "age".equals(lastTargetingFreshnessReason)
+                                                    && motion.motionClass() == TargetMotionClass.STEADY
+                                                    && targetVel != null
+                                                    && targetAccel != null
+                                                    && targetVel.lengthSqr() <= 1.0E-6
+                                                    && targetAccel.lengthSqr() <= 1.0E-6
+                                                    && cachedTargetingRequestTick != Long.MIN_VALUE
+                                                    && serverLevel.getGameTime() >= cachedTargetingRequestTick
+                                                    && serverLevel.getGameTime() - cachedTargetingRequestTick
+                                                    <= ASYNC_TARGETING_TASK_TIMEOUT_TICKS
+                                                    && cachedTargetingSolvePos != null
+                                                    && cachedTargetingOriginPos != null
+                                                    && liveOrigin != null
+                                                    && solvePos.distanceToSqr(cachedTargetingSolvePos) <= 0.01
+                                                    && liveOrigin.distanceToSqr(cachedTargetingOriginPos) <= 0.01
+                                                    && Objects.equals(cachedTargetingTargetId, targetMotionId)
+                                                    && currentProjectile != null
+                                                    && Objects.equals(cachedTargetingShotFingerprint, currentProjectile.fingerprint())
+                                                    && liveAuthority != null
+                                                    && liveAuthority.aimValid
+                                                    && liveAuthority.firingSnapshot != null
+                                                    && liveAuthority.trajectoryClear;
 
-                                        if (!safeOk) {
-                                            LOGGER.debug("WFC BLOCK: safe zone violation");
-                                        }
-
-                                        if (!cannonReady) {
-                                            LOGGER.debug("WFC BLOCK: cannon not ready");
-                                        }
-
-                                        if (!yawPitchOk) {
-                                            LOGGER.debug("WFC BLOCK: yaw/pitch not aligned");
-                                        }
-
-                                        if (!stableOk) {
-                                            LOGGER.debug("WFC BLOCK: aim not stable");
-                                        }
-
-                                        if (!directAdapterAimReady) {
-                                            LOGGER.debug("WFC BLOCK: direct adapter aim did not resolve to controller angles");
-                                        }
-
-                                        if (!aimWithinMovementLimits) {
-                                            LOGGER.debug("WFC BLOCK: movement limits reason={} requestedPitch={} appliedPitch={} requestedYaw={} appliedYaw={} frame={} sourceSublevel={}",
-                                                    aimEvaluation == null ? "not_evaluated" : aimEvaluation.reason(),
-                                                    aimEvaluation == null ? null : aimEvaluation.requestedPitchDeg(),
-                                                    aimEvaluation == null ? null : aimEvaluation.appliedPitchDeg(),
-                                                    aimEvaluation == null ? null : aimEvaluation.requestedControllerYawDeg(),
-                                                    aimEvaluation == null ? null : aimEvaluation.appliedControllerYawDeg(),
-                                                    mountFrame.kind(), mountFrame.sourceSublevelId());
-                                        }
-                                    }
 
                                     boolean sharedFireGates =
                                             this.targetingConfig.autoFire()
-                                            && hasFireEligibleAim(
-                                                    hasLeadSolution,
-                                                    hasFireEligibleNewTargetingSolution,
-                                                    canFireWithoutLead)
+                                            && (hasFireEligibleAim(hasLeadSolution, hasFireEligibleNewTargetingSolution, canFireWithoutLead) || stationaryDualRevalidated)
                                             && directAdapterAimReady
                                             && aimWithinMovementLimits
                                             && structuralAimAccepted
                                             && (isDualNetwork() || safeOk)
                                             && stableOk;
+
                                     if (isDualNetwork()) {
                                         this.updateDualFireControllers(
                                                 serverLevel,
@@ -3160,7 +3217,90 @@ public class WeaponFiringControl {
                         snapshot.launchPosition(direction), direction,
                         snapshot.inheritedVelocity(), model,
                         validationTicks, snapshot.level());
-        ObstructionResult obstruction = this.mainThreadObstructionChecker.check(serverLevel, trajectory, Math.max(0, result.predictedFlightTicks()));
+
+        int originalCheckTick = Math.max(0, result.predictedFlightTicks());
+
+        Vec3 segmentImpact = null;
+        int segmentImpactTick = -1;
+
+        if (!isDualNetwork() && snapshot.targetAabb() != null) {
+            List<Trajectory.Sample> samples = trajectory.samples();
+            AABB targetBox = snapshot.targetAabb();
+
+            for (int i = 0; i + 1 < samples.size(); i++) {
+                Trajectory.Sample from = samples.get(i);
+                Trajectory.Sample to = samples.get(i + 1);
+
+                Vec3 targetFrom = predictTarget(
+                        snapshot.targetPosition(),
+                        snapshot.targetVelocity(),
+                        snapshot.targetAcceleration(),
+                        from.tick(),
+                        snapshot.targetMotionClass(),
+                        snapshot.gravity()
+                );
+
+                Vec3 targetTo = predictTarget(
+                        snapshot.targetPosition(),
+                        snapshot.targetVelocity(),
+                        snapshot.targetAcceleration(),
+                        to.tick(),
+                        snapshot.targetMotionClass(),
+                        snapshot.gravity()
+                );
+
+                Vec3 relativeFrom = from.position().subtract(targetFrom.subtract(snapshot.targetPosition()));
+                Vec3 relativeTo = to.position().subtract(targetTo.subtract(snapshot.targetPosition()));
+                Vec3 intersection = targetBox.contains(relativeFrom)
+                        ? relativeFrom
+                        : targetBox.clip(
+                        relativeFrom,
+                        relativeTo
+                ).orElse(null);
+
+                if (intersection == null) {
+                    continue;
+                }
+
+                Vec3 travel = relativeTo.subtract(relativeFrom);
+                double lengthSquared = travel.lengthSqr();
+
+                double fraction = lengthSquared < 1.0E-12 ? 0.0 : Math.max(0.0, Math.min(1.0, intersection.subtract(relativeFrom).dot(travel) / lengthSquared));
+
+                segmentImpact = from.position().lerp(to.position(), fraction);
+                segmentImpactTick = to.tick();
+                break;
+            }
+
+            if (segmentImpact != null) {
+                for (int i = 0; i + 1 < samples.size(); i++) {
+                    Trajectory.Sample from = samples.get(i);
+                    Trajectory.Sample to = samples.get(i + 1);
+
+                    if (from.tick() >= segmentImpactTick) {
+                        break;
+                    }
+
+                    Vec3 segmentEnd = to.tick() == segmentImpactTick ? segmentImpact : to.position();
+                    if (this.pathTouchesSafeZone(from.position(), segmentEnd)) {
+                        return null;
+                    }
+                }
+            }
+        }
+
+        int pathEndTick = segmentImpact != null ? segmentImpactTick : originalCheckTick;
+        ObstructionResult obstruction = segmentImpact == null ? this.mainThreadObstructionChecker.check(
+                serverLevel,
+                trajectory,
+                pathEndTick
+        ) : this.mainThreadObstructionChecker.check(
+                serverLevel,
+                trajectory,
+                pathEndTick,
+                segmentImpact
+        );
+
         if (obstruction.clear() || this.isValidatedObstructionAtTarget(snapshot, obstruction)) {
             return result;
         }
@@ -3877,6 +4017,7 @@ public class WeaponFiringControl {
 
             AimGeometry geometry = resolveAimGeometry(side, shot);
             MountAimFrame frame = resolveMountAimFrame(side, shot);
+            debugDualBarrel(serverLevel, side, shot, geometry, frame);
 
             Vec3 compensatedDirection = null;
             if (side == authority) {
@@ -3887,13 +4028,10 @@ public class WeaponFiringControl {
                         && Double.isFinite(authorityYaw);
             } else if (shot.directAim) {
                 side.cancelTargeting();
-                compensatedDirection = directionFromTo(
-                        geometry.muzzlePosition(), solvePos);
-                AimCommandEvaluation evaluation = frame.evaluate(
-                        compensatedDirection);
+                compensatedDirection = directionFromTo(geometry.muzzlePosition(), solvePos);
+                AimCommandEvaluation evaluation = frame.evaluate(compensatedDirection);
                 if (evaluation.valid()) {
-                    side.desiredYaw = evaluation
-                            .requestedControllerYawDeg();
+                    side.desiredYaw = evaluation.requestedControllerYawDeg();
                     side.aimValid = !evaluation.yawConstrained();
                 } else {
                     side.desiredYaw = null;
@@ -3912,6 +4050,7 @@ public class WeaponFiringControl {
                     side.cancelTargeting();
                     side.solutionKey = key;
                 }
+
                 this.pollSecondaryTargeting(side, key);
                 if (side.cachedSolution != null) {
                     SecondaryTargetingResult cached = side.cachedSolution;
@@ -3920,19 +4059,28 @@ public class WeaponFiringControl {
                             cached.result().aimSolution().aimPoint(),
                             cached.snapshot().steeringOrigin(),
                             geometry.steeringOrigin(),
-                            rebaseAimPoint(
-                                    cached.result().aimSolution().aimPoint(),
-                                    cached.solvePos(), solvePos));
-                    AimCommandEvaluation evaluation = frame.evaluate(
-                            compensatedDirection);
-                    long age = serverLevel.getGameTime()
-                            - cached.requestTick();
+                            rebaseAimPoint(cached.result().aimSolution().aimPoint(), cached.solvePos(), solvePos));
+
+                    AimCommandEvaluation evaluation = frame.evaluate(compensatedDirection);
+                    long age = serverLevel.getGameTime() - cached.requestTick();
+
                     if (evaluation.valid()) {
-                        side.desiredYaw = evaluation
-                                .requestedControllerYawDeg();
-                        side.aimValid = !evaluation.yawConstrained()
-                                && age >= 0
-                                && age <= ASYNC_TARGETING_FIRE_FRESH_TICKS;
+                        side.desiredYaw = evaluation.requestedControllerYawDeg();
+                        boolean recentSolution = age >= 0 && age <= ASYNC_TARGETING_FIRE_FRESH_TICKS;
+
+                        boolean stationaryRevalidationCandidate =
+                                age > ASYNC_TARGETING_FIRE_FRESH_TICKS
+                                && age <= ASYNC_TARGETING_TASK_TIMEOUT_TICKS
+                                && targetMotionClass == TargetMotionClass.STEADY
+                                && targetVelocity != null
+                                && targetAcceleration != null
+                                && targetVelocity.lengthSqr() <= 1.0E-6
+                                && targetAcceleration.lengthSqr() <= 1.0E-6
+                                && solvePos.distanceToSqr(cached.solvePos()) <= 0.01
+                                && geometry.steeringOrigin().distanceToSqr(
+                                cached.snapshot().steeringOrigin()) <= 0.01;
+
+                        side.aimValid = !evaluation.yawConstrained() && (recentSolution || stationaryRevalidationCandidate);
                     }
                 }
                 if (side.pendingSolution == null
@@ -3977,11 +4125,11 @@ public class WeaponFiringControl {
                 );
             }
 
-            if (!issueAimCommand || sharedPitch == null || !Double.isFinite(sharedPitch)
-                    || side.desiredYaw == null || !Double.isFinite(side.desiredYaw)) {
+            if (!issueAimCommand || sharedPitch == null || !Double.isFinite(sharedPitch) || side.desiredYaw == null || !Double.isFinite(side.desiredYaw)) {
                 side.aimValid = false;
                 continue;
             }
+
             if (!frame.pitchConstraint().hasReachablePitch()
                     || sharedPitch < frame.pitchConstraint().minPitchDeg() - 1.0E-6
                     || sharedPitch > frame.pitchConstraint().maxPitchDeg() + 1.0E-6) {
@@ -4010,7 +4158,8 @@ public class WeaponFiringControl {
                     geometry,
                     firingDirection,
                     side.firingSnapshot,
-                    firingModel
+                    firingModel,
+                    side
             );
         }
     }
@@ -4278,7 +4427,8 @@ public class WeaponFiringControl {
             AimGeometry geometry,
             Vec3 direction,
             TargetingSnapshot snapshot,
-            ProjectileModel model
+            ProjectileModel model,
+            WeaponSide side
     ) {
         if (model == null) {
             return false;
@@ -4296,9 +4446,41 @@ public class WeaponFiringControl {
         );
 
         List<com.happysg.radar.targeting.Trajectory.Sample> samples = trajectory.samples();
+        debugDualTrajectory(serverLevel, side, samples);
+
+        Vec3 segmentImpactPoint = null;
+        int segmentImpactEndTick = -1;
+
+        if (snapshot.targetAabb() != null) {
+            AABB targetBox = snapshot.targetAabb();
+
+            for (int i = 0; i + 1 < samples.size(); i++) {
+                var from = samples.get(i);
+                var to = samples.get(i + 1);
+
+                Vec3 targetFrom = predictTarget(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), from.tick(), snapshot.targetMotionClass(), snapshot.gravity());
+                Vec3 targetTo = predictTarget(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), to.tick(), snapshot.targetMotionClass(), snapshot.gravity());
+
+                Vec3 relativeFrom = from.position().subtract(targetFrom.subtract(snapshot.targetPosition()));
+                Vec3 relativeTo = to.position().subtract(targetTo.subtract(snapshot.targetPosition()));
+                Vec3 intersection = targetBox.contains(relativeFrom) ? relativeFrom : targetBox.clip(relativeFrom, relativeTo).orElse(null);
+
+                if (intersection == null) {
+                    continue;
+                }
+
+                Vec3 relativeTravel = relativeTo.subtract(relativeFrom);
+                double lengthSquared = relativeTravel.lengthSqr();
+                double fraction = lengthSquared < 1.0E-12 ? 0.0 : Math.max(0.0, Math.min(1.0, intersection.subtract(relativeFrom).dot(relativeTravel) / lengthSquared));
+
+                segmentImpactPoint = from.position().lerp(to.position(), fraction);
+                segmentImpactEndTick = to.tick();
+
+                break;
+            }
+        }
 
         double closest = Double.POSITIVE_INFINITY;
-
         int closestTick = 0;
 
         for (com.happysg.radar.targeting.Trajectory.Sample sample : samples) {
@@ -4320,27 +4502,35 @@ public class WeaponFiringControl {
             }
         }
 
-        int pathEndTick = Math.min(ticks, closestTick + 1);
+        boolean reachedTargetHitbox = snapshot.targetAabb() != null && closest == 0.0;
+        int pathEndTick = Math.min(ticks, segmentImpactEndTick > 0 ? segmentImpactEndTick : reachedTargetHitbox ? Math.max(1, closestTick) : closestTick + 1);
 
         for (int i = 0; i + 1 < samples.size(); i++) {
             if (samples.get(i).tick() >= pathEndTick) {
                 break;
             }
 
-            if (this.pathTouchesSafeZone(samples.get(i).position(), samples.get(i + 1).position())) {
+            Vec3 segmentEnd = segmentImpactPoint != null && samples.get(i + 1).tick() == pathEndTick ? segmentImpactPoint : samples.get(i + 1).position();
+            if (this.pathTouchesSafeZone(samples.get(i).position(), segmentEnd)) {
                 return false;
             }
         }
 
         if (this.targetingConfig.lineOfSight()) {
-            ObstructionResult obstruction = this.mainThreadObstructionChecker.check(serverLevel, trajectory, pathEndTick);
+            ObstructionResult obstruction = segmentImpactPoint == null
+                    ? this.mainThreadObstructionChecker.check(
+                    serverLevel, trajectory, pathEndTick)
+                    : this.mainThreadObstructionChecker.check(
+                    serverLevel, trajectory, pathEndTick,
+                    segmentImpactPoint);
 
             if (!obstruction.clear() && !this.isValidatedObstructionAtTarget(snapshot, obstruction)) {
                 return false;
             }
         }
 
-        return closest <= this.directTargetHitTolerance(snapshot);
+        double tolerance = this.directTargetHitTolerance(snapshot);
+        return segmentImpactPoint != null || closest <= tolerance;
     }
 
     private static int sideValidationTicks(TargetingSnapshot snapshot, ProjectileModel model) {
@@ -5333,6 +5523,7 @@ public class WeaponFiringControl {
                     side.aimValid,
                     side.trajectoryClear)
                     && isWeaponStateOk(side);
+
             if (shouldFire && shot.adapter != null && !prepareAdapterShotForFire(shot.adapter, shot.context, side.mountPos)) {
                 shouldFire = false;
             }

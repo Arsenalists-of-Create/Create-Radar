@@ -130,7 +130,7 @@ public final class RadarOcclusion {
                 to,
                 counter,
                 (currentCounter, pos) -> {
-                    if (pos.equals(startBlock) || pos.equals(endBlock) || !level.hasChunkAt(pos)) {
+                    if (pos.equals(startBlock) || pos.equals(endBlock) || !currentCounter.isChunkAvailable(level, pos)) {
                         return null;
                     }
 
@@ -168,6 +168,25 @@ public final class RadarOcclusion {
     private static final class SolidBlockCounter {
         private final int limit;
         private int count;
+
+        private @Nullable Level lastChunkLevel;
+        private int lastChunkX = Integer.MIN_VALUE;
+        private int lastChunkZ = Integer.MIN_VALUE;
+        private boolean lastChunkAvailable;
+
+        private boolean isChunkAvailable(Level level, BlockPos pos) {
+            int chunkX = pos.getX() >> 4;
+            int chunkZ = pos.getZ() >> 4;
+
+            if (lastChunkLevel != level || lastChunkX != chunkX || lastChunkZ != chunkZ) {
+                lastChunkLevel = level;
+                lastChunkX = chunkX;
+                lastChunkZ = chunkZ;
+                lastChunkAvailable = level.hasChunkAt(pos);
+            }
+
+            return lastChunkAvailable;
+        }
 
         private SolidBlockCounter(int limit) {
             this.limit = Math.max(0, limit);

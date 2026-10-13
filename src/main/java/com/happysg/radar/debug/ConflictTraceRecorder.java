@@ -111,17 +111,15 @@ public final class ConflictTraceRecorder {
         }
     }
 
-    public static Scope begin(String subsystem, String operation,
-                              @Nullable Level level,
-                              @Nullable BlockPos position,
-                              Map<String, String> context) {
-        long correlation = NEXT_CORRELATION.getAndIncrement();
-        if (enabled) {
-            recordInternal(subsystem, operation, "BEGIN", level, position,
-                    correlation, context, false);
+    public static Scope begin(String subsystem, String operation, @Nullable Level level, @Nullable BlockPos position, Map<String, String> context) {
+        if (!enabled) {
+            return new Scope(subsystem, operation, level, position, 0L, 0L, null);
         }
-        return new Scope(subsystem, operation, level, position, correlation,
-                System.nanoTime(), context);
+
+        long correlation = NEXT_CORRELATION.getAndIncrement();
+        recordInternal(subsystem, operation, "BEGIN", level, position, correlation, context, false);
+
+        return new Scope(subsystem, operation, level, position, correlation, System.nanoTime(), context);
     }
 
     public static void mark(String subsystem, String operation, String phase,
@@ -373,11 +371,14 @@ public final class ConflictTraceRecorder {
             if (closed) return;
             closed = true;
             heartbeat(subsystem, operation, level, success);
-            if (!enabled) return;
+
+            if (!enabled || startedNanos == 0L) {
+                return;
+            }
+
             LinkedHashMap<String, String> completed = new LinkedHashMap<>(context);
             completed.put("result", result);
-            completed.put("duration_us", Long.toString(Math.max(0L,
-                    (System.nanoTime() - startedNanos) / 1_000L)));
+            completed.put("duration_us", Long.toString(Math.max(0L, (System.nanoTime() - startedNanos) / 1_000L)));
             recordInternal(subsystem, operation,
                     success ? "END" : "FAILED", level, position,
                     correlation, completed, false);

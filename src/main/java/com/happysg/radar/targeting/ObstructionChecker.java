@@ -33,6 +33,10 @@ public class ObstructionChecker {
    }
 
    public ObstructionResult check(Level level, ProjectileSimulator.SimulationResult trajectory, int maxTick) {
+      return this.check(level, trajectory, maxTick, null);
+   }
+
+   public ObstructionResult check(Level level, ProjectileSimulator.SimulationResult trajectory, int maxTick, Vec3 lastSegmentEnd) {
       if (this.enabled && level != null && trajectory != null && !level.isClientSide()) {
          List<Trajectory.Sample> samples = trajectory.trajectory().samples();
 
@@ -44,7 +48,7 @@ public class ObstructionChecker {
             }
 
             Vec3 from = fromSample.position();
-            Vec3 to = toSample.position();
+            Vec3 to = lastSegmentEnd != null && toSample.tick() == maxTick ? lastSegmentEnd : toSample.position();
             if (!(from.distanceToSqr(to) < 1.0E-10)) {
                ClipContext context = new ClipContext(from, to, Block.COLLIDER, Fluid.NONE, CollisionContext.empty());
                HitResult hit = level.clip(context);
