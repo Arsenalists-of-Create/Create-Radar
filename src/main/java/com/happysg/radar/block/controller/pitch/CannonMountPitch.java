@@ -170,14 +170,22 @@ public class CannonMountPitch {
                 return false;
             }
         } else {
-            Vec3 origin = controller.getRayStart();
-            List<Double> pitches = CannonTargeting.calculatePitch(mount, origin, p, sl);
             var effectivePitch = controller.getMovementLimits()
                     .intersection(controller.getSupportedMovementLimits())
                     .orElse(null);
-            if (effectivePitch == null || pitches == null
-                    || pitches.stream().noneMatch(pitch -> pitch != null
-                    && effectivePitch.allowsControllerTarget(pitch, 0.0))) {
+
+            if (effectivePitch == null) {
+                return false;
+            }
+
+            Vec3 origin = controller.getRayStart();
+            if (origin == null) {
+                return false;
+            }
+
+            List<Double> pitches = CannonTargeting.calculatePitch(mount, origin, p, sl);
+
+            if (pitches == null || pitches.stream().noneMatch(pitch -> pitch != null && effectivePitch.allowsControllerTarget(pitch, 0.0))) {
                 return false;
             }
         }

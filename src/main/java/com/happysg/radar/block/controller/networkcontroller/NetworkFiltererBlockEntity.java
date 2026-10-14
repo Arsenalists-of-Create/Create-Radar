@@ -588,36 +588,35 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         endpointRepushRequired = false;
     }
 
-    private boolean anyCannonCanEngage(ServerLevel sl, RadarTrack track, boolean requireLos) {
+    private boolean anyCannonCanEngage(List<AutoPitchControllerBlockEntity> endpoints, RadarTrack track, boolean requireLos) {
         Vec3 target = track != null ? track.position() : null;
         if (target == null) return false;
 
-        for (AutoPitchControllerBlockEntity pitch : getWeaponEndpointsCached(sl)) {
+        for (AutoPitchControllerBlockEntity pitch : endpoints) {
             pitch.getFiringControl();
 
             Vec3 origin = pitch.getRayStart();
             if (origin == null) continue;
 
-            if (pitch.canEngageTrack(track, requireLos)) return true;
+            if (pitch.canEngageTrack(track, requireLos)) {
+                return true;
+            }
         }
+
         return false;
     }
 
-    private List<AutoPitchControllerBlockEntity> getTargetConstrainedWeaponEndpoints(ServerLevel sl) {
-        List<AutoPitchControllerBlockEntity> endpoints = getWeaponEndpointsCached(sl);
-        if (endpoints.isEmpty()) {
-            return List.of();
-        }
+    private boolean hasTargetConstrainedWeaponEndpoint(List<AutoPitchControllerBlockEntity> endpoints) {
+        boolean hasConstrained = false;
 
-        List<AutoPitchControllerBlockEntity> constrained = new ArrayList<>();
         for (AutoPitchControllerBlockEntity pitch : endpoints) {
             if (pitch.canConstrainAutoTargeting()) {
-                constrained.add(pitch);
+                hasConstrained = true;
             }
         }
-        return constrained;
-    }
 
+        return hasConstrained;
+    }
 
     private void pushToEndpoints(@Nullable RadarTrack track) {
         TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
@@ -1068,8 +1067,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         final Vec3 sortOrigin = filtererPos;
         candidates.sort(Comparator.comparingDouble(t -> sortOrigin.distanceToSqr(t.position())));
 
-        List<AutoPitchControllerBlockEntity> weaponEndpoints = getTargetConstrainedWeaponEndpoints(sl);
-        if (weaponEndpoints.isEmpty()) {
+        List<AutoPitchControllerBlockEntity> rangeBatchEndpoints = getWeaponEndpointsCached(sl);
+        if (!hasTargetConstrainedWeaponEndpoint(rangeBatchEndpoints)) {
             if (requireLos) {
                 return null;
             }
@@ -1077,8 +1076,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return candidates.isEmpty() ? null : candidates.get(0);
         }
 
-        // per-cannon gating (range + angle + safezone segment + LOS if enabled)
-        List<AutoPitchControllerBlockEntity> rangeBatchEndpoints = getWeaponEndpointsCached(sl);
         int startedBatches = 0;
 
         try {
@@ -1088,7 +1085,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             }
 
             for (RadarTrack t : candidates) {
-                if (anyCannonCanEngage(sl, t, requireLos)) {
+                if (anyCannonCanEngage(rangeBatchEndpoints, t, requireLos)) {
                     return t;
                 }
             }
