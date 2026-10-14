@@ -1,5 +1,9 @@
 package com.happysg.radar.targeting;
 
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SubLevelAimResolver;
+import dev.ryanhcode.sable.companion.SableCompanion;
+import dev.ryanhcode.sable.companion.SubLevelAccess;
 import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ClipContext;
@@ -54,8 +58,17 @@ public class ObstructionChecker {
                HitResult hit = level.clip(context);
                if (hit.getType() != Type.MISS) {
                   Vec3 hitPosition = hit.getLocation();
-                  if (!(hitPosition.distanceToSqr(from) > to.distanceToSqr(from) + 1.0E-8)) {
-                     BlockPos blockPos = hit instanceof BlockHitResult blockHit ? blockHit.getBlockPos() : null;
+                  BlockPos blockPos = hit instanceof BlockHitResult blockHit ? blockHit.getBlockPos() : null;
+
+                  if (blockPos != null && Mods.SABLE.isLoaded()) {
+                     SubLevelAccess hitSublevel = SableCompanion.INSTANCE.getContaining(level, blockPos);
+
+                     if (hitSublevel != null) {
+                        hitPosition = SubLevelAimResolver.toWorld(hitSublevel, hitPosition);
+                     }
+                  }
+
+                  if (hitPosition.distanceToSqr(from) <= to.distanceToSqr(from) + 1.0E-8) {
                      return ObstructionResult.blocked(toSample.tick(), hitPosition, blockPos);
                   }
                }

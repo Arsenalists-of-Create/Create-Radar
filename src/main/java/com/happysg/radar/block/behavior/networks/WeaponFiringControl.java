@@ -4431,20 +4431,30 @@ public class WeaponFiringControl {
         if (hit.getType() == Type.MISS) {
             return true;
         }
+
+        Vec3 worldHitPosition = hit.getLocation();
+        SubLevelAccess hitSublevel = null;
+
+        if (Mods.SABLE.isLoaded() && hit instanceof BlockHitResult blockHit) {
+            hitSublevel = SableCompanion.INSTANCE.getContaining(serverLevel, blockHit.getBlockPos());
+
+            if (hitSublevel != null) {
+                worldHitPosition = SubLevelAimResolver.toWorld(hitSublevel, worldHitPosition);
+            }
+        }
+
         double hitDistance = targetAabb == null
-                ? hit.getLocation().distanceTo(targetPosition)
-                : TargetingMath.distancePointToAabb(
-                hit.getLocation(), targetAabb);
+                ? worldHitPosition.distanceTo(targetPosition)
+                : TargetingMath.distancePointToAabb(worldHitPosition, targetAabb);
+
         if (hitDistance <= 0.75) {
             return true;
         }
+
         return this.targetSublevel != null
-                && hit instanceof BlockHitResult blockHit
-                && SableCompanion.INSTANCE.getContaining(
-                serverLevel, blockHit.getBlockPos()) != null
-                && this.targetSublevel.getUniqueId().equals(
-                SableCompanion.INSTANCE.getContaining(
-                        serverLevel, blockHit.getBlockPos()).getUniqueId());
+                && hitSublevel != null
+                && this.targetSublevel.getUniqueId()
+                .equals(hitSublevel.getUniqueId());
     }
 
     private boolean ballisticSidePathClear(
@@ -6221,23 +6231,29 @@ public class WeaponFiringControl {
                 return false;
             }
         }
-        ClipContext context = new ClipContext(start, end, Block.COLLIDER,
-                Fluid.NONE, CollisionContext.empty());
+        ClipContext context = new ClipContext(start, end, Block.COLLIDER, Fluid.NONE, CollisionContext.empty());
         HitResult hit = this.level.clip(context);
+
         if (hit.getType() == Type.MISS) {
             return true;
         }
-        if (hit.getLocation().distanceToSqr(start)
-                >= end.distanceToSqr(start) - 1.0E-6) {
+
+        Vec3 worldHitPosition = hit.getLocation();
+        SubLevelAccess hitSublevel = null;
+
+        if (Mods.SABLE.isLoaded() && hit instanceof BlockHitResult blockHit) {
+            hitSublevel = SableCompanion.INSTANCE.getContaining(this.level, blockHit.getBlockPos());
+
+            if (hitSublevel != null) {
+                worldHitPosition = SubLevelAimResolver.toWorld(hitSublevel, worldHitPosition);
+            }
+        }
+
+        if (worldHitPosition.distanceToSqr(start) >= end.distanceToSqr(start) - 1.0E-6) {
             return true;
         }
-        if (hit instanceof BlockHitResult blockHit) {
-            SubLevelAccess hitSublevel = SableCompanion.INSTANCE.getContaining(
-                    this.level, blockHit.getBlockPos());
-            return hitSublevel != null
-                    && targetId.equals(hitSublevel.getUniqueId());
-        }
-        return false;
+
+        return hitSublevel != null && targetId.equals(hitSublevel.getUniqueId());
     }
 
     public static record SolverDebugReport(List<String> lines, @Nullable ProjectileSimulator.SimulationResult trajectory) {
