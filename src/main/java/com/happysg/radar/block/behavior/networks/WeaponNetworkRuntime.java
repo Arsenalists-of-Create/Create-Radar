@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.TreeMap;
 
 /**
  * Server-only source of truth for weapon endpoint topology.
@@ -48,8 +49,8 @@ public final class WeaponNetworkRuntime {
                     .thenComparingInt(position -> position.getZ());
 
     private final ServerLevel level;
-    private final Map<BlockPos, LinkEntry> linksByDataLink = new HashMap<>();
-    private final Map<BlockPos, DataLinkBlockEntity.WeaponEndpointType> contactControllers = new HashMap<>();
+    private final Map<BlockPos, LinkEntry> linksByDataLink = new TreeMap<>(STABLE_POSITION);
+    private final Map<BlockPos, DataLinkBlockEntity.WeaponEndpointType> contactControllers = new TreeMap<>(STABLE_POSITION);
 
     private RuntimeSnapshot snapshot = RuntimeSnapshot.empty();
     private boolean topologyDirty = true;
@@ -486,10 +487,7 @@ public final class WeaponNetworkRuntime {
         Set<BlockPos> targetedMounts = new HashSet<>();
         Map<BlockPos, GroupBuilder> groups = new HashMap<>();
 
-        List<LinkEntry> explicitLinks = linksByDataLink.values().stream()
-                .sorted(Comparator.comparing(
-                        LinkEntry::dataLinkPos, STABLE_POSITION))
-                .toList();
+        List<LinkEntry> explicitLinks = List.copyOf(linksByDataLink.values());
         for (LinkEntry link : explicitLinks) {
             explicitByEndpoint.computeIfAbsent(
                     link.endpointPos(), ignored -> new ArrayList<>())
@@ -535,11 +533,7 @@ public final class WeaponNetworkRuntime {
             }
         }
 
-        List<Map.Entry<BlockPos,
-                DataLinkBlockEntity.WeaponEndpointType>> contacts =
-                contactControllers.entrySet().stream()
-                        .sorted(Map.Entry.comparingByKey(STABLE_POSITION))
-                        .toList();
+        List<Map.Entry<BlockPos, DataLinkBlockEntity.WeaponEndpointType>> contacts = List.copyOf(contactControllers.entrySet());
         for (Map.Entry<BlockPos,
                 DataLinkBlockEntity.WeaponEndpointType> registered
                 : contacts) {

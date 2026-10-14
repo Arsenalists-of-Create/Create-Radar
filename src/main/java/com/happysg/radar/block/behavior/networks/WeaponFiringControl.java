@@ -516,6 +516,7 @@ public class WeaponFiringControl {
         if (start == null) {
             return null;
         } else {
+            double maxRange = this.pitchController != null ? this.pitchController.getMaxEngagementRangeBlocks() : 0.0;
             if (c != null && now - c.lastTick < 3L) {
                 Vec3 cached = null;
                 if (c.hasFrac) {
@@ -524,7 +525,7 @@ public class WeaponFiringControl {
                     cached = c.lastWorldPoint;
                 }
 
-                if (cached != null && this.isPointInShootableRange(cached) && !this.isOutOfKnownRange(cached) && this.rayClear(start, cached).isClear()) {
+                if (isVisiblePointWithinRange(cached, start, maxRange) && this.rayClear(start, cached).isClear()) {
                     return cached;
                 }
 
@@ -535,7 +536,7 @@ public class WeaponFiringControl {
                 c = new VisCache();
             }
 
-            Vec3 vis = this.findVisiblePointOnEntityRotating(f, start, c, 10);
+            Vec3 vis = this.findVisiblePointOnEntityRotating(f, start, c, 10, maxRange);
             c.lastTick = now;
             this.visCache.put(id, c);
             if (vis == null) {
@@ -549,7 +550,7 @@ public class WeaponFiringControl {
     }
 
     @Nullable
-    private Vec3 findVisiblePointOnEntityRotating(Entity e, Vec3 start, VisCache cache, int budget) {
+    private Vec3 findVisiblePointOnEntityRotating(Entity e, Vec3 start, VisCache cache, int budget, double maxRange) {
         AABB bb = this.inflatedAabb(e);
         long now = this.level.getGameTime();
         List<Vec3> candidates = new ArrayList<>(24);
@@ -608,18 +609,18 @@ public class WeaponFiringControl {
             int tries = 0;
             if (cache.hasFrac) {
                 Vec3 cached = fracToWorld(bb, cache.fx, cache.fy, cache.fz);
-                if (this.isPointInShootableRange(cached) && !this.isOutOfKnownRange(cached) && this.rayClear(start, cached).isClear()) {
+                if (isVisiblePointWithinRange(cached, start, maxRange) && this.rayClear(start, cached).isClear()) {
                     cache.blockedStreak = 0;
                     if (now - cache.lastReacquireTick >= 10L) {
                         cache.lastReacquireTick = now;
-                        if (cached.distanceToSqr(center) > 1.0E-4 && this.isPointInShootableRange(center) && !this.isOutOfKnownRange(center) && this.rayClear(start, center).isClear()) {
+                        if (cached.distanceToSqr(center) > 1.0E-4 && isVisiblePointWithinRange(center, start, maxRange) && this.rayClear(start, center).isClear()) {
                             worldToFrac(bb, center, cache);
                             cache.lastWorldPoint = center;
                             cache.probeCursor = 0;
                             return center;
                         }
 
-                        if (cached.distanceToSqr(upper) > 1.0E-4 && this.isPointInShootableRange(upper) && !this.isOutOfKnownRange(upper) && this.rayClear(start, upper).isClear()) {
+                        if (cached.distanceToSqr(upper) > 1.0E-4 && isVisiblePointWithinRange(upper, start, maxRange) && this.rayClear(start, upper).isClear()) {
                             worldToFrac(bb, upper, cache);
                             cache.lastWorldPoint = upper;
                             cache.probeCursor = 0;
@@ -644,7 +645,7 @@ public class WeaponFiringControl {
 
                 for(int k = 0; k < maxNewTries; ++k) {
                     Vec3 end = candidates.get((idx + k) % n);
-                    if (this.isPointInShootableRange(end) && !this.isOutOfKnownRange(end) && this.rayClear(start, end).isClear()) {
+                    if (isVisiblePointWithinRange(end, start, maxRange) && this.rayClear(start, end).isClear()) {
                         worldToFrac(bb, end, cache);
                         cache.lastWorldPoint = end;
                         cache.probeCursor = (idx + k + 1) % n;
@@ -714,6 +715,26 @@ public class WeaponFiringControl {
                 return horiz2 <= max * max;
             }
         }
+    }
+
+    private static boolean isVisiblePointWithinRange(@Nullable Vec3 point, Vec3 start, double maxRange) {
+        if (point == null) {
+            return false;
+        }
+
+        if (maxRange <= 0.0) {
+            return true;
+        }
+
+        double dx = point.x - start.x;
+        double dz = point.z - start.z;
+        double maxRangeSquared = maxRange * maxRange;
+
+        if (dx * dx + dz * dz > maxRangeSquared) {
+            return false;
+        }
+
+        return point.distanceToSqr(start) <= maxRangeSquared;
     }
 
     public boolean hasLineOfSightTo(@Nullable RadarTrack track, boolean requireLos) {

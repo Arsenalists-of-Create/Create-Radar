@@ -30,6 +30,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
@@ -97,19 +98,20 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             return;
         }
 
+        List<Vec3> sensors = getSensorWorldPositions();
+
         if (lastCandidateRefreshTick == Long.MIN_VALUE || gameTime < lastCandidateRefreshTick || gameTime - lastCandidateRefreshTick >= CANDIDATE_REFRESH_TICKS) {
-            refreshEntityCandidates(serverLevel);
+            refreshEntityCandidates(serverLevel, sensors);
             lastCandidateRefreshTick = gameTime;
         }
 
-        scanCurrentSweep(serverLevel);
+        scanCurrentSweep(serverLevel, sensors);
     }
 
-    private void refreshEntityCandidates(ServerLevel level) {
+    private void refreshEntityCandidates(ServerLevel level, List<Vec3> sensors) {
         entityCandidates.clear();
         shipCandidates.clear();
 
-        List<Vec3> sensors = getSensorWorldPositions();
         if (sensors.isEmpty()) return;
 
         AABB scanBounds = createScanBounds(sensors);
@@ -167,8 +169,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         return false;
     }
 
-    private void scanCurrentSweep(ServerLevel level) {
-        List<Vec3> sensors = getSensorWorldPositions();
+    private void scanCurrentSweep(ServerLevel level, List<Vec3> sensors) {
         if (sensors.isEmpty()) return;
 
         Vec3 sweepCenter = RadarPhysics.worldPosition(sonar);
@@ -398,9 +399,11 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
 
         BlockPos.MutableBlockPos worldPos = new BlockPos.MutableBlockPos();
         LevelChunk currentChunk = null;
+        LevelChunkSection currentSection = null;
 
         int currentChunkX = Integer.MIN_VALUE;
         int currentChunkZ = Integer.MIN_VALUE;
+        int currentSectionY = Integer.MIN_VALUE;
 
         final var chunkSource = level.getChunkSource();
 
@@ -424,6 +427,9 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
 
                 currentChunkX = chunkX;
                 currentChunkZ = chunkZ;
+
+                currentSection = null;
+                currentSectionY = Integer.MIN_VALUE;
             }
 
             worldPos.set(x, y, z);
@@ -431,7 +437,20 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             double nextT = Math.min(tMaxX, Math.min(tMaxY, tMaxZ));
             double exitT = Math.min(1.0, nextT);
 
-            boolean isAir = currentChunk.getBlockState(worldPos).isAir();
+            boolean isAir;
+
+            if (level.isOutsideBuildHeight(y)) {
+                isAir = currentChunk.getBlockState(worldPos).isAir();
+            } else {
+                int sectionY = y >> 4;
+
+                if (currentSection == null || currentSectionY != sectionY) {
+                    currentSectionY = sectionY;
+                    currentSection = currentChunk.getSection(currentChunk.getSectionIndex(y));
+                }
+
+                isAir = currentSection.getBlockState(x & 15, y & 15, z & 15).isAir();
+            }
 
             if (isAir && !(x == startX && y == startY && z == startZ)) {
                 double sampleT = 0.0;
