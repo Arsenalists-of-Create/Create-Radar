@@ -117,7 +117,7 @@ public class CannonMountPitch {
             r = CannonUtil.getMaxProjectileRangeBlocks(cannon, sl);
         }
 
-        LOGGER.debug("RANGE DBG endpoint={} cannon={} range={} blocks", controller.getBlockPos(), cannon.getClass().getSimpleName(), r);
+        // LOGGER.debug("RANGE DBG endpoint={} cannon={} range={} blocks", controller.getBlockPos(), cannon.getClass().getSimpleName(), r);
         return r;
     }
 
@@ -190,7 +190,7 @@ public class CannonMountPitch {
 
         if (!controller.isRunningController()) {
             motionState.reset();
-            LOGGER.debug("PITCH.rotateCBC aborted: isRunning=false");
+            //LOGGER.debug("PITCH.rotateCBC aborted: isRunning=false");
             return;
         }
 
@@ -211,7 +211,7 @@ public class CannonMountPitch {
 
         double diff = controller.getTargetAngle() - currentPitch;
 
-        LOGGER.debug("PITCH.rotateCBC current={} target={} diff={} speed={}", currentPitch, controller.getTargetAngle(), diff, controller.getAvailableInputSpeed());
+        //LOGGER.debug("PITCH.rotateCBC current={} target={} diff={} speed={}", currentPitch, controller.getTargetAngle(), diff, controller.getAvailableInputSpeed());
 
         double rpm = Math.abs(controller.getAvailableInputSpeed());
         if (rpm <= 0.0) {
@@ -221,7 +221,7 @@ public class CannonMountPitch {
 
         double move = motionState.nextStep(diff, rpm);
 
-        LOGGER.debug("RADAR_PITCH_MOVE diff={} rpm={} move={}", diff, rpm, move);
+        //LOGGER.debug("RADAR_PITCH_MOVE diff={} rpm={} move={}", diff, rpm, move);
 
         if (Math.abs(move) <= 1.0E-9) {
             return;
@@ -241,7 +241,7 @@ public class CannonMountPitch {
         if (PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
             List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
-                LOGGER.debug("ping-3{}", angles);
+                //LOGGER.debug("ping-3{}", angles);
                 return;
             }
 
@@ -255,11 +255,11 @@ public class CannonMountPitch {
         Vec3 origin = controller.getRayStart();
         List<Double> angles = CannonTargeting.calculatePitch(mount, origin, targetPos, serverLevel);
 
-        LOGGER.debug("PITCH.solve origin={} target={} mountPos={}", origin, targetPos, mount.getBlockPos());
+        //LOGGER.debug("PITCH.solve origin={} target={} mountPos={}", origin, targetPos, mount.getBlockPos());
         controller.setLastTargetPos(targetPos);
 
         if (angles == null || angles.isEmpty()) {
-            LOGGER.debug("PITCH.solve FAILED: no pitch roots");
+            //LOGGER.debug("PITCH.solve FAILED: no pitch roots");
             controller.setRunning(false);
             return;
         }
@@ -270,7 +270,7 @@ public class CannonMountPitch {
             controller.setInternalTargetAngle(angles.get(0));
         }
 
-        LOGGER.debug("PITCH.solve targetAngle={}", controller.getTargetAngle());
+        //LOGGER.debug("PITCH.solve targetAngle={}", controller.getTargetAngle());
 
         controller.setRunning(true);
         controller.notifyUpdate();

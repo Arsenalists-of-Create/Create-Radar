@@ -1,10 +1,10 @@
 package com.happysg.radar.compat.cbc_at;
 
+import com.happysg.radar.targeting.LoadedFluidDrag;
 import com.happysg.radar.targeting.ProjectileModel;
 import com.happysg.radar.targeting.ProjectileStep;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
-import rbasamoyai.createbigcannons.munitions.config.FluidDragHandler;
 
 /**
  * Exact powered-flight model used by CBC:AT's small and medium rockets.
@@ -58,7 +58,7 @@ public record CBCATRocketProjectileModel(
 
         double density = dragDensity;
         if (level != null) {
-            density += FluidDragHandler.getFluidDrag(level.getFluidState(BlockPos.containing(positionX, positionY, positionZ)));
+            density += LoadedFluidDrag.sample(level, BlockPos.containing(positionX, positionY, positionZ));
         }
 
         double dragForce = 0.0;

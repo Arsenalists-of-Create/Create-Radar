@@ -429,14 +429,13 @@ public class CannonUtil {
                     projectileAddedPower,
                     bigCannonReason(reason, cbcAtPhysics)
             );
-            LOGGER.debug("Resolved big cannon shot state: speed={} projectile={} projectileLocal={} muzzleExit={} muzzleOffset={} gravity={} drag={} quadratic={}",
-                    state.speed(), state.projectileClass(), state.projectileLocalPos(), state.muzzleExitLocalPos(), state.muzzleForwardOffset(),
-                    state.ballistics().gravity(), state.ballistics().drag(), state.ballistics().isQuadraticDrag());
+//            LOGGER.debug("Resolved big cannon shot state: speed={} projectile={} projectileLocal={} muzzleExit={} muzzleOffset={} gravity={} drag={} quadratic={}",
+//                    state.speed(), state.projectileClass(), state.projectileLocalPos(), state.muzzleExitLocalPos(), state.muzzleForwardOffset(),
+//                    state.ballistics().gravity(), state.ballistics().drag(), state.ballistics().isQuadraticDrag());
             return state;
         }
 
-        if (shouldLogBallisticWarning(level, cannon,
-                "no_loaded_projectile", muzzleExit)) {
+        if (shouldLogBallisticWarning(level, cannon, "no_loaded_projectile", muzzleExit)) {
             LOGGER.warn("No loaded big cannon projectile found during ordered resolve; speed={} muzzleExit={} using HE shell fallback {}",
                     speed, muzzleExit, fallback);
         }
@@ -846,12 +845,11 @@ public class CannonUtil {
     }
 
     public static boolean isCBCMSCannon(AbstractMountedCannonContraption cannon) {
-        return Mods.CBCMORESHELLS.isLoaded() && CBCMSCannonCompat.isCBCMSMount(cannon);
+        return Mods.CBCMORESHELLS.isLoaded() && CBCMSCannonCompat.isCBCMSMountedWeapon(cannon);
     }
 
     public static boolean isCBCMSFamily(AbstractMountedCannonContraption cannon) {
-        return Mods.CBCMORESHELLS.isLoaded()
-                && (CBCMSCannonCompat.isCBCMSMount(cannon) || isBigCannon(cannon));
+        return Mods.CBCMORESHELLS.isLoaded() && (CBCMSCannonCompat.isCBCMSMountedWeapon(cannon) || isBigCannon(cannon));
     }
 
     @Nullable

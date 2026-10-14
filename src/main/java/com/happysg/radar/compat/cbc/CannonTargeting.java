@@ -11,11 +11,8 @@ import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.math3.analysis.UnivariateFunction;
 import com.happysg.radar.math3.analysis.solvers.BrentSolver;
 import com.happysg.radar.math3.analysis.solvers.UnivariateSolver;
+import com.happysg.radar.targeting.*;
 import com.mojang.logging.LogUtils;
-import com.happysg.radar.targeting.ObstructionChecker;
-import com.happysg.radar.targeting.PitchConstraint;
-import com.happysg.radar.targeting.TargetingResult;
-import com.happysg.radar.targeting.TargetingSnapshot;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
@@ -24,7 +21,6 @@ import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCan
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionProperties;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionPropertiesHandler;
-import rbasamoyai.createbigcannons.munitions.config.FluidDragHandler;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
 
 import java.util.ArrayList;
@@ -111,7 +107,7 @@ public class CannonTargeting {
         CBCATCannonCompat.ShotState cbcAtShot = CannonUtil.resolveCBCATShotState(cannon, level);
         if (CannonUtil.isPoweredRocket(cannon)) {
             if ((Boolean) RadarConfig.server().forceLegacyCannonLeadSolver.get()) {
-                LOGGER.debug("cbc_at_powered_rocket_unsupported_in_forced_legacy");
+                //LOGGER.debug("cbc_at_powered_rocket_unsupported_in_forced_legacy");
                 return null;
             }
             CBCATRocketProjectileModel rocketModel = cbcAtShot == null ? null : cbcAtShot.rocketModel();
@@ -227,8 +223,8 @@ public class CannonTargeting {
         double dragDensity = dimension.dragMultiplier();
         boolean quadraticDrag = ballistics.isQuadraticDrag();
         double muzzleForwardOffset = shotState.muzzleForwardOffset();
-        LOGGER.debug("Big cannon pitch solve: origin={} target={} speed={} projectile={} gravity={} drag={} dragDensity={} quadratic={} muzzleOffset={} reason={}",
-                originPos, targetPos, speed, shotState.projectileClass(), gravity, drag, dragDensity, quadraticDrag, muzzleForwardOffset, shotState.reason());
+        //LOGGER.debug("Big cannon pitch solve: origin={} target={} speed={} projectile={} gravity={} drag={} dragDensity={} quadratic={} muzzleOffset={} reason={}",
+        //        originPos, targetPos, speed, shotState.projectileClass(), gravity, drag, dragDensity, quadraticDrag, muzzleForwardOffset, shotState.reason());
         return calculateSimulatedPitchRoots(originPos, targetPos, speed, gravity, drag, muzzleForwardOffset, dragDensity, quadraticDrag, level);
     }
 
@@ -302,20 +298,25 @@ public class CannonTargeting {
         double prevPitch = Double.NaN;
         double prevError = Double.NaN;
 
-        for (double pitch = BIG_CANNON_PITCH_MIN; pitch <= BIG_CANNON_PITCH_MAX + 1.0e-9; pitch += BIG_CANNON_SCAN_STEP) {
-            double error = simulatedHeightError(originPos, targetPos, horizontalUnit, speed, gravity, drag, muzzleForwardOffset, dragDensity, quadraticDrag, level, pitch);
-            if (!Double.isFinite(error)) {
-                continue;
-            }
+        try {
+            for (double pitch = BIG_CANNON_PITCH_MIN; pitch <= BIG_CANNON_PITCH_MAX + 1.0e-9; pitch += BIG_CANNON_SCAN_STEP) {
+                double error = simulatedHeightError(originPos, targetPos, horizontalUnit, speed, gravity, drag, muzzleForwardOffset, dragDensity, quadraticDrag, level, pitch);
 
-            if (Math.abs(error) <= BIG_CANNON_ROOT_EPS) {
-                addRoot(roots, pitch);
-            } else if (Double.isFinite(prevError) && prevError * error < 0.0) {
-                addRoot(roots, refineSimulatedPitchRoot(originPos, targetPos, horizontalUnit, speed, gravity, drag, muzzleForwardOffset, dragDensity, quadraticDrag, level, prevPitch, pitch));
-            }
+                if (!Double.isFinite(error)) {
+                    continue;
+                }
 
-            prevPitch = pitch;
-            prevError = error;
+                if (Math.abs(error) <= BIG_CANNON_ROOT_EPS) {
+                    addRoot(roots, pitch);
+                } else if (Double.isFinite(prevError) && prevError * error < 0.0) {
+                    addRoot(roots, refineSimulatedPitchRoot(originPos, targetPos, horizontalUnit, speed, gravity, drag, muzzleForwardOffset, dragDensity, quadraticDrag, level, prevPitch, pitch));
+                }
+
+                prevPitch = pitch;
+                prevError = error;
+            }
+        } catch (LoadedFluidDrag.Unavailable ignored) {
+            return List.of();
         }
 
         return List.copyOf(roots);
@@ -435,7 +436,7 @@ public class CannonTargeting {
 
         double density = dragDensity;
         if (level != null) {
-            density += FluidDragHandler.getFluidDrag(level.getFluidState(BlockPos.containing(position)));
+            density += LoadedFluidDrag.sample(level, BlockPos.containing(position));
         }
         if (density <= 0.0) {
             return acceleration;

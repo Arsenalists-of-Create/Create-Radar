@@ -1,5 +1,6 @@
 package com.happysg.radar.compat.cbcmoreshells;
 
+import com.happysg.radar.targeting.LoadedFluidDrag;
 import com.happysg.radar.targeting.ProjectileStep;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
@@ -20,10 +21,8 @@ public record CBCMSTorpedoProjectileModel(
     }
 
     @Override
-    public void step(int tick, double px, double py, double pz, double vx, double vy, double vz,
-                     Level level, ProjectileStep output) {
-        boolean immersed = level != null
-                && !level.getFluidState(BlockPos.containing(px, py, pz)).isEmpty();
+    public void step(int tick, double px, double py, double pz, double vx, double vy, double vz, Level level, ProjectileStep output) {
+        boolean immersed = LoadedFluidDrag.isImmersed(level, BlockPos.containing(px, py, pz));
         stepForMedium(immersed, px, py, pz, vx, vy, vz, output);
     }
 

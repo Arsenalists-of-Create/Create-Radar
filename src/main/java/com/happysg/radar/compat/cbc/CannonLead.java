@@ -1,6 +1,7 @@
 package com.happysg.radar.compat.cbc;
 
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.targeting.LoadedFluidDrag;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -10,7 +11,6 @@ import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCan
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionProperties;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionPropertiesHandler;
-import rbasamoyai.createbigcannons.munitions.config.FluidDragHandler;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
 
 import java.util.List;
@@ -129,7 +129,7 @@ public class CannonLead {
 
         double density = Double.isFinite(dragDensity) && dragDensity >= 0.0 ? dragDensity : 1.0;
         if (level != null) {
-            density += FluidDragHandler.getFluidDrag(level.getFluidState(BlockPos.containing(position)));
+            density += LoadedFluidDrag.sample(level, BlockPos.containing(position));
         }
         if (density <= 0.0) {
             return acceleration;
@@ -192,7 +192,7 @@ public class CannonLead {
         if (targetPosNow == null || targetVelPerTick == null || targetAccelPerTick2 == null) return null;
         if (shooterVelPerTick == null || shooterAccelPerTick2 == null) return null;
         if (CannonUtil.isPoweredRocket(cannon)) {
-            LOGGER.debug("[LEAD] cbc_at_powered_rocket_unsupported_in_forced_legacy");
+            //LOGGER.debug("[LEAD] cbc_at_powered_rocket_unsupported_in_forced_legacy");
             return null;
         }
 
@@ -245,64 +245,68 @@ public class CannonLead {
         double chosenYawRad = 0.0;
         int flightTicks = (int) Math.round(tGuessTicks);
 
-        for (int iter = 0; iter < 8; iter++) {
-            // IMPORTANT FIX:
-            // targetPosRel0/VelRel/AccelRel are anchored at FIRE TIME,
-            // so advance ONLY by FLIGHT TIME (NOT fireDelay+flight).
-            double tFlightTicks = tGuessTicks;
-            double tLeadTicks = tFlightTicks + latencyTicks;
-            // Predict target position (relative) at impact time after firing
-            Vec3 aimRel = predictPositionTicks(targetPosRel0, targetVelRel, targetAccelRel, tLeadTicks);
-            aimPoint = shooterPosAtFire.add(aimRel);
+        try {
+            for (int iter = 0; iter < 8; iter++) {
+                // IMPORTANT FIX:
+                // targetPosRel0/VelRel/AccelRel are anchored at FIRE TIME,
+                // so advance ONLY by FLIGHT TIME (NOT fireDelay+flight).
+                double tFlightTicks = tGuessTicks;
+                double tLeadTicks = tFlightTicks + latencyTicks;
+                // Predict target position (relative) at impact time after firing
+                Vec3 aimRel = predictPositionTicks(targetPosRel0, targetVelRel, targetAccelRel, tLeadTicks);
+                aimPoint = shooterPosAtFire.add(aimRel);
 
-            Vec3 toPred = aimPoint.subtract(shooterPosAtFire);
-            chosenYawRad = Math.atan2(toPred.z, toPred.x);
+                Vec3 toPred = aimPoint.subtract(shooterPosAtFire);
+                chosenYawRad = Math.atan2(toPred.z, toPred.x);
 
-            // Default LOS pitch
-            double horizToPred = Math.sqrt(toPred.x * toPred.x + toPred.z * toPred.z);
-            double pitchRad = Math.atan2(toPred.y, Math.max(1.0e-6, horizToPred));
+                // Default LOS pitch
+                double horizToPred = Math.sqrt(toPred.x * toPred.x + toPred.z * toPred.z);
+                double pitchRad = Math.atan2(toPred.y, Math.max(1.0e-6, horizToPred));
 
-            // CBC pitch solution for predicted intercept point
-            List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, aimPoint, level);
-            if (pitchRoots != null && !pitchRoots.isEmpty()) {
-                pitchRad = Math.toRadians(selectPitchRoot(pitchRoots, preferHighArc));
-            }
+                // CBC pitch solution for predicted intercept point
+                List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, aimPoint, level);
+                if (pitchRoots != null && !pitchRoots.isEmpty()) {
+                    pitchRad = Math.toRadians(selectPitchRoot(pitchRoots, preferHighArc));
+                }
 
-            Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
-            chosenPitchDeg = Math.toDegrees(pitchRad);
+                Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
+                chosenPitchDeg = Math.toDegrees(pitchRad);
 
-            Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(muzzleForwardOffset));
+                Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(muzzleForwardOffset));
 
-            double dx = aimPoint.x - muzzlePosAtFire.x;
-            double dz = aimPoint.z - muzzlePosAtFire.z;
-            double horiz = Math.sqrt(dx * dx + dz * dz);
+                double dx = aimPoint.x - muzzlePosAtFire.x;
+                double dz = aimPoint.z - muzzlePosAtFire.z;
+                double horiz = Math.sqrt(dx * dx + dz * dz);
 
-            SimResult sim = simulateFlightTicks(
-                    muzzlePosAtFire,
-                    shooterVelAtFire,
-                    dir,
-                    muzzleSpeedPerTick,
-                    gravityPerTick,
-                    formDrag,
-                    dragDensity,
-                    quadraticDrag,
-                    aimPoint,
-                    horiz,
-                    computeMaxSimTicks(horiz, muzzleSpeedPerTick, maxSimDistanceBlocks),
-                    true,
-                    level
-            );
+                SimResult sim = simulateFlightTicks(
+                        muzzlePosAtFire,
+                        shooterVelAtFire,
+                        dir,
+                        muzzleSpeedPerTick,
+                        gravityPerTick,
+                        formDrag,
+                        dragDensity,
+                        quadraticDrag,
+                        aimPoint,
+                        horiz,
+                        computeMaxSimTicks(horiz, muzzleSpeedPerTick, maxSimDistanceBlocks),
+                        true,
+                        level
+                );
 
-            int newFlightTicks = sim.ticks;
+                int newFlightTicks = sim.ticks;
 
-            if (Math.abs(newFlightTicks - tGuessTicks) < 0.5) {
+                if (Math.abs(newFlightTicks - tGuessTicks) < 0.5) {
+                    flightTicks = newFlightTicks;
+                    tGuessTicks = newFlightTicks;
+                    break;
+                }
+
                 flightTicks = newFlightTicks;
                 tGuessTicks = newFlightTicks;
-                break;
             }
-
-            flightTicks = newFlightTicks;
-            tGuessTicks = newFlightTicks;
+        } catch (LoadedFluidDrag.Unavailable ignored) {
+            return null;
         }
 
         return new LeadSolution(aimPoint, chosenPitchDeg, chosenYawRad, flightTicks);
@@ -344,7 +348,7 @@ public class CannonLead {
             return null;
         }
         if (CannonUtil.isPoweredRocket(cannon)) {
-            LOGGER.debug("[LEAD] cbc_at_powered_rocket_unsupported_in_forced_legacy");
+            //LOGGER.debug("[LEAD] cbc_at_powered_rocket_unsupported_in_forced_legacy");
             return null;
         }
 
@@ -355,8 +359,8 @@ public class CannonLead {
         CannonUtil.BigCannonShotState shotState = CannonUtil.isBigCannon(cannon) ? CannonUtil.resolveBigCannonShotState(cannon, level) : null;
         double muzzleSpeedPerTick = shotState != null ? shotState.speed() : CannonUtil.getInitialVelocity(cannon, level);
         if (muzzleSpeedPerTick <= 0.0) {
-            LOGGER.debug("[LEAD] muzzleSpeedPerTick={} (no ammo/invalid state?) cannon={} mountPos={}",
-                    muzzleSpeedPerTick, cannon.getClass().getSimpleName(), mount.getBlockPos());
+            //LOGGER.debug("[LEAD] muzzleSpeedPerTick={} (no ammo/invalid state?) cannon={} mountPos={}",
+            //        muzzleSpeedPerTick, cannon.getClass().getSimpleName(), mount.getBlockPos());
             return null;
         }
 
@@ -396,62 +400,66 @@ public class CannonLead {
         int flightTicks = (int) Math.round(tGuessTicks);
 
         // Iterate to converge flight time against the projectile sim
-        for (int iter = 0; iter < 8; iter++) {
-            // Predict target at impact (FIRE TIME + flight)
-            Vec3 aimRel = relPos0.add(relVel.scale(tGuessTicks));
-            aimPoint = shooterPosAtFire.add(aimRel);
+        try {
+            for (int iter = 0; iter < 8; iter++) {
+                // Predict target at impact (FIRE TIME + flight)
+                Vec3 aimRel = relPos0.add(relVel.scale(tGuessTicks));
+                aimPoint = shooterPosAtFire.add(aimRel);
 
-            // Yaw in XZ plane from shooter at fire -> predicted point
-            Vec3 toPred = aimPoint.subtract(shooterPosAtFire);
-            chosenYawRad = Math.atan2(toPred.z, toPred.x);
+                // Yaw in XZ plane from shooter at fire -> predicted point
+                Vec3 toPred = aimPoint.subtract(shooterPosAtFire);
+                chosenYawRad = Math.atan2(toPred.z, toPred.x);
 
-            // Default LOS pitch (fallback)
-            double horizToPred = Math.sqrt(toPred.x * toPred.x + toPred.z * toPred.z);
-            double pitchRad = Math.atan2(toPred.y, Math.max(1.0e-6, horizToPred));
+                // Default LOS pitch (fallback)
+                double horizToPred = Math.sqrt(toPred.x * toPred.x + toPred.z * toPred.z);
+                double pitchRad = Math.atan2(toPred.y, Math.max(1.0e-6, horizToPred));
 
-            // CBC ballistic pitch solve for the predicted intercept point
-            List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, aimPoint, level);
-            if (pitchRoots != null && !pitchRoots.isEmpty()) {
-                pitchRad = Math.toRadians(selectPitchRoot(pitchRoots, preferHighArc));
-            }
+                // CBC ballistic pitch solve for the predicted intercept point
+                List<Double> pitchRoots = CannonTargeting.calculatePitch(mount, shooterPosAtFire, aimPoint, level);
+                if (pitchRoots != null && !pitchRoots.isEmpty()) {
+                    pitchRad = Math.toRadians(selectPitchRoot(pitchRoots, preferHighArc));
+                }
 
-            Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
-            chosenPitchDeg = Math.toDegrees(pitchRad);
+                Vec3 dir = directionFromYawPitch(chosenYawRad, pitchRad);
+                chosenPitchDeg = Math.toDegrees(pitchRad);
 
-            Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(muzzleForwardOffset));
+                Vec3 muzzlePosAtFire = shooterPosAtFire.add(dir.scale(muzzleForwardOffset));
 
-            // Horizontal distance from muzzle to predicted point (stop condition for sim)
-            double dx = aimPoint.x - muzzlePosAtFire.x;
-            double dz = aimPoint.z - muzzlePosAtFire.z;
-            double horiz = Math.sqrt(dx * dx + dz * dz);
+                // Horizontal distance from muzzle to predicted point (stop condition for sim)
+                double dx = aimPoint.x - muzzlePosAtFire.x;
+                double dz = aimPoint.z - muzzlePosAtFire.z;
+                double horiz = Math.sqrt(dx * dx + dz * dz);
 
-            SimResult sim = simulateFlightTicks(
-                    muzzlePosAtFire,
-                    shooterVelAtFire,
-                    dir,
-                    muzzleSpeedPerTick,
-                    gravityPerTick,
-                    drag,
-                    dragDensity,
-                    quadraticDrag,
-                    aimPoint,
-                    horiz,
-                    computeMaxSimTicks(horiz, muzzleSpeedPerTick, maxSimDistanceBlocks),
-                    true,
-                    level
-            );
+                SimResult sim = simulateFlightTicks(
+                        muzzlePosAtFire,
+                        shooterVelAtFire,
+                        dir,
+                        muzzleSpeedPerTick,
+                        gravityPerTick,
+                        drag,
+                        dragDensity,
+                        quadraticDrag,
+                        aimPoint,
+                        horiz,
+                        computeMaxSimTicks(horiz, muzzleSpeedPerTick, maxSimDistanceBlocks),
+                        true,
+                        level
+                );
 
-            int newFlightTicks = sim.ticks;
+                int newFlightTicks = sim.ticks;
 
-            // Converged?
-            if (Math.abs(newFlightTicks - tGuessTicks) < 0.5) {
+                // Converged?
+                if (Math.abs(newFlightTicks - tGuessTicks) < 0.5) {
+                    flightTicks = newFlightTicks;
+                    tGuessTicks = newFlightTicks;
+                    break;
+                }
+
                 flightTicks = newFlightTicks;
                 tGuessTicks = newFlightTicks;
-                break;
             }
-
-            flightTicks = newFlightTicks;
-            tGuessTicks = newFlightTicks;
+        } catch (LoadedFluidDrag.Unavailable ignored) {
+            return null;
         }
 
         return new LeadSolution(aimPoint, chosenPitchDeg, chosenYawRad, flightTicks);
@@ -500,7 +508,7 @@ public class CannonLead {
             directionalLead = leadVec.dot(targetVelPerTick.normalize());
         }
 
-        LOGGER.debug("Lead debug -> totalLead={} directionalLead={} leadVec={} targetVelPerTick={}",
-                totalLead, directionalLead, leadVec, targetVelPerTick);
+        //LOGGER.debug("Lead debug -> totalLead={} directionalLead={} leadVec={} targetVelPerTick={}",
+        //        totalLead, directionalLead, leadVec, targetVelPerTick);
     }
 }

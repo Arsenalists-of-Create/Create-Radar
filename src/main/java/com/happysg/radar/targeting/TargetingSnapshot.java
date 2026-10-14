@@ -112,6 +112,38 @@ public record TargetingSnapshot(Level level, Vec3 muzzlePosition, Vec3 inherited
       return this.projectileSpeed > (double)0.0F && this.maxFlightTicks > 0 && finite(this.muzzlePosition) && finite(this.targetPosition) && finite(this.inheritedVelocity) && finite(this.targetVelocity) && finite(this.targetAcceleration);
    }
 
+   public TargetingSnapshot withoutLiveLevel() {
+      return new TargetingSnapshot(
+              null,
+              muzzlePosition,
+              inheritedVelocity,
+              targetPosition,
+              targetVelocity,
+              targetAcceleration,
+              targetAabb,
+              projectileSpeed,
+              gravity,
+              drag,
+              quadraticDrag,
+              cbcPhysics,
+              dragDensity,
+              maxFlightTicks,
+              gameTime,
+              preferredYawDeg,
+              preferredPitchDeg,
+              currentYawDeg,
+              currentPitchDeg,
+              projectileEffect,
+              splashRadius,
+              targetSublevelId,
+              targetMotionClass,
+              pitchConstraint,
+              preferHighArc,
+              launchPivotPosition,
+              muzzleForwardOffset
+      );
+   }
+
    public MountState mountState() {
       return new MountState(this.steeringOrigin(), this.muzzlePosition, this.inheritedVelocity, (double)0.0F, (double)0.0F);
    }

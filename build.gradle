@@ -174,10 +174,16 @@ dependencies {
     compileOnly files("lib/cbcmodernwarfare-${cbc_mw_version}+mc.${minecraft_version}-neoforge.jar")
     compileOnly files("lib/cbc_at_Neoforge_${minecraft_version}_${cbc_at_version}.jar")
     compileOnly files("lib/CBC-Military-Supplement-${minecraft_version}-${cbc_ms_version}.jar")
+    compileOnly files("lib/shaolib_munitions-0.1.0.jar")
     localRuntime files("lib/createbigcannons-${cbc_version}+mc.${minecraft_version}.jar")
     if (includeOptionalCbcCompatRuntime) {
         localRuntime files("lib/cbcmodernwarfare-${cbc_mw_version}+mc.${minecraft_version}-neoforge.jar")
         localRuntime files("lib/cbc_at_Neoforge_${minecraft_version}_${cbc_at_version}.jar")
+
+        // Deps for CBCMS
+        localRuntime files("lib/shaolib_munitions-0.1.0.jar")
+        localRuntime files("lib/shaolib-0.1.1.jar")
+
         localRuntime files("lib/CBC-Military-Supplement-${minecraft_version}-${cbc_ms_version}.jar")
         localRuntime files("lib/architectury-13.0.8-neoforge.jar") // CEC
         localRuntime files("lib/createenergycannons-neoforge-${cbc_cec_version}+${minecraft_version}.jar")

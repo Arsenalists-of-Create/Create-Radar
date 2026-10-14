@@ -99,7 +99,7 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
             );
         }
 
-        if (RadarConfig.client().useGuiByDefault.get()) {
+        if (level.isClientSide && RadarConfig.client().useGuiByDefault.get()) {
             BlockEntity be = blockEntity;
             if (be instanceof MonitorBlockEntity monitor) {
                 if (monitor.getController().isAradLinked()) {

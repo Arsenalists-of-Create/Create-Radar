@@ -297,14 +297,14 @@ public class NetworkData extends SavedData {
         }
     }
 
-// ------------------------------------------------------------
+    // ------------------------------------------------------------
 // Key helpers (string keys used by your maps)
 // ------------------------------------------------------------
-@Nullable
-public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) {
-    if (filtererKey == null || filtererKey.isEmpty()) return null;
-    return posFromKey(filtererKey);
-}
+    @Nullable
+    public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) {
+        if (filtererKey == null || filtererKey.isEmpty()) return null;
+        return posFromKey(filtererKey);
+    }
     public Map<String, Group> getGroups() {
         return Collections.unmodifiableMap(groupsByFilterer);
     }
@@ -979,7 +979,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-// In NetworkData
+    // In NetworkData
     @Nullable
     public BlockPos peekEndpointForDataLink(ResourceKey<Level> dim, BlockPos dataLinkPos) {
         String endpointKey = dataLinkToEndpoint.get(key(dim, dataLinkPos));
@@ -1347,8 +1347,8 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
     }
 
     public RestorationReport restoreSchematicSnapshot(ServerLevel level, BlockPos controllerPos, CompoundTag tag,
-                                                       Function<CompoundTag, BlockPos> decoder,
-                                                       RestorationMode mode) {
+                                                      Function<CompoundTag, BlockPos> decoder,
+                                                      RestorationMode mode) {
         ResourceKey<Level> dim = level.dimension();
         int skipped = 0;
         if (tag.getAllKeys().contains("SchemaVersion")
@@ -2325,8 +2325,4 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
     private boolean isDefinitelyMissing(ServerLevel level, BlockPos pos, boolean onlyIfChunkLoaded, boolean requireBlockEntity) {
         return checkPresence(level, pos, onlyIfChunkLoaded, requireBlockEntity) == Presence.MISSING;
     }
-
-
-
-
 }

@@ -63,6 +63,26 @@ public final class CBCMuzzleUtil {
             return cur;
         }
 
+        if (Mods.CBCMORESHELLS.isLoaded() && CBCMSCannonCompat.isCBCMSTorpedoTube(cannon)) {
+            BlockPos cur = start.immutable();
+
+            while (CBCMSCannonCompat.isCBCMSTorpedoTubeBarrel(cannon.presentBlockEntities.get(cur))) {
+                cur = cur.relative(dir);
+            }
+
+            return cur;
+        }
+
+        if (Mods.CBCMORESHELLS.isLoaded() && CBCMSCannonCompat.isCBCMSProjectileRack(cannon)) {
+            BlockPos cur = start.immutable();
+
+            while (CBCMSCannonCompat.isCBCMSProjectileRackBarrel(cannon.presentBlockEntities.get(cur))) {
+                cur = cur.relative(dir);
+            }
+
+            return cur;
+        }
+
         if (Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isCBCMWCannon(cannon)) {
             return CBCMWCannonCompat.getMuzzleExitLocal(cannon);
         }
@@ -98,7 +118,7 @@ public final class CBCMuzzleUtil {
 
         Direction dir = cannon.initialOrientation();
 
-        if (Mods.CBCMORESHELLS.isLoaded() && CBCMSCannonCompat.isCBCMSMount(cannon)) {
+        if (Mods.CBCMORESHELLS.isLoaded() && (CBCMSCannonCompat.isCBCMSMount(cannon) || CBCMSCannonCompat.isCBCMSTorpedoTube(cannon))) {
             Vec3 outsideCenter = poce.toGlobalVector(Vec3.atCenterOf(outside), 0);
             Vec3 forward = getForwardWorld(poce);
             return forward.lengthSqr() < 1.0E-8

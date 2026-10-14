@@ -37,7 +37,12 @@ public class TargetingComputer {
       if (snapshot == null || model == null || !snapshot.isValid()) {
          return TargetingResult.invalid("invalid snapshot or projectile model");
       }
-      return this.solver.solve(snapshot, model, this.obstructionChecker);
+
+      try {
+         return this.solver.solve(snapshot, model, this.obstructionChecker);
+      } catch (LoadedFluidDrag.Unavailable ignored) {
+         return TargetingResult.noShot("required fluid chunk unavailable");
+      }
    }
 
    public ProjectileSimulator projectileSimulator() {

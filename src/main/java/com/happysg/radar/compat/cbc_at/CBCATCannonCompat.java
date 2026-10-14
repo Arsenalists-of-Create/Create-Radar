@@ -2,16 +2,20 @@ package com.happysg.radar.compat.cbc_at;
 
 import com.dsvv.cbcat.cannon.heavy_autocannon.HeavyAutocannonBlock;
 import com.dsvv.cbcat.cannon.heavy_autocannon.IHeavyAutocannonBlockEntity;
+import com.dsvv.cbcat.cannon.heavy_autocannon.breech.HeavyAutocannonBreechBlockEntity;
 import com.dsvv.cbcat.cannon.heavy_autocannon.contraption.MountedHeavyAutocannonContraption;
 import com.dsvv.cbcat.cannon.heavy_autocannon.munitions.AbstractHeavyAutocannonProjectileItem;
 import com.dsvv.cbcat.cannon.heavy_autocannon.munitions.HeavyAutocannonAmmoItem;
+import com.dsvv.cbcat.cannon.heavy_autocannon.munitions.box.HeavyAutocannonAmmoContainerItem;
 import com.dsvv.cbcat.cannon.medium_rocketpod.IMediumRocketPodBlockEntity;
 import com.dsvv.cbcat.cannon.medium_rocketpod.MediumRocketPodBlock;
+import com.dsvv.cbcat.cannon.medium_rocketpod.breech.MediumRocketPodBreechBlockEntity;
 import com.dsvv.cbcat.cannon.medium_rocketpod.contraption.MountedMediumRocketRailContraption;
 import com.dsvv.cbcat.cannon.medium_rocketpod.munitions.AbstractMediumRocketItem;
 import com.dsvv.cbcat.cannon.medium_rocketpod.munitions.MediumRocketItem;
 import com.dsvv.cbcat.cannon.rocketpod.IRocketPodBlockEntity;
 import com.dsvv.cbcat.cannon.rocketpod.RocketPodBlock;
+import com.dsvv.cbcat.cannon.rocketpod.breech.RocketPodBreechBlockEntity;
 import com.dsvv.cbcat.cannon.rocketpod.contraption.MountedRocketPodContraption;
 import com.dsvv.cbcat.cannon.rocketpod.munitions.AbstractRocketItem;
 import com.dsvv.cbcat.cannon.rocketpod.munitions.RocketItem;
@@ -41,6 +45,8 @@ import rbasamoyai.createbigcannons.cannons.autocannon.material.AutocannonMateria
 import rbasamoyai.createbigcannons.cannons.autocannon.material.AutocannonMaterialProperties;
 import rbasamoyai.createbigcannons.munitions.AbstractCannonProjectile;
 import rbasamoyai.createbigcannons.munitions.autocannon.AutocannonAmmoItem;
+import rbasamoyai.createbigcannons.munitions.autocannon.ammo_container.AutocannonAmmoContainerItem;
+import com.dsvv.cbcat.cannon.twin_autocannon.breech.TwinAutocannonBreechBlockEntity;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionProperties;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionPropertiesHandler;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
@@ -317,7 +323,71 @@ public final class CBCATCannonCompat {
     }
 
     @Nullable
+    private static ItemStack verifyNextRound(@Nullable ItemStack stack, CannonKind kind, ServerLevel level) {
+        if (!isAmmunitionForKind(stack, kind)) {
+            return null;
+        }
+
+        return createProjectile(stack, level) != null ? stack.copy() : null;
+    }
+
+    @Nullable
     private static ItemStack findLoadedAmmunition(AbstractMountedCannonContraption cannon, CannonKind kind, ServerLevel level) {
+        if (kind == CannonKind.TWIN_AUTOCANNON && cannon.getStartPos() != null && cannon.presentBlockEntities != null && cannon.presentBlockEntities.get(cannon.getStartPos()) instanceof TwinAutocannonBreechBlockEntity breech) {
+            ItemStack nextRound = breech.getInputBuffer().peekFirst();
+
+            if (nextRound == null || nextRound.isEmpty()) {
+                ItemStack magazine = breech.getMagazine();
+
+                if (magazine != null && !magazine.isEmpty() && magazine.getItem() instanceof AutocannonAmmoContainerItem) {
+                    ItemStack magazineCopy = magazine.copy();
+                    nextRound = AutocannonAmmoContainerItem.pollItemFromContainer(magazineCopy);
+                }
+            }
+
+            if (isAmmunitionForKind(nextRound, kind) && createProjectile(nextRound, level) != null) {
+                return nextRound.copy();
+            }
+
+            return null;
+        }
+
+        BlockEntity breechEntity = cannon.getStartPos() != null && cannon.presentBlockEntities != null ? cannon.presentBlockEntities.get(cannon.getStartPos()) : null;
+
+
+        if (kind == CannonKind.HEAVY_AUTOCANNON && breechEntity instanceof HeavyAutocannonBreechBlockEntity heavy) {
+
+            ItemStack next = heavy.getInputBuffer().peekFirst();
+
+            if (next == null || next.isEmpty()) {
+                ItemStack magazine = heavy.getMagazine();
+
+                if (magazine != null && !magazine.isEmpty() && magazine.getItem() instanceof HeavyAutocannonAmmoContainerItem) {
+                    next = HeavyAutocannonAmmoContainerItem.pollItemFromContainer(magazine.copy());
+                }
+            }
+
+            return verifyNextRound(next, kind, level);
+        }
+
+        if (kind == CannonKind.ROCKET_POD
+                && breechEntity instanceof RocketPodBreechBlockEntity rocket) {
+
+            return verifyNextRound(rocket.getInputBuffer().peekFirst(), kind, level);
+        }
+
+        if (kind == CannonKind.MEDIUM_ROCKET_RAIL && breechEntity instanceof MediumRocketPodBreechBlockEntity medium) {
+            for (int slot = 0; slot < medium.getQueueLimit(); slot++) {
+                ItemStack next = medium.getFromSlot(slot);
+
+                if (next != null && !next.isEmpty()) {
+                    return verifyNextRound(next, kind, level);
+                }
+            }
+
+            return null;
+        }
+
         if (cannon instanceof GetItemStorage storageOwner) {
             var storage = storageOwner.getItemStorage();
             if (storage != null) {

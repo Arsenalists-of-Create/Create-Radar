@@ -801,7 +801,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             }
         }
 
-        LOGGER.debug("MONITOR setSelectedTargetServer: track={}, controllerPos={}", track == null ? "null" : track.getId(), controllerBe.getBlockPos());
+        //LOGGER.debug("MONITOR setSelectedTargetServer: track={}, controllerPos={}", track == null ? "null" : track.getId(), controllerBe.getBlockPos());
 
         NetworkData.Group g = controllerBe.getNetworkGroup(sl);
         if (g == null)
@@ -822,14 +822,14 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         // Forward selection to the filterer BE at the group's filterer position
         BlockPos filterpos = g.key.filtererPos();
-        LOGGER.debug("MONITOR forwarding to filterer: filterPos={}, groupKey={}", filterpos, g.key);
+        //LOGGER.debug("MONITOR forwarding to filterer: filterPos={}, groupKey={}", filterpos, g.key);
 
         if (level.getBlockEntity(filterpos) instanceof NetworkFiltererBlockEntity filtererBe) {
-            LOGGER.debug("MONITOR found filterer BE: calling receiveSelectedTargetFromMonitor track={}", track == null ? "null" : track.getId());
-            LOGGER.debug("Ping");
+            //LOGGER.debug("MONITOR found filterer BE: calling receiveSelectedTargetFromMonitor track={}", track == null ? "null" : track.getId());
+            //LOGGER.debug("Ping");
             filtererBe.receiveSelectedTargetFromMonitor(track,safeZones);
         } else {
-            LOGGER.debug("MONITOR could NOT find NetworkFiltererBlockEntity at {}. Found={}", filterpos, level.getBlockEntity(filterpos) == null ? "null" : level.getBlockEntity(filterpos).getClass().getName());
+            //LOGGER.debug("MONITOR could NOT find NetworkFiltererBlockEntity at {}. Found={}", filterpos, level.getBlockEntity(filterpos) == null ? "null" : level.getBlockEntity(filterpos).getClass().getName());
         }
 
         controllerBe.setChanged();

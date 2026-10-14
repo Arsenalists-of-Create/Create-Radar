@@ -449,57 +449,61 @@ public class SimulatedAimSolver implements AimSolver {
          double nextPx;
          double nextPy;
          double nextPz;
-         if (customStep != null) {
-            customDynamics.step(
-                    tick, px, py, pz, vx, vy, vz,
-                    snapshot.level(), customStep);
-            nextPx = customStep.positionX;
-            nextPy = customStep.positionY;
-            nextPz = customStep.positionZ;
-            vx = customStep.velocityX;
-            vy = customStep.velocityY;
-            vz = customStep.velocityZ;
-         } else if (model.cbcPhysics()) {
-            double speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
-            double dragForce = 0.0;
-            if (speed > 1.0E-8 && model.drag() > 0.0) {
-               double density = Math.max(0.0, model.dragDensity());
-               if (snapshot.level() != null) {
-                  density += rbasamoyai.createbigcannons.munitions.config.FluidDragHandler.getFluidDrag(snapshot.level().getFluidState(BlockPos.containing(px, py, pz)));
+         try {
+            if (customStep != null) {
+               customDynamics.step(
+                       tick, px, py, pz, vx, vy, vz,
+                       snapshot.level(), customStep);
+               nextPx = customStep.positionX;
+               nextPy = customStep.positionY;
+               nextPz = customStep.positionZ;
+               vx = customStep.velocityX;
+               vy = customStep.velocityY;
+               vz = customStep.velocityZ;
+            } else if (model.cbcPhysics()) {
+               double speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+               double dragForce = 0.0;
+               if (speed > 1.0E-8 && model.drag() > 0.0) {
+                  double density = Math.max(0.0, model.dragDensity());
+                  if (snapshot.level() != null) {
+                     density += LoadedFluidDrag.sample(snapshot.level(), BlockPos.containing(px, py, pz));
+                  }
+                  dragForce = model.drag() * density * speed;
+                  if (model.quadraticDrag()) {
+                     dragForce *= speed;
+                  }
+                  dragForce = Math.min(dragForce, speed);
                }
-               dragForce = model.drag() * density * speed;
+               double scale = speed > 1.0E-8 ? dragForce / speed : 0.0;
+               double ax = -vx * scale;
+               double ay = model.gravity() - vy * scale;
+               double az = -vz * scale;
+               nextPx = px + vx + ax * 0.5;
+               nextPy = py + vy + ay * 0.5;
+               nextPz = pz + vz + az * 0.5;
+               vx += ax;
+               vy += ay;
+               vz += az;
+            } else {
+               nextPx = px + vx;
+               nextPy = py + vy;
+               nextPz = pz + vz;
+               double speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+               double dragForce = model.drag() * speed;
                if (model.quadraticDrag()) {
                   dragForce *= speed;
                }
                dragForce = Math.min(dragForce, speed);
+               if (dragForce > 0.0 && speed > 1.0E-8) {
+                  double scale = 1.0 - dragForce / speed;
+                  vx *= scale;
+                  vy *= scale;
+                  vz *= scale;
+               }
+               vy += model.gravity();
             }
-            double scale = speed > 1.0E-8 ? dragForce / speed : 0.0;
-            double ax = -vx * scale;
-            double ay = model.gravity() - vy * scale;
-            double az = -vz * scale;
-            nextPx = px + vx + ax * 0.5;
-            nextPy = py + vy + ay * 0.5;
-            nextPz = pz + vz + az * 0.5;
-            vx += ax;
-            vy += ay;
-            vz += az;
-         } else {
-            nextPx = px + vx;
-            nextPy = py + vy;
-            nextPz = pz + vz;
-            double speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
-            double dragForce = model.drag() * speed;
-            if (model.quadraticDrag()) {
-               dragForce *= speed;
-            }
-            dragForce = Math.min(dragForce, speed);
-            if (dragForce > 0.0 && speed > 1.0E-8) {
-               double scale = 1.0 - dragForce / speed;
-               vx *= scale;
-               vy *= scale;
-               vz *= scale;
-            }
-            vy += model.gravity();
+         } catch (LoadedFluidDrag.Unavailable ignored) {
+            return null;
          }
 
          double segmentTime = closestLinearSegmentTime(context, tick, px, py, pz, nextPx, nextPy, nextPz);

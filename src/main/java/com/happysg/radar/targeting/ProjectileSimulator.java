@@ -5,7 +5,6 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import rbasamoyai.createbigcannons.munitions.config.FluidDragHandler;
 
 public class ProjectileSimulator {
    private static final int MAX_SIMULATION_TICKS = 4096;
@@ -142,9 +141,9 @@ public class ProjectileSimulator {
          return acceleration;
       }
 
-      double density = !Double.isFinite(dragDensity) || dragDensity < (double)0.0F ? (double)1.0F : dragDensity;
+      double density = !Double.isFinite(dragDensity) || dragDensity < 0.0F ? 1.0F : dragDensity;
       if (level != null) {
-         density += FluidDragHandler.getFluidDrag(level.getFluidState(BlockPos.containing(position)));
+         density += LoadedFluidDrag.sample(level, BlockPos.containing(position));
       }
 
       if (density <= (double)0.0F) {

@@ -276,7 +276,7 @@ public class WeaponFiringControl {
         this.maxSimDistanceBlocks = 8192.0;
         this.mainThreadObstructionChecker = new ObstructionChecker();
         this.targetingComputer = TargetingComputer.createDefault();
-        this.asyncTargetingComputer = new TargetingComputer(null, new ProjectileSimulator(), null, null);
+        this.asyncTargetingComputer = new TargetingComputer(null, new ProjectileSimulator(), null, ObstructionChecker.NONE);
         this.cbcAtRocketTargetingComputer = CBCATRocketAimSolver.createComputer(this.mainThreadObstructionChecker);
         this.asyncCBCAtRocketTargetingComputer = CBCATRocketAimSolver.createComputer(ObstructionChecker.NONE);
         this.cbcmsTargetingComputer = CBCMSAimSolver.createComputer(this.mainThreadObstructionChecker);
@@ -326,7 +326,7 @@ public class WeaponFiringControl {
 
         BlockPos mountPos = weapon != null ? weapon.getMountPos() : cannonMount != null ? cannonMount.getBlockPos() : null;
 
-        LOGGER.debug("FiringControlBlockEntity.<init>() -> controller={} mountPos={} weaponApi={} cbc={}", controller, mountPos, weapon != null, cannonMount != null);
+        //LOGGER.debug("FiringControlBlockEntity.<init>() -> controller={} mountPos={} weaponApi={} cbc={}", controller, mountPos, weapon != null, cannonMount != null);
     }
 
     private RayResult rayClear(Vec3 start, Vec3 end) {
@@ -2779,11 +2779,10 @@ public class WeaponFiringControl {
 
         try {
             this.pendingTargetingRequest = request;
+
             TargetingComputer computer = this.targetingComputerFor(request.solverKind(), true);
-            this.pendingTargetingFuture = CompletableFuture.supplyAsync(
-                    () -> new AsyncTargetingResult(request, computer.solve(request.snapshot(), request.projectileModel())),
-                    TARGETING_EXECUTOR
-            );
+            TargetingSnapshot workerSnapshot = request.snapshot().withoutLiveLevel();
+            this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, computer.solve(workerSnapshot, request.projectileModel())), TARGETING_EXECUTOR);
             ++this.asyncSolveSubmitted;
         } catch (RejectedExecutionException rejected) {
             this.pendingTargetingRequest = null;
@@ -3211,12 +3210,15 @@ public class WeaponFiringControl {
                 || request.solverKind() != currentProjectile.solverKind()) {
             return null;
         }
+
         int validationTicks = Math.max(1, Math.min(snapshot.maxFlightTicks(), result.predictedFlightTicks() + 1));
-        ProjectileSimulator.SimulationResult trajectory =
-                this.validationProjectileSimulator.simulate(
-                        snapshot.launchPosition(direction), direction,
-                        snapshot.inheritedVelocity(), model,
-                        validationTicks, snapshot.level());
+        ProjectileSimulator.SimulationResult trajectory;
+
+        try {
+            trajectory = this.validationProjectileSimulator.simulate(snapshot.launchPosition(direction), direction, snapshot.inheritedVelocity(), model, validationTicks, snapshot.level());
+        } catch (LoadedFluidDrag.Unavailable ignored) {
+            return null;
+        }
 
         int originalCheckTick = Math.max(0, result.predictedFlightTicks());
 
@@ -4261,9 +4263,11 @@ public class WeaponFiringControl {
         }
 
         try {
-            side.pendingSolution = CompletableFuture.supplyAsync(() -> {
-                TargetingResult result = this.targetingComputerFor(solverKind, true).solve(snapshot, model);
+            TargetingSnapshot workerSnapshot = snapshot.withoutLiveLevel();
+            TargetingComputer computer = this.targetingComputerFor(solverKind, true);
 
+            side.pendingSolution = CompletableFuture.supplyAsync(() -> {
+                TargetingResult result = computer.solve(workerSnapshot, model);
                 return new SecondaryTargetingResult(key, snapshot, solvePos, snapshot.gameTime(), result);
             }, TARGETING_EXECUTOR);
         } catch (RejectedExecutionException ignored) {
@@ -4436,14 +4440,13 @@ public class WeaponFiringControl {
 
         int ticks = Math.max(1, Math.min(snapshot.maxFlightTicks(), sideValidationTicks(snapshot, model)));
 
-        ProjectileSimulator.SimulationResult trajectory = this.validationProjectileSimulator.simulate(
-                geometry.launchPosition(direction),
-                direction,
-                snapshot.inheritedVelocity(),
-                model,
-                ticks,
-                serverLevel
-        );
+        ProjectileSimulator.SimulationResult trajectory;
+
+        try {
+            trajectory = this.validationProjectileSimulator.simulate(geometry.launchPosition(direction), direction, snapshot.inheritedVelocity(), model, ticks, serverLevel);
+        } catch (LoadedFluidDrag.Unavailable ignored) {
+            return false;
+        }
 
         List<com.happysg.radar.targeting.Trajectory.Sample> samples = trajectory.samples();
         debugDualTrajectory(serverLevel, side, samples);
