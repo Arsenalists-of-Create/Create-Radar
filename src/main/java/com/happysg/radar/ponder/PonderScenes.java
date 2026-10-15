@@ -1134,7 +1134,7 @@ public class PonderScenes {
                 .placeNearTarget();
 
         scene.idle(110);
-        createScene.world().setKineticSpeed(util.select().fromTo(0, 1, 2, 2, 1, 2), 32);
+        createScene.world().setKineticSpeed(util.select().fromTo(0, 1, 2, 2, 1, 2).add(util.select().position(2, 2, 2)), 32);
         scene.overlay().showText(90)
                 .text("Provide rotational power to the bearing for the sonar to operate")
                 .pointAt(util.grid().at(1, 1, 2).getCenter())
