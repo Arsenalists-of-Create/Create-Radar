@@ -1005,16 +1005,17 @@ public class PonderScenes {
                 .pointAt(directMount.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame()
-                .text("The opposite side can use a conventional CBC cannon mount.");
+                .text("The opposite CBC cannon mount connects directly to the Pitch Gearbox and needs no additional mount Data Link.");
         scene.idle(85);
         showSelection(scene, swivelMountLink);
 
-        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, swivelMountLink, new AABB(new BlockPos(3, 2, 5)), 75);
-        scene.overlay().showText(80)
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, swivelMount, new AABB(new BlockPos(1, 2, 4)), 80);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, swivelMountLink, new AABB(new BlockPos(3, 2, 5)), 80);
+        scene.overlay().showText(85)
                 .pointAt(swivelMountLink.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame()
-                .text("Link the Swivel-side cannon mount to the Pitch Gearbox using a Data Link.");
+                .text("Data Link 1/2: Select the Swivel-mounted cannon mount, then attach a Data Link to the Pitch Gearbox.");
         scene.idle(90);
         showSelection(scene, networkController);
         showSelection(scene, networkLink);
@@ -1024,7 +1025,7 @@ public class PonderScenes {
                 .pointAt(networkLink.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame()
-                .text("Connect the Pitch Gearbox to the Network Controller using a Data Link.");
+                .text("Data Link 2/2: Select the Network Controller, then attach a second Data Link to the Pitch Gearbox.");
         scene.idle(90);
         showSelection(scene, shaft);
         scene.overlay().showText(85)
