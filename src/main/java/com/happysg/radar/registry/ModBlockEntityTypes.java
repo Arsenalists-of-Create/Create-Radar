@@ -27,6 +27,8 @@ import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.happysg.radar.block.radar.skyradar.SkyRadarRenderer;
 import com.happysg.radar.block.radar.skyradar.SkyRadarVisual;
 import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlockEntity;
+import com.happysg.radar.block.radar.sonar.bearing.SonarBearingShaftRenderer;
+import com.happysg.radar.block.radar.sonar.bearing.SonarBearingShaftVisual;
 
 import com.simibubi.create.content.contraptions.bearing.BearingRenderer;
 import com.simibubi.create.content.contraptions.bearing.BearingVisual;
@@ -104,6 +106,8 @@ public class ModBlockEntityTypes {
 
     public static final BlockEntityEntry<SonarBearingBlockEntity> SONAR_BEARING_BE = REGISTRATE
             .blockEntity("sonar_bearing", SonarBearingBlockEntity::new)
+            .visual(() -> SonarBearingShaftVisual::new, true)
+            .renderer(() -> SonarBearingShaftRenderer::new)
             .validBlocks(ModBlocks.SONAR_BEARING)
             .register();
 
