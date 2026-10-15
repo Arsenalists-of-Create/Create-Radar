@@ -27,6 +27,8 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigBool autoTargetDropInvalidTargets = b(true, "dropInvalidTargets", "Allow automatic targets to be released after losing line of sight or entering a safe zone");
     public final ConfigInt autoTargetDropDelaySeconds = i(10, 1, 600, "dropDelaySeconds", "Maximum time in seconds to retain an automatic target after losing line of sight or entering a safe zone");
     public final ConfigInt autoTargetUnloadedDropDelaySeconds = i(10, -1, 600, "unloadedDropDelaySeconds", "Seconds to retain an automatic target while all weapons are unloaded. -1 disables dropping; 0 drops immediately");
+    public final ConfigBool autoTargetWaterDepthEnabled = b(false, "underwaterDepthLimitEnabled", "Exclude automatic entity targets deeper than the configured water depth");
+    public final ConfigInt autoTargetMaxWaterDepthBlocks = i(4, 0, 64, "maxUnderwaterDepthBlocks", "Maximum continuous water blocks at and above an entity's eye position allowed for automatic targeting");
 
     public final ConfigGroup chaffConfig = group(3, "chaffConfig", "Firework chaff lock-breaking behavior");
     public final ConfigBool chaffEnabled = b(true, "enabled", "Allow fireworks to temporarily break radar locks");

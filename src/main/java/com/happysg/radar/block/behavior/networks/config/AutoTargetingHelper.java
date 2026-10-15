@@ -3,9 +3,12 @@ package com.happysg.radar.block.behavior.networks.config;
 import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
+import com.happysg.radar.config.RadarConfig;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
@@ -22,6 +25,54 @@ public final class AutoTargetingHelper {
 
     public static Vec3 defaultTargetOrigin(BlockPos monitorControllerPos) {
         return Vec3.atCenterOf(monitorControllerPos);
+    }
+
+    public static boolean exceedsUnderwaterDepthLimit(ServerLevel level, RadarTrack track) {
+        if (level == null || track == null || !RadarConfig.server().autoTargetWaterDepthEnabled.get()) {
+            return false;
+        }
+
+        TrackCategory category = track.trackCategory();
+        if (category != TrackCategory.PLAYER
+                && category != TrackCategory.MOB
+                && category != TrackCategory.HOSTILE
+                && category != TrackCategory.ANIMAL) {
+            return false;
+        }
+
+        if (track.isSynthetic()) {
+            return false;
+        }
+
+        UUID entityId;
+        try {
+            entityId = UUID.fromString(track.getId());
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+
+        Entity entity = level.getEntity(entityId);
+        if (entity == null || !entity.isAlive()) {
+            return false;
+        }
+
+        BlockPos.MutableBlockPos cursor = BlockPos.containing(entity.getEyePosition()).mutable();
+
+        if (!level.hasChunkAt(cursor)) {
+            return false;
+        }
+
+        int maxDepth = RadarConfig.server().autoTargetMaxWaterDepthBlocks.get();
+
+        for (int depth = 0; depth <= maxDepth; depth++) {
+            if (cursor.getY() >= level.getMaxBuildHeight() || !level.getFluidState(cursor).is(FluidTags.WATER)) {
+                return false;
+            }
+
+            cursor.move(0, 1, 0);
+        }
+
+        return true;
     }
 
     @Nullable
@@ -64,18 +115,14 @@ public final class AutoTargetingHelper {
         RadarTrack bestTrack = null;
 
         for (RadarTrack track : tracks) {
-            if (!targetingConfig.test(track.trackCategory()))
-                continue;
+            if (!targetingConfig.test(track.trackCategory())) continue;
+            if (serverLevel != null && exceedsUnderwaterDepthLimit(serverLevel, track)) continue;
 
             Vec3 pos = track.position();
-            if (pos == null)
-                continue;
+            if (pos == null) continue;
 
-            if (isIgnoredByIdentification(track, serverLevel, ignoreList))
-                continue;
-
-            if (isInSafeZone(pos, safeZones, serverLevel))
-                continue;
+            if (isIgnoredByIdentification(track, serverLevel, ignoreList)) continue;
+            if (isInSafeZone(pos, safeZones, serverLevel)) continue;
 
 
             if (targetingConfig.lineOfSight() && serverLevel != null && origin != null) {

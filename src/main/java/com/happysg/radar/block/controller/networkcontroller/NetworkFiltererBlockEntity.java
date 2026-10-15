@@ -351,6 +351,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 return;
             }
 
+            if (selectedWasAuto && cfg.autoTarget() && AutoTargetingHelper.exceedsUnderwaterDepthLimit(sl, selected)) {
+                dropOrReselectAuto(sl, data, group);
+                return;
+            }
+
             if (selectedWasAuto && cfg.autoTarget()) {
                 List<AutoPitchControllerBlockEntity> endpoints = getWeaponEndpointsCached(sl);
 
@@ -1228,6 +1233,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
             if (!cfg.test(track.trackCategory())) continue;
             if (!isVsShipStillLoaded(sl, track)) continue;
+            if (AutoTargetingHelper.exceedsUnderwaterDepthLimit(sl, track)) continue;
 
             Vec3 pos = track.position();
             if (pos == null) continue;
