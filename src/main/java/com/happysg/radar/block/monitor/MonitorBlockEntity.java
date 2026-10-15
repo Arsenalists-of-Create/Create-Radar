@@ -91,6 +91,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     private boolean ponderRwrIconEnlarged = false;
     private @Nullable PonderJammingVisual.Tier ponderJammingTier;
     private long ponderJammingStartTick;
+    private boolean ponderRadarVisualActive = false;
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -243,6 +244,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         if (level == null)
             return;
+
+        if (ponderRadarVisualActive) {
+            return;
+        }
 
         if (ponderJammingTier != null) {
             refreshPonderJammingVisual();
@@ -1037,6 +1042,44 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     public boolean shouldRenderPonderRwrRings() {
         return !ponderRwrIconEnlarged;
+    }
+
+    public void beginPonderRadarVisual() {
+        ponderRadarVisualActive = true;
+        ponderJammingTier = null;
+        ponderRwrVisualOverride = false;
+        ponderRwrVisualActive = false;
+        rwrInfos = List.of();
+
+        controller = worldPosition;
+        radius = 3;
+
+        Vec3 center = Vec3.atCenterOf(worldPosition);
+        long now = level == null ? 0L : level.getGameTime();
+
+        radarPos = worldPosition;
+
+        radarInfos = List.of(new RadarDisplayInfo(
+                worldPosition,
+                center,
+                128.0f,
+                true,
+                RadarDisplayProfiles.GROUND,
+                0.0f,
+                4.0f,
+                now,
+                360.0f,
+                null,
+                null,
+                null,
+                MonitorRadarData.empty(),
+                MonitorExtensionState.empty()
+        ));
+
+        cachedTracks = List.of(
+                new RadarTrack("ponder_player", center.add(32, 0, 18), Vec3.ZERO, now, TrackCategory.PLAYER, "minecraft:player", 1.8f),
+                new RadarTrack("ponder_hostile", center.add(-20, 0, -35), Vec3.ZERO, now, TrackCategory.HOSTILE, "minecraft:zombie", 1.9f)
+        );
     }
 
     public void beginPonderRwrVisual() {
