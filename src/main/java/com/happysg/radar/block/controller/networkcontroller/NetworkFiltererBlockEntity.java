@@ -11,6 +11,7 @@ import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.arad.jammer.DirectionalJammingService;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.SafeZone;
+import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
@@ -25,6 +26,7 @@ import com.happysg.radar.compat.create.CreateSchematicLinkPersistence;
 import com.happysg.radar.compat.sable.SableLinkPersistence;
 import com.happysg.radar.compat.sable.SableNetworkFiltererAccess;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.track.TrackCategory;
@@ -72,6 +74,25 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private static final int SLOT_TARGETING = 2;
 
     private boolean selectedWasAuto = false;
+
+    @Nullable
+    private String autoUnloadedTargetId = null;
+
+    private long autoUnloadedSinceTick = Long.MIN_VALUE;
+
+    @Nullable
+    private String autoInvalidTargetId = null;
+    private long autoInvalidSinceTick = Long.MIN_VALUE;
+
+    @Nullable
+    private String autoVisibleTargetId = null;
+
+    private long autoVisibleSinceTick = Long.MIN_VALUE;
+
+    @Nullable
+    private String autoTimedOutTargetId = null;
+
+    private long autoTimedOutUntilTick = Long.MIN_VALUE;
 
     private long suppressAutoUntilTick = 0L;
     private static final int MANUAL_CLEAR_COOLDOWN_TICKS = 20;
@@ -329,6 +350,133 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 applySelectedTarget(sl, data, group, null, false);
                 return;
             }
+
+            if (selectedWasAuto && cfg.autoTarget()) {
+                List<AutoPitchControllerBlockEntity> endpoints = getWeaponEndpointsCached(sl);
+
+                boolean checkVisibility = RadarConfig.server().autoTargetDropInvalidTargets.get();
+                boolean cycleVisibleTargets = RadarConfig.server().autoTargetCycleVisibleTargets.get();
+                boolean checkLos = cycleVisibleTargets || (checkVisibility && cfg.lineOfSight());
+
+                boolean hasLoadedWeapon = false;
+                boolean hasVisibleWeapon = !checkLos;
+
+                for (AutoPitchControllerBlockEntity pitch : endpoints) {
+                    if (!hasResolvableAutoShot(sl, pitch)) {
+                        continue;
+                    }
+
+                    hasLoadedWeapon = true;
+
+                    if (checkLos
+                            && !hasVisibleWeapon
+                            && pitch.firingControl != null
+                            && pitch.firingControl.hasLineOfSightTo(selected, true)) {
+                        hasVisibleWeapon = true;
+                    }
+
+                    if (!checkLos || hasVisibleWeapon) {
+                        break;
+                    }
+                }
+
+                int unloadDelay = RadarConfig.server().autoTargetUnloadedDropDelaySeconds.get();
+                if (unloadDelay >= 0 && !endpoints.isEmpty() && !hasLoadedWeapon) {
+                    long now = sl.getGameTime();
+                    String selectedId = selected.getId();
+
+                    if (!Objects.equals(autoUnloadedTargetId, selectedId)) {
+                        autoUnloadedTargetId = selectedId;
+                        autoUnloadedSinceTick = now;
+                    }
+
+                    if (now - autoUnloadedSinceTick >= unloadDelay * 20L) {
+                        applySelectedTarget(sl, data, group, null, false);
+                        return;
+                    }
+                } else {
+                    autoUnloadedTargetId = null;
+                    autoUnloadedSinceTick = Long.MIN_VALUE;
+                }
+
+                Vec3 selectedPos = selected.position();
+
+                boolean invalidTarget = checkVisibility
+                        && (selectedPos == null
+                        || AutoTargetingHelper.isInSafeZone(selectedPos, safeZones, sl)
+                        || (cfg.lineOfSight()
+                        && hasLoadedWeapon
+                        && !hasVisibleWeapon)
+                );
+
+                if (invalidTarget) {
+                    long now = sl.getGameTime();
+
+                    autoVisibleTargetId = null;
+                    autoVisibleSinceTick = Long.MIN_VALUE;
+                    String selectedId = selected.getId();
+
+                    if (!Objects.equals(autoInvalidTargetId, selectedId)) {
+                        autoInvalidTargetId = selectedId;
+                        autoInvalidSinceTick = now;
+                    }
+
+                    long elapsed = now - autoInvalidSinceTick;
+
+                    if (elapsed >= 20L) {
+                        List<RadarTrack> alternatives = cachedTracks.stream().filter(track -> track != null && !Objects.equals(track.getId(), selectedId)).toList();
+
+                        RadarTrack replacement = pickAutoTarget_PerCannon(sl, alternatives, safeZones);
+
+                        if (replacement != null) {
+                            applySelectedTarget(sl, data, group, replacement, true);
+                            return;
+                        }
+                    }
+
+                    long dropDelayTicks = RadarConfig.server().autoTargetDropDelaySeconds.get() * 20L;
+
+                    if (elapsed >= dropDelayTicks) {
+                        applySelectedTarget(sl, data, group, null, false);
+                        return;
+                    }
+
+                } else {
+                    autoInvalidTargetId = null;
+                    autoInvalidSinceTick = Long.MIN_VALUE;
+
+                    if (cycleVisibleTargets
+                            && hasLoadedWeapon
+                            && hasVisibleWeapon
+                            && selectedPos != null) {
+
+                        long now = sl.getGameTime();
+                        String selectedId = selected.getId();
+
+                        if (!Objects.equals(autoVisibleTargetId, selectedId)) {
+                            autoVisibleTargetId = selectedId;
+                            autoVisibleSinceTick = now;
+                        }
+
+                        long timeoutTicks = RadarConfig.server().autoTargetDropDelaySeconds.get() * 20L;
+
+                        if (now - autoVisibleSinceTick >= timeoutTicks) {
+
+                            autoTimedOutTargetId = selectedId;
+                            autoTimedOutUntilTick = now + timeoutTicks;
+
+                            RadarTrack replacement = pickAutoTarget_PerCannon(sl, cachedTracks, safeZones);
+
+                            applySelectedTarget(sl, data, group, replacement, replacement != null);
+                            return;
+                        }
+
+                    } else {
+                        autoVisibleTargetId = null;
+                        autoVisibleSinceTick = Long.MIN_VALUE;
+                    }
+                }
+            }
         }
 
         if (selected == null) {
@@ -553,6 +701,17 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             clearChaffState();
         }
 
+        if (!Objects.equals(prev, next) || this.selectedWasAuto != wasAuto) {
+            autoInvalidTargetId = null;
+            autoInvalidSinceTick = Long.MIN_VALUE;
+
+            autoVisibleTargetId = null;
+            autoVisibleSinceTick = Long.MIN_VALUE;
+
+            autoUnloadedTargetId = null;
+            autoUnloadedSinceTick = Long.MIN_VALUE;
+        }
+
         this.selectedWasAuto = wasAuto;
 
         data.setSelectedTargetId(group, next);
@@ -576,6 +735,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
 
         data.setDirty();
+        setChanged();
     }
 
     private void markPushedTrack(@Nullable RadarTrack track) {
@@ -586,6 +746,21 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         lastPushedSafeZonesHash = safeZonesHash(safeZones);
         lastPushedJammingToken = jammingToken(track);
         endpointRepushRequired = false;
+    }
+
+    private boolean hasResolvableAutoShot(ServerLevel sl, AutoPitchControllerBlockEntity pitch) {
+        pitch.getFiringControl();
+
+        WeaponFiringControl control = pitch.firingControl;
+        if (control == null) {
+            return false;
+        }
+
+        if (control.cannonMount != null) {
+            return WeaponFiringControl.hasResolvableShot(control.cannonMount, sl);
+        }
+
+        return WeaponFiringControl.hasResolvableShot(control.weapon, sl);
     }
 
     private boolean anyCannonCanEngage(List<AutoPitchControllerBlockEntity> endpoints, RadarTrack track, boolean requireLos) {
@@ -1038,13 +1213,18 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         Set<String> ignoreList = buildIgnoreList(ident);
 
         boolean requireLos = cfg.lineOfSight();
+        boolean skipTimedOutTarget = RadarConfig.server().autoTargetCycleVisibleTargets.get() && sl.getGameTime() < autoTimedOutUntilTick;
 
         // Build list of candidates sorted by distance to FILTERER
         ArrayList<RadarTrack> candidates = new ArrayList<>();
         for (RadarTrack track : tracks) {
             if (track == null) continue;
-            if (chaffAutoIgnoredTargetId != null
-                    && chaffAutoIgnoredTargetId.equals(track.getId())) continue;
+
+            if (skipTimedOutTarget && Objects.equals(track.getId(), autoTimedOutTargetId)) {
+                continue;
+            }
+
+            if (chaffAutoIgnoredTargetId != null && chaffAutoIgnoredTargetId.equals(track.getId())) continue;
 
             if (!cfg.test(track.trackCategory())) continue;
             if (!isVsShipStillLoaded(sl, track)) continue;
@@ -1067,9 +1247,17 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         final Vec3 sortOrigin = filtererPos;
         candidates.sort(Comparator.comparingDouble(t -> sortOrigin.distanceToSqr(t.position())));
 
-        List<AutoPitchControllerBlockEntity> rangeBatchEndpoints = getWeaponEndpointsCached(sl);
+        List<AutoPitchControllerBlockEntity> allEndpoints = getWeaponEndpointsCached(sl);
+        List<AutoPitchControllerBlockEntity> rangeBatchEndpoints = new ArrayList<>();
+
+        for (AutoPitchControllerBlockEntity pitch : allEndpoints) {
+            if (hasResolvableAutoShot(sl, pitch)) {
+                rangeBatchEndpoints.add(pitch);
+            }
+        }
+
         if (!hasTargetConstrainedWeaponEndpoint(rangeBatchEndpoints)) {
-            if (requireLos) {
+            if (requireLos || (rangeBatchEndpoints.isEmpty() && !allEndpoints.isEmpty())) {
                 return null;
             }
 
@@ -1145,6 +1333,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         nbt.put(NBT_INVENTORY, inventory.serializeNBT(registries));
         saveSlotNbt(nbt);
+        nbt.putBoolean("SelectedWasAuto", selectedWasAuto);
         nbt.putLong("LastKnownPos", lastKnownPos.asLong());
         if (level instanceof ServerLevel serverLevel) {
             if (Mods.SABLE.isLoaded()) {
@@ -1178,6 +1367,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     protected void loadAdditional(CompoundTag nbt, HolderLookup.Provider registries) {
         super.loadAdditional(nbt, registries);
 
+        selectedWasAuto = nbt.getBoolean("SelectedWasAuto");
         if (nbt.contains(NBT_INVENTORY, Tag.TAG_COMPOUND)) {
             inventory.deserializeNBT(registries, nbt.getCompound(NBT_INVENTORY));
         } else if (nbt.contains(LEGACY_INV, Tag.TAG_COMPOUND)) {

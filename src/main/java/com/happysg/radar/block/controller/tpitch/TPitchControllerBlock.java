@@ -1,5 +1,7 @@
 package com.happysg.radar.block.controller.tpitch;
 
+import com.happysg.radar.api.mount.RadarMountAdapter;
+import com.happysg.radar.api.mount.RadarMountRegistry;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
@@ -22,7 +24,6 @@ import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
@@ -137,13 +138,31 @@ public class TPitchControllerBlock extends KineticBlock
         double bestScore = -Double.MAX_VALUE;
 
         for (Direction direction : HORIZONTAL_DIRECTIONS) {
-            if (CannonMountContext.resolveEndpoint(
-                    context.getLevel(), placementPos.relative(direction)) == null) {
+            if (CannonMountContext.resolveEndpoint(context.getLevel(), placementPos.relative(direction)) == null) {
                 continue;
             }
 
-            double score = look.x * direction.getStepX()
-                    + look.z * direction.getStepZ();
+            double score = look.x * direction.getStepX() + look.z * direction.getStepZ();
+            if (score > bestScore) {
+                bestScore = score;
+                bestDirection = direction;
+            }
+        }
+
+        if (bestDirection != null) {
+            return bestDirection;
+        }
+
+        for (Direction direction : HORIZONTAL_DIRECTIONS) {
+            BlockPos endpointPos = placementPos.relative(direction);
+            RadarMountAdapter mount = RadarMountRegistry.find(context.getLevel(), endpointPos);
+
+            if (mount == null || !mount.isValid() || !mount.supportsPitch() || mount.getMountPos() == null) {
+                continue;
+            }
+
+            double score = look.x * direction.getStepX() + look.z * direction.getStepZ();
+
             if (score > bestScore) {
                 bestScore = score;
                 bestDirection = direction;
@@ -153,11 +172,8 @@ public class TPitchControllerBlock extends KineticBlock
         return bestDirection;
     }
 
-    static Direction closestPerpendicularDirection(Direction.Axis crossbarAxis,
-                                                   Vec3 towardPlayer) {
-        Direction bestDirection = crossbarAxis == Direction.Axis.X
-                ? Direction.SOUTH
-                : Direction.EAST;
+    static Direction closestPerpendicularDirection(Direction.Axis crossbarAxis, Vec3 towardPlayer) {
+        Direction bestDirection = crossbarAxis == Direction.Axis.X ? Direction.SOUTH : Direction.EAST;
         double bestScore = directionScore(bestDirection, towardPlayer);
 
         for (Direction direction : Direction.values()) {

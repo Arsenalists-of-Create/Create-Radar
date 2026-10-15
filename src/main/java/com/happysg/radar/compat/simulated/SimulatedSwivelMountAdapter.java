@@ -8,6 +8,8 @@ import com.happysg.radar.block.controller.kinetic.KineticMountFrame;
 import com.happysg.radar.block.controller.kinetic.KineticMountAdapter;
 import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
+import com.happysg.radar.block.controller.tpitch.TPitchControllerBlock;
+import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.simibubi.create.content.kinetics.RotationPropagator;
@@ -35,6 +37,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 
+import java.util.List;
 import java.util.UUID;
 
 
@@ -65,8 +68,7 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
     }
 
 
-    public static KineticMountAdapterResolution resolve(KineticBlockEntity controller,
-                                                        Direction.Axis rotationAxis) {
+    public static KineticMountAdapterResolution resolve(KineticBlockEntity controller, Direction.Axis rotationAxis) {
         Level level = controller.getLevel();
         if (level == null) {
             return KineticMountAdapterResolution.absent("controller_level_unavailable");
@@ -152,25 +154,182 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
     }
 
     /**
+     * Returns the T-Pitch output carrying the given weapon mount.
+     */
+    public static Direction findTPitchSwivelSide(TPitchControllerBlockEntity controller, BlockPos mountPos) {
+        Level level = controller.getLevel();
+        if (level == null || mountPos == null) {
+            return null;
+        }
+
+        BlockState state = controller.getBlockState();
+        if (!state.hasProperty(TPitchControllerBlock.ORIENTATION)) {
+            return null;
+        }
+
+        Direction.Axis axis = state.getValue(TPitchControllerBlock.ORIENTATION).crossbarAxis();
+        Direction positive = axis == Direction.Axis.X ? Direction.EAST : Direction.SOUTH;
+
+        boolean first = isMountOnTPitchSwivelSide(controller, positive, axis, mountPos);
+        boolean second = isMountOnTPitchSwivelSide(controller, positive.getOpposite(), axis, mountPos);
+
+        if (first == second) {
+            return null;
+        }
+
+        return first ? positive : positive.getOpposite();
+    }
+
+    private static boolean isMountOnTPitchSwivelSide(TPitchControllerBlockEntity controller, Direction side, Direction.Axis axis, BlockPos mountPos) {
+        Level level = controller.getLevel();
+        if (level == null) {
+            return false;
+        }
+
+        BlockPos bearingPos = controller.getBlockPos().relative(side);
+        if (!level.hasChunkAt(bearingPos) || !level.hasChunkAt(mountPos)) {
+            return false;
+        }
+
+        if (!(level.getBlockEntity(bearingPos) instanceof SwivelBearingBlockEntity bearing)) {
+            return false;
+        }
+
+        BlockState bearingState = bearing.getBlockState();
+        if (!(bearingState.getBlock() instanceof SwivelBearingBlock) || !bearingState.hasProperty(SwivelBearingBlock.FACING) || bearingState.getValue(SwivelBearingBlock.FACING).getAxis() != axis) {
+            return false;
+        }
+
+        UUID assemblyId = bearing.getSubLevelID();
+        if (assemblyId == null) {
+            return false;
+        }
+
+        SubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null) {
+            return false;
+        }
+
+        SubLevel attached = container.getSubLevel(assemblyId);
+        if (attached == null || attached.isRemoved()) {
+            return false;
+        }
+
+        BlockEntity weaponMount = level.getBlockEntity(mountPos);
+        if (weaponMount == null) {
+            return false;
+        }
+
+        SubLevel containing = Sable.HELPER.getContaining(weaponMount);
+        if (containing == attached) {
+            return true;
+        }
+
+        return containing != null && SubLevelHelper.getConnectedChain(attached).contains(containing);
+    }
+
+    /**
+     * Resolves a Swivel on either output of a T-Pitch gearbox.
+     */
+    public static KineticMountAdapterResolution resolveTPitch(TPitchControllerBlockEntity controller) {
+        Level level = controller.getLevel();
+
+        if (level == null) {
+            return KineticMountAdapterResolution.absent("controller_level_unavailable");
+        }
+
+        BlockState state = controller.getBlockState();
+        if (!state.hasProperty(TPitchControllerBlock.ORIENTATION)) {
+            return KineticMountAdapterResolution.absent("tpitch_orientation_unavailable");
+        }
+
+        Direction.Axis crossbarAxis = state.getValue(TPitchControllerBlock.ORIENTATION).crossbarAxis();
+        Direction positive = crossbarAxis == Direction.Axis.X ? Direction.EAST : Direction.SOUTH;
+
+        SwivelBearingBlockEntity selectedBearing = null;
+        Direction selectedDirection = null;
+        Direction.Axis selectedAxis = null;
+
+        int matches = 0;
+        boolean unloaded = false;
+
+        for (Direction direction : new Direction[]{ positive, positive.getOpposite() }) {
+            BlockPos candidatePos = controller.getBlockPos().relative(direction);
+
+            if (!level.hasChunkAt(candidatePos)) {
+                unloaded = true;
+                continue;
+            }
+
+            BlockEntity candidate = level.getBlockEntity(candidatePos);
+            if (!(candidate instanceof SwivelBearingBlockEntity bearing)) {
+                continue;
+            }
+
+            BlockState bearingState = bearing.getBlockState();
+            if (!(bearingState.getBlock() instanceof SwivelBearingBlock) || !bearingState.hasProperty(SwivelBearingBlock.FACING)) {
+                continue;
+            }
+
+            Direction.Axis bearingAxis = bearingState.getValue(SwivelBearingBlock.FACING).getAxis();
+            if (bearingAxis != crossbarAxis) {
+                continue;
+            }
+
+            matches++;
+            selectedBearing = bearing;
+            selectedDirection = direction;
+            selectedAxis = bearingAxis;
+        }
+
+        if (unloaded) {
+            return KineticMountAdapterResolution.unavailable("tpitch_output_chunk_unloaded");
+        }
+
+        if (matches == 0) {
+            return KineticMountAdapterResolution.absent("no_adjacent_tpitch_swivel");
+        }
+
+        if (matches > 1) {
+            return KineticMountAdapterResolution.ambiguous("multiple_tpitch_swivels");
+        }
+
+        if (selectedBearing.getExtraKinetics() == null) {
+            return KineticMountAdapterResolution.unavailable("tpitch_swivel_kinetic_endpoint_unavailable");
+        }
+
+        return KineticMountAdapterResolution.present(new SimulatedSwivelMountAdapter(controller, selectedAxis, selectedDirection, selectedBearing));
+    }
+
+    /**
      * Used by the Simulated compatibility mixin to make the selected custom
      * kinetic edge report the same ratio in both propagation directions.
      */
-    public static boolean isSelectedEndpoint(KineticBlockEntity controller,
-                                             KineticBlockEntity candidate) {
+    public static boolean isSelectedEndpoint(KineticBlockEntity controller, KineticBlockEntity candidate) {
+        if (controller instanceof TPitchControllerBlockEntity tPitch) {
+            if (!tPitch.hasStructuralKineticSelectionForTargeting()) {
+                return false;
+            }
+
+            KineticMountAdapterResolution resolution = resolveTPitch(tPitch);
+            KineticMountAdapter adapter = resolution.adapter();
+
+            return resolution.hasAdapter() && adapter != null && adapter.isValid() && adapter.isKineticEndpoint(candidate);
+        }
+
         Direction.Axis axis;
         if (controller instanceof AutoYawControllerBlockEntity) {
             axis = Direction.Axis.Y;
         } else if (controller instanceof AutoPitchControllerBlockEntity
                 && controller.getBlockState().hasProperty(HorizontalDirectionalBlock.FACING)) {
-            axis = controller.getBlockState()
-                    .getValue(HorizontalDirectionalBlock.FACING).getAxis();
+            axis = controller.getBlockState().getValue(HorizontalDirectionalBlock.FACING).getAxis();
         } else {
             return false;
         }
+
         KineticMountAdapterResolution resolution = resolve(controller, axis);
         KineticMountAdapter adapter = resolution.adapter();
-        return resolution.hasAdapter() && adapter != null && adapter.isValid()
-                && adapter.isKineticEndpoint(candidate);
+        return resolution.hasAdapter() && adapter != null && adapter.isValid() && adapter.isKineticEndpoint(candidate);
     }
 
     @Override
@@ -422,10 +581,20 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
     }
 
     private Direction controllerFacing() {
+        if (controller instanceof TPitchControllerBlockEntity) {
+            return relativeDirection;
+        }
+
         BlockState state = controller.getBlockState();
+
+        if (controller instanceof TPitchControllerBlockEntity && state.hasProperty(TPitchControllerBlock.ORIENTATION)) {
+            return state.getValue(TPitchControllerBlock.ORIENTATION).branchDirection();
+        }
+
         if (state.hasProperty(DirectionalKineticBlock.FACING)) {
             return state.getValue(DirectionalKineticBlock.FACING);
         }
+
         if (state.hasProperty(HorizontalDirectionalBlock.FACING)) {
             return state.getValue(HorizontalDirectionalBlock.FACING);
         }
@@ -444,6 +613,36 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
             cachedCannonMountAssemblyId = assemblyId;
             cachedCannonMountPos = null;
             nextCannonMountScanTick = Long.MIN_VALUE;
+        }
+
+        if (controller instanceof TPitchControllerBlockEntity tPitch) {
+            if (!(level instanceof ServerLevel serverLevel)) {
+                return CannonCalibration.unavailable();
+            }
+
+            List<BlockPos> linkedMounts = WeaponNetworkRuntime.get(serverLevel).getExplicitMountsForController(controller.getBlockPos());
+            BlockPos selectedMount = null;
+
+            for (BlockPos mountPos : linkedMounts) {
+                Direction mountSide = findTPitchSwivelSide(tPitch, mountPos);
+
+                if (mountSide != relativeDirection) {
+                    continue;
+                }
+
+                if (selectedMount != null && !selectedMount.equals(mountPos)) {
+                    return CannonCalibration.unavailable();
+                }
+
+                selectedMount = mountPos;
+            }
+
+            if (selectedMount == null) {
+                return CannonCalibration.unavailable();
+            }
+
+            CannonCalibration calibration = calibrationAt(attached, selectedMount, false);
+            return calibration.hasMount() ? calibration : CannonCalibration.unavailable();
         }
 
         if (level instanceof ServerLevel serverLevel) {

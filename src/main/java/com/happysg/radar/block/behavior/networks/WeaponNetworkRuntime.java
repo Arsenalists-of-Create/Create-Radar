@@ -10,7 +10,9 @@ import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
+import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
+import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -903,7 +905,7 @@ public final class WeaponNetworkRuntime {
             Set<BlockPos> targetedMounts
     ) {
         BlockEntity endpoint = level.getBlockEntity(controllerPos);
-        if (!(endpoint instanceof TPitchControllerBlockEntity)) {
+        if (!(endpoint instanceof TPitchControllerBlockEntity tPitch)) {
             return List.of();
         }
         BlockState state = endpoint.getBlockState();
@@ -916,18 +918,13 @@ public final class WeaponNetworkRuntime {
         Direction positive = axis == Direction.Axis.X
                 ? Direction.EAST : Direction.SOUTH;
         LinkedHashSet<BlockPos> mounts = new LinkedHashSet<>();
-        addTPitchSide(
-                mounts,
-                controllerPos.relative(positive),
-                targetedMounts);
-        addTPitchSide(
-                mounts,
-                controllerPos.relative(positive.getOpposite()),
-                targetedMounts);
+        addTPitchSide(mounts, tPitch, positive, targetedMounts);
+        addTPitchSide(mounts, tPitch, positive.getOpposite(), targetedMounts);
         return mounts.stream().sorted(STABLE_POSITION).toList();
     }
 
-    private void addTPitchSide(Set<BlockPos> mounts, BlockPos endpointPos, Set<BlockPos> targetedMounts) {
+    private void addTPitchSide(Set<BlockPos> mounts, TPitchControllerBlockEntity controller, Direction side, Set<BlockPos> targetedMounts) {
+        BlockPos endpointPos = controller.getBlockPos().relative(side);
         CannonMountContext direct = directMount(endpointPos);
 
         if (direct != null) {
@@ -936,7 +933,6 @@ public final class WeaponNetworkRuntime {
         }
 
         RadarMountAdapter api = RadarMountRegistry.find(level, endpointPos);
-
         if (api != null && api.isValid()) {
             BlockPos mountPos = api.getMountPos();
 
@@ -947,9 +943,35 @@ public final class WeaponNetworkRuntime {
         }
 
         CannonMountContext extended = CannonMountContext.resolveEndpoint(level, endpointPos);
-
         if (extended != null && targetedMounts.contains(extended.getBlockPos())) {
             mounts.add(extended.getBlockPos().immutable());
+        }
+
+        if (!Mods.SIMULATED.isLoaded()) {
+            return;
+        }
+
+        BlockPos selected = null;
+
+        for (LinkEntry link : linksByDataLink.values()) {
+            if (link.type() != DataLinkBlockEntity.WeaponEndpointType.PITCH || !link.endpointPos().equals(controller.getBlockPos())) {
+                continue;
+            }
+
+            Direction linkedSide = SimulatedSwivelMountAdapter.findTPitchSwivelSide(controller, link.mountPos());
+            if (linkedSide != side) {
+                continue;
+            }
+
+            if (selected != null && !selected.equals(link.mountPos())) {
+                return;
+            }
+
+            selected = link.mountPos();
+        }
+
+        if (selected != null) {
+            mounts.add(selected.immutable());
         }
     }
 
@@ -1021,34 +1043,35 @@ public final class WeaponNetworkRuntime {
         return List.copyOf(entries);
     }
 
-    private boolean canShareExplicitEndpoint(
-            LinkEntry candidate,
-            List<LinkEntry> existing
-    ) {
+    private boolean canShareExplicitEndpoint(LinkEntry candidate, List<LinkEntry> existing) {
         if (existing.isEmpty()) {
             return true;
         }
+
         if (candidate.type()
                 != DataLinkBlockEntity.WeaponEndpointType.PITCH
-                || !(level.getBlockEntity(candidate.endpointPos())
-                instanceof TPitchControllerBlockEntity tPitch)
+                || !(level.getBlockEntity(candidate.endpointPos()) instanceof TPitchControllerBlockEntity tPitch)
                 || existing.size() >= 2
                 || !tPitch.canLinkMount(candidate.mountPos())) {
             return false;
         }
+
+        Direction candidateSwivelSide = Mods.SIMULATED.isLoaded() ? SimulatedSwivelMountAdapter.findTPitchSwivelSide(tPitch, candidate.mountPos()) : null;
         for (LinkEntry link : existing) {
             if (link.type()
                     != DataLinkBlockEntity.WeaponEndpointType.PITCH
                     || link.mountPos().equals(candidate.mountPos())) {
                 return false;
             }
+
+            if (candidateSwivelSide != null && candidateSwivelSide == SimulatedSwivelMountAdapter.findTPitchSwivelSide(tPitch, link.mountPos())) {
+                return false;
+            }
         }
         return true;
     }
 
-    private Set<BlockPos> acceptedDataLinkTargets(
-            @Nullable LinkEntry ignored
-    ) {
+    private Set<BlockPos> acceptedDataLinkTargets(@Nullable LinkEntry ignored) {
         Set<BlockPos> targets = new HashSet<>();
         for (LinkEntry entry : linksByDataLink.values()) {
             if (!entry.equals(ignored)) {
@@ -1064,23 +1087,19 @@ public final class WeaponNetworkRuntime {
             if (!level.isLoaded(dataLinkPos)) {
                 return true;
             }
-            BlockEntity blockEntity =
-                    level.getBlockEntity(dataLinkPos);
-            if (!(blockEntity
-                    instanceof DataLinkBlockEntity dataLink)) {
+
+            BlockEntity blockEntity = level.getBlockEntity(dataLinkPos);
+            if (!(blockEntity instanceof DataLinkBlockEntity dataLink)) {
                 return true;
             }
+
             BlockState state = dataLink.getBlockState();
             return !(state.getBlock() instanceof DataLinkBlock)
                     || !state.hasProperty(DataLinkBlock.LINK_STYLE)
-                    || state.getValue(DataLinkBlock.LINK_STYLE)
-                    != DataLinkBlock.LinkStyle.CONTROLLER
-                    || dataLink.getWeaponEndpointType()
-                    != entry.getValue().type()
-                    || !dataLink.getSourcePosition().equals(
-                    entry.getValue().endpointPos())
-                    || !dataLink.getTargetPosition().equals(
-                    entry.getValue().mountPos());
+                    || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.CONTROLLER
+                    || dataLink.getWeaponEndpointType() != entry.getValue().type()
+                    || !dataLink.getSourcePosition().equals(entry.getValue().endpointPos())
+                    || !dataLink.getTargetPosition().equals(entry.getValue().mountPos());
         });
 
         removed |= contactControllers.entrySet().removeIf(entry -> {

@@ -22,6 +22,12 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigInt controllerCollisionViewMaxScannedBlocks = i(100000, 500, 1000000, "maxScannedBlocks", "Maximum block positions inspected for one controller collision snapshot");
     public final ConfigInt controllerCollisionViewMaxBoxes = i(16384, 128, 16384, "maxCollisionBoxes", "Maximum collision boxes returned in one controller collision snapshot");
 
+    public final ConfigGroup autoTargetRetentionConfig = group(3, "autoTargetRetentionConfig", "Automatic target visibility and retention");
+    public final ConfigBool autoTargetCycleVisibleTargets = b(false, "cycleVisibleTargets", "Cycle away from automatic targets that remain visible and detected after the configured drop delay");
+    public final ConfigBool autoTargetDropInvalidTargets = b(true, "dropInvalidTargets", "Allow automatic targets to be released after losing line of sight or entering a safe zone");
+    public final ConfigInt autoTargetDropDelaySeconds = i(10, 1, 600, "dropDelaySeconds", "Maximum time in seconds to retain an automatic target after losing line of sight or entering a safe zone");
+    public final ConfigInt autoTargetUnloadedDropDelaySeconds = i(10, -1, 600, "unloadedDropDelaySeconds", "Seconds to retain an automatic target while all weapons are unloaded. -1 disables dropping; 0 drops immediately");
+
     public final ConfigGroup chaffConfig = group(3, "chaffConfig", "Firework chaff lock-breaking behavior");
     public final ConfigBool chaffEnabled = b(true, "enabled", "Allow fireworks to temporarily break radar locks");
     public final ConfigBool chaffDebugChat = b(false, "debugChat", "Broadcast chaff roll debug details to all players");

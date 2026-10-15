@@ -151,6 +151,11 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         boolean kineticSelected = tickKineticActuator();
         tickDebugSwivelSweep(kineticSelected);
         if (kineticSelected) {
+            tickSpecializedPitchMounts();
+            return;
+        }
+
+        if (tickSpecializedPitchMounts()) {
             return;
         }
 
@@ -174,6 +179,14 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         isRunning = false;
+    }
+
+    protected boolean tickSpecializedPitchMounts() {
+        return false;
+    }
+
+    protected void tickCbcMount(CannonMountContext mount) {
+        cannonHandler.tick(mount);
     }
 
     public void getFiringControl() {
@@ -565,9 +578,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         KineticMountAdapterResolution kineticResolution = resolveKineticMount();
-        if (kineticResolution.isStructuralSelection()) {
+        if (kineticResolution.isStructuralSelection() && shouldUseStructuralTargeting()) {
             Vec3 origin = PhysicsHandler.getWorldVec(this);
             setStructuralAimDirection(targetPos.subtract(origin), false);
+            return;
+        }
+
+        if (setSpecializedPitchTarget(targetPos)) {
             return;
         }
 
@@ -585,6 +602,26 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (mount != null && mount.kind == MountKind.API && mount.api != null) {
             apiHandler.setTarget(mount.api, targetPos);
         }
+    }
+
+    protected boolean shouldUseStructuralTargeting() {
+        return true;
+    }
+
+    /**
+     * Allows specialized pitch controllers to route a target
+     * before the ordinary single-mount fallback runs.
+     */
+    protected boolean setSpecializedPitchTarget(Vec3 targetPos) {
+        return false;
+    }
+
+    protected void setDirectCbcTarget(CannonMountContext mount, Vec3 targetPos) {
+        cannonHandler.setTarget(mount, targetPos);
+    }
+
+    protected void setDirectApiTarget(RadarMountAdapter mount, Vec3 targetPos) {
+        apiHandler.setTarget(mount, targetPos);
     }
 
     public void returnToZero() {
@@ -1047,7 +1084,6 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     protected boolean supportsPhysBearingMounts() {
         return true;
     }
-
     protected boolean supportsStructuralKineticMounts() {
         return true;
     }
@@ -1349,17 +1385,24 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private KineticMountAdapterResolution resolveKineticMount() {
         if (!supportsStructuralKineticMounts()) {
-            return KineticMountAdapterResolution.absent(
-                    "controller_does_not_support_structural_mounts");
+            return KineticMountAdapterResolution.absent("controller_does_not_support_structural_mounts");
         }
-        Direction.Axis axis = getControllerAxis();
+
+        Direction.Axis axis = getStructuralKineticAxis();
         if (lastKineticAxis != axis) {
             lastKineticAxis = axis;
             kineticControllerState.invalidate();
         }
-        return Mods.SIMULATED.isLoaded()
-                ? SimulatedSwivelMountAdapter.resolve(this, axis)
-                : KineticMountAdapterResolution.absent("simulated_not_loaded");
+
+        return Mods.SIMULATED.isLoaded() ? resolveStructuralKineticMount(axis) : KineticMountAdapterResolution.absent("simulated_not_loaded");
+    }
+
+    protected Direction.Axis getStructuralKineticAxis() {
+        return getControllerAxis();
+    }
+
+    protected KineticMountAdapterResolution resolveStructuralKineticMount(Direction.Axis axis) {
+        return SimulatedSwivelMountAdapter.resolve(this, axis);
     }
 
     private boolean isSelectedKineticMountEndpoint(KineticBlockEntity candidate) {

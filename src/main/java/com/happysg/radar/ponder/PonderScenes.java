@@ -245,7 +245,8 @@ public class PonderScenes {
 
     public static void rwrPonder(SceneBuilder scene, SceneBuildingUtil util){
         scene.title("rwr_ponder", "rwr");
-        scene.scaleSceneView(0.75f);
+        scene.configureBasePlate(0, 0, 7);
+        scene.scaleSceneView(0.65f);
         scene.world().showSection(util.select().layer(0), Direction.DOWN);
         scene.idle(40);
         Selection monitor = util.select().fromTo(3, 1, 6, 5, 3, 6);
@@ -304,7 +305,7 @@ public class PonderScenes {
                 .attachKeyFrame()
                 .placeNearTarget();
         scene.idle(100);
-        scene.scaleSceneView(1.2f);
+        scene.scaleSceneView(0.65f);
         scene.overlay().showText(80)
                 .text("The rings of the display the threat level of the contact, not distance")
                 .pointAt(monitor.getCenter())
@@ -385,7 +386,8 @@ public class PonderScenes {
 
     public static void rwrContactsPonder(SceneBuilder scene, SceneBuildingUtil util) {
         scene.title("rwr_contacts_ponder", "Reading RWR Contacts");
-        scene.scaleSceneView(0.75f);
+        scene.configureBasePlate(0, 0, 7);
+        scene.scaleSceneView(0.65f);
         scene.world().showSection(util.select().layer(0), Direction.DOWN);
         scene.idle(20);
 
@@ -1223,6 +1225,81 @@ public class PonderScenes {
                 .pointAt(util.grid().at(1, 1, 2).getCenter())
                 .attachKeyFrame()
                 .placeNearTarget();
+
+        scene.idle(100);
+        scene.markAsFinished();
+    }
+
+    public static void planeRadarSetup(SceneBuilder scene, SceneBuildingUtil util) {
+        scene.title("plane_radar_ponder", "Using the Plane Radar");
+        scene.configureBasePlate(0, 0, 7);
+        scene.scaleSceneView(0.8f);
+        scene.rotateCameraY(180);
+
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(20);
+
+        BlockPos radarPos = util.grid().at(3, 1, 3);
+        Selection radar = util.select().position(radarPos);
+
+        BlockPos controllerPos = util.grid().at(5, 1, 4);
+        Selection controller = util.select().position(controllerPos);
+
+        BlockPos linkPos = util.grid().at(3, 1, 4);
+        Selection dataLink = util.select().position(linkPos);
+
+        showSelection(scene, radar);
+        scene.overlay().showText(75)
+                .text("The Plane Radar is a compact, non-spinning radar that does not require rotational power.")
+                .pointAt(radar.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame();
+
+        scene.idle(85);
+        scene.overlay().showText(80)
+                .text("Unlike a rotating Radar Bearing, the Plane Radar scans a fixed forward sector.")
+                .pointAt(radar.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame();
+
+        scene.idle(90);
+        scene.overlay().showText(80)
+                .text("When mounted on a moving ship, its scanning direction follows the ship's heading.")
+                .pointAt(radar.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame();
+
+        scene.idle(90);
+
+        showSelection(scene, controller);
+        scene.overlay().showText(75)
+                .text("The Plane Radar connects to a radar network through a Network Controller.")
+                .pointAt(controller.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame();
+        scene.idle(85);
+        scene.overlay().showText(80)
+                .text("Select the Network Controller with a Data Link.")
+                .pointAt(controller.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame();
+
+        scene.overlay().showControls(controller.getCenter(), Pointing.DOWN, 40).rightClick();
+        scene.idle(90);
+        showSelection(scene, dataLink);
+        scene.overlay().showText(80)
+                .text("Then attach the Data Link to the Plane Radar to join the network.")
+                .pointAt(dataLink.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame();
+
+        scene.overlay().showControls(radar.getCenter(), Pointing.DOWN, 40).rightClick();
+        scene.idle(90);
+        scene.overlay().showText(85)
+                .text("Detected contacts can now be shared with connected Monitors and weapon networks.")
+                .pointAt(radar.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame();
 
         scene.idle(100);
         scene.markAsFinished();

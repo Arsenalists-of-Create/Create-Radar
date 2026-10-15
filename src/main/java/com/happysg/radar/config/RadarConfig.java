@@ -8,7 +8,6 @@ import net.createmod.catnip.config.ui.BaseConfigScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.neoforged.neoforge.common.ModConfigSpec;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.ModLoadingContext;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.config.ModConfigEvent;

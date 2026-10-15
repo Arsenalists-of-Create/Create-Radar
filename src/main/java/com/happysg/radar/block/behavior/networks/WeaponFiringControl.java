@@ -11,6 +11,7 @@ import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
 import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
+import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
@@ -88,7 +89,6 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
-import rbasamoyai.createbigcannons.cannon_control.contraption.MountedBigCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionProperties;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionPropertiesHandler;
@@ -1085,9 +1085,27 @@ public class WeaponFiringControl {
     }
 
     private boolean isDualNetwork() {
-        return this.controlView != null
-                && this.controlView.mode()
-                == WeaponNetworkRuntime.WeaponNetworkMode.T_PITCH_DUAL;
+        return this.controlView != null && this.controlView.mode() == WeaponNetworkRuntime.WeaponNetworkMode.T_PITCH_DUAL;
+    }
+
+    private boolean usesStructuralPitchForMount(@Nullable BlockPos mountPos) {
+        if (this.pitchController == null) {
+            return false;
+        }
+
+        if (this.pitchController instanceof TPitchControllerBlockEntity tPitch) {
+            return tPitch.isStructuralPitchMount(mountPos);
+        }
+
+        return this.pitchController.hasStructuralKineticSelectionForTargeting();
+    }
+
+    private boolean usesStructuralPitchForAuthority() {
+        BlockPos mountPos = this.cannonMount != null
+                ? this.cannonMount.getBlockPos() : this.weapon != null
+                ? this.weapon.getMountPos() : null;
+
+        return usesStructuralPitchForMount(mountPos);
     }
 
     /**
@@ -1342,13 +1360,22 @@ public class WeaponFiringControl {
             return;
         }
 
+        boolean tPitchStructural = this.pitchController instanceof TPitchControllerBlockEntity && usesStructuralPitchForAuthority();
+        boolean structuralPitchAccepted = true;
+
         if (this.pitchController != null) {
-            this.pitchController.setTargetAngle((float) desiredPitch);
+            if (tPitchStructural) {
+                structuralPitchAccepted = this.pitchController.setRadarAimDirection(aimDirection);
+            } else {
+                this.pitchController.setTargetAngle((float) desiredPitch);
+            }
         }
 
         if (this.yawController != null) {
             this.yawController.setTargetAngle((float) desiredYaw);
         }
+
+        Double sharedPitchCommand = tPitchStructural ? (structuralPitchAccepted ? this.pitchController.getTargetAngle() : null) : desiredPitch;
 
         if (isDualNetwork()) {
             WeaponSide authority = authoritySide();
@@ -1368,7 +1395,7 @@ public class WeaponFiringControl {
                     targetAcceleration,
                     TargetMotionClass.UNKNOWN,
                     0,
-                    desiredPitch,
+                    sharedPitchCommand,
                     desiredYaw,
                     aimDirection,
                     authorityShot
@@ -1376,7 +1403,7 @@ public class WeaponFiringControl {
 
             boolean yawAccepted = this.commandDualYawControllers(true, desiredYaw);
             double minimumTolerance = shot.minimumFiringToleranceDegrees();
-            boolean sharedFireGates = this.targetingConfig.autoFire() && shot.canTriggerFire() && yawAccepted;
+            boolean sharedFireGates = this.targetingConfig.autoFire() && shot.canTriggerFire() && yawAccepted && structuralPitchAccepted;
 
             this.updateDualFireControllers(
                     serverLevel,
@@ -1391,12 +1418,9 @@ public class WeaponFiringControl {
         }
 
         double minimumTolerance = shot.minimumFiringToleranceDegrees();
-
         boolean aligned = hasCorrectGenericYawPitch(false, minimumTolerance);
-
         boolean safe = !this.passesSafeZone();
-
-        boolean shouldFire = this.targetingConfig.autoFire() && shot.canTriggerFire() && aligned && safe;
+        boolean shouldFire = this.targetingConfig.autoFire() && shot.canTriggerFire() && structuralPitchAccepted && aligned && safe;
 
         if (shouldFire && !prepareAdapterShotForFire(shot, shotContext)) {
             shouldFire = false;
@@ -1414,7 +1438,20 @@ public class WeaponFiringControl {
             return false;
         }
 
-        boolean pitch = this.pitchController.isAlignedForFiring(lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
+        boolean pitch;
+
+        if (this.pitchController instanceof TPitchControllerBlockEntity && this.weapon != null) {
+            WeaponSide side = authoritySide();
+
+            if (side == null) {
+                side = new WeaponSide(this.weapon.getMountPos(), null, this.weapon, this.yawController, this.fireController);
+            }
+
+            pitch = isWeaponPitchAligned(side, lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
+        } else {
+            pitch = this.pitchController.isAlignedForFiring(lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
+        }
+
         boolean yaw = true;
 
         RadarMountAdapter mount = this.weapon == null ? null : this.weapon.getMount();
@@ -2015,19 +2052,16 @@ public class WeaponFiringControl {
                                     FiringAlignmentTolerance firingTolerance =
                                             firingAlignmentTolerance(
                                                     dist,
-                                                    RadarConfig.server()
-                                                            .autoFireMaxLateralErrorBlocks
-                                                            .get(),
-                                                    this.activeAlignmentAxisCount());
+                                                    RadarConfig.server().autoFireMaxLateralErrorBlocks.get(),
+                                                    this.activeAlignmentAxisCount()
+                                            );
                                     this.lastFiringAlignmentTolerance = firingTolerance;
-                                    boolean structuralAimAccepted = true;
-                                    boolean structuralPitch = this.pitchController != null
-                                            && this.pitchController.hasStructuralKineticSelectionForTargeting();
-                                    boolean structuralYaw = this.yawController != null
-                                            && this.yawController.hasStructuralKineticSelectionForTargeting();
 
-                                    boolean issueAimCommand =
-                                            shouldIssueAimCommand(aimUpdateMode);
+                                    boolean structuralAimAccepted = true;
+                                    boolean structuralPitch = usesStructuralPitchForAuthority();
+                                    boolean structuralYaw = this.yawController != null && this.yawController.hasStructuralKineticSelectionForTargeting();
+                                    boolean issueAimCommand = shouldIssueAimCommand(aimUpdateMode);
+
                                     if (issueAimCommand) {
                                         if (structuralPitch) {
                                             if (worldAimDirection == null) {
@@ -3196,17 +3230,20 @@ public class WeaponFiringControl {
         if (previousAngle != null && Double.isFinite(previousAngle)) {
             return previousAngle;
         }
+
         if (this.pitchController == null) {
             return null;
         }
-        if (this.pitchController.hasStructuralKineticSelectionForTargeting()) {
+
+        if (usesStructuralPitchForAuthority()) {
             Vec3 physical = this.pitchController.getStructuralPhysicalWorldDirection();
-            return physical == null ? null
-                    : TargetingMath.yawPitchFromDirection(physical).pitchDeg();
+            return physical == null ? null : TargetingMath.yawPitchFromDirection(physical).pitchDeg();
         }
+
         if (this.isSableMount()) {
             return null;
         }
+
         double angle = this.pitchController.getTargetAngle();
         return Double.isFinite(angle) ? angle : null;
     }
@@ -4323,7 +4360,7 @@ public class WeaponFiringControl {
 
     @Nullable
     private Double currentPitchDeg(CannonMountContext mount, AbstractMountedCannonContraption cannon) {
-        if (this.pitchController != null && this.pitchController.hasStructuralKineticSelectionForTargeting()) {
+        if (usesStructuralPitchForMount(mount.getBlockPos())) {
             Vec3 physical = this.pitchController.getStructuralPhysicalWorldDirection();
             return physical == null ? null : TargetingMath.yawPitchFromDirection(physical).pitchDeg();
         }
@@ -4380,9 +4417,8 @@ public class WeaponFiringControl {
             return null;
         }
 
-        if (this.pitchController != null && this.pitchController.hasStructuralKineticSelectionForTargeting()) {
+        if (usesStructuralPitchForMount(side.mountPos)) {
             Vec3 physical = this.pitchController.getStructuralPhysicalWorldDirection();
-
             return physical == null ? null : TargetingMath.yawPitchFromDirection(physical).pitchDeg();
         }
 
@@ -4954,12 +4990,11 @@ public class WeaponFiringControl {
 
     @Nullable
     private Double currentPitchDeg(AbstractMountedCannonContraption cannonContraption) {
-        if (this.pitchController != null
-                && this.pitchController.hasStructuralKineticSelectionForTargeting()) {
+        if (usesStructuralPitchForAuthority()) {
             Vec3 physical = this.pitchController.getStructuralPhysicalWorldDirection();
-            return physical == null ? null
-                    : TargetingMath.yawPitchFromDirection(physical).pitchDeg();
+            return physical == null ? null : TargetingMath.yawPitchFromDirection(physical).pitchDeg();
         }
+
         PitchOrientedContraptionEntity contraption = this.cannonMount.getContraption();
         if (contraption != null && cannonContraption != null) {
             int invert = -cannonContraption.initialOrientation().getStepX() + cannonContraption.initialOrientation().getStepZ();
@@ -4982,11 +5017,9 @@ public class WeaponFiringControl {
     private int estimateSlewTicksForSolution(AbstractMountedCannonContraption cannonContraption, @Nullable AimSolution solution, double fallbackControllerYaw, double fallbackPitch) {
         if (solution != null && solution.aimDirection() != null
                 && ((this.yawController != null
-                        && this.yawController.hasStructuralKineticSelectionForTargeting())
-                    || (this.pitchController != null
-                        && this.pitchController.hasStructuralKineticSelectionForTargeting()))) {
-            return this.estimateStructuralSlewTicks(cannonContraption,
-                    solution.aimDirection(), fallbackControllerYaw, fallbackPitch);
+                && this.yawController.hasStructuralKineticSelectionForTargeting())
+                || usesStructuralPitchForAuthority())) {
+            return this.estimateStructuralSlewTicks(cannonContraption, solution.aimDirection(), fallbackControllerYaw, fallbackPitch);
         }
         if (solution != null) {
             MountAimFrame frame = this.resolveMountAimFrame(
@@ -5032,17 +5065,15 @@ public class WeaponFiringControl {
         }
 
         double pitchTicks = 0.0;
-        if (this.pitchController != null
-                && this.pitchController.hasStructuralKineticSelectionForTargeting()) {
+        if (usesStructuralPitchForAuthority()) {
             KineticAimFrame frame = this.pitchController.getStructuralAimFrame();
             Double physical = this.pitchController.getStructuralPhysicalControllerAngle();
             if (frame == null || physical == null) {
                 return 40;
             }
+
             double target = frame.controllerTargetDegrees(CannonAxis.PITCH, worldAimDirection);
-            pitchTicks = ticksForAngle(
-                    Math.abs(target - physical),
-                    this.pitchController.getStructuralEffectiveDegreesPerTick());
+            pitchTicks = ticksForAngle(Math.abs(target - physical), this.pitchController.getStructuralEffectiveDegreesPerTick());
         } else if (this.pitchController != null) {
             PitchOrientedContraptionEntity contraption = this.cannonMount.getContraption();
             if (contraption != null) {
@@ -5127,8 +5158,8 @@ public class WeaponFiringControl {
                 sourceSublevelId = this.lastResolvedSourceSublevelId;
             }
         }
-        boolean structuralPitch = this.pitchController != null
-                && this.pitchController.hasStructuralKineticSelectionForTargeting();
+
+        boolean structuralPitch = usesStructuralPitchForMount(mount.getBlockPos());
         if (structuralPitch) {
             KineticAimFrame aimFrame = this.pitchController.getStructuralAimFrame();
             if (mountShip == null && sourceSublevelId != null) {
@@ -5162,17 +5193,17 @@ public class WeaponFiringControl {
         ControllerMovementLimits yawLimits = yawController == null
                 ? ControllerMovementLimits.defaults(CannonAxis.YAW)
                 : yawController.getMovementLimits();
-        double yawNeutral = yawController == null ? 0.0
-                : yawController.getLimitNeutralAngleDeg();
+
+        double yawNeutral = yawController == null ? 0.0 : yawController.getLimitNeutralAngleDeg();
         KineticAimFrame yawLimitFrame = null;
-        if (yawController != null
-                && yawController.hasStructuralKineticSelectionForTargeting()) {
+        if (yawController != null && yawController.hasStructuralKineticSelectionForTargeting()) {
             yawLimitFrame = yawController.getStructuralAimFrame();
             if (yawLimitFrame == null) {
                 frameKind = MountFrameKind.UNAVAILABLE;
                 unavailableReason = "structural_yaw_frame_unavailable";
             }
         }
+
         return new MountAimFrame(
                 frameKind, sourceSublevelId, pitchConstraint,
                 yawLimits, yawNeutral, unavailableReason, yawLimitFrame);
@@ -5196,8 +5227,7 @@ public class WeaponFiringControl {
         }
 
         for (WeaponSide side : this.weaponSides) {
-            if (side.weapon != null
-                    && side.weapon != this.weapon) {
+            if (side.weapon != null && side.weapon != this.weapon) {
                 side.weapon.setFiring(false);
             }
         }
@@ -5215,23 +5245,18 @@ public class WeaponFiringControl {
                 rightAxis, upAxis, forwardAxis);
     }
 
-    private PitchConstraint effectivePitchConstraint(
-            AbstractMountedCannonContraption cannonContraption) {
-        return this.resolveMountAimFrame(cannonContraption)
-                .pitchConstraint();
+    private PitchConstraint effectivePitchConstraint(AbstractMountedCannonContraption cannonContraption) {
+        return this.resolveMountAimFrame(cannonContraption).pitchConstraint();
     }
 
     @Nullable
-    private Vec3 worldDirectionFromMountCommand(@Nullable Double pitchDeg,
-                                                @Nullable Double controllerYawDeg) {
-        PitchOrientedContraptionEntity mounted = this.cannonMount == null
-                ? null : this.cannonMount.getContraption();
+    private Vec3 worldDirectionFromMountCommand(@Nullable Double pitchDeg, @Nullable Double controllerYawDeg) {
+        PitchOrientedContraptionEntity mounted = this.cannonMount == null ? null : this.cannonMount.getContraption();
         AbstractMountedCannonContraption cannon = mounted != null
                 && mounted.getContraption()
                 instanceof AbstractMountedCannonContraption c ? c : null;
-        return this.worldDirectionFromMountCommand(
-                this.resolveMountAimFrame(cannon), pitchDeg,
-                controllerYawDeg);
+
+        return this.worldDirectionFromMountCommand(this.resolveMountAimFrame(cannon), pitchDeg, controllerYawDeg);
     }
 
     @Nullable
@@ -5596,6 +5621,14 @@ public class WeaponFiringControl {
     ) {
         if (side == null || this.pitchController == null) {
             return false;
+        }
+
+        if (this.pitchController instanceof TPitchControllerBlockEntity tPitch) {
+            Boolean swivelAligned = tPitch.swivelPitchAlignmentForFiring(side.mountPos, lag, minimumToleranceDegrees, maximumToleranceDegrees);
+
+            if (swivelAligned != null) {
+                return swivelAligned;
+            }
         }
 
         if (side.weapon != null) {
