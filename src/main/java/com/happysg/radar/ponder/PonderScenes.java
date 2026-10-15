@@ -1,5 +1,6 @@
 package com.happysg.radar.ponder;
 
+import com.happysg.radar.block.arad.jammer.JammerBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.skyradar.SkyRadarBlockEntity;
 import com.happysg.radar.config.RadarConfig;
@@ -788,7 +789,7 @@ public class PonderScenes {
     }
 
     public static void tPitchSetup(@NotNull SceneBuilder scene, SceneBuildingUtil util) {
-        scene.title("t_pitch_ponder", "Using a T-Pitch Controller");
+        scene.title("t_pitch_ponder", "Using the Pitch Gearbox");
         scene.configureBasePlate(0, 0, 8);
         scene.scaleSceneView(0.75f);
         Selection leftYawController = util.select().position(2, 1, 4);
@@ -818,7 +819,7 @@ public class PonderScenes {
 //        showSelection(scene, tPitchControllerLink);
 //        showSelection(scene, tPitchDataLink);
         scene.overlay().showText(60)
-                .text("The T-Pitch Controller is a dual-output alternative to the Auto Pitch Controller")
+                .text("The Pitch Gearbox is a dual-output alternative to the Auto Pitch Controller")
                 .pointAt(tPitchController.getCenter())
                 .attachKeyFrame()
                 .placeNearTarget();
@@ -840,7 +841,7 @@ public class PonderScenes {
         scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(new BlockPos(6, 1, 2)), 70);
         scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, tPitchDataLink, new AABB(new BlockPos(3, 3, 4)), 70);
         scene.overlay().showText(75)
-                .text("Select the Network Controller, then attach a Data Link to the T-Pitch Gearbox.")
+                .text("Select the Network Controller, then attach a Data Link to the Pitch Gearbox.")
                 .pointAt(tPitchDataLink.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame();
@@ -857,29 +858,182 @@ public class PonderScenes {
     public static void swivelSetup(@NotNull SceneBuilder scene, SceneBuildingUtil util) {
         scene.title("swivel_ponder", "Using Swivel Bearings");
         scene.configureBasePlate(0, 0, 7);
+        scene.scaleSceneView(0.8f);
 
         Selection networkController = util.select().position(0, 1, 1);
 
-        Selection mountedYawSwivel = util.select().position(2, 1, 4);
-        Selection mountedYawController = util.select().position(3, 1, 4);
-        Selection mountedYawControllerLink = util.select().position(3, 1, 5);
-        Selection mountedCannonMount = util.select().position(2, 2, 4);
-        Selection mountedPitchController = util.select().position(1, 2, 4);
-        Selection mountedPitchControllerLink = util.select().position(1, 2, 5);
-        Selection mountedNetworkDataLink = util.select().position(1, 3, 4);
+        Selection yawSwivel = util.select().position(2, 1, 4);
+        Selection yawController = util.select().position(3, 1, 4);
+        Selection yawLink = util.select().position(3, 1, 5);
+        Selection cannonMount = util.select().position(2, 2, 4);
+        Selection pitchController = util.select().position(1, 2, 4);
+        Selection pitchNetworkLink = util.select().position(1, 3, 4);
 
         Selection dualYawSwivel = util.select().position(3, 1, 2);
         Selection dualYawController = util.select().position(4, 1, 2);
-        Selection dualYawControllerLink = util.select().position(4, 1, 1);
+        Selection dualYawLink = util.select().position(4, 1, 1);
         Selection dualPitchController = util.select().position(3, 2, 2);
-        Selection dualNetworkDataLink = util.select().position(3, 2, 3);
         Selection dualPitchSwivel = util.select().position(3, 3, 2);
         Selection dualCannonMount = util.select().position(2, 3, 2);
+        Selection dualNetworkLink = util.select().position(3, 2, 3);
 
         scene.world().showSection(util.select().layer(0), Direction.DOWN);
-        scene.idle(10);
+        scene.idle(20);
 
+        showSelection(scene, networkController);
+        showSelection(scene, yawSwivel);
+        showSelection(scene, yawController);
+        showSelection(scene, cannonMount);
 
+        scene.overlay().showText(75)
+                .pointAt(yawSwivel.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Swivel Bearings can provide yaw movement for cannon mounts.");
+
+        scene.idle(85);
+
+        showSelection(scene, yawLink);
+        showSelection(scene, pitchController);
+
+        scene.overlay().showText(75)
+                .pointAt(pitchController.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Auto Yaw drives the yaw Swivel while Auto Pitch controls elevation.");
+
+        scene.idle(85);
+
+        showSelection(scene, pitchNetworkLink);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(new BlockPos(0, 1, 1)), 80);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, pitchNetworkLink, new AABB(new BlockPos(1, 3, 4)), 80);
+        scene.overlay().showText(75)
+                .pointAt(pitchNetworkLink.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Connect Auto Pitch to the Network Controller using a Data Link.");
+        scene.idle(90);
+
+        showSelection(scene, dualYawSwivel);
+        showSelection(scene, dualYawController);
+        showSelection(scene, dualYawLink);
+        showSelection(scene, dualPitchController);
+        showSelection(scene, dualPitchSwivel);
+        showSelection(scene, dualCannonMount);
+
+        scene.overlay().showText(75)
+                .pointAt(dualPitchSwivel.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Separate Swivels can provide independent yaw and pitch movement.");
+
+        scene.idle(85);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, dualPitchController, new AABB(new BlockPos(3, 2, 2)), 80);
+
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, dualPitchSwivel, new AABB(new BlockPos(3, 3, 2)), 80);
+        scene.overlay().showText(80)
+                .pointAt(dualPitchController.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Place Auto Pitch next to a Swivel with a matching rotation axis.");
+        scene.idle(90);
+        showSelection(scene, dualNetworkLink);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(new BlockPos(0, 1, 1)), 80);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, dualNetworkLink, new AABB(new BlockPos(3, 2, 3)), 80);
+        scene.overlay().showText(75)
+                .pointAt(dualNetworkLink.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Connect the Pitch Controller to the Network Controller using a Data Link.");
+        scene.idle(85);
+        scene.overlay().showText(85)
+                .pointAt(dualPitchSwivel.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Assemble and unlock the Swivels before automatic aiming.");
+        scene.idle(95);
+        scene.markAsFinished();
+    }
+
+    public static void swivelTPitchSetup(@NotNull SceneBuilder scene, SceneBuildingUtil util) {
+        scene.title("swivel_t_pitch_ponder", "Using Swivels with the Pitch Gearbox");
+        scene.configureBasePlate(0, 0, 8);
+        scene.scaleSceneView(0.75f);
+        scene.rotateCameraY(45);
+
+        Selection controller = util.select().position(3, 2, 4);
+        Selection swivel = util.select().position(2, 2, 4);
+        Selection swivelMount = util.select().position(1, 2, 4);
+        Selection swivelCannon = util.select().fromTo(1, 3, 2, 1, 3, 5);
+
+        Selection directMount = util.select().position(4, 2, 4);
+        Selection directCannon = util.select().fromTo(4, 3, 2, 4, 3, 5);
+        Selection yawController = util.select().position(4, 1, 4);
+        Selection yawLink = util.select().position(4, 1, 3);
+
+        Selection swivelMountLink = util.select().position(3, 2, 5);
+        Selection networkController = util.select().position(6, 1, 2);
+        Selection networkLink = util.select().position(3, 3, 4);
+        Selection shaft = util.select().fromTo(3, 2, 2, 3, 2, 3);
+
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(20);
+
+        showSelection(scene, controller);
+        showSelection(scene, swivel);
+
+        scene.overlay().showText(75)
+                .pointAt(swivel.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("The Pitch Gearbox can control a Simulated Swivel on one of its crossbar sides.");
+        scene.idle(85);
+        showSelection(scene, swivelMount);
+        showSelection(scene, swivelCannon);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, swivel, new AABB(new BlockPos(2, 2, 4)), 75);
+        scene.overlay().showText(75)
+                .pointAt(swivelMount.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Align the Swivel with the crossbar axis and attach the cannon assembly.");
+        scene.idle(85);
+        showSelection(scene, directMount);
+        showSelection(scene, directCannon);
+        showSelection(scene, yawController);
+        showSelection(scene, yawLink);
+        scene.overlay().showText(75)
+                .pointAt(directMount.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("The opposite side can use a conventional CBC cannon mount.");
+        scene.idle(85);
+        showSelection(scene, swivelMountLink);
+
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, swivelMountLink, new AABB(new BlockPos(3, 2, 5)), 75);
+        scene.overlay().showText(80)
+                .pointAt(swivelMountLink.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Link the Swivel-side cannon mount to the Pitch Gearbox using a Data Link.");
+        scene.idle(90);
+        showSelection(scene, networkController);
+        showSelection(scene, networkLink);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(new BlockPos(6, 1, 2)), 75);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, networkLink, new AABB(new BlockPos(3, 3, 4)), 75);
+        scene.overlay().showText(80)
+                .pointAt(networkLink.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Connect the Pitch Gearbox to the Network Controller using a Data Link.");
+        scene.idle(90);
+        showSelection(scene, shaft);
+        scene.overlay().showText(85)
+                .pointAt(shaft.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Provide shaft power, assemble the Swivel, and keep it locked for automatic aiming.");
+        scene.idle(95);
+        scene.markAsFinished();
     }
 
     private static void showSelection(SceneBuilder scene, Selection selection) {
@@ -991,5 +1145,85 @@ public class PonderScenes {
         scene.markAsFinished();
     }
 
-    public static void jammerSetup(SceneBuilder scene, SceneBuildingUtil util){}
+    public static void jammerSetup(SceneBuilder scene, SceneBuildingUtil util) {
+        CreateSceneBuilder createScene = new CreateSceneBuilder(scene);
+        scene.title("jammer_ponder", "Using a Directional Jammer");
+        scene.configureBasePlate(0, 0, 7);
+        scene.scaleSceneView(0.75f);
+
+        Selection rwr = util.select().position(2, 1, 6);
+        Selection monitor = util.select().fromTo(3, 1, 6, 5, 3, 6);
+        Selection radar = util.select().position(6, 1, 1);
+        Selection shaft = util.select().position(2, 1, 3);
+        Selection jammer = util.select().position(2, 2, 3);
+        Selection jammerLink = util.select().position(2, 3, 3);
+
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(20);
+        showSelection(scene, rwr);
+        showSelection(scene, monitor);
+        scene.world().modifyBlockEntity(new BlockPos(3, 1, 6), MonitorBlockEntity.class, MonitorBlockEntity::beginPonderRwrVisual);
+
+        scene.overlay().showText(70)
+                .pointAt(rwr.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Place an RWR beside a Monitor to detect radar emissions.");
+
+        scene.idle(80);
+        showSelection(scene, radar);
+        scene.world().modifyBlockEntity(new BlockPos(3, 1, 6), MonitorBlockEntity.class, MonitorBlockEntity::showPonderGroundRadarIcon);
+
+        scene.overlay().showText(70)
+                .pointAt(monitor.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Detected radar sources appear as contacts on the Monitor.");
+
+        scene.idle(80);
+        showSelection(scene, shaft);
+        showSelection(scene, jammer);
+
+        scene.overlay().showText(75)
+                .pointAt(jammer.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Mount the Directional Jammer above a shaft to supply rotational power.");
+        scene.idle(85);
+        showSelection(scene, jammerLink);
+
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, rwr, new AABB(new BlockPos(2, 1, 6)), 80);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, jammerLink, new AABB(new BlockPos(2, 3, 3)), 80);
+
+        scene.overlay().showText(75)
+                .pointAt(jammerLink.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Select the RWR with a Data Link, then attach it to the Jammer.");
+
+        scene.idle(85);
+        scene.overlay().showText(80)
+                .pointAt(monitor.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Select a radar contact on the Monitor to designate it for jamming.");
+
+        scene.idle(90);
+        createScene.world().setKineticSpeed(shaft.add(jammer), 32);
+        scene.world().modifyBlockEntity(new BlockPos(2, 2, 3), JammerBlockEntity.class, be -> be.setYaw(90.0f));
+        scene.overlay().showText(85)
+                .pointAt(jammer.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Jamming effectiveness depends on shaft speed and alignment with the radar.");
+        scene.idle(100);
+        scene.world().modifyBlockEntity(new BlockPos(3, 1, 6), MonitorBlockEntity.class, MonitorBlockEntity::showPonderDirectionalJamming);
+        scene.overlay().showText(85)
+                .pointAt(monitor.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Interference can distort radar contacts and create false returns.");
+        scene.idle(100);
+        scene.markAsFinished();
+    }
 }
