@@ -1234,7 +1234,6 @@ public class PonderScenes {
         scene.title("plane_radar_ponder", "Using the Plane Radar");
         scene.configureBasePlate(0, 0, 7);
         scene.scaleSceneView(0.8f);
-        scene.rotateCameraY(180);
 
         scene.world().showSection(util.select().layer(0), Direction.DOWN);
         scene.idle(20);

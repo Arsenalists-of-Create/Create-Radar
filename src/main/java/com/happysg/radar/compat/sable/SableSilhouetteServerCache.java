@@ -79,6 +79,18 @@ public final class SableSilhouetteServerCache {
         entry.nextBuildTick = Math.max(entry.nextBuildTick, now + RadarConfig.server().sableSilhouetteRebuildDebounceTicks.get());
     }
 
+    public static void requestRefreshForStaleAim(ServerLevel level, UUID id, int observedRevision) {
+        Entry entry = entries(level).get(id);
+
+        if (entry == null || entry.dirty || entry.revision != observedRevision) {
+            return;
+        }
+
+        entry.dirty = true;
+        long rebuildAt = level.getGameTime() + RadarConfig.server().sableSilhouetteRebuildDebounceTicks.get();
+        entry.nextBuildTick = Math.min(entry.nextBuildTick, rebuildAt);
+    }
+
     public static void remove(ServerLevel level, UUID id) {
         entries(level).remove(id);
     }

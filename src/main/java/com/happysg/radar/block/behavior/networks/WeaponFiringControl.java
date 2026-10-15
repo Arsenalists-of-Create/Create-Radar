@@ -2018,8 +2018,30 @@ public class WeaponFiringControl {
                                             == MountFrameKind.UNAVAILABLE) {
                                         aimEvaluation = mountFrame.evaluate(null);
                                     }
-                                    this.lastAimCommandEvaluation =
-                                            aimEvaluation;
+
+                                    boolean binocularSteeringFallback = this.binoMode
+                                            && aimUpdateMode == AimUpdateMode.HOLD
+                                            && !hasNewTargetingSolution
+                                            && !hasLeadSolution
+                                            && !canFireWithoutLead;
+
+                                    if (binocularSteeringFallback) {
+                                        Vec3 directDirection = directionFromTo(cannonMuzzleWorld, solvePos);
+                                        AimCommandEvaluation directEvaluation = mountFrame.evaluate(directDirection);
+
+                                        if (directEvaluation.valid()) {
+                                            aimEvaluation = directEvaluation;
+                                            worldAimDirection = directDirection;
+
+                                            desiredPitch = directEvaluation.appliedPitchDeg();
+                                            desiredYaw = directEvaluation.appliedControllerYawDeg();
+
+                                            offsetAim = solvePos;
+                                            aimUpdateMode = AimUpdateMode.DIRECT;
+                                        }
+                                    }
+
+                                    this.lastAimCommandEvaluation = aimEvaluation;
 
                                     boolean directAdapterAimReady =
                                             isDirectAdapterAimReady(
@@ -2180,7 +2202,8 @@ public class WeaponFiringControl {
 
 
                                     boolean sharedFireGates =
-                                            this.targetingConfig.autoFire()
+                                            !binocularSteeringFallback
+                                            && this.targetingConfig.autoFire()
                                             && (hasFireEligibleAim(hasLeadSolution, hasFireEligibleNewTargetingSolution, canFireWithoutLead) || stationaryDualRevalidated)
                                             && directAdapterAimReady
                                             && aimWithinMovementLimits
@@ -6205,9 +6228,16 @@ public class WeaponFiringControl {
                 && id.equals(cached.sublevelId())
                 && cached.revision() == snapshot.revision()
                 && cached.requireLos() == requireLos;
-        boolean reacquire = !sameCache
-                || now - cached.acquiredTick()
-                >= SUBLEVEL_AIM_REACQUIRE_TICKS;
+        boolean cachedPointGone = sameCache && !isSublevelAimBlockPresent(serverLevel, cached.localAim());
+
+        if (cachedPointGone) {
+            SableSilhouetteServerCache.requestRefreshForStaleAim(serverLevel, id, snapshot.revision());
+        }
+
+        boolean reacquire = cachedPointGone
+                || !sameCache
+                || now - cached.acquiredTick() >= SUBLEVEL_AIM_REACQUIRE_TICKS;
+
         if (sameCache && !reacquire) {
             ResolvedSublevelAim resolved = this.materializeSublevelAim(
                     subLevel, cached.localAim(), cached.revision());
@@ -6217,20 +6247,34 @@ public class WeaponFiringControl {
             }
         }
 
-        Vec3 localOrigin = SubLevelAimResolver.toLocal(
-                subLevel, worldOrigin);
+        Vec3 localOrigin = SubLevelAimResolver.toLocal(subLevel, worldOrigin);
+        final boolean[] missingCandidate = {false};
+
         SubLevelAimResolver.LocalAim selected = SubLevelAimResolver.select(
                 snapshot.silhouette().localBoxes(), localOrigin,
                 SUBLEVEL_AIM_CANDIDATE_LIMIT, candidate -> {
+                    if (!isSublevelAimBlockPresent(serverLevel, candidate)) {
+                        missingCandidate[0] = true;
+                        return false;
+                    }
+
                     if (!requireLos) {
                         return true;
                     }
-                    Vec3 worldPoint = SubLevelAimResolver.toWorld(
-                            subLevel, candidate.point());
-                    return this.rayReachesTargetSublevel(
-                            worldOrigin, worldPoint, id);
+
+                    Vec3 worldPoint = SubLevelAimResolver.toWorld(subLevel, candidate.point());
+                    return this.rayReachesTargetSublevel(worldOrigin, worldPoint, id);
                 });
+
+        if (missingCandidate[0]) {
+            SableSilhouetteServerCache.requestRefreshForStaleAim(serverLevel, id, snapshot.revision());
+        }
+
         if (selected == null) {
+            if (cacheSelection && cachedPointGone) {
+                this.cachedSublevelAim = null;
+                this.invalidateSublevelAimDependentState(id);
+            }
             return null;
         }
 
@@ -6246,6 +6290,13 @@ public class WeaponFiringControl {
         }
         return this.materializeSublevelAim(
                 subLevel, selected, snapshot.revision());
+    }
+
+    private static boolean isSublevelAimBlockPresent(ServerLevel level, SubLevelAimResolver.LocalAim aim) {
+        BlockPos localPos = BlockPos.containing(aim.point());
+        var state = level.getBlockState(localPos);
+
+        return !state.isAir() && !state.getCollisionShape(level, localPos).isEmpty();
     }
 
     private ResolvedSublevelAim materializeSublevelAim(
