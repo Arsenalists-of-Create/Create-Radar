@@ -950,7 +950,7 @@ public class PonderScenes {
                 .pointAt(dualPitchSwivel.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame()
-                .text("Assemble and unlock the Swivels before automatic aiming.");
+                .text("Assemble and lock the Swivels before automatic aiming.");
         scene.idle(95);
         scene.markAsFinished();
     }
@@ -1034,6 +1034,88 @@ public class PonderScenes {
                 .attachKeyFrame()
                 .text("Provide shaft power, assemble the Swivel, and keep it locked for automatic aiming.");
         scene.idle(95);
+        scene.markAsFinished();
+    }
+
+    public static void swivelSharedYawGearboxSetup(
+            @NotNull SceneBuilder scene,
+            SceneBuildingUtil util
+    ) {
+        scene.title("swivel_shared_yaw_gearbox_ponder", "Using a Swivel with the Pitch Gearbox");
+        scene.configureBasePlate(0, 0, 8);
+        scene.scaleSceneView(0.75f);
+        scene.rotateCameraY(45);
+
+        Selection yawSwivel = util.select().position(3, 1, 4);
+        Selection yawController = util.select().position(4, 1, 4);
+        Selection yawLink = util.select().position(4, 1, 5);
+
+        Selection pitchGearbox = util.select().position(3, 2, 4);
+        Selection leftMount = util.select().position(2, 2, 4);
+        Selection rightMount = util.select().position(4, 2, 4);
+
+        Selection leftCannon = util.select().fromTo(2, 3, 2, 2, 3, 5);
+        Selection rightCannon = util.select().fromTo(4, 3, 2, 4, 3, 5);
+
+        Selection networkController = util.select().position(6, 1, 2);
+        Selection networkLink = util.select().position(3, 3, 4);
+        Selection shaft = util.select().fromTo(3, 2, 2, 3, 2, 3);
+
+        scene.world().showSection(util.select().layer(0), Direction.DOWN);
+        scene.idle(20);
+        showSelection(scene, yawSwivel);
+        showSelection(scene, yawController);
+        showSelection(scene, pitchGearbox);
+
+        scene.overlay().showText(80)
+                .pointAt(yawSwivel.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("A Simulated Swivel can provide shared yaw for a Pitch Gearbox weapon platform.");
+        scene.idle(90);
+        showSelection(scene, leftMount);
+        showSelection(scene, rightMount);
+        showSelection(scene, leftCannon);
+        showSelection(scene, rightCannon);
+
+        scene.overlay().showText(85)
+                .pointAt(pitchGearbox.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("The Pitch Gearbox controls pitch for both cannon mounts at the same time.");
+        scene.idle(95);
+        showSelection(scene, yawLink);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, rightMount, new AABB(new BlockPos(4, 2, 4)), 80);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, yawLink, new AABB(new BlockPos(4, 1, 5)), 80);
+        scene.overlay().showText(85)
+                .pointAt(yawLink.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Link one cannon mount to Auto Yaw so the Swivel can rotate the entire platform.");
+        scene.idle(95);
+        showSelection(scene, networkController);
+        showSelection(scene, networkLink);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(new BlockPos(6, 1, 2)), 80);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, networkLink, new AABB(new BlockPos(3, 3, 4)), 80);
+        scene.overlay().showText(85)
+                .pointAt(networkLink.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Connect the Pitch Gearbox to the Network Controller using a Data Link.");
+        scene.idle(95);
+        showSelection(scene, shaft);
+        scene.overlay().showText(90)
+                .pointAt(shaft.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Provide shaft power, assemble the Swivel, and keep it locked for automatic aiming.");
+        scene.idle(100);
+        scene.overlay().showText(90)
+                .pointAt(pitchGearbox.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("This setup uses one shared yaw Swivel and one shared Pitch Gearbox for both cannons.");
+        scene.idle(100);
         scene.markAsFinished();
     }
 

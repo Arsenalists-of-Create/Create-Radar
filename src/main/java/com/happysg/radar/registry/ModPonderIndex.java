@@ -42,6 +42,7 @@ public class ModPonderIndex implements PonderPlugin {
         if (Mods.SIMULATED.isLoaded()) {
             helper.addStoryBoard(Mods.SIMULATED.rl("swivel_bearing"), "swivel_ponder", PonderScenes::swivelSetup, ModPonderTags.WEAPON_NETWORK).orderAfter("simulated", "swivel_bearing_passthrough");
             helper.addStoryBoard(Mods.SIMULATED.rl("swivel_bearing"), "swivel_t_pitch_ponder", PonderScenes::swivelTPitchSetup, ModPonderTags.WEAPON_NETWORK).orderAfter(CreateRadar.MODID, "swivel_ponder");
+            helper.addStoryBoard(Mods.SIMULATED.rl("swivel_bearing"), "swivel_shared_yaw_gearbox_ponder", PonderScenes::swivelSharedYawGearboxSetup, ModPonderTags.WEAPON_NETWORK).orderAfter(CreateRadar.MODID, "swivel_t_pitch_ponder");
         }
 
         HELPER.forComponents(ModBlocks.SKY_RADAR)
