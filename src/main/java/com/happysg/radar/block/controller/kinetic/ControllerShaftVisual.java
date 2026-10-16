@@ -23,9 +23,13 @@ public class ControllerShaftVisual<
         T extends KineticBlockEntity & ControllerInputShaft>
         extends KineticBlockEntityVisual<T>
         implements SimpleTickableVisual {
-    private final RotatingInstance shaft;
+    private RotatingInstance shaft;
+    private RotatingInstance innerShaft;
     private RotatingInstance cog;
+
+    private final Model normalShaftModel;
     private final boolean directionalHalfShaft;
+    private boolean showingSwivel;
 
     public ControllerShaftVisual(VisualizationContext context, T blockEntity,
                                  float partialTick) {
@@ -39,6 +43,7 @@ public class ControllerShaftVisual<
                                     boolean directionalHalfShaft) {
         super(context, blockEntity, partialTick);
         this.directionalHalfShaft = directionalHalfShaft;
+        this.normalShaftModel = model;
         shaft = instancerProvider()
                 .instancer(AllInstanceTypes.ROTATING, model)
                 .createInstance();
@@ -47,41 +52,78 @@ public class ControllerShaftVisual<
 
     private void refreshShaft() {
         Direction.Axis axis = rotationAxis();
+        Direction inputDirection = blockEntity.getInputShaftDirection();
+
         double sampledRpm = blockEntity.getAvailableInputSpeed();
-        float rpm = Double.isFinite(sampledRpm) ? (float) sampledRpm : 0.0f;
+        float inputRpm = Double.isFinite(sampledRpm)
+                ? (float) sampledRpm : 0.0f;
+
+        // Controller output drives the Swivel through a -1 kinetic connection.
+        float swivelRpm = -blockEntity.getSpeed();
 
         BlockState state = blockEntity.getBlockState();
-        boolean swivelMode = (state.getBlock() instanceof AutoYawControllerBlock
-                && state.getValue(AutoYawControllerBlock.SWIVEL_MODE)) || (state.getBlock() instanceof AutoPitchControllerBlock
-                && state.getValue(AutoPitchControllerBlock.SWIVEL_MODE));
+        boolean swivelMode =
+                (state.getBlock() instanceof AutoYawControllerBlock
+                        && state.getValue(AutoYawControllerBlock.SWIVEL_MODE))
+                        || (state.getBlock() instanceof AutoPitchControllerBlock
+                        && state.getValue(AutoPitchControllerBlock.SWIVEL_MODE));
 
-        // Create or remove the cog only when the appearance changes.
-        if (swivelMode && cog == null) {
-            cog = instancerProvider()
-                    .instancer(AllInstanceTypes.ROTATING,
-                            Models.partial(AllPartialModels.SHAFTLESS_COGWHEEL))
+        // Recreate geometry only when switching between normal and Swivel mode.
+        if (swivelMode != showingSwivel) {
+            shaft.delete();
+
+            if (innerShaft != null) {
+                innerShaft.delete();
+                innerShaft = null;
+            }
+
+            if (cog != null) {
+                cog.delete();
+                cog = null;
+            }
+
+            shaft = instancerProvider()
+                    .instancer(AllInstanceTypes.ROTATING, swivelMode ? Models.partial(AllPartialModels.SHAFT_HALF) : normalShaftModel)
                     .createInstance();
-        } else if (!swivelMode && cog != null) {
-            cog.delete();
-            cog = null;
+
+            if (swivelMode) {
+                innerShaft = instancerProvider()
+                        .instancer(AllInstanceTypes.ROTATING, Models.partial(AllPartialModels.SHAFT_HALF))
+                        .createInstance();
+
+                cog = instancerProvider()
+                        .instancer(AllInstanceTypes.ROTATING, Models.partial(AllPartialModels.SHAFTLESS_COGWHEEL))
+                        .createInstance();
+            }
+
+            showingSwivel = swivelMode;
         }
 
         shaft.rotation.identity();
-        if (directionalHalfShaft) {
-            shaft.rotateToFace(Direction.SOUTH,
-                    blockEntity.getInputShaftDirection());
+
+        if (swivelMode || directionalHalfShaft) {
+            shaft.rotateToFace(Direction.SOUTH, inputDirection);
         } else {
             shaft.rotateToFace(Direction.UP, axis);
         }
 
-        shaft.setup(blockEntity, axis, rpm)
+        shaft.setup(blockEntity, axis, inputRpm)
                 .setPosition(getVisualPosition())
                 .setChanged();
 
-        if (cog != null) {
+        if (swivelMode) {
+            innerShaft.rotation.identity();
+            innerShaft.rotateToFace(
+                    Direction.SOUTH, inputDirection.getOpposite());
+
+            innerShaft.setup(blockEntity, axis, swivelRpm)
+                    .setPosition(getVisualPosition())
+                    .setChanged();
+
             cog.rotation.identity();
             cog.rotateToFace(Direction.UP, axis);
-            cog.setup(blockEntity, axis, rpm)
+
+            cog.setup(blockEntity, axis, swivelRpm)
                     .setPosition(getVisualPosition())
                     .setChanged();
         }
@@ -95,8 +137,9 @@ public class ControllerShaftVisual<
     @Override
     public void tick(Context context) {
         refreshShaft();
-        if (cog != null) {
-            applyOverstressEffect(blockEntity, shaft, cog);
+
+        if (showingSwivel) {
+            applyOverstressEffect(blockEntity, shaft, innerShaft, cog);
         } else {
             applyOverstressEffect(blockEntity, shaft);
         }
@@ -104,8 +147,8 @@ public class ControllerShaftVisual<
 
     @Override
     public void updateLight(float partialTick) {
-        if (cog != null) {
-            relight(shaft, cog);
+        if (showingSwivel) {
+            relight(shaft, innerShaft, cog);
         } else {
             relight(shaft);
         }
@@ -113,17 +156,27 @@ public class ControllerShaftVisual<
 
     @Override
     protected void _delete() {
+        shaft.delete();
+
+        if (innerShaft != null) {
+            innerShaft.delete();
+        }
+
         if (cog != null) {
             cog.delete();
         }
-        shaft.delete();
     }
 
     @Override
     public void collectCrumblingInstances(Consumer<Instance> consumer) {
+        consumer.accept(shaft);
+
+        if (innerShaft != null) {
+            consumer.accept(innerShaft);
+        }
+
         if (cog != null) {
             consumer.accept(cog);
         }
-        consumer.accept(shaft);
     }
 }

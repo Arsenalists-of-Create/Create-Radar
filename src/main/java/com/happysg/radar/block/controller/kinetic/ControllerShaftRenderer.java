@@ -38,66 +38,88 @@ public class ControllerShaftRenderer<
     }
 
     @Override
-    protected void renderSafe(T blockEntity, float partialTick,
-                              PoseStack poseStack, MultiBufferSource buffer,
-                              int light, int overlay) {
-        if (blockEntity.getLevel() == null
-                || VisualizationManager.supportsVisualization(
-                blockEntity.getLevel())) {
+    protected void renderSafe(T blockEntity, float partialTick, PoseStack poseStack, MultiBufferSource buffer, int light, int overlay) {
+        if (blockEntity.getLevel() == null || VisualizationManager.supportsVisualization(blockEntity.getLevel())) {
             return;
         }
 
-        Direction.Axis axis = KineticBlockEntityRenderer
-                .getRotationAxisOf(blockEntity);
+        BlockState state = blockEntity.getBlockState();
+        Direction.Axis axis = KineticBlockEntityRenderer.getRotationAxisOf(blockEntity);
+        Direction inputDirection = blockEntity.getInputShaftDirection();
+
         double sampledRpm = blockEntity.getAvailableInputSpeed();
-        float rpm = Double.isFinite(sampledRpm) ? (float) sampledRpm : 0.0f;
-        float renderTime = AnimationTickHolder.getRenderTime(
-                blockEntity.getLevel());
-        float offset = KineticBlockEntityRenderer
-                .getRotationOffsetForPosition(blockEntity,
-                        blockEntity.getBlockPos(), axis);
-        float angle = ((renderTime * rpm * 0.3f + offset) % 360.0f)
-                * Mth.DEG_TO_RAD;
+        float inputRpm = Double.isFinite(sampledRpm) ? (float) sampledRpm : 0.0f;
+        float swivelRpm = -blockEntity.getSpeed();
+
+        float renderTime = AnimationTickHolder.getRenderTime(blockEntity.getLevel());
+        float offset = KineticBlockEntityRenderer.getRotationOffsetForPosition(blockEntity, blockEntity.getBlockPos(), axis);
+
+        boolean swivelMode =
+                (state.getBlock() instanceof AutoYawControllerBlock
+                        && state.getValue(AutoYawControllerBlock.SWIVEL_MODE))
+                        || (state.getBlock() instanceof AutoPitchControllerBlock
+                        && state.getValue(AutoPitchControllerBlock.SWIVEL_MODE));
+
+        if (!swivelMode) {
+            SuperByteBuffer shaft = directionalHalfShaft ? CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state) : CachedBuffers.block(KineticBlockEntityRenderer.shaft(axis));
+            renderRotatingPart(poseStack, buffer, shaft, light, axis, inputRpm, renderTime, offset, directionalHalfShaft ? Direction.SOUTH : null, directionalHalfShaft ? inputDirection : null);
+            return;
+        }
+
+
+        renderRotatingPart(
+                poseStack, buffer,
+                CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state),
+                light, axis, inputRpm, renderTime, offset,
+                Direction.SOUTH, inputDirection);
+
+
+        renderRotatingPart(
+                poseStack, buffer,
+                CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state),
+                light, axis, swivelRpm, renderTime, offset,
+                Direction.SOUTH, inputDirection.getOpposite());
+
+
+        renderRotatingPart(
+                poseStack, buffer,
+                CachedBuffers.partial(AllPartialModels.SHAFTLESS_COGWHEEL, state),
+                light, axis, swivelRpm, renderTime, offset,
+                Direction.UP,
+                Direction.get(Direction.AxisDirection.POSITIVE, axis));
+    }
+
+    private static void renderRotatingPart(
+            PoseStack poseStack,
+            MultiBufferSource buffer,
+            SuperByteBuffer model,
+            int light,
+            Direction.Axis axis,
+            float rpm,
+            float renderTime,
+            float offset,
+            Direction modelFrom,
+            Direction modelTo) {
+
+        float angle = ((renderTime * rpm * 0.3f + offset) % 360.0f) * Mth.DEG_TO_RAD;
 
         poseStack.pushPose();
         poseStack.translate(0.5f, 0.5f, 0.5f);
         poseStack.mulPose(axisRotation(axis).rotation(angle));
-        if (directionalHalfShaft) {
-            Direction inputDirection = blockEntity.getInputShaftDirection();
+
+        if (modelFrom != null && modelTo != null) {
             poseStack.mulPose(new Quaternionf().rotationTo(
-                    0, 0, 1,
-                    inputDirection.getStepX(),
-                    inputDirection.getStepY(),
-                    inputDirection.getStepZ()));
+                    modelFrom.getStepX(),
+                    modelFrom.getStepY(),
+                    modelFrom.getStepZ(),
+                    modelTo.getStepX(),
+                    modelTo.getStepY(),
+                    modelTo.getStepZ()));
         }
+
         poseStack.translate(-0.5f, -0.5f, -0.5f);
 
-        SuperByteBuffer shaft = directionalHalfShaft
-                ? CachedBuffers.partial(AllPartialModels.SHAFT_HALF,
-                blockEntity.getBlockState())
-                : CachedBuffers.block(KineticBlockEntityRenderer.shaft(axis));
-        shaft.light(light).renderInto(poseStack, buffer.getBuffer(RenderType.solid()));
-
-        BlockState state = blockEntity.getBlockState();
-        boolean swivelMode = (state.getBlock() instanceof AutoYawControllerBlock
-                && state.getValue(AutoYawControllerBlock.SWIVEL_MODE)) || (state.getBlock() instanceof AutoPitchControllerBlock
-                && state.getValue(AutoPitchControllerBlock.SWIVEL_MODE));
-
-        if (swivelMode) {
-            poseStack.pushPose();
-
-            Direction direction = Direction.get(Direction.AxisDirection.POSITIVE, axis);
-
-            poseStack.translate(0.5f, 0.5f, 0.5f);
-            poseStack.mulPose(new Quaternionf().rotationTo(0, 1, 0, direction.getStepX(), direction.getStepY(), direction.getStepZ()));
-            poseStack.translate(-0.5f, -0.5f, -0.5f);
-
-            CachedBuffers.partial(AllPartialModels.SHAFTLESS_COGWHEEL, state)
-                    .light(light)
-                    .renderInto(poseStack, buffer.getBuffer(RenderType.solid()));
-
-            poseStack.popPose();
-        }
+        model.light(light).renderInto(poseStack, buffer.getBuffer(RenderType.solid()));
 
         poseStack.popPose();
     }
