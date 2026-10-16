@@ -20,10 +20,12 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 
-public class AutoYawControllerBlock extends DirectionalKineticBlock
-        implements IBE<AutoYawControllerBlockEntity>, PlacementShaftTarget {
+public class AutoYawControllerBlock extends DirectionalKineticBlock implements IBE<AutoYawControllerBlockEntity>, PlacementShaftTarget {
+    public static final BooleanProperty SWIVEL_MODE = BooleanProperty.create("swivel_mode");
     private static final Direction[] MOUNT_DIRECTIONS = {
             Direction.UP,
             Direction.DOWN
@@ -31,6 +33,13 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock
 
     public AutoYawControllerBlock(Properties properties) {
         super(properties);
+        registerDefaultState(defaultBlockState().setValue(SWIVEL_MODE, false));
+    }
+
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        super.createBlockStateDefinition(builder);
+        builder.add(SWIVEL_MODE);
     }
 
     @Override

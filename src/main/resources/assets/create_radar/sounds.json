@@ -30,5 +30,21 @@
         "stream": false
       }
     ]
+  },
+  "sonar.hum": {
+    "sounds": [
+      {
+        "name": "create_radar:computer_humming",
+        "stream": false
+      }
+    ]
+  },
+  "sonar.ping": {
+    "sounds": [
+      {
+        "name": "create_radar:sonar_ping",
+        "stream": false
+      }
+    ]
   }
 }

@@ -488,6 +488,22 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
 
         if (selected != null) {
             ensureAdjacentMountsCurrent(axis);
+            Direction positive = positiveDirection(axis);
+
+            for (Direction side : List.of(positive, positive.getOpposite())) {
+
+                BlockPos endpointPos = worldPosition.relative(side);
+
+                if (!level.hasChunkAt(endpointPos)) {
+                    continue;
+                }
+
+                CannonMountContext direct = CannonMountContext.of(level.getBlockEntity(endpointPos));
+
+                if (direct != null && direct.isCurrent() && direct.getBlockPos().equals(endpointPos) && direct.sameMount(selected)) {
+                    return false;
+                }
+            }
 
             for (CannonMountContext mount : cachedAdjacentMounts) {
                 if (mount.sameMount(selected)) {
@@ -506,11 +522,11 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
             }
 
             if (mountPos.equals(adapter.getMountPos())) {
-                return true;
+                return false;
             }
         }
 
-        if (Mods.SIMULATED.isLoaded() && SimulatedSwivelMountAdapter.findTPitchSwivelSide(this, mountPos) != null) {
+        if (Mods.SIMULATED.isLoaded() && SimulatedSwivelMountAdapter.findTPitchLinkSide(this, mountPos) != null) {
             return true;
         }
 
@@ -583,7 +599,6 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
                 return isStructuralPitchMount(firingControl.weapon.getMountPos());
             }
         }
-
         CannonMountContext primary = resolvePrimaryCbcMount();
 
         if (primary != null) {

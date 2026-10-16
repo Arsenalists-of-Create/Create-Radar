@@ -13,6 +13,7 @@ import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountExtens
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountExtensionBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
+import rbasamoyai.createbigcannons.cannon_control.fixed_cannon_mount.FixedCannonMountBlockEntity;
 
 import javax.annotation.Nullable;
 
@@ -24,6 +25,7 @@ import javax.annotation.Nullable;
 public final class CannonMountContext {
     private enum Kind {
         CBC,
+        CBC_FIXED,
         CBCMW_COMPACT
     }
 
@@ -39,6 +41,9 @@ public final class CannonMountContext {
     public static CannonMountContext of(@Nullable BlockEntity blockEntity) {
         if (blockEntity instanceof CannonMountBlockEntity) {
             return new CannonMountContext(blockEntity, Kind.CBC);
+        }
+        if (blockEntity instanceof FixedCannonMountBlockEntity) {
+            return new CannonMountContext(blockEntity, Kind.CBC_FIXED);
         }
         if (Mods.CBCMODERNWARFARE.isLoaded() && CBCMWMountCompat.isCompactMount(blockEntity)) {
             return new CannonMountContext(blockEntity, Kind.CBCMW_COMPACT);
@@ -129,6 +134,9 @@ public final class CannonMountContext {
         if (kind == Kind.CBC) {
             return ((CannonMountBlockEntity) blockEntity).getContraption();
         }
+        if (kind == Kind.CBC_FIXED) {
+            return ((FixedCannonMountBlockEntity) blockEntity).getContraption();
+        }
         return CBCMWMountCompat.getContraption(blockEntity);
     }
 
@@ -172,7 +180,7 @@ public final class CannonMountContext {
     public void setPitch(float pitch) {
         if (kind == Kind.CBC) {
             ((CannonMountBlockEntity) blockEntity).setPitch(pitch);
-        } else {
+        } else if (kind == Kind.CBCMW_COMPACT) {
             CBCMWMountCompat.setPitch(blockEntity, pitch);
         }
     }
@@ -192,6 +200,8 @@ public final class CannonMountContext {
     public void notifyUpdate() {
         if (kind == Kind.CBC) {
             ((CannonMountBlockEntity) blockEntity).notifyUpdate();
+        } else if (kind == Kind.CBC_FIXED) {
+            ((FixedCannonMountBlockEntity) blockEntity).notifyUpdate();
         } else {
             CBCMWMountCompat.notifyUpdate(blockEntity);
         }
@@ -222,12 +232,18 @@ public final class CannonMountContext {
         if (kind == Kind.CBC) {
             return (CannonMountBlockEntity) blockEntity;
         }
+        if (kind == Kind.CBC_FIXED) {
+            return (FixedCannonMountBlockEntity) blockEntity;
+        }
         return CBCMWMountCompat.getController(blockEntity);
     }
 
     public BlockPos getControllerBlockPos() {
         if (kind == Kind.CBC) {
             return ((CannonMountBlockEntity) blockEntity).getControllerBlockPos();
+        }
+        if (kind == Kind.CBC_FIXED) {
+            return ((FixedCannonMountBlockEntity) blockEntity).getControllerBlockPos();
         }
         return CBCMWMountCompat.getControllerBlockPos(blockEntity);
     }
@@ -237,7 +253,11 @@ public final class CannonMountContext {
      * Compact mounts can still use a yaw controller through an external swivel.
      */
     public boolean supportsDirectYawControl() {
-        return kind != Kind.CBCMW_COMPACT;
+        return kind == Kind.CBC;
+    }
+
+    public boolean isFixed() {
+        return kind == Kind.CBC_FIXED;
     }
 
     public boolean isCompact() {

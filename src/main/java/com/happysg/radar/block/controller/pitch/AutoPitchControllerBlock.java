@@ -21,12 +21,14 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import org.jetbrains.annotations.NotNull;
 
-public class AutoPitchControllerBlock extends HorizontalKineticBlock
-        implements IBE<AutoPitchControllerBlockEntity>, PlacementShaftTarget {
+public class AutoPitchControllerBlock extends HorizontalKineticBlock implements IBE<AutoPitchControllerBlockEntity>, PlacementShaftTarget {
+    public static final BooleanProperty SWIVEL_MODE = BooleanProperty.create("swivel_mode");
     private static final Direction[] MOUNT_DIRECTIONS = {
             Direction.NORTH,
             Direction.EAST,
@@ -36,6 +38,13 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock
 
     public AutoPitchControllerBlock(Properties properties) {
         super(properties);
+        registerDefaultState(defaultBlockState().setValue(SWIVEL_MODE, false));
+    }
+
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        super.createBlockStateDefinition(builder);
+        builder.add(SWIVEL_MODE);
     }
 
     @Override

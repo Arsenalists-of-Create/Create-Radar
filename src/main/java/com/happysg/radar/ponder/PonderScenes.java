@@ -18,6 +18,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.animal.Parrot;
 import net.minecraft.world.phys.AABB;
@@ -1316,6 +1317,7 @@ public class PonderScenes {
         Selection shaft = util.select().position(2, 1, 3);
         Selection jammer = util.select().position(2, 2, 3);
         Selection jammerLink = util.select().position(2, 3, 3);
+        Selection redstoneInput = util.select().position(1, 2, 3);
 
         scene.world().showSection(util.select().layer(0), Direction.DOWN);
         scene.idle(20);
@@ -1374,15 +1376,63 @@ public class PonderScenes {
                 .pointAt(jammer.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame()
-                .text("Jamming effectiveness depends on shaft speed and alignment with the radar.");
-        scene.idle(100);
-        scene.world().modifyBlockEntity(new BlockPos(3, 1, 6), MonitorBlockEntity.class, MonitorBlockEntity::showPonderDirectionalJamming);
+                .text("Rotational power charges the Jammer for 45 seconds.");
+
+        scene.idle(95);
+
+        scene.overlay().showText(85)
+                .pointAt(jammer.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Once charged, the Jammer waits for a Redstone signal.");
+
+        scene.idle(95);
+
+// Show Redstone power being supplied to the Jammer.
+        scene.world().replaceBlocks(
+                redstoneInput,
+                Blocks.REDSTONE_BLOCK.defaultBlockState(),
+                false
+        );
+        showSelection(scene, redstoneInput);
+
+        scene.overlay().showText(85)
+                .pointAt(redstoneInput.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Apply Redstone power to discharge the Jammer for 15 seconds.");
+
+        scene.idle(95);
+
+        scene.world().modifyBlockEntity(
+                new BlockPos(3, 1, 6),
+                MonitorBlockEntity.class,
+                MonitorBlockEntity::showPonderDirectionalJamming
+        );
+
         scene.overlay().showText(85)
                 .pointAt(monitor.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame()
-                .text("Interference can distort radar contacts and create false returns.");
+                .text("While discharging, the Jammer distorts radar contacts and creates false returns.");
+
+        scene.idle(95);
+
+        scene.overlay().showText(90)
+                .pointAt(jammer.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("After 15 seconds, the Jammer stops and must recharge for another 45 seconds.");
+
         scene.idle(100);
+
+        scene.overlay().showText(100)
+                .pointAt(redstoneInput.getCenter())
+                .placeNearTarget()
+                .attachKeyFrame()
+                .text("Continuous Redstone power automatically triggers another discharge when fully recharged.");
+
+        scene.idle(110);
         scene.markAsFinished();
     }
 }

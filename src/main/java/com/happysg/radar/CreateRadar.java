@@ -3,6 +3,7 @@ package com.happysg.radar;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.arad.rwr.RwrEngagedLoopSoundManager;
 import com.happysg.radar.block.arad.rwr.RwrLockLoopSoundManager;
+import com.happysg.radar.block.radar.sonar.bearing.SonarHumLoopSoundManager;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorInputHandler;
 import com.happysg.radar.compat.Mods;
@@ -111,6 +112,7 @@ public class CreateRadar {
 
     private static void clientTick(ClientTickEvent.Post event) {
         DataLinkBlockItem.clientTick();
+        SonarHumLoopSoundManager.pruneStopped();
     }
 
     public static Logger getLogger() {
@@ -140,6 +142,7 @@ public class CreateRadar {
         SableSilhouetteClientCache.clear();
         RwrEngagedLoopSoundManager.clear();
         RwrLockLoopSoundManager.clear();
+        SonarHumLoopSoundManager.clear();
     }
 
     public static void registerCapabilities(RegisterCapabilitiesEvent event) {

@@ -26,6 +26,8 @@ public final class KineticControllerState {
     private static final int SETTLE_TICKS = 3;
     private static final int WATCHDOG_STALL_TICKS = 40;
     private static final double MAX_SETPOINT_COMPENSATION_DEGREES = 5.0;
+    private static final double FINE_APPROACH_DEGREES = 5.0;
+    private static final double FINE_APPROACH_STEP_FRACTION = 0.25;
 
     private final CannonAxis axis;
 
@@ -328,10 +330,9 @@ public final class KineticControllerState {
                 && Math.abs(remainingDegrees) < 1.0
                 ? PROPORTIONAL_RPM_PER_DEGREE * 0.5
                 : PROPORTIONAL_RPM_PER_DEGREE;
-        double rawRpm = clamp(controlDegrees * proportionalGain,
-                -maximumRpm, maximumRpm) * driveSign;
-        rawRpm = limitSetpointCompensation(adapter, rawRpm, controlDegrees,
-                bearingTarget, desiredBearingTarget);
+        double rawRpm = clamp(controlDegrees * proportionalGain, -maximumRpm, maximumRpm) * driveSign;
+        rawRpm = limitSetpointCompensation(adapter, rawRpm, controlDegrees, bearingTarget, desiredBearingTarget);
+        rawRpm = limitPhysicalApproachRpm(adapter, rawRpm, remainingDegrees, tolerance);
 
         if (!watchdogActive) {
             beginWatchdog(adapter, bearingTarget, physicalAngle, desiredBearingTarget,
@@ -362,9 +363,9 @@ public final class KineticControllerState {
 
         double smoothing = Math.abs(controlDegrees) <= 5.0 ? 0.5 : 0.4;
         smoothedGeneratorRpm += (rawRpm - smoothedGeneratorRpm) * smoothing;
-        smoothedGeneratorRpm = limitSetpointCompensation(
-                adapter, smoothedGeneratorRpm, controlDegrees,
-                bearingTarget, desiredBearingTarget);
+        smoothedGeneratorRpm = limitSetpointCompensation(adapter, smoothedGeneratorRpm, controlDegrees, bearingTarget, desiredBearingTarget);
+        smoothedGeneratorRpm = limitPhysicalApproachRpm(adapter, smoothedGeneratorRpm, remainingDegrees, tolerance);
+
         if (Math.abs(smoothedGeneratorRpm) < stopRpm) {
             smoothedGeneratorRpm = 0.0;
         }
@@ -677,6 +678,29 @@ public final class KineticControllerState {
             return false;
         }
         return true;
+    }
+
+    private double limitPhysicalApproachRpm(KineticMountAdapter adapter, double requestedRpm, double physicalErrorDegrees, double toleranceDegrees) {
+        if (!Double.isFinite(requestedRpm)
+                || !Double.isFinite(physicalErrorDegrees)
+                || Math.abs(physicalErrorDegrees) > FINE_APPROACH_DEGREES
+                || requestedRpm == 0.0) {
+            return requestedRpm;
+        }
+
+        double requestedStep = adapter.effectiveDegreesPerTick(Math.abs(requestedRpm));
+
+        if (!Double.isFinite(requestedStep) || requestedStep <= 0.0) {
+            return requestedRpm;
+        }
+
+        double allowedStep = Math.max(Math.max(0.0, toleranceDegrees) * 0.5, Math.abs(physicalErrorDegrees) * FINE_APPROACH_STEP_FRACTION);
+
+        if (requestedStep <= allowedStep) {
+            return requestedRpm;
+        }
+
+        return requestedRpm * allowedStep / requestedStep;
     }
 
     private double limitSetpointCompensation(KineticMountAdapter adapter,

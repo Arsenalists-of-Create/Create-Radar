@@ -4,6 +4,7 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
+import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableLinkPersistence;
 import com.happysg.radar.registry.AllDataBehaviors;
@@ -56,6 +57,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     private BlockPos filtererOffset = null;
     @Nullable
     private BlockPos filtererWorldPosFallback = null;
+    private List<BlockPos> lastObservedWeaponCandidates = List.of();
 
     private BlockPos linkedMonitorPos;
 
@@ -346,37 +348,70 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     }
 
     private void restoreWeaponFilterLinkFallback() {
-        if (!(level instanceof ServerLevel serverLevel)) {
+        if (!(level instanceof ServerLevel serverLevel)
+                || serverLevel.getGameTime() % 20 != 0) {
             return;
         }
+
         if (!getBlockState().hasProperty(DataLinkBlock.LINK_STYLE)
-                || getBlockState().getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR) {
+                || getBlockState().getValue(DataLinkBlock.LINK_STYLE)
+                != DataLinkBlock.LinkStyle.RADAR) {
             return;
         }
+
         BlockPos filtererPos = resolveFiltererPosition();
         if (filtererPos == null) {
             return;
         }
 
-        NetworkData data = NetworkData.get(serverLevel);
-        BlockPos existingFilterer = data.getFiltererForDataLink(serverLevel.dimension(), worldPosition);
-        if (existingFilterer != null) {
+        BlockPos endpointPos = getTargetPosition();
+
+        if (!serverLevel.hasChunkAt(endpointPos)) {
             return;
         }
 
-        BlockPos endpointPos = getTargetPosition();
-        BlockPos mountPos = WeaponNetworkRuntime.get(serverLevel).getMountForController(endpointPos);
-        if (mountPos == null) {
+        if (!(serverLevel.getBlockEntity(endpointPos) instanceof AutoPitchControllerBlockEntity pitch)) {
             return;
+        }
+
+        NetworkData data = NetworkData.get(serverLevel);
+        BlockPos registeredFilterer = data.getFiltererForDataLink(serverLevel.dimension(), worldPosition);
+
+        if (registeredFilterer != null && !registeredFilterer.equals(filtererPos)) {
+            return;
+        }
+
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(serverLevel);
+        runtime.advertiseContactController(pitch);
+        List<BlockPos> candidates = runtime.getPendingControllerMountCandidates(endpointPos);
+
+        if (!candidates.equals(lastObservedWeaponCandidates)) {
+            lastObservedWeaponCandidates = List.copyOf(candidates);
+            runtime.markContactTopologyDirty();
+        }
+
+        BlockPos mountPos = runtime.getMountForController(endpointPos);
+
+        if (mountPos != null) {
+            WeaponNetworkRuntime.WeaponControlView view = runtime.getWeaponControlViewFromPitch(endpointPos);
+
+            if (view == null || !view.validTopology() || view.channelForMount(mountPos) == null) {
+                mountPos = null;
+            }
         }
 
         NetworkData.Group group = data.getOrCreateGroup(serverLevel.dimension(), filtererPos);
-        if (!data.canAttachWeaponEndpoint(group, endpointPos, mountPos)) {
-            return;
+        if (!data.reserveWeaponEndpoint(group, endpointPos)) return;
+
+        if (registeredFilterer == null || !group.dataLinks.contains(worldPosition)) {
+            data.addDataLinkToGroup(group, worldPosition, endpointPos);
         }
 
-        data.attachWeaponEndpoint(group, endpointPos, mountPos);
-        data.addDataLinkToGroup(group, worldPosition, endpointPos);
+        if (data.reconcileWeaponEndpointMount(group, endpointPos, mountPos)) {
+            if (serverLevel.getBlockEntity(filtererPos) instanceof NetworkFiltererBlockEntity filterer) {
+                filterer.onWeaponTopologyChanged();
+            }
+        }
     }
 
     @Nullable

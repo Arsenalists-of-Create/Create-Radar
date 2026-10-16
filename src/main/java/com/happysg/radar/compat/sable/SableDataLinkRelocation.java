@@ -376,15 +376,13 @@ public final class SableDataLinkRelocation {
             }
             invalidateControllers(level, move.newTarget());
         } else {
-            BlockPos savedEndpoint = networkData.peekEndpointForDataLink(
-                    level.dimension(), move.oldDataLink());
+            BlockPos savedEndpoint = networkData.peekEndpointForDataLink(level.dimension(), move.oldDataLink());
             if (savedEndpoint == null) {
-                savedEndpoint = networkData.peekEndpointForDataLink(
-                        level.dimension(), move.newDataLink());
+                savedEndpoint = networkData.peekEndpointForDataLink(level.dimension(), move.newDataLink());
             }
             if (move.oldTarget().equals(savedEndpoint)) {
-                BlockPos savedMount = networkData.getWeaponMountForController(
-                        level.dimension(), move.oldTarget());
+                BlockPos savedMount = networkData.getWeaponMountForController(level.dimension(), move.oldTarget());
+
                 if (savedMount != null) {
                     weaponResult = networkData.relocateWeaponEndpoint(
                             level.dimension(),
@@ -393,8 +391,19 @@ public final class SableDataLinkRelocation {
                             savedMount,
                             savedMount.offset(move.newDataLink().subtract(move.oldDataLink()))
                     );
+                } else {
+                    weaponResult = networkData.relocatePendingWeaponEndpoint(level.dimension(), move.oldTarget(), move.newTarget());
                 }
             }
+
+            if (weaponResult == NetworkData.WeaponRelocationResult.CONFLICT) {
+                WeaponNetworkRuntime.get(level).unregister(newLink.getBlockPos());
+
+                LOGGER.warn("Refused conflicting pending controller relocation {} -> {}", move.oldTarget(), move.newTarget());
+                return;
+            }
+
+            newLink.finishAssemblyRelocation(move.newTarget());
             newLink.finishAssemblyRelocation(move.newTarget());
         }
 

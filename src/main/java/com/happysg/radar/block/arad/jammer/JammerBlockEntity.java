@@ -7,7 +7,7 @@ import com.happysg.radar.api.radar.rwr.RadarRwrEmitter;
 import com.happysg.radar.api.radar.rwr.RadarRwrTypes;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
-import com.happysg.radar.block.radar.behavior.IRadar;
+import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
@@ -37,6 +37,11 @@ public class JammerBlockEntity extends KineticBlockEntity {
 
     public int range = 128;
     public boolean enabled = true;
+
+    private static final float CHARGING_RPM_EPSILON = 1.0e-4f;
+
+    private int chargeTicks;
+    private long dischargeEndGameTick;
 
     public record SelectedEmitterInfo(
             String sourceId,
@@ -101,6 +106,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
 
         if (level instanceof ServerLevel serverLevel) {
             tickAradLink(serverLevel);
+            tickDischargeCycle(serverLevel);
         }
 
         float maximumStep = degreesPerTick(getSpeed());
@@ -139,6 +145,65 @@ public class JammerBlockEntity extends KineticBlockEntity {
             lastKnownPos = worldPosition.immutable();
             setChanged();
         }
+    }
+
+    private void tickDischargeCycle(ServerLevel serverLevel) {
+        long now = serverLevel.getGameTime();
+        boolean hasRotation = Math.abs(getSpeed()) > CHARGING_RPM_EPSILON && !isOverStressed();
+        boolean redstonePowered = serverLevel.hasNeighborSignal(worldPosition);
+
+        if (dischargeEndGameTick > 0L) {
+            if (now >= dischargeEndGameTick || !redstonePowered || !hasRotation || !enabled) {
+                dischargeEndGameTick = 0L;
+                chargeTicks = 0;
+
+                setChanged();
+                notifyUpdate();
+            }
+
+            return;
+        }
+
+        if (!enabled || !hasRotation) {
+            return;
+        }
+
+        int requiredChargeTicks = RadarConfig.server().directionalJammerRechargeSeconds.get() * 20;
+
+        if (chargeTicks < requiredChargeTicks) {
+            chargeTicks++;
+
+            if (chargeTicks % 20 == 0) {
+                setChanged();
+            }
+
+            if (chargeTicks == requiredChargeTicks) {
+                setChanged();
+                notifyUpdate();
+            }
+        }
+
+        boolean hasSelectedTarget = selectedEmitterSource != null && selectedEmitterPosition != null;
+
+        if (chargeTicks >= requiredChargeTicks && redstonePowered && hasSelectedTarget) {
+            dischargeEndGameTick = now + RadarConfig.server().directionalJammerDischargeSeconds.get() * 20L;
+            chargeTicks = 0;
+
+            setChanged();
+            notifyUpdate();
+        }
+    }
+
+    public boolean isDischarging() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return false;
+        }
+
+        return enabled
+                && dischargeEndGameTick > serverLevel.getGameTime()
+                && serverLevel.hasNeighborSignal(worldPosition)
+                && Math.abs(getSpeed()) > CHARGING_RPM_EPSILON
+                && !isOverStressed();
     }
 
     public void refreshAradLinkState() {
@@ -403,7 +468,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
         ExternalRwrEmitterRegistry.EmitterState externalEmitter = selectedEmitterSource == null || emitter != null ? null
                         : ExternalRwrEmitterRegistry.resolveSelectable(serverLevel, selectedEmitterSource).orElse(null);
 
-        if (!enabled || selectedEmitterSource == null || selectedEmitterPosition == null || (emitter == null && externalEmitter == null)) {
+        if (!isDischarging() || selectedEmitterSource == null || selectedEmitterPosition == null || (emitter == null && externalEmitter == null)) {
             DirectionalJammingService.remove(serverLevel, worldPosition);
             jammingProfile = DirectionalJammingService.Profile.INACTIVE;
             return;
@@ -447,7 +512,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
     }
 
     public boolean affects(BlockPos radarPos) {
-        if (!enabled) return false;
+        if (!isDischarging()) return false;
         return radarPos.closerThan(worldPosition, range);
     }
 
@@ -455,6 +520,8 @@ public class JammerBlockEntity extends KineticBlockEntity {
     protected void read(CompoundTag compound, HolderLookup.Provider registries,
                         boolean clientPacket) {
         super.read(compound, registries, clientPacket);
+        chargeTicks = Mth.clamp(compound.getInt("JammerChargeTicks"), 0, 12000);
+        dischargeEndGameTick = Math.max(0L, compound.getLong("JammerDischargeEndGameTick"));
         if (compound.contains("Yaw", Tag.TAG_FLOAT)) {
             yaw = wrap360(compound.getFloat("Yaw"));
         }
@@ -483,6 +550,8 @@ public class JammerBlockEntity extends KineticBlockEntity {
     protected void write(CompoundTag compound, HolderLookup.Provider registries,
                          boolean clientPacket) {
         super.write(compound, registries, clientPacket);
+        compound.putInt("JammerChargeTicks", chargeTicks);
+        compound.putLong("JammerDischargeEndGameTick", dischargeEndGameTick);
         compound.putFloat("Yaw", wrap360(yaw));
         compound.putFloat("TargetYaw", wrap360(targetYaw));
         compound.putFloat("Pitch", clampPitch(pitch));

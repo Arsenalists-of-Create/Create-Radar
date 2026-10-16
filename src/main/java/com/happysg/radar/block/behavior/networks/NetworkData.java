@@ -593,6 +593,10 @@ public class NetworkData extends SavedData {
         return canClaimEndpoint(group, radarPos, LinkOrigin.DATALINK);
     }
 
+    public boolean canReserveWeaponEndpoint(Group group, BlockPos controllerPos) {
+        return group != null && controllerPos != null && canClaimEndpoint(group, controllerPos, LinkOrigin.DATALINK);
+    }
+
     public boolean canAttachWeaponEndpoint(Group group, BlockPos controllerPos, BlockPos weaponMountPos) {
         // controller already owned by other group?
         if (!canClaimEndpoint(group, controllerPos, LinkOrigin.DATALINK)) return false;
@@ -661,6 +665,19 @@ public class NetworkData extends SavedData {
         NeoForge.EVENT_BUS.post(new RadarNetworkLifecycleEvent(level, group.key.filtererPos(), radarPos, null, RadarNetworkLifecycleEvent.Action.ATTACHED));
     }
 
+    public boolean reserveWeaponEndpoint(Group group, BlockPos controllerPos) {
+        if (!canReserveWeaponEndpoint(group, controllerPos)) return false;
+
+        ResourceKey<Level> dim = group.key.dim();
+        String endpointKey = key(dim, controllerPos);
+
+        boolean wasExplicit = endpointOrigins.get(endpointKey) == LinkOrigin.DATALINK;
+        if (!claimEndpointForGroup(null, group, controllerPos, LinkOrigin.DATALINK)) return false;
+        boolean added = group.weaponEndpoints.add(controllerPos.immutable());
+        if (added || !wasExplicit) setDirty();
+
+        return true;
+    }
 
     public void attachWeaponEndpoint(Group group, BlockPos controllerPos, BlockPos weaponMountPos) {
         if (!claimEndpointForGroup(null, group, controllerPos, LinkOrigin.DATALINK)) return;
@@ -675,6 +692,52 @@ public class NetworkData extends SavedData {
         controllerToWeaponMount.put(key(group.key.dim(), controllerPos), key(group.key.dim(), weaponMountPos));
 
         setDirty();
+    }
+
+    public boolean reconcileWeaponEndpointMount(
+            Group group,
+            BlockPos controllerPos,
+            @Nullable BlockPos weaponMountPos
+    ) {
+        if (group == null || controllerPos == null) {
+            return false;
+        }
+
+        ResourceKey<Level> dim = group.key.dim();
+        String endpointKey = key(dim, controllerPos);
+        String filtererKey = key(dim, group.key.filtererPos());
+
+        if (!group.weaponEndpoints.contains(controllerPos) || !filtererKey.equals(endpointToFilterer.get(endpointKey)) || endpointOrigins.get(endpointKey) != LinkOrigin.DATALINK) {
+            return false;
+        }
+
+        String oldMountKey = controllerToWeaponMount.get(endpointKey);
+        String newMountKey = weaponMountPos == null ? null : key(dim, weaponMountPos);
+
+        if (Objects.equals(oldMountKey, newMountKey)) return false;
+        if (weaponMountPos != null && !canAttachWeaponEndpoint(group, controllerPos, weaponMountPos)) return false;
+
+
+        if (oldMountKey != null) {
+            controllerToWeaponMount.remove(endpointKey);
+
+            if (!groupReferencesMount(group, dim, oldMountKey)) {
+                group.usedWeaponMounts.remove(posFromKey(oldMountKey));
+
+                if (filtererKey.equals(weaponMountToFilterer.get(oldMountKey))) {
+                    weaponMountToFilterer.remove(oldMountKey);
+                }
+            }
+        }
+
+        if (newMountKey != null) {
+            controllerToWeaponMount.put(endpointKey, newMountKey);
+            group.usedWeaponMounts.add(weaponMountPos.immutable());
+            weaponMountToFilterer.put(newMountKey, filtererKey);
+        }
+
+        setDirty();
+        return true;
     }
 
     public void addDataLinkToGroup(Group group, BlockPos dataLinkPos, BlockPos endpointPos) {
@@ -1027,6 +1090,48 @@ public class NetworkData extends SavedData {
         if (endpointKey != null) dataLinkToEndpoint.put(newKey, endpointKey);
         setDirty();
         return true;
+    }
+
+    public WeaponRelocationResult relocatePendingWeaponEndpoint(ResourceKey<Level> dim, BlockPos oldController, BlockPos newController) {
+        if (dim == null || oldController == null || newController == null || oldController.equals(newController)) {
+            return WeaponRelocationResult.NOT_FOUND;
+        }
+
+        String oldKey = key(dim, oldController);
+        String newKey = key(dim, newController);
+
+        String filtererKey = endpointToFilterer.get(oldKey);
+        if (filtererKey == null) {
+            return WeaponRelocationResult.NOT_FOUND;
+        }
+
+        Group group = groupsByFilterer.get(filtererKey);
+
+        if (group == null || !group.weaponEndpoints.contains(oldController) || endpointOrigins.get(oldKey) != LinkOrigin.DATALINK || controllerToWeaponMount.containsKey(oldKey)) {
+            return WeaponRelocationResult.NOT_FOUND;
+        }
+
+        if (endpointToFilterer.containsKey(newKey) || group.weaponEndpoints.contains(newController) || controllerToWeaponMount.containsKey(newKey)) {
+            return WeaponRelocationResult.CONFLICT;
+        }
+
+        group.weaponEndpoints.remove(oldController);
+        group.weaponEndpoints.add(newController.immutable());
+
+        endpointToFilterer.remove(oldKey);
+        endpointToFilterer.put(newKey, filtererKey);
+
+        endpointOrigins.remove(oldKey);
+        endpointOrigins.put(newKey, LinkOrigin.DATALINK);
+
+        for (Map.Entry<String, String> entry : dataLinkToEndpoint.entrySet()) {
+            if (oldKey.equals(entry.getValue())) {
+                entry.setValue(newKey);
+            }
+        }
+
+        setDirty();
+        return WeaponRelocationResult.UPDATED;
     }
 
     /**

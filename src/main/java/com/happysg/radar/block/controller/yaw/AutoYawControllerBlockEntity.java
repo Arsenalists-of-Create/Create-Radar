@@ -914,6 +914,13 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     @Nullable
     public KineticAimFrame getStructuralAimFrame() {
         KineticMountAdapterResolution resolution = resolveKineticMount();
+
+        BlockState state = getBlockState();
+        boolean swivelMode = resolution.hasAdapter() && resolution.adapter().isValid();
+        if (state.hasProperty(AutoYawControllerBlock.SWIVEL_MODE) && state.getValue(AutoYawControllerBlock.SWIVEL_MODE) != swivelMode) {
+            level.setBlock(worldPosition, state.setValue(AutoYawControllerBlock.SWIVEL_MODE, swivelMode), 2);
+        }
+
         KineticMountAdapter adapter = resolution.adapter();
         if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
                 || !adapter.isAssembled() || !adapter.isLocked()

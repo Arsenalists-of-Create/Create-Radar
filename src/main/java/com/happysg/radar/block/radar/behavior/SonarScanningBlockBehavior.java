@@ -11,6 +11,7 @@ import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
+import com.happysg.radar.registry.ModSounds;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
@@ -21,6 +22,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
@@ -42,6 +44,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     public static final BehaviourType<SonarScanningBlockBehavior> TYPE = new BehaviourType<>();
 
     public static final int SCAN_PERIOD_TICKS = 20;
+    private static final int SONAR_PING_INTERVAL_TICKS = 80;
     private static final int TRACK_EXPIRATION_TICKS = 100;
     private static final int CANDIDATE_REFRESH_TICKS = 5;
     public static final double SWEEP_DEGREES_PER_TICK = 19.2;
@@ -103,6 +106,21 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         if (lastCandidateRefreshTick == Long.MIN_VALUE || gameTime < lastCandidateRefreshTick || gameTime - lastCandidateRefreshTick >= CANDIDATE_REFRESH_TICKS) {
             refreshEntityCandidates(serverLevel, sensors);
             lastCandidateRefreshTick = gameTime;
+        }
+
+        if (!sensors.isEmpty() && gameTime % SONAR_PING_INTERVAL_TICKS == 0) {
+            Vec3 soundPos = RadarPhysics.worldPosition(sonar);
+
+            serverLevel.playSound(
+                    null,
+                    soundPos.x,
+                    soundPos.y,
+                    soundPos.z,
+                    ModSounds.SONAR_PING.get(),
+                    SoundSource.BLOCKS,
+                    1.25f,
+                    1.0f
+            );
         }
 
         scanCurrentSweep(serverLevel, sensors);
@@ -173,7 +191,9 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         if (sensors.isEmpty()) return;
 
         Vec3 sweepCenter = RadarPhysics.worldPosition(sonar);
-        double sweepAngle = (180.0 - sonar.getGlobalAngle() + 360.0 + SWEEP_DEGREES_PER_TICK * 0.5) % 360.0;
+        double sweepStep = sonar.getSweepAngularSpeedDegreesPerTick();
+        double sweepAngle = Mth.positiveModulo(180.0 - sonar.getGlobalAngle() + sweepStep * 0.5, 360.0);
+        double sweepFov = Math.min(360.0, Math.max(RadarConfig.server().sonarFOV.get(), Math.abs(sweepStep)));
 
         List<Entity> inSector = new ArrayList<>();
 
@@ -186,7 +206,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
 
             Vec3 target = entity.position();
 
-            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, RadarConfig.server().sonarFOV.get()))
+            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, sweepFov))
                 continue;
 
             if (!isWithinSensorRange(target, sensors))
@@ -205,7 +225,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         boolean shipsFirst = (level.getGameTime() & 1L) == 0L;
 
         if (shipsFirst && Mods.SABLE.isLoaded() && scanSable) {
-            scanSableShips(level, sensors, sweepCenter, sweepAngle, budget);
+            scanSableShips(level, sensors, sweepCenter, sweepAngle, sweepFov, budget);
         }
 
         for (Entity entity : inSector) {
@@ -225,11 +245,11 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         }
 
         if (!shipsFirst && Mods.SABLE.isLoaded() && scanSable) {
-            scanSableShips(level, sensors, sweepCenter, sweepAngle, budget);
+            scanSableShips(level, sensors, sweepCenter, sweepAngle, sweepFov, budget);
         }
     }
 
-    private void scanSableShips(ServerLevel level, List<Vec3> sensors, Vec3 sweepCenter, double sweepAngle, ScanBudget budget) {
+    private void scanSableShips(ServerLevel level, List<Vec3> sensors, Vec3 sweepCenter, double sweepAngle, double sweepFov, ScanBudget budget) {
         SubLevelAccess ownShip = SableUtils.getShipManagingPos(sonar);
         List<SubLevelAccess> ships = new ArrayList<>(shipCandidates);
 
@@ -246,7 +266,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             if (target == null)
                 continue;
 
-            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, RadarConfig.server().sonarFOV.get()))
+            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, sweepFov))
                 continue;
 
             if (!isWithinSensorRange(target, sensors))

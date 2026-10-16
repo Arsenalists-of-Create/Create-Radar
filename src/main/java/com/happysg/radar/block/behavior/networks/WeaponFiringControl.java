@@ -2118,10 +2118,8 @@ public class WeaponFiringControl {
                                                                 worldAimDirection,
                                                                 firingTolerance.maximumDegrees());
                                             }
-                                        } else if (desiredYaw != null
-                                                && this.yawController != null) {
-                                            this.yawController.setTargetAngle(
-                                                    desiredYaw.floatValue());
+                                        } else if (desiredYaw != null && this.yawController != null) {
+                                            this.yawController.setTargetAngle(desiredYaw.floatValue());
                                         }
                                     }
 
@@ -4103,6 +4101,7 @@ public class WeaponFiringControl {
             debugDualBarrel(serverLevel, side, shot, geometry, frame);
 
             Vec3 compensatedDirection = null;
+
             if (side == authority) {
                 side.desiredYaw = authorityYaw;
                 compensatedDirection = authorityDirection;
@@ -5595,18 +5594,15 @@ public class WeaponFiringControl {
             boolean yawAligned;
 
             if (this.sharedYawController != null) {
-                yawAligned = this.sharedYawController
-                        .isAlignedForFiring(
-                                lag, tolerance, maximumTolerance);
+                yawAligned = this.sharedYawController.isAlignedForFiring(lag, tolerance, maximumTolerance);
             } else {
-                yawAligned = side.yaw != null
-                        && side.yaw.isAlignedForFiring(
-                        lag, tolerance, maximumTolerance);
+                yawAligned = side.yaw != null && side.yaw.isAlignedForFiring(lag, tolerance, maximumTolerance);
             }
-            boolean profileMatches = side == authority
-                    || authorityFingerprint != null
+
+            boolean profileMatches = side == authority || authorityFingerprint != null
                     && shot != null
                     && authorityFingerprint.equals(shot.fingerprint);
+
             boolean shouldFire = dualSideFireEligible(
                     sharedFireGates,
                     pitchAligned,
@@ -5615,8 +5611,8 @@ public class WeaponFiringControl {
                     side.fire != null || side.weapon != null,
                     profileMatches,
                     side.aimValid,
-                    side.trajectoryClear)
-                    && isWeaponStateOk(side);
+                    side.trajectoryClear
+            ) && isWeaponStateOk(side);
 
             if (shouldFire && shot.adapter != null && !prepareAdapterShotForFire(shot.adapter, shot.context, side.mountPos)) {
                 shouldFire = false;

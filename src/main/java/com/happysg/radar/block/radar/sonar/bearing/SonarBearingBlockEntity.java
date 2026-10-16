@@ -22,6 +22,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -35,6 +36,10 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     private UUID emitterId = UUID.randomUUID();
     private final Set<BlockPos> savedSensorPositions = new HashSet<>();
     private BlockPos lastKnownPos = BlockPos.ZERO;
+    private static final double REFERENCE_SONAR_RPM = 196.0;
+    private static final int SWEEP_SYNC_INTERVAL_TICKS = 100;
+    private double sweepAngleDegrees;
+    private long lastSweepUpdateTick = Long.MIN_VALUE;
 
     public SonarBearingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -79,10 +84,15 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     @Override
     public void tick() {
+        advanceSonarSweep();
         super.tick();
 
         if (level == null) {
             return;
+        }
+
+        if (level.isClientSide) {
+            SonarHumLoopSoundManager.update(this);
         }
 
         if (!level.isClientSide) {
@@ -98,6 +108,32 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         }
 
         updateScanningBehavior();
+    }
+
+    private void advanceSonarSweep() {
+        if (level == null) {
+            return;
+        }
+
+        long gameTime = level.getGameTime();
+
+        if (gameTime == lastSweepUpdateTick) {
+            return;
+        }
+
+        lastSweepUpdateTick = gameTime;
+        double step = getSweepAngularSpeedDegreesPerTick();
+
+        if (step == 0.0) {
+            return;
+        }
+
+        sweepAngleDegrees = Mth.positiveModulo(sweepAngleDegrees + step, 360.0);
+
+        if (!level.isClientSide && gameTime % SWEEP_SYNC_INTERVAL_TICKS == 0) {
+            setChanged();
+            sendData();
+        }
     }
 
     @Override
@@ -347,11 +383,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     @Override
     public float getGlobalAngle() {
-        if (level == null) {
-            return 0f;
-        }
-
-        return (float) ((level.getGameTime() * SonarScanningBlockBehavior.SWEEP_DEGREES_PER_TICK) % 360.0);
+        return (float) sweepAngleDegrees;
     }
 
     @Override
@@ -392,7 +424,11 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     @Override
     public float getSweepAngularSpeedDegreesPerTick() {
-        return (float) SonarScanningBlockBehavior.SWEEP_DEGREES_PER_TICK;
+        if (!isRunning()) {
+            return 0.0f;
+        }
+
+        return (float) (SonarScanningBlockBehavior.SWEEP_DEGREES_PER_TICK * getSpeed() / REFERENCE_SONAR_RPM);
     }
 
     @Override
@@ -414,6 +450,18 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         if (tag.hasUUID("EmitterId")) {
             emitterId = tag.getUUID("EmitterId");
         }
+
+        sweepAngleDegrees = Mth.positiveModulo(tag.getDouble("SonarSweepAngle"), 360.0);
+
+        if (clientPacket && level != null) {
+            long elapsed = level.getGameTime() - tag.getLong("SonarSweepTick");
+
+            if (elapsed > 0 && elapsed <= SWEEP_SYNC_INTERVAL_TICKS) {
+                sweepAngleDegrees = Mth.positiveModulo(sweepAngleDegrees + getSweepAngularSpeedDegreesPerTick() * elapsed, 360.0);
+            }
+
+            lastSweepUpdateTick = level.getGameTime();
+        }
     }
 
     @Override
@@ -423,5 +471,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         tag.putBoolean("StructureValid", structureValid);
         tag.putLongArray("SensorPositions", savedSensorPositions.stream().mapToLong(BlockPos::asLong).toArray());
         tag.putUUID("EmitterId", emitterId);
+        tag.putDouble("SonarSweepAngle", sweepAngleDegrees);
+        tag.putLong("SonarSweepTick", level == null ? 0L : level.getGameTime());
     }
 }

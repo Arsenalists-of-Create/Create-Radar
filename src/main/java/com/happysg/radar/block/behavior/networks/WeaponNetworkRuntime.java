@@ -220,6 +220,14 @@ public final class WeaponNetworkRuntime {
         return snapshot.controllerToMount().get(controllerPos);
     }
 
+    public List<BlockPos> getPendingControllerMountCandidates(BlockPos controllerPos) {
+        if (controllerPos == null || !level.hasChunkAt(controllerPos) || !(level.getBlockEntity(controllerPos) instanceof AutoPitchControllerBlockEntity)) {
+            return List.of();
+        }
+
+        return discoverContactMounts(controllerPos, DataLinkBlockEntity.WeaponEndpointType.PITCH, acceptedDataLinkTargets(null));
+    }
+
     /**
      * Compatibility query for Controller-style Data Link ownership. If a
      * T-Pitch has two explicit targets, this returns the first mount in stable
@@ -755,19 +763,15 @@ public final class WeaponNetworkRuntime {
             Map<BlockPos, EndpointOrigin> endpointOrigins,
             Map<BlockPos, WeaponControlView> controlViews
     ) {
-        List<BlockPos> eligible =
-                eligibleTPitchMounts(pitchPos, targetedMounts);
+        List<BlockPos> eligible = eligibleTPitchMounts(pitchPos, targetedMounts);
         List<BlockPos> retained = new ArrayList<>(2);
+
         for (BlockPos mount : eligible) {
-            Set<BlockPos> explicitPitch =
-                    explicitClaims.getOrDefault(
-                            new Slot(
-                                    mount,
-                                    DataLinkBlockEntity
-                                            .WeaponEndpointType.PITCH),
-                            new LinkedHashSet<>());
-            if (explicitPitch.isEmpty()
-                    || explicitPitch.contains(pitchPos)) {
+            Set<BlockPos> explicitPitch = explicitClaims.getOrDefault(
+                    new Slot(mount, DataLinkBlockEntity.WeaponEndpointType.PITCH),
+                    new LinkedHashSet<>());
+
+            if (explicitPitch.isEmpty() || explicitPitch.contains(pitchPos)) {
                 retained.add(mount);
             }
         }
@@ -863,15 +867,32 @@ public final class WeaponNetworkRuntime {
         }
 
         LinkedHashSet<BlockPos> mounts = new LinkedHashSet<>();
-        if (endpoint instanceof AutoPitchControllerBlockEntity
-                && type
-                == DataLinkBlockEntity.WeaponEndpointType.PITCH) {
+        if (endpoint instanceof AutoPitchControllerBlockEntity pitch && type == DataLinkBlockEntity.WeaponEndpointType.PITCH) {
             BlockState state = endpoint.getBlockState();
+
             if (state.hasProperty(HorizontalDirectionalBlock.FACING)) {
-                addDirectMount(
-                        mounts,
-                        endpointPos.relative(state.getValue(
-                                HorizontalDirectionalBlock.FACING)));
+                Direction facing = state.getValue(HorizontalDirectionalBlock.FACING);
+                addDirectMount(mounts, endpointPos.relative(facing));
+
+                if (mounts.isEmpty() && Mods.SIMULATED.isLoaded()) {
+                    Direction.Axis swivelAxis = facing.getAxis();
+
+                    for (LinkEntry link : linksByDataLink.values()) {
+                        if (link.type() != DataLinkBlockEntity.WeaponEndpointType.YAW || !isExplicitEndpointAvailable(link)) {
+                            continue;
+                        }
+
+                        BlockPos mountPos = resolveAvailableMount(link.mountPos());
+
+                        if (mountPos == null || !mountPos.equals(link.mountPos())) {
+                            continue;
+                        }
+
+                        if (SimulatedSwivelMountAdapter.isMountOnControllerSwivel(pitch, swivelAxis, mountPos)) {
+                            mounts.add(mountPos);
+                        }
+                    }
+                }
             }
         } else if (endpoint instanceof AutoYawControllerBlockEntity
                 && type
@@ -1056,7 +1077,9 @@ public final class WeaponNetworkRuntime {
             return false;
         }
 
-        Direction candidateSwivelSide = Mods.SIMULATED.isLoaded() ? SimulatedSwivelMountAdapter.findTPitchSwivelSide(tPitch, candidate.mountPos()) : null;
+        Direction candidateSwivelSide = Mods.SIMULATED.isLoaded()
+                ? SimulatedSwivelMountAdapter.findTPitchLinkSide(tPitch, candidate.mountPos())
+                : null;
         for (LinkEntry link : existing) {
             if (link.type()
                     != DataLinkBlockEntity.WeaponEndpointType.PITCH
@@ -1064,7 +1087,7 @@ public final class WeaponNetworkRuntime {
                 return false;
             }
 
-            if (candidateSwivelSide != null && candidateSwivelSide == SimulatedSwivelMountAdapter.findTPitchSwivelSide(tPitch, link.mountPos())) {
+            if (candidateSwivelSide != null && candidateSwivelSide == SimulatedSwivelMountAdapter.findTPitchLinkSide(tPitch, link.mountPos())) {
                 return false;
             }
         }

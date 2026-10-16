@@ -80,10 +80,9 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String DATA_LINK_ONLY_PITCH_ALLOWED = CreateRadar.MODID + ".data_link.only_pitch_allowed";
     private static final String DATA_LINK_PLACE_FAILED = CreateRadar.MODID + ".data_link.place_failed";
     private static final String DATA_LINK_SELECT_FIRST = CreateRadar.MODID + ".data_link.select_mount_or_filterer_first";
-    private static final String DATA_LINK_T_PITCH_INVALID_MOUNT =
-            CreateRadar.MODID + ".data_link.t_pitch_invalid_mount";
-    private static final String DATA_LINK_T_PITCH_MOUNT_RESERVED =
-            CreateRadar.MODID + ".data_link.t_pitch_mount_reserved";
+    private static final String DATA_LINK_T_PITCH_INVALID_MOUNT = CreateRadar.MODID + ".data_link.t_pitch_invalid_mount";
+    private static final String DATA_LINK_T_PITCH_MOUNT_RESERVED = CreateRadar.MODID + ".data_link.t_pitch_mount_reserved";
+    private static final String DATA_LINK_PITCH_REQUIRES_GEARBOX = CreateRadar.MODID + ".data_link.pitch_requires_gearbox";
 
     public DataLinkBlockItem(Block pBlock, Properties pProperties) {
         super(pBlock, pProperties);
@@ -134,6 +133,7 @@ public class DataLinkBlockItem extends BlockItem {
             if (controllerType == ControllerType.PITCH && !(use.be() instanceof TPitchControllerBlockEntity)) {
 
                 if (!level.isClientSide) {
+                    sendError(player, DATA_LINK_PITCH_REQUIRES_GEARBOX);
                     clearLinkTag(stack);
                 }
 
@@ -731,7 +731,7 @@ public class DataLinkBlockItem extends BlockItem {
             return new FilterCommit(canAttach, null, null);
         }
 
-        static FilterCommit weapon(boolean canAttach, BlockPos weaponMountPos) {
+        static FilterCommit weapon(boolean canAttach, @Nullable BlockPos weaponMountPos) {
             return new FilterCommit(canAttach, weaponMountPos, null);
         }
 
@@ -803,9 +803,13 @@ public class DataLinkBlockItem extends BlockItem {
                 return FilterCommit.denied(DATA_LINK_ONLY_PITCH_ALLOWED);
             }
 
-            BlockPos weaponMountPos = WeaponNetworkRuntime.get(serverLevel).getMountForController(use.clickedPos());
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(serverLevel);
+            runtime.advertiseContactController(use.be());
+            runtime.markContactTopologyDirty();
+            BlockPos weaponMountPos = runtime.getMountForController(use.clickedPos());
+
             if (weaponMountPos == null) {
-                return FilterCommit.denied(DATA_LINK_CONTROLLER_NO_WEAPON_GROUP);
+                return FilterCommit.weapon(data.canReserveWeaponEndpoint(group, use.clickedPos()), null);
             }
 
             return FilterCommit.weapon(data.canAttachWeaponEndpoint(group, use.clickedPos(), weaponMountPos), weaponMountPos);
@@ -836,7 +840,13 @@ public class DataLinkBlockItem extends BlockItem {
                     applyFilters(serverLevel, filtererPos);
                 }
 
-                case CONTROLLER -> data.attachWeaponEndpoint(group, use.clickedPos(), commit.weaponMountPos());
+                case CONTROLLER -> {
+                    if (commit.weaponMountPos() == null) {
+                        data.reserveWeaponEndpoint(group, use.clickedPos());
+                    } else {
+                        data.attachWeaponEndpoint(group, use.clickedPos(), commit.weaponMountPos());
+                    }
+                }
             }
         }
 

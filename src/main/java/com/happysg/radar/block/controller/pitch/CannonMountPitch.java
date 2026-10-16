@@ -194,6 +194,10 @@ public class CannonMountPitch {
     }
 
     private void rotateCBC(CannonMountContext mount) {
+        if (mount.isFixed()) {
+            return;
+        }
+
         DirectCbcMountMotion.State motionState = motionStates.computeIfAbsent(mount.blockEntity(), ignored -> new DirectCbcMountMotion.State());
 
         if (!controller.isRunningController()) {

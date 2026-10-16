@@ -205,7 +205,25 @@ public class ModBlocks {
                     .properties(p -> p.strength(0.8f))
 
                     .transform(axeOrPickaxe())
-                    .blockstate((c, p) -> p.directionalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
+                    .blockstate((c, p) -> p.getVariantBuilder(c.get()).forAllStates(state -> {
+                        Direction facing = state.getValue(AutoYawControllerBlock.FACING);
+                        boolean swivel = state.getValue(AutoYawControllerBlock.SWIVEL_MODE);
+
+                        int rotationX = switch (facing) {
+                            case DOWN -> 0;
+                            case UP -> 180;
+                            default -> 90;
+                        };
+
+                        int rotationY = switch (facing) {
+                            case EAST -> 90;
+                            case SOUTH -> 180;
+                            case WEST -> 270;
+                            default -> 0;
+                        };
+
+                        return ConfiguredModel.builder().modelFile(p.models().getExistingFile(CreateRadar.asResource(swivel ? "block/swivel_controller" : "block/auto_yaw_controller"))).rotationX(rotationX).rotationY(rotationY).build();
+                    }))
                     .simpleItem()
                     .register();
 
@@ -218,7 +236,19 @@ public class ModBlocks {
                     .properties(p -> p.noOcclusion())
                     .properties(p -> p.strength(0.8f))
                     .transform(axeOrPickaxe())
-                    .blockstate((c, p) -> p.horizontalBlock(c.getEntry(), AssetLookup.standardModel(c, p)))
+                    .blockstate((c, p) -> p.getVariantBuilder(c.get()).forAllStates(state -> {
+                        Direction facing = state.getValue(AutoPitchControllerBlock.HORIZONTAL_FACING);
+                        boolean swivel = state.getValue(AutoPitchControllerBlock.SWIVEL_MODE);
+
+                        int rotationY = switch (facing) {
+                            case EAST -> 90;
+                            case SOUTH -> 180;
+                            case WEST -> 270;
+                            default -> 0;
+                        };
+
+                        return ConfiguredModel.builder().modelFile(p.models().getExistingFile(CreateRadar.asResource(swivel ? "block/swivel_controller" : "block/auto_pitch_controller"))).rotationY(rotationY).build();
+                    }))
                     .simpleItem()
                     .register();
 

@@ -1250,10 +1250,19 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private boolean tickKineticActuator() {
         KineticMountAdapterResolution resolution = resolveKineticMount();
+        KineticMountAdapter adapter = resolution.adapter();
+        boolean swivelMode = resolution.hasAdapter() && adapter != null && adapter.isValid();
+        BlockState state = getBlockState();
+
+        if (state.hasProperty(AutoPitchControllerBlock.SWIVEL_MODE) && state.getValue(AutoPitchControllerBlock.SWIVEL_MODE) != swivelMode) {
+            level.setBlock(worldPosition, state.setValue(AutoPitchControllerBlock.SWIVEL_MODE, swivelMode), 2);
+        }
+
         boolean consumed = kineticControllerState.tick(
                 this, resolution, isRunning, targetAngle,
                 KINETIC_TRACKING_TOLERANCE_DEG,
                 getAvailableInputSpeed(), this::commandGeneratedSpeed);
+
         flushKineticStateSync();
         return consumed;
     }

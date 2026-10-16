@@ -153,6 +153,127 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
                 controller, rotationAxis, selectedDirection, selectedBearing));
     }
 
+    public static boolean isMountOnControllerSwivel(KineticBlockEntity controller, Direction.Axis rotationAxis, BlockPos mountPos) {
+        if (controller == null || mountPos == null) {
+            return false;
+        }
+
+        Level level = controller.getLevel();
+        if (level == null || !level.hasChunkAt(mountPos)) {
+            return false;
+        }
+
+        KineticMountAdapterResolution resolution = resolve(controller, rotationAxis);
+
+        if (!(resolution.adapter() instanceof SimulatedSwivelMountAdapter swivel) || !swivel.isValid() || !swivel.isAssembled()) {
+            return false;
+        }
+
+        BlockEntity mountEntity = level.getBlockEntity(mountPos);
+        if (CannonMountContext.of(mountEntity) == null) {
+            return false;
+        }
+
+        UUID assemblyId = swivel.bearing.getSubLevelID();
+        if (assemblyId == null) {
+            return false;
+        }
+
+        SubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null) {
+            return false;
+        }
+
+        SubLevel attached = container.getSubLevel(assemblyId);
+        if (attached == null || attached.isRemoved()) {
+            return false;
+        }
+
+        SubLevel containing = Sable.HELPER.getContaining(mountEntity);
+        return containing != null && (containing == attached || SubLevelHelper.getConnectedChain(attached).contains(containing));
+    }
+
+    public static Direction findTPitchLinkSide(
+            TPitchControllerBlockEntity controller,
+            BlockPos mountPos
+    ) {
+        Direction assembledSide =
+                findTPitchSwivelSide(controller, mountPos);
+
+        if (assembledSide != null) {
+            return assembledSide;
+        }
+
+        Level level = controller.getLevel();
+        if (level == null || mountPos == null
+                || !level.hasChunkAt(mountPos)) {
+            return null;
+        }
+
+        BlockState state = controller.getBlockState();
+        if (!state.hasProperty(TPitchControllerBlock.ORIENTATION)) {
+            return null;
+        }
+
+        Direction.Axis axis = state.getValue(
+                TPitchControllerBlock.ORIENTATION).crossbarAxis();
+
+        Direction positive = axis == Direction.Axis.X
+                ? Direction.EAST : Direction.SOUTH;
+
+        boolean first = isUnassembledTPitchSwivelSide(
+                controller, positive, axis, mountPos);
+
+        boolean second = isUnassembledTPitchSwivelSide(
+                controller, positive.getOpposite(), axis, mountPos);
+
+        if (first == second) {
+            return null;
+        }
+
+        return first ? positive : positive.getOpposite();
+    }
+
+    private static boolean isUnassembledTPitchSwivelSide(TPitchControllerBlockEntity controller, Direction side, Direction.Axis axis, BlockPos mountPos) {
+        Level level = controller.getLevel();
+        if (level == null) {
+            return false;
+        }
+
+        BlockPos bearingPos = controller.getBlockPos().relative(side);
+        BlockPos mountEndpointPos = bearingPos.relative(side);
+
+        if (!level.hasChunkAt(bearingPos) || !level.hasChunkAt(mountEndpointPos) || !level.hasChunkAt(mountPos)) {
+            return false;
+        }
+
+        if (!(level.getBlockEntity(bearingPos) instanceof SwivelBearingBlockEntity bearing)) {
+            return false;
+        }
+
+        BlockState bearingState = bearing.getBlockState();
+
+        if (!(bearingState.getBlock() instanceof SwivelBearingBlock)
+                || !bearingState.hasProperty(SwivelBearingBlock.FACING)
+                || bearingState.getValue(SwivelBearingBlock.FACING).getAxis() != axis
+                || !bearingState.hasProperty(SwivelBearingBlock.ASSEMBLED)
+                || bearingState.getValue(SwivelBearingBlock.ASSEMBLED)
+                || bearing.getSubLevelID() != null) {
+            return false;
+        }
+
+        CannonMountContext mount = CannonMountContext.resolveEndpoint(level, mountEndpointPos);
+
+        if (mount == null || !mount.isCurrent() || !mount.getBlockPos().equals(mountPos)) {
+            return false;
+        }
+
+        SubLevel bearingLevel = Sable.HELPER.getContaining(bearing);
+        SubLevel mountLevel = Sable.HELPER.getContaining(mount.blockEntity());
+
+        return bearingLevel == mountLevel && (bearingLevel == null || !bearingLevel.isRemoved());
+    }
+
     /**
      * Returns the T-Pitch output carrying the given weapon mount.
      */
