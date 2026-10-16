@@ -10,6 +10,7 @@ public class ModPartials {
     public static final PartialModel ROTATING_MOUNT  = block("rotating_mount");
     public static final PartialModel SKY_RADAR_TOP_SHAFT = block("sky_radar_top_shaft");
     public static final PartialModel ROTATING_JAMMER = block("rotating_jammer");
+    public static final PartialModel SWIVEL_COG = block("swivel_cog");
 
     private static PartialModel block(String path) {
         return PartialModel.of(CreateRadar.asResource("block/" + path));
