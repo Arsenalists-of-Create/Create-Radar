@@ -2,6 +2,9 @@ package com.happysg.radar.block.controller.kinetic;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
+import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlock;
+import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
+import com.happysg.radar.registry.ModPartials;
 import com.simibubi.create.AllPartialModels;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
@@ -13,6 +16,7 @@ import net.createmod.catnip.render.SuperByteBuffer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import org.joml.Quaternionf;
@@ -72,8 +76,29 @@ public class ControllerShaftRenderer<
                 ? CachedBuffers.partial(AllPartialModels.SHAFT_HALF,
                 blockEntity.getBlockState())
                 : CachedBuffers.block(KineticBlockEntityRenderer.shaft(axis));
-        shaft.light(light)
-                .renderInto(poseStack, buffer.getBuffer(RenderType.solid()));
+        shaft.light(light).renderInto(poseStack, buffer.getBuffer(RenderType.solid()));
+
+        BlockState state = blockEntity.getBlockState();
+        boolean swivelMode = (state.getBlock() instanceof AutoYawControllerBlock
+                && state.getValue(AutoYawControllerBlock.SWIVEL_MODE)) || (state.getBlock() instanceof AutoPitchControllerBlock
+                && state.getValue(AutoPitchControllerBlock.SWIVEL_MODE));
+
+        if (swivelMode) {
+            poseStack.pushPose();
+
+            Direction direction = Direction.get(Direction.AxisDirection.POSITIVE, axis);
+
+            poseStack.translate(0.5f, 0.5f, 0.5f);
+            poseStack.mulPose(new Quaternionf().rotationTo(0, 1, 0, direction.getStepX(), direction.getStepY(), direction.getStepZ()));
+            poseStack.translate(-0.5f, -0.5f, -0.5f);
+
+            CachedBuffers.partial(ModPartials.SWIVEL_COG, state)
+                    .light(light)
+                    .renderInto(poseStack, buffer.getBuffer(RenderType.solid()));
+
+            poseStack.popPose();
+        }
+
         poseStack.popPose();
     }
 

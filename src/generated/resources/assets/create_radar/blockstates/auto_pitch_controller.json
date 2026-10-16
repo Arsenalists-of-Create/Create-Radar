@@ -1,18 +1,33 @@
 {
   "variants": {
-    "facing=east": {
+    "facing=east,swivel_mode=false": {
       "model": "create_radar:block/auto_pitch_controller",
       "y": 90
     },
-    "facing=north": {
+    "facing=east,swivel_mode=true": {
+      "model": "create_radar:block/swivel_controller",
+      "y": 90
+    },
+    "facing=north,swivel_mode=false": {
       "model": "create_radar:block/auto_pitch_controller"
     },
-    "facing=south": {
+    "facing=north,swivel_mode=true": {
+      "model": "create_radar:block/swivel_controller"
+    },
+    "facing=south,swivel_mode=false": {
       "model": "create_radar:block/auto_pitch_controller",
       "y": 180
     },
-    "facing=west": {
+    "facing=south,swivel_mode=true": {
+      "model": "create_radar:block/swivel_controller",
+      "y": 180
+    },
+    "facing=west,swivel_mode=false": {
       "model": "create_radar:block/auto_pitch_controller",
+      "y": 270
+    },
+    "facing=west,swivel_mode=true": {
+      "model": "create_radar:block/swivel_controller",
       "y": 270
     }
   }
