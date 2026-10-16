@@ -26,7 +26,7 @@ public final class LoadedFluidDrag {
         LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
 
         if (chunk == null) {
-            throw UNAVAILABLE;
+            return 0.0;
         }
 
         return FluidDragHandler.getFluidDrag(chunk.getFluidState(pos));

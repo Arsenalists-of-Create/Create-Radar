@@ -4516,6 +4516,30 @@ public class WeaponFiringControl {
                 .equals(hitSublevel.getUniqueId());
     }
 
+    @Nullable
+    private Vec3 predictedTargetSegmentIntersection(TargetingSnapshot snapshot, Trajectory.Sample from, Trajectory.Sample to) {
+        AABB targetBox = snapshot.targetAabb();
+        if (targetBox == null) {
+            return null;
+        }
+
+        Vec3 targetFrom = predictTarget(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), from.tick(), snapshot.targetMotionClass(), snapshot.gravity());
+        Vec3 targetTo = predictTarget(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), to.tick(), snapshot.targetMotionClass(), snapshot.gravity());
+        Vec3 relativeFrom = from.position().subtract(targetFrom.subtract(snapshot.targetPosition()));
+        Vec3 relativeTo = to.position().subtract(targetTo.subtract(snapshot.targetPosition()));
+        Vec3 intersection = targetBox.contains(relativeFrom) ? relativeFrom : targetBox.clip(relativeFrom, relativeTo).orElse(null);
+
+        if (intersection == null) {
+            return null;
+        }
+
+        Vec3 relativeTravel = relativeTo.subtract(relativeFrom);
+        double lengthSquared = relativeTravel.lengthSqr();
+        double fraction = lengthSquared < 1.0E-12 ? 0.0 : Math.max(0.0, Math.min(1.0, intersection.subtract(relativeFrom).dot(relativeTravel) / lengthSquared));
+
+        return from.position().lerp(to.position(), fraction);
+    }
+
     private boolean ballisticSidePathClear(
             ServerLevel serverLevel,
             AimGeometry geometry,
@@ -4533,7 +4557,7 @@ public class WeaponFiringControl {
         ProjectileSimulator.SimulationResult trajectory;
 
         try {
-            trajectory = this.validationProjectileSimulator.simulate(geometry.launchPosition(direction), direction, snapshot.inheritedVelocity(), model, ticks, serverLevel);
+            trajectory = this.validationProjectileSimulator.simulate(geometry.launchPosition(direction), direction, snapshot.inheritedVelocity(), model, ticks, serverLevel, (from, to) -> predictedTargetSegmentIntersection(snapshot, from, to) != null);
         } catch (LoadedFluidDrag.Unavailable ignored) {
             return false;
         }
@@ -4545,30 +4569,18 @@ public class WeaponFiringControl {
         int segmentImpactEndTick = -1;
 
         if (snapshot.targetAabb() != null) {
-            AABB targetBox = snapshot.targetAabb();
-
             for (int i = 0; i + 1 < samples.size(); i++) {
-                var from = samples.get(i);
-                var to = samples.get(i + 1);
+                Trajectory.Sample from = samples.get(i);
+                Trajectory.Sample to = samples.get(i + 1);
 
-                Vec3 targetFrom = predictTarget(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), from.tick(), snapshot.targetMotionClass(), snapshot.gravity());
-                Vec3 targetTo = predictTarget(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), to.tick(), snapshot.targetMotionClass(), snapshot.gravity());
-
-                Vec3 relativeFrom = from.position().subtract(targetFrom.subtract(snapshot.targetPosition()));
-                Vec3 relativeTo = to.position().subtract(targetTo.subtract(snapshot.targetPosition()));
-                Vec3 intersection = targetBox.contains(relativeFrom) ? relativeFrom : targetBox.clip(relativeFrom, relativeTo).orElse(null);
+                Vec3 intersection = predictedTargetSegmentIntersection(snapshot, from, to);
 
                 if (intersection == null) {
                     continue;
                 }
 
-                Vec3 relativeTravel = relativeTo.subtract(relativeFrom);
-                double lengthSquared = relativeTravel.lengthSqr();
-                double fraction = lengthSquared < 1.0E-12 ? 0.0 : Math.max(0.0, Math.min(1.0, intersection.subtract(relativeFrom).dot(relativeTravel) / lengthSquared));
-
-                segmentImpactPoint = from.position().lerp(to.position(), fraction);
+                segmentImpactPoint = intersection;
                 segmentImpactEndTick = to.tick();
-
                 break;
             }
         }

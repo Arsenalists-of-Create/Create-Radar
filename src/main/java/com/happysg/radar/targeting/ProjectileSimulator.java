@@ -2,28 +2,38 @@ package com.happysg.radar.targeting;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiPredicate;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+
+import javax.annotation.Nullable;
 
 public class ProjectileSimulator {
    private static final int MAX_SIMULATION_TICKS = 4096;
 
    public SimulationResult simulate(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, ProjectileModel model, int maxTicks) {
-      return model == null ? ProjectileSimulator.SimulationResult.empty(startPosition) : this.simulate(startPosition, aimDirection, inheritedVelocity, model, maxTicks, null);
+      return simulate(startPosition, aimDirection, inheritedVelocity, model, maxTicks, null);
    }
 
    public SimulationResult simulate(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, ProjectileModel model, int maxTicks, Level level) {
-      if (model == null) {
-         return ProjectileSimulator.SimulationResult.empty(startPosition);
-      }
-      if (model.usesCustomDynamics()) {
-         return this.simulateCustom(startPosition, aimDirection, inheritedVelocity, model, maxTicks, level);
-      }
-      return this.simulate(startPosition, aimDirection, inheritedVelocity, model.muzzleSpeed(), model.gravity(), model.drag(), model.quadraticDrag(), model.cbcPhysics(), model.dragDensity(), maxTicks, level);
+      return simulate(startPosition, aimDirection, inheritedVelocity, model, maxTicks, level, null);
    }
 
-   private SimulationResult simulateCustom(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, ProjectileModel model, int maxTicks, Level level) {
+   public SimulationResult simulate(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, ProjectileModel model, int maxTicks, Level level, @Nullable BiPredicate<Trajectory.Sample, Trajectory.Sample> stopOnSegment) {
+      if (model == null) {
+         return SimulationResult.empty(startPosition);
+      }
+
+      if (model.usesCustomDynamics()) {
+         return simulateCustom(startPosition, aimDirection, inheritedVelocity, model, maxTicks, level, stopOnSegment);
+      }
+
+      return simulate(startPosition, aimDirection, inheritedVelocity, model.muzzleSpeed(), model.gravity(), model.drag(), model.quadraticDrag(), model.cbcPhysics(), model.dragDensity(), maxTicks, level, stopOnSegment);
+   }
+
+   private SimulationResult simulateCustom(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, ProjectileModel model, int maxTicks, Level level, @Nullable BiPredicate<Trajectory.Sample, Trajectory.Sample> stopOnSegment) {
       Vec3 safeStart = finite(startPosition) ? startPosition : Vec3.ZERO;
       Vec3 safeInherited = finite(inheritedVelocity) ? inheritedVelocity : Vec3.ZERO;
       if (aimDirection == null || !finite(aimDirection) || aimDirection.lengthSqr() < 1.0E-12
@@ -45,13 +55,23 @@ public class ProjectileSimulator {
       int ticks = Math.max(0, Math.min(MAX_SIMULATION_TICKS, maxTicks));
       List<Trajectory.Sample> samples = new ArrayList<>(ticks + 1);
       ProjectileStep step = new ProjectileStep();
+      Trajectory.Sample previous = null;
 
       for (int tick = 0; tick <= ticks; tick++) {
-         samples.add(new Trajectory.Sample(tick, new Vec3(px, py, pz), new Vec3(vx, vy, vz)));
+         Trajectory.Sample current = new Trajectory.Sample(tick, new Vec3(px, py, pz), new Vec3(vx, vy, vz));
+         samples.add(current);
+
+         if (previous != null && stopOnSegment != null && stopOnSegment.test(previous, current)) {
+            break;
+         }
+
          if (tick == ticks) {
             break;
          }
+
+         previous = current;
          dynamics.step(tick, px, py, pz, vx, vy, vz, level, step);
+
          px = step.positionX;
          py = step.positionY;
          pz = step.positionZ;
@@ -61,7 +81,7 @@ public class ProjectileSimulator {
       }
 
       Trajectory trajectory = new Trajectory(samples);
-      return new SimulationResult(trajectory, ticks, trajectory.endPosition(), trajectory.endVelocity());
+      return new SimulationResult(trajectory, trajectory.endTick(), trajectory.endPosition(), trajectory.endVelocity());
    }
 
    public SimulationResult simulate(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, double muzzleSpeed, double gravity, double drag, int maxTicks) {
@@ -73,6 +93,10 @@ public class ProjectileSimulator {
    }
 
    public SimulationResult simulate(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, double muzzleSpeed, double gravity, double drag, boolean quadraticDrag, boolean cbcPhysics, double dragDensity, int maxTicks, Level level) {
+      return simulate(startPosition, aimDirection, inheritedVelocity, muzzleSpeed, gravity, drag, quadraticDrag, cbcPhysics, dragDensity, maxTicks, level, null);
+   }
+
+   public SimulationResult simulate(Vec3 startPosition, Vec3 aimDirection, Vec3 inheritedVelocity, double muzzleSpeed, double gravity, double drag, boolean quadraticDrag, boolean cbcPhysics, double dragDensity, int maxTicks, Level level, @Nullable BiPredicate<Trajectory.Sample, Trajectory.Sample> stopOnSegment) {
       if (startPosition == null) {
          startPosition = Vec3.ZERO;
       }
@@ -101,8 +125,23 @@ public class ProjectileSimulator {
             int ticks = Math.max(0, Math.min(MAX_SIMULATION_TICKS, maxTicks));
             List<Trajectory.Sample> samples = new ArrayList<>(ticks + 1);
 
-            for(int tick = 0; tick <= ticks; ++tick) {
-               samples.add(new Trajectory.Sample(tick, position, velocity));
+            Trajectory.Sample previous = null;
+
+            for (int tick = 0; tick <= ticks; ++tick) {
+               Trajectory.Sample current = new Trajectory.Sample(tick, position, velocity);
+               samples.add(current);
+
+               if (previous != null && stopOnSegment != null
+                       && stopOnSegment.test(previous, current)) {
+                  break;
+               }
+
+               if (tick == ticks) {
+                  break;
+               }
+
+               previous = current;
+
                if (cbcPhysics) {
                   Vec3 acceleration = cbcAcceleration(position, velocity, gravity, drag, dragDensity, quadraticDrag, level);
                   position = position.add(velocity).add(acceleration.scale(0.5));
@@ -125,7 +164,7 @@ public class ProjectileSimulator {
             }
 
             Trajectory trajectory = new Trajectory(samples);
-            return new SimulationResult(trajectory, ticks, trajectory.endPosition(), trajectory.endVelocity());
+            return new SimulationResult(trajectory, trajectory.endTick(), trajectory.endPosition(), trajectory.endVelocity());
          } else {
             return ProjectileSimulator.SimulationResult.empty(startPosition);
          }
