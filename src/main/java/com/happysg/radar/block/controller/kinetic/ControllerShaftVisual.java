@@ -59,7 +59,7 @@ public class ControllerShaftVisual<
         if (swivelMode && cog == null) {
             cog = instancerProvider()
                     .instancer(AllInstanceTypes.ROTATING,
-                            Models.partial(ModPartials.SWIVEL_COG))
+                            Models.partial(AllPartialModels.SHAFTLESS_COGWHEEL))
                     .createInstance();
         } else if (!swivelMode && cog != null) {
             cog.delete();

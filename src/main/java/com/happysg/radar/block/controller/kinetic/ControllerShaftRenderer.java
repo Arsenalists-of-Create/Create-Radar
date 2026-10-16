@@ -92,7 +92,7 @@ public class ControllerShaftRenderer<
             poseStack.mulPose(new Quaternionf().rotationTo(0, 1, 0, direction.getStepX(), direction.getStepY(), direction.getStepZ()));
             poseStack.translate(-0.5f, -0.5f, -0.5f);
 
-            CachedBuffers.partial(ModPartials.SWIVEL_COG, state)
+            CachedBuffers.partial(AllPartialModels.SHAFTLESS_COGWHEEL, state)
                     .light(light)
                     .renderInto(poseStack, buffer.getBuffer(RenderType.solid()));
 

@@ -247,7 +247,11 @@ public class ModBlocks {
                             default -> 0;
                         };
 
-                        return ConfiguredModel.builder().modelFile(p.models().getExistingFile(CreateRadar.asResource(swivel ? "block/swivel_controller_pitch" : "block/auto_pitch_controller"))).rotationY(rotationY).build();
+                        return ConfiguredModel.builder()
+                                .modelFile(p.models().getExistingFile(CreateRadar.asResource(swivel ? "block/swivel_controller" : "block/auto_pitch_controller")))
+                                .rotationX(swivel ? 90 : 0)
+                                .rotationY(rotationY)
+                                .build();
                     }))
                     .simpleItem()
                     .register();
