@@ -59,11 +59,9 @@ public final class KineticPowerSource {
             return 0.0;
         }
 
+        //|| rotate.getRotationAxis(sourceState) != direction.getAxis()
         BlockState sourceState = level.getBlockState(sourcePos);
-        if (!(sourceState.getBlock() instanceof IRotate rotate)
-                || rotate.getRotationAxis(sourceState) != direction.getAxis()
-                || !rotate.hasShaftTowards(level, sourcePos, sourceState,
-                direction.getOpposite())) {
+        if (!(sourceState.getBlock() instanceof IRotate rotate) || !rotate.hasShaftTowards(level, sourcePos, sourceState, direction.getOpposite())) {
             return 0.0;
         }
 
