@@ -8,6 +8,10 @@
     {
       "id": "create_kaboom:unguided_rocket",
       "required": false
+    },
+    {
+      "id": "cbcmodernwarfare:munitions_contraption",
+      "required": false
     }
   ]
 }

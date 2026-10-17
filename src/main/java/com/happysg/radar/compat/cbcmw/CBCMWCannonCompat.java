@@ -19,6 +19,7 @@ import rbasamoyai.createbigcannons.munitions.autocannon.AutocannonAmmoItem;
 import rbasamoyai.createbigcannons.munitions.autocannon.ammo_container.AutocannonAmmoContainerItem;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
 import riftyboi.cbcmodernwarfare.cannon_control.contraption.MountedMediumcannonContraption;
+import riftyboi.cbcmodernwarfare.cannon_control.contraption.MountedMunitionsLauncherContraption;
 import riftyboi.cbcmodernwarfare.cannon_control.contraption.MountedRotarycannonContraption;
 import riftyboi.cbcmodernwarfare.cannons.medium_cannon.MediumcannonBlock;
 import riftyboi.cbcmodernwarfare.cannons.medium_cannon.IMediumcannonBlockEntity;
@@ -66,6 +67,10 @@ public final class CBCMWCannonCompat {
 
     public static boolean isRotaryCannon(AbstractMountedCannonContraption cannon) {
         return cannon instanceof MountedRotarycannonContraption;
+    }
+
+    public static boolean isMunitionsLauncher(AbstractMountedCannonContraption cannon) {
+        return cannon instanceof MountedMunitionsLauncherContraption;
     }
 
     @Nullable

@@ -827,6 +827,10 @@ public class CannonUtil {
         return Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isCBCMWCannon(cannon);
     }
 
+    public static boolean isCBCMWLauncher(AbstractMountedCannonContraption cannon) {
+        return Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isMunitionsLauncher(cannon);
+    }
+
     public static boolean isMediumCannon(AbstractMountedCannonContraption cannon) {
         return Mods.CBCMODERNWARFARE.isLoaded() && CBCMWCannonCompat.isMediumCannon(cannon);
     }

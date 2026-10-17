@@ -1133,6 +1133,15 @@ public class WeaponFiringControl {
                     || adapter.aimMode() == WeaponShotProfile.AimMode.BALLISTIC
                     && adapter.projectileModel() != null;
         }
+
+        if (CannonUtil.isCBCMWLauncher(cannon)) {
+            return false;
+        }
+
+        if (CannonUtil.isLaserCannon(cannon)) {
+            return true;
+        }
+
         if (CannonUtil.isLaserCannon(cannon)) {
             return true;
         }
