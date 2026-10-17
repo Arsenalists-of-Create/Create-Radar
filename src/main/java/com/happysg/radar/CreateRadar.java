@@ -8,6 +8,7 @@ import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorInputHandler;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CbcRadarWeaponRegistration;
+import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
 import com.happysg.radar.compat.sable.SableSilhouetteClientCache;
 import com.happysg.radar.compat.sable.SableSilhouetteEvents;
 import com.happysg.radar.compat.computercraft.CCCompatRegister;
@@ -41,7 +42,6 @@ import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
-import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
@@ -79,9 +79,6 @@ public class CreateRadar {
         ModLang.register();
         ModPartials.init();
         ModSounds.register(modEventBus);
-
-
-
         RadarConfig.register(container);
 
         modEventBus.addListener(CreateRadar::init);
@@ -97,11 +94,14 @@ public class CreateRadar {
             CbcRadarWeaponRegistration.register();
         }
 
+        if (Mods.CBCMODERNWARFARE.isLoaded()) {
+            CBCMWCannonCompat.registerLauncherShotAdapter();
+        }
+
         if (Mods.SABLE.isLoaded())
             SableSilhouetteEvents.register();
 
-        if (Mods.COMPUTERCRAFT.isLoaded())
-            CCCompatRegister.registerPeripherals();
+        if (Mods.COMPUTERCRAFT.isLoaded()) CCCompatRegister.registerPeripherals();
         EarlyDiagnosticJournal.record("MOD_CONSTRUCTOR", "COMPLETE", Map.of());
     }
 
