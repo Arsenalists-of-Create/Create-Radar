@@ -25,6 +25,7 @@ import org.slf4j.Logger;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import rbasamoyai.createbigcannons.cannons.ItemCannonBehavior;
+import rbasamoyai.createbigcannons.config.CBCConfigs;
 import rbasamoyai.createbigcannons.munitions.AbstractCannonProjectile;
 import rbasamoyai.createbigcannons.munitions.autocannon.AutocannonAmmoItem;
 import rbasamoyai.createbigcannons.munitions.autocannon.ammo_container.AutocannonAmmoContainerItem;
@@ -53,6 +54,7 @@ import riftyboi.cbcmodernwarfare.munitions.contraptions.config.MunitionsContrapt
 import riftyboi.cbcmodernwarfare.munitions.medium_cannon.MediumcannonAmmoItem;
 import riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.fuel_tanks.IFuelTankBlock;
 import riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.guidance.IGuidanceBlock;
+import riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.guidance.infrared_homing.InfraredSeekerGuidanceBlock;
 import riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.propulsion.IThrusterBlock;
 import riftyboi.cbcmodernwarfare.munitions.munitions_contraption_launcher.propulsion.MunitionsLauncherThrusterBlock;
 
@@ -211,8 +213,8 @@ public final class CBCMWCannonCompat {
         );
     }
 
-    public record LauncherShotPreview(LauncherLoadout loadout, LauncherProjectileModel model, Vec3 muzzleWorldPosition, String fingerprint) { }
-    public record LauncherLoadout(float initialSpeed, float gravity, int fuelTicks, float burnRate, float thrust, BlockPos muzzleExitLocal) { }
+    public record LauncherShotPreview(LauncherLoadout loadout, LauncherProjectileModel model, Vec3 muzzleWorldPosition, String fingerprint) {}
+    public record LauncherLoadout(float initialSpeed, float gravity, int fuelTicks, float burnRate, float thrust, BlockPos muzzleExitLocal, boolean infraredGuidance) {}
 
     @Nullable
     public static LauncherShotPreview resolveLauncherShotPreview(CannonMountContext mount, ServerLevel level) {
@@ -304,8 +306,7 @@ public final class CBCMWCannonCompat {
         }
 
         BlockEntity startBlockEntity = cannon.presentBlockEntities.get(start);
-        if (!(startBlockEntity instanceof MediumcannonBreechBlockEntity breech)
-                || !(startBlockEntity.getBlockState().getBlock() instanceof MediumcannonBlock block)) {
+        if (!(startBlockEntity instanceof MediumcannonBreechBlockEntity breech) || !(startBlockEntity.getBlockState().getBlock() instanceof MediumcannonBlock block)) {
             return null;
         }
 
@@ -317,10 +318,13 @@ public final class CBCMWCannonCompat {
         }
 
         BarrelWalk walk = walkBarrels(cannon, start, direction, true, loadedStack);
-        float speed = material.properties().baseSpeed()
-                + Math.min(walk.travelled(), material.properties().maxSpeedIncreases())
-                * material.properties().speedIncreasePerBarrel();
-        BallisticPropertiesComponent ballistics = resolveBallistics(projectile);
+        float speed = material.properties().baseSpeed() + Math.min(walk.travelled(), material.properties().maxSpeedIncreases()) * material.properties().speedIncreasePerBarrel();
+        BallisticPropertiesComponent ballistics = CannonUtil.getProjectileBallistics(projectile);
+
+        if (ballistics == null) {
+            return null;
+        }
+
         return new ShotState(speed, ballistics, 0, describeAmmo(loadedStack));
     }
 
@@ -346,11 +350,21 @@ public final class CBCMWCannonCompat {
         }
 
         BarrelWalk walk = walkBarrels(cannon, start, direction, false, loadedStack);
-        float speed = material.properties().baseSpeed()
-                + Math.min(walk.travelled(), material.properties().maxSpeedIncreases())
-                * material.properties().speedIncreasePerBarrel();
+        if (!CBCConfigs.server().failure.disableAllFailure.get() && walk.travelled() > material.properties().maxBarrelLength()) {
+            var ammoProperties = ((AutocannonAmmoItem) loadedStack.getItem()).getAutocannonProperties(loadedStack);
+            if (ammoProperties == null || ammoProperties.canSquib()) {
+                return null;
+            }
+        }
+
+        float speed = material.properties().baseSpeed() + Math.min(walk.travelled(), material.properties().maxSpeedIncreases()) * material.properties().speedIncreasePerBarrel();
         int lifetime = Math.max(1, material.properties().projectileLifetime());
-        BallisticPropertiesComponent ballistics = resolveBallistics(projectile);
+
+        BallisticPropertiesComponent ballistics = CannonUtil.getProjectileBallistics(projectile);
+        if (ballistics == null || !Float.isFinite(speed) || speed <= 0.0F) {
+            return null;
+        }
+
         return new ShotState(speed, ballistics, lifetime, describeAmmo(loadedStack));
     }
 
@@ -409,6 +423,7 @@ public final class CBCMWCannonCompat {
 
         int thrusterCount = 0;
         int warheadCount = 0;
+        int infraredSeekerCount = 0;
         int loadedBlocks = 0;
         boolean passedEmptyTube = false;
         boolean reachedMuzzle = false;
@@ -454,16 +469,18 @@ public final class CBCMWCannonCompat {
             }
 
             var block = loaded.state().getBlock();
-            if (block instanceof IGuidanceBlock) {
-                return null;
-            }
+            if (block instanceof IGuidanceBlock guidance) {
+                if (!(block instanceof InfraredSeekerGuidanceBlock) || ++infraredSeekerCount > 1) {
+                    return null;
+                }
 
-            if (block instanceof IThrusterBlock thruster) {
+                gravity += guidance.addedGravity();
+
+            } else if (block instanceof IThrusterBlock thruster) {
                 if (!(block instanceof MunitionsLauncherThrusterBlock)) {
                     return null;
                 }
 
-                gravity += thruster.addedGravity();
                 gravity += thruster.addedGravity();
                 storedFuel += thruster.storedFuel();
                 burnRate += thruster.burnRate();
@@ -501,7 +518,7 @@ public final class CBCMWCannonCompat {
             current = current.relative(direction);
         }
 
-        if (loadedBlocks == 0 ||
+        if (!reachedMuzzle ||
                 loadedBlocks == 0 ||
                 thrusterCount != 1 ||
                 storedFuel <= 0 ||
@@ -517,14 +534,7 @@ public final class CBCMWCannonCompat {
         int fuelTicks = (int) storedFuel * 20;
         gravity = Math.min(gravity, -0.02F);
 
-        return new LauncherLoadout(
-                initialSpeed,
-                gravity,
-                fuelTicks,
-                burnRate,
-                thrust,
-                current.immutable()
-        );
+        return new LauncherLoadout(initialSpeed, gravity, fuelTicks, burnRate, thrust, current.immutable(), infraredSeekerCount == 1);
     }
 
     /**
@@ -690,15 +700,44 @@ public final class CBCMWCannonCompat {
                         return null;
                     }
 
+                    WeaponFirePreparation preparation = fireContext -> {
+                        if (!fireContext.level().getServer().isSameThread()) {
+                            return false;
+                        }
+
+                        if (fireContext.level() != context.level() || !fireContext.mountPos().equals(mount.getBlockPos()) || !mount.isCurrent()) {
+                            return false;
+                        }
+
+                        LauncherShotPreview current = resolveLauncherShotPreview(mount, fireContext.level());
+                        if (current == null) {
+                            return false;
+                        }
+
+                        return preview.loadout().equals(current.loadout()) && preview.model().equals(current.model()) && preview.fingerprint().equals(current.fingerprint());
+                    };
+
+                    if (preview.loadout().infraredGuidance()) {
+                        return WeaponShotProfile.direct(
+                                preview.muzzleWorldPosition(),
+                                Vec3.ZERO,
+                                preview.fingerprint(),
+                                0.0,
+                                true,
+                                preparation,
+                                "cbcmw_infrared_target_designation"
+                        );
+                    }
+
                     return WeaponShotProfile.ballistic(
                             ProjectileModelBridge.toApi(preview.model()),
                             preview.muzzleWorldPosition(),
                             Vec3.ZERO,
                             0,
                             preview.fingerprint(),
-                            false,
-                            WeaponFirePreparation.READY,
-                            "cbcmw_launcher_aim_preview"
+                            true,
+                            preparation,
+                            "cbcmw_launcher_ballistic"
                     );
                 }
         );

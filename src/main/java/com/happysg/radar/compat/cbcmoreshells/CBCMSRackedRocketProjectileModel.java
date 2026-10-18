@@ -13,7 +13,6 @@ public record CBCMSRackedRocketProjectileModel(
         double steadyStateVelocity,
         int maxFlightTicks
 ) implements CBCMSProjectileModel {
-
     public CBCMSRackedRocketProjectileModel {
         thrustTicks = Math.max(0, thrustTicks);
         maxFlightTicks = Math.max(1, maxFlightTicks);

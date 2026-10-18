@@ -34,6 +34,7 @@ import com.happysg.radar.compat.cbc_at.CBCATRocketAimSolver;
 import com.happysg.radar.compat.cbcmoreshells.CBCMSAimSolver;
 import com.happysg.radar.compat.cbcmoreshells.CBCMSCannonCompat;
 import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
+import com.happysg.radar.compat.cbcmw.CBCMWGuidanceCompat;
 import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
 import com.happysg.radar.compat.sable.SubLevelAimResolver;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -2228,17 +2229,20 @@ public class WeaponFiringControl {
                                                 dualAuthorityShot
                                         );
                                     } else {
-                                        boolean shouldFire =
-                                                sharedFireGates
-                                                && yawPitchOk
-                                                && cannonReady;
+                                        boolean shouldFire = sharedFireGates && yawPitchOk && cannonReady;
+
                                         if (shouldFire
                                                 && adapterShot != null
-                                                && !this.prepareAdapterShotForFire(
-                                                adapterShot,
-                                                adapterContext)) {
+                                                && !this.prepareAdapterShotForFire(adapterShot, adapterContext)) {
                                             shouldFire = false;
                                         }
+
+                                        if (shouldFire
+                                                && CannonUtil.isCBCMWLauncher(cannon)
+                                                && !CBCMWGuidanceCompat.prepareLaunch(this.cannonMount, serverLevel, this.targetEntity)) {
+                                            shouldFire = false;
+                                        }
+
                                         if (this.fireController != null) {
                                             if (shouldFire) {
                                                 this.tryFireCannon();
@@ -3308,6 +3312,24 @@ public class WeaponFiringControl {
             return null;
         }
 
+        if (model instanceof CBCMWCannonCompat.LauncherProjectileModel launcherModel) {
+            double expectedFluidDrag = launcherModel.sampledFluidDrag();
+            List<Trajectory.Sample> samples = trajectory.samples();
+
+            for (int i = 0; i + 1 < samples.size(); i++) {
+                Vec3 position = samples.get(i).position();
+                BlockPos pos = BlockPos.containing(position);
+                if (serverLevel.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4) == null) {
+                    return null;
+                }
+
+                double actualFluidDrag = LoadedFluidDrag.sample(serverLevel, pos);
+                if (!Double.isFinite(actualFluidDrag) || Math.abs(actualFluidDrag - expectedFluidDrag) > 1.0E-6) {
+                    return null;
+                }
+            }
+        }
+
         int originalCheckTick = Math.max(0, result.predictedFlightTicks());
 
         Vec3 segmentImpact = null;
@@ -3393,6 +3415,10 @@ public class WeaponFiringControl {
 
         if (obstruction.clear() || this.isValidatedObstructionAtTarget(snapshot, obstruction)) {
             return result;
+        }
+
+        if (model instanceof CBCMWCannonCompat.LauncherProjectileModel) {
+            return null;
         }
 
         TargetingComputer computer = this.targetingComputerFor(currentProjectile.solverKind(), false);
@@ -5624,6 +5650,14 @@ public class WeaponFiringControl {
             ) && isWeaponStateOk(side);
 
             if (shouldFire && shot.adapter != null && !prepareAdapterShotForFire(shot.adapter, shot.context, side.mountPos)) {
+                shouldFire = false;
+            }
+
+            if (shouldFire
+                    && shot != null
+                    && shot.cannon != null
+                    && CannonUtil.isCBCMWLauncher(shot.cannon)
+                    && !CBCMWGuidanceCompat.prepareLaunch(side.mount, serverLevel, this.targetEntity)) {
                 shouldFire = false;
             }
 
