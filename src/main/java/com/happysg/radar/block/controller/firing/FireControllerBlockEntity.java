@@ -54,7 +54,7 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
         long now = level.getGameTime();
 
         // i hard fail-safe: if nobody has told me to keep firing recently, i turn off
-        if ((isPowered() || pulsing) && lastCommandTick >= 0 && (now - lastCommandTick) > FAILSAFE_TICKS) {
+        if ((isPowered() || pulsing) && (lastCommandTick < 0 || now < lastCommandTick || now - lastCommandTick > FAILSAFE_TICKS)) {
             setPowered(false);
             return;
         }
@@ -142,17 +142,20 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
         if (!(state.getBlock() instanceof FireControllerBlock))
             return;
 
-        if (state.getValue(FireControllerBlock.POWERED) == powered)
-            return;
-
+        boolean fieldChanged = this.powered != powered;
         this.powered = powered;
 
+        if (state.getValue(FireControllerBlock.POWERED) == powered) {
+            if (fieldChanged) {
+                setChanged();
+                sendData();
+            }
+            return;
+        }
+
         level.setBlock(worldPosition, state.setValue(FireControllerBlock.POWERED, powered), 3);
-
         level.updateNeighborsAt(worldPosition, state.getBlock());
-        for (Direction d : Direction.values())
-            level.updateNeighborsAt(worldPosition.relative(d), state.getBlock());
-
+        for (Direction d : Direction.values()) level.updateNeighborsAt(worldPosition.relative(d), state.getBlock());
         level.updateNeighbourForOutputSignal(worldPosition, state.getBlock());
 
         setChanged();
@@ -189,6 +192,7 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
     @Override
     public void onLoad() {
         super.onLoad();
+        lastCommandTick = -1;
         powered = false;
         pulsing = false;
         nextPulseTick = -1;

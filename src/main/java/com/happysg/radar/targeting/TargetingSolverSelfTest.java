@@ -45,6 +45,7 @@ public final class TargetingSolverSelfTest {
       results.add(checkIntercept("moving_away", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)2.0F, (double)0.0F, (double)0.0F), (double)10.0F, true));
       results.add(checkIntercept("target_too_fast_to_intercept", new Vec3((double)100.0F, (double)0.0F, (double)0.0F), new Vec3((double)12.0F, (double)0.0F, (double)0.0F), (double)10.0F, false));
       results.add(checkProjectileIntegrationOrder());
+      results.add(checkCbcSweepEndpoint());
       results.add(checkStatefulDynamicsIsolation());
       results.add(checkCBCATLaunchFormulas());
       results.add(checkCBCATSmallRocketPoweredStep());
@@ -61,9 +62,15 @@ public final class TargetingSolverSelfTest {
       results.add(checkBigCannonHighLowRoots());
       results.add(checkBigCannonUnreachable());
       results.add(checkTrustedAccelerationPrediction());
+      results.add(checkLaunchTimeTargetRebase());
+      results.add(checkRigidBodyLaunchPrediction());
+      results.add(checkRigidBodyTargetRotation());
+      results.add(checkRotatingRigidBodyIntercept());
+      results.add(checkCandidateSpecificMuzzleVelocity());
       results.add(checkLongRangeStationarySolve());
       results.add(checkLongRangeMovingSolve());
       results.add(checkLongRangeCbcStyleSolve());
+      results.add(checkDragMathIntercept());
       results.add(checkProjectileSimulatorLongCap());
       results.add(checkCoupledMuzzleCloseRangeStability());
       results.add(checkCoupledMuzzleMovingLead());
@@ -163,9 +170,9 @@ public final class TargetingSolverSelfTest {
       );
       ProjectileStep step = new ProjectileStep();
       model.step(0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, null, step);
-      boolean passed = close(step.positionX, 1.025)
+      boolean passed = close(step.positionX, 1.0375)
               && close(step.positionY, -0.04375)
-              && close(step.velocityX, 1.05)
+              && close(step.velocityX, 1.075)
               && close(step.velocityY, -0.0875);
       return new Result("cbc_at_small_rocket_powered_step", passed,
               "pos=" + step.positionX + "," + step.positionY
@@ -178,7 +185,7 @@ public final class TargetingSolverSelfTest {
       );
       ProjectileStep step = new ProjectileStep();
       model.step(0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, null, step);
-      boolean passed = close(step.positionX, 1.05) && close(step.velocityX, 1.1);
+      boolean passed = close(step.positionX, 1.075) && close(step.velocityX, 1.15);
       return new Result("cbc_at_medium_rocket_powered_step", passed,
               "positionX=" + step.positionX + " velocityX=" + step.velocityX);
    }
@@ -227,6 +234,221 @@ public final class TargetingSolverSelfTest {
       TargetingResult result = computer.solve(snapshot, model);
       boolean passed = result != null && result.valid() && result.hasShot() && result.missDistance() < 1.0;
       return new Result(name, passed, result == null ? "<null>" : result.debugString());
+   }
+
+   private static Result checkCbcSweepEndpoint() {
+      Trajectory.Sample from = new Trajectory.Sample(0, Vec3.ZERO, new Vec3(10, 0, 0));
+      Trajectory.Sample to = new Trajectory.Sample(1, new Vec3(10, -0.5, 0), new Vec3(10, -1, 0));
+      Vec3 sweepEnd = ObstructionChecker.cbcSweepEnd(from, to);
+
+      boolean passed = close(sweepEnd.x, 10.0) && close(sweepEnd.y, -1.0) && close(sweepEnd.z, 0.0) && close(to.position().y, -0.5);
+      return new Result("cbc_collision_sweep_endpoint", passed, "movement=" + to.position() + " collisionEnd=" + sweepEnd);
+   }
+
+   private static Result checkRigidBodyLaunchPrediction() {
+      Vec3 omega = new Vec3(0.0, 0.1, 0.0);
+      Vec3 origin = Vec3.ZERO;
+      Vec3 velocity = new Vec3(0.2, 0.0, 0.0);
+
+      double distance = 8.0;
+
+      RigidBodyLaunchMath.Motion sampled =
+              RigidBodyLaunchMath.fromVelocityProbes(
+                      origin,
+                      velocity,
+                      velocity.add(omega.cross(new Vec3(distance, 0, 0))),
+                      velocity.add(omega.cross(new Vec3(0, distance, 0))),
+                      velocity.add(omega.cross(new Vec3(0, 0, distance))),
+                      distance
+              );
+
+      if (sampled == null) {
+         return new Result("rigid_body_launch_prediction", false, "velocity sampling failed");
+      }
+
+      double ticks = Math.PI / (2.0 * 0.1);
+      Vec3 point = new Vec3(10.0, 0.0, 0.0);
+      Vec3 future = sampled.futurePosition(point, ticks);
+      Vec3 futureVelocity = sampled.futureVelocity(point, ticks);
+      Vec3 expectedPosition = new Vec3(velocity.x * ticks, 0.0, -10.0);
+      Vec3 expectedVelocity = new Vec3(-0.8, 0.0, 0.0);
+
+      boolean passed = close(sampled.angularVelocity(), omega) && future.distanceTo(expectedPosition) < 1.0e-6 && futureVelocity.distanceTo(expectedVelocity) < 1.0e-6;
+      return new Result("rigid_body_launch_prediction", passed, "future=" + future + " velocity=" + futureVelocity + " omega=" + sampled.angularVelocity());
+   }
+
+   private static Result checkRigidBodyTargetRotation() {
+      Vec3 origin = Vec3.ZERO;
+      Vec3 linearVelocity = new Vec3(0.2, 0.0, 0.0);
+      double rotationRate = Math.PI / 20.0;
+      Vec3 omega = new Vec3(0.0, rotationRate, 0.0);
+
+      double probeDistance = 8.0;
+
+      RigidBodyLaunchMath.Motion motion =
+              RigidBodyLaunchMath.fromVelocityProbes(
+                      origin,
+                      linearVelocity,
+                      linearVelocity.add(omega.cross(new Vec3(probeDistance, 0, 0))),
+                      linearVelocity.add(omega.cross(new Vec3(0, probeDistance, 0))),
+                      linearVelocity.add(omega.cross(new Vec3(0, 0, probeDistance))),
+                      probeDistance
+              );
+
+      if (motion == null) {
+         return new Result("rigid_body_target_rotation", false, "Motion sampling failed");
+      }
+
+      Vec3 hullPoint = new Vec3(10.0, 0.0, 0.0);
+
+      RigidBodyTargetMotion target = new RigidBodyTargetMotion(motion, hullPoint, 2.0);
+
+      Vec3 predictedLaunch = target.launchPosition();
+      Vec3 expectedLaunch = motion.futurePosition(hullPoint, 2.0);
+
+      Vec3 predictedImpact = target.positionAt(8.0);
+      Vec3 expectedImpact = new Vec3(2.0, 0.0, -10.0);
+
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(target.launchPosition())
+              .targetVelocity(target.launchVelocity())
+              .targetAcceleration(Vec3.ZERO)
+              .rigidBodyTargetMotion(target)
+              .projectileSpeed(5.0)
+              .maxFlightTicks(100)
+              .build();
+
+      TargetPredictor predictor = new TargetPredictor();
+      Vec3 snapshotPrediction = predictor.predictPosition(snapshot, 8.0);
+      Vec3 trustedPrediction = predictor.predictPosition(snapshot, 8.0, 0.25);
+
+      TargetingSnapshot asyncCopy = snapshot.withoutLiveLevel();
+
+      boolean snapshotPassed = snapshotPrediction.distanceToSqr(expectedImpact) < 1.0e-10
+              && trustedPrediction.distanceToSqr(expectedImpact) < 1.0e-10
+              && asyncCopy.rigidBodyTargetMotion() != null
+              && asyncCopy.rigidBodyTargetMotion().positionAt(8.0).distanceToSqr(expectedImpact) < 1.0e-10;
+
+      Vec3 predictedVelocity = target.velocityAt(8.0);
+      Vec3 expectedVelocity = new Vec3(0.2 - 10.0 * rotationRate, 0.0, 0.0);
+
+      Vec3 linearOnlyPrediction = hullPoint.add(motion.futureVelocity(hullPoint, 0.0).scale(10.0));
+
+      boolean passed = close(predictedLaunch, expectedLaunch)
+              && close(predictedImpact, expectedImpact)
+              && close(predictedVelocity, expectedVelocity)
+              && close(target.positionAt(-1.0), expectedLaunch)
+              && linearOnlyPrediction.distanceTo(predictedImpact) > 3.0
+              && snapshotPassed;
+
+
+      return new Result("rigid_body_target_rotation", passed, "launch=" + predictedLaunch + " impact=" + predictedImpact + " velocity=" + predictedVelocity + " linearOnly=" + linearOnlyPrediction);
+   }
+
+   private static Result checkRotatingRigidBodyIntercept() {
+      Vec3 origin = new Vec3(120.0, 0.0, 0.0);
+      Vec3 linearVelocity = new Vec3(0.08, 0.0, 0.0);
+      Vec3 omega = new Vec3(0.0, 0.07, 0.0);
+      double distance = 8.0;
+
+      RigidBodyLaunchMath.Motion motion =
+              RigidBodyLaunchMath.fromVelocityProbes(
+                      origin,
+                      linearVelocity,
+                      linearVelocity.add(omega.cross(new Vec3(distance, 0, 0))),
+                      linearVelocity.add(omega.cross(new Vec3(0, distance, 0))),
+                      linearVelocity.add(omega.cross(new Vec3(0, 0, distance))), distance
+              );
+
+      if (motion == null) {
+         return new Result("rotating_rigid_body_intercept", false, "Motion sampling failed");
+      }
+
+      RigidBodyTargetMotion target = new RigidBodyTargetMotion(motion, origin.add(0.0, 0.0, 12.0), 3.0);
+
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(target.launchPosition())
+              .targetVelocity(target.launchVelocity())
+              .targetAcceleration(Vec3.ZERO)
+              .rigidBodyTargetMotion(target)
+              .projectileSpeed(10.0)
+              .gravity(0.0)
+              .drag(0.0)
+              .maxFlightTicks(55)
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
+
+      TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
+      TargetingResult result = computer.solve(snapshot);
+
+      boolean passed = result != null
+              && result.valid()
+              && result.hasShot()
+              && result.aimSolution() != null
+              && result.missDistance() < 0.5;
+
+      return new Result("rotating_rigid_body_intercept", passed, result == null ? "null result" : result.debugString());
+   }
+
+   private static Result checkDragMathIntercept() {
+      ProjectileModel model = ProjectileModel.cbc(8.0, -0.05, 0.01, 1.0, false);
+
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(Vec3.ZERO)
+              .targetPosition(new Vec3(150.0, 0.0, 10.0))
+              .targetVelocity(new Vec3(0.0, 0.0, 0.08))
+              .projectileSpeed(model.muzzleSpeed())
+              .gravity(model.gravity())
+              .drag(model.drag())
+              .cbcPhysics(true)
+              .maxFlightTicks(120)
+              .targetMotionClass(TargetMotionClass.STEADY)
+              .build();
+
+      TargetingResult result = new SimulatedAimSolver(new ProjectileSimulator(), new TargetPredictor()).solve(snapshot, model, ObstructionChecker.NONE);
+      String path = debugValue(result, "path=");
+      int evaluations = debugInt(result, "candidateEvaluations=");
+
+      boolean passed = result != null
+              && result.valid()
+              && result.hasShot()
+              && result.missDistance() <= 0.10
+              && "math_drag".equals(path)
+              && evaluations > 0
+              && evaluations <= 45;
+
+      return new Result("drag_math_intercept", passed, "path=" + path + " evaluations=" + evaluations + " result=" + result.debugString());
+   }
+
+   private static Result checkCandidateSpecificMuzzleVelocity() {
+      Vec3 referenceMuzzle = new Vec3(5.0, 0.0, 0.0);
+      Vec3 referenceVelocity = new Vec3(0.2, 0.0, -0.5);
+      Vec3 omega = new Vec3(0.0, 0.1, 0.0);
+
+      TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+              .muzzlePosition(referenceMuzzle)
+              .launchPivotPosition(Vec3.ZERO)
+              .muzzleForwardOffset(5.0)
+              .inheritedVelocity(referenceVelocity)
+              .launchAngularVelocity(omega)
+              .targetPosition(new Vec3(100.0, 0.0, 0.0))
+              .projectileSpeed(10.0)
+              .maxFlightTicks(100)
+              .build();
+
+      Vec3 forwardX = new Vec3(1.0, 0.0, 0.0);
+      Vec3 forwardZ = new Vec3(0.0, 0.0, 1.0);
+
+      Vec3 velocityX = snapshot.inheritedVelocityAt(forwardX);
+      Vec3 velocityZ = snapshot.inheritedVelocityAt(forwardZ);
+
+      Vec3 expectedVelocityZ = new Vec3(0.7, 0.0, 0.0);
+      Vec3 copiedVelocity = snapshot.withoutLiveLevel().inheritedVelocityAt(forwardZ);
+
+      boolean passed = close(velocityX, referenceVelocity) && close(velocityZ, expectedVelocityZ) && close(copiedVelocity, expectedVelocityZ);
+      return new Result("candidate_specific_muzzle_velocity", passed, "reference=" + velocityX + " rotated=" + velocityZ + " expected=" + expectedVelocityZ);
    }
 
    private static Result checkProjectileIntegrationOrder() {
@@ -385,6 +607,42 @@ public final class TargetingSolverSelfTest {
               "integrations=" + result.ticks() + " samples=" + result.samples().size());
    }
 
+   private static Result checkLaunchTimeTargetRebase() {
+      TargetPredictor predictor = new TargetPredictor();
+
+      Vec3 position = new Vec3(120.0, 14.0, -34.0);
+      Vec3 velocity = new Vec3(0.8, 0.03, -0.07);
+      Vec3 acceleration = new Vec3(0.4, -0.01, 0.03);
+
+      double firingDelay = 12.0;
+      double flightTime = 15.5;
+
+      for (TargetMotionClass motionClass : new TargetMotionClass[]{TargetMotionClass.STEADY, TargetMotionClass.ERRATIC, TargetMotionClass.UNKNOWN}) {
+         Vec3 effectiveAcceleration = TargetingMotion.effectiveAcceleration(acceleration, motionClass);
+         Vec3 delayedPosition = TargetingMotion.futurePosition(position, velocity, effectiveAcceleration, firingDelay);
+         Vec3 delayedVelocity = TargetingMotion.futureVelocity(velocity, effectiveAcceleration, firingDelay);
+
+         TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+                 .muzzlePosition(Vec3.ZERO)
+                 .targetPosition(delayedPosition)
+                 .targetVelocity(delayedVelocity)
+                 .targetAcceleration(acceleration)
+                 .targetMotionClass(motionClass)
+                 .projectileSpeed(10.0)
+                 .maxFlightTicks(100)
+                 .build();
+
+         Vec3 actual = predictor.predictPosition(snapshot, flightTime, TargetingMotion.accelerationTrust(motionClass));
+         Vec3 expected = TargetingMotion.futurePosition(position, velocity, effectiveAcceleration, firingDelay + flightTime);
+
+         if (actual.distanceToSqr(expected) > 1.0e-12) {
+            return new Result("launch_time_target_rebase", false, "motionClass=" + motionClass + " actual=" + actual + " expected=" + expected);
+         }
+      }
+
+      return new Result("launch_time_target_rebase", true, "Position and velocity remain consistent " + "across firing delays and acceleration trust");
+   }
+
    private static Result checkTrustedAccelerationPrediction() {
       TargetPredictor predictor = new TargetPredictor();
       TargetingSnapshot snapshot = TargetingSnapshot.builder(null).targetPosition(Vec3.ZERO).targetVelocity(new Vec3((double)1.0F, (double)0.0F, (double)0.0F)).targetAcceleration(new Vec3((double)0.2F, (double)0.0F, (double)0.0F)).projectileSpeed((double)1.0F).maxFlightTicks(20).build();
@@ -540,34 +798,30 @@ public final class TargetingSolverSelfTest {
    }
 
    private static Result checkCoupledMuzzleWarmResponsiveness() {
-      TargetingComputer computer = new TargetingComputer(
-              null, new ProjectileSimulator(),
-              new TargetPredictor(), ObstructionChecker.NONE);
+      TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
       Vec3 initialTarget = new Vec3(10.0, 0.0, 0.0);
       TargetingResult cold = computer.solve(
               coupledMuzzleSnapshot(
                       initialTarget, Vec3.ZERO,
-                      TargetingMath.directionFromYawPitch(
-                              30.0, 0.0).scale(5.0),
+                      TargetingMath.directionFromYawPitch(30.0, 0.0).scale(5.0),
                       null));
       TargetingResult warm = computer.solve(
               coupledMuzzleSnapshot(
                       initialTarget.add(0.0, 0.0, 0.02),
                       Vec3.ZERO,
-                      TargetingMath.directionFromYawPitch(
-                              -30.0, 0.0).scale(5.0),
-                      cold));
-      int coldEvaluations =
-              debugInt(cold, "candidateEvaluations=");
-      int warmEvaluations =
-              debugInt(warm, "candidateEvaluations=");
+                      TargetingMath.directionFromYawPitch(-30.0, 0.0).scale(5.0), cold));
+      int coldEvaluations = debugInt(cold, "candidateEvaluations=");
+      int warmEvaluations = debugInt(warm, "candidateEvaluations=");
+      String path = debugValue(warm, "path=");
+
+      boolean analytic = "analytic".equals(path);
+      boolean warmDual = "warm_dual".equals(path);
+
       boolean passed = warm.valid() && warm.hasShot()
-              && "warm_dual".equals(
-              debugValue(warm, "path="))
+              && (analytic || warmDual)
               && warmEvaluations > 0
-              && warmEvaluations < coldEvaluations
-              && Math.abs(warm.desiredYawDeg()
-              - cold.desiredYawDeg()) < 0.5;
+              && (analytic || warmEvaluations < coldEvaluations)
+              && Math.abs(warm.desiredYawDeg() - cold.desiredYawDeg()) < 0.5;
       return new Result(
               "coupled_muzzle_warm_responsiveness",
               passed, "evaluations=" + warmEvaluations
@@ -796,15 +1050,18 @@ public final class TargetingSolverSelfTest {
                       previous.desiredPitchDeg())
                       .scale(initialPosition.length())
                       .distanceTo(movedPosition);
+      String path = debugValue(updated, "path=");
+
+      boolean analytic = "analytic".equals(path);
+      boolean warmDual = "warm_dual".equals(path);
+
       boolean passed = updated.valid() && updated.hasShot()
               && oldDirectionMiss < 0.05
               && Math.abs(yawDelta) > 1.0E-6
-              && "warm_dual".equals(
-              debugValue(updated, "path="))
-              && "true".equals(
-              debugValue(updated, "warmAgreed="))
+              && (analytic || warmDual)
+              && (analytic || "true".equals(debugValue(updated, "warmAgreed=")))
               && warmEvaluations > 0
-              && warmEvaluations < coldEvaluations;
+              && (analytic || warmEvaluations < coldEvaluations);
       return new Result("warm_start_tracks_inside_hit_tolerance",
               passed, "oldDirectionMiss=" + oldDirectionMiss
               + " yawDelta=" + yawDelta
@@ -910,9 +1167,10 @@ public final class TargetingSolverSelfTest {
    private static boolean validTrackingShot(
            TargetingResult result, int evaluations) {
       String path = debugValue(result, "path=");
-      String precision =
-              debugValue(result, "refinementPrecisionBlocks=");
-      boolean recognizedPath = "warm_dual".equals(path)
+      String precision = debugValue(result, "refinementPrecisionBlocks=");
+      boolean recognizedPath = "analytic".equals(path)
+              || "math_drag".equals(path)
+              || "warm_dual".equals(path)
               || "ranked_fallback".equals(path)
               || "ranked".equals(path);
       boolean recognizedPrecision = "warm_dual".equals(path)
@@ -980,7 +1238,7 @@ public final class TargetingSolverSelfTest {
    private static Result checkHighArcObstructionFallback() {
       ObstructionChecker checker = new ObstructionChecker() {
          @Override
-         public ObstructionResult check(net.minecraft.world.level.Level level, ProjectileSimulator.SimulationResult trajectory, int maxTick) {
+         public ObstructionResult check(net.minecraft.world.level.Level level, ProjectileSimulator.SimulationResult trajectory, int maxTick, Vec3 lastSegmentEnd, boolean cbcSweep) {
             List<Trajectory.Sample> samples = trajectory == null ? List.of() : trajectory.trajectory().samples();
             if (samples.size() >= 2) {
                Vec3 step = samples.get(1).position().subtract(samples.get(0).position());

@@ -105,6 +105,12 @@ public class ARADData extends SavedData {
         return rwrKey == null ? null : posFromKey(rwrKey);
     }
 
+    @Nullable
+    public BlockPos peekEndpointForDataLink(ResourceKey<Level> dim, BlockPos dataLinkPos) {
+        String endpointKey = dataLinkToEndpoint.get(key(dim, dataLinkPos));
+        return endpointKey == null ? null : posFromKey(endpointKey);
+    }
+
     public boolean canAttachMonitor(ServerLevel level, Group group, BlockPos monitorPos) {
         String endpointKey = key(group.key.dim(), monitorPos);
         String existing = monitorToRwr.get(endpointKey);

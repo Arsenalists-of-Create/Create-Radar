@@ -5,6 +5,7 @@ import com.happysg.radar.api.mount.RadarMountRegistry;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
+import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.networking.packets.OpenControllerLimitsScreenPacket;
 import com.happysg.radar.block.datalink.DataLinkBlock;
@@ -12,6 +13,7 @@ import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.content.kinetics.base.KineticBlock;
 import com.simibubi.create.foundation.block.IBE;
+import dev.simulated_team.simulated.content.blocks.swivel_bearing.SwivelBearingBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -162,7 +164,24 @@ public class TPitchControllerBlock extends KineticBlock
             }
 
             double score = look.x * direction.getStepX() + look.z * direction.getStepZ();
+            if (score > bestScore) {
+                bestScore = score;
+                bestDirection = direction;
+            }
+        }
 
+        if (bestDirection != null || !Mods.SIMULATED.isLoaded()) {
+            return bestDirection;
+        }
+
+        for (Direction direction : HORIZONTAL_DIRECTIONS) {
+            BlockState neighbor = context.getLevel().getBlockState(placementPos.relative(direction));
+
+            if (!(neighbor.getBlock() instanceof SwivelBearingBlock) || !neighbor.hasProperty(SwivelBearingBlock.FACING) || neighbor.getValue(SwivelBearingBlock.FACING).getAxis() != direction.getAxis()) {
+                continue;
+            }
+
+            double score = look.x * direction.getStepX() + look.z * direction.getStepZ();
             if (score > bestScore) {
                 bestScore = score;
                 bestDirection = direction;

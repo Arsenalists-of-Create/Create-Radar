@@ -273,17 +273,14 @@ public class DataLinkBlockItem extends BlockItem {
             mountPos = apiMount.getMountPos().immutable();
         }
 
-        if (use.be() instanceof TPitchControllerBlockEntity tPitch
-                && !tPitch.canLinkMount(mountPos)) {
+        if (use.be() instanceof TPitchControllerBlockEntity tPitch && !tPitch.canLinkMount(mountPos)) {
             sendError(use.player(), DATA_LINK_T_PITCH_INVALID_MOUNT);
             clearLinkTag(use.stack());
             return InteractionResult.FAIL;
         }
 
         WeaponNetworkRuntime weaponRuntime = WeaponNetworkRuntime.get(serverLevel);
-        List<BlockPos> existingMounts =
-                weaponRuntime.getExplicitMountsForController(
-                        use.clickedPos());
+        List<BlockPos> existingMounts = weaponRuntime.getExplicitMountsForController(use.clickedPos());
         boolean secondTPitchLink = use.be()
                 instanceof TPitchControllerBlockEntity
                 && existingMounts.size() == 1
@@ -296,13 +293,12 @@ public class DataLinkBlockItem extends BlockItem {
 
         BlockPos placedPos = getPlacementPos(use);
         DataLinkBlockEntity.WeaponEndpointType endpointType = controllerType.endpointType();
-        if (endpointType == DataLinkBlockEntity.WeaponEndpointType.PITCH
-                && weaponRuntime.hasPitchReservationConflict(
-                use.clickedPos(), mountPos)) {
+        if (endpointType == DataLinkBlockEntity.WeaponEndpointType.PITCH && weaponRuntime.hasPitchReservationConflict(use.clickedPos(), mountPos)) {
             sendError(use.player(), DATA_LINK_T_PITCH_MOUNT_RESERVED);
             clearLinkTag(use.stack());
             return InteractionResult.FAIL;
         }
+
         if (!weaponRuntime.canAttachEndpoint(endpointType, use.clickedPos(), mountPos)) {
             sendError(use.player(), DATA_LINK_DUPLICATE_CONTROLLER_TYPE);
             clearLinkTag(use.stack());

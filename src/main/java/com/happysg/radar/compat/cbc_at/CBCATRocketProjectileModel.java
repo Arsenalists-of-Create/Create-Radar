@@ -3,6 +3,8 @@ package com.happysg.radar.compat.cbc_at;
 import com.happysg.radar.targeting.LoadedFluidDrag;
 import com.happysg.radar.targeting.ProjectileModel;
 import com.happysg.radar.targeting.ProjectileStep;
+import com.happysg.radar.targeting.Trajectory;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 
@@ -71,7 +73,7 @@ public record CBCATRocketProjectileModel(
         }
 
         boolean powered = tick < fuelTicks;
-        double thrust = powered ? Math.min((tick + 2.0) * thrustIncrease, maxThrust) : 0.0;
+        double thrust = powered ? Math.min((2.0 * tick + 3.0) * thrustIncrease, maxThrust) : 0.0;
         double axialForce = thrust - dragForce;
         double accelerationX = unitX * axialForce;
         double accelerationY = unitY * axialForce + gravity * (powered ? 0.875 : 1.3);
@@ -85,6 +87,24 @@ public record CBCATRocketProjectileModel(
                 velocityY + accelerationY,
                 velocityZ + accelerationZ
         );
+    }
+
+    public Vec3 collisionSweepEnd(Trajectory.Sample from, Trajectory.Sample to) {
+        Vec3 end = from.position().add(to.velocity());
+
+        if (from.tick() >= fuelTicks || thrustIncrease <= 0.0) {
+            return end;
+        }
+
+        double speed = from.velocity().length();
+        if (speed <= 1.0E-8) {
+            return end;
+        }
+
+        double firstThrust = Math.min((2.0 * from.tick() + 2.0) * thrustIncrease, maxThrust);
+        double secondThrust = Math.min((2.0 * from.tick() + 3.0) * thrustIncrease, maxThrust);
+        double difference = secondThrust - firstThrust;
+        return end.subtract(from.velocity().scale(difference / speed));
     }
 
     @Override
@@ -101,7 +121,7 @@ public record CBCATRocketProjectileModel(
                 dragForce *= velocity;
             }
             dragForce = Math.min(Math.max(0.0, dragForce), velocity);
-            double thrust = tick < fuelTicks ? Math.min((tick + 2.0) * thrustIncrease, maxThrust) : 0.0;
+            double thrust = tick < fuelTicks ? Math.min((2.0 * tick + 3.0) * thrustIncrease, maxThrust) : 0.0;
             double acceleration = thrust - dragForce;
             double nextPosition = position + velocity + acceleration * 0.5;
             if (nextPosition >= distance) {

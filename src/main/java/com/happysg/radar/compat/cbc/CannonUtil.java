@@ -108,14 +108,12 @@ public class CannonUtil {
     }
 
     public static int getBarrelLength(AbstractMountedCannonContraption cannon) {
-        if (cannon == null)
+        if (cannon == null || cannon.initialOrientation() == null) {
             return 0;
-        if(cannon.initialOrientation() == Direction.WEST || cannon.initialOrientation() == Direction.NORTH){
-            return ((AbstractCannonAccessor) cannon).getBackExtensionLength();
         }
-        else{
-            return ((AbstractCannonAccessor) cannon).getFrontExtensionLength();
-        }
+
+        AbstractCannonAccessor accessor = (AbstractCannonAccessor) cannon;
+        return cannon.initialOrientation().getAxisDirection() == Direction.AxisDirection.NEGATIVE ? accessor.getBackExtensionLength() : accessor.getFrontExtensionLength();
     }
     public static Vec3 getCannonMountOffset(Level level, BlockPos pos) {
         return getCannonMountOffset(level.getBlockEntity(pos));

@@ -41,6 +41,15 @@ public class ObstructionChecker {
    }
 
    public ObstructionResult check(Level level, ProjectileSimulator.SimulationResult trajectory, int maxTick, Vec3 lastSegmentEnd) {
+      return check(level, trajectory, maxTick, lastSegmentEnd, false);
+   }
+
+   public ObstructionResult check(
+           Level level,
+           ProjectileSimulator.SimulationResult trajectory,
+           int maxTick,
+           Vec3 lastSegmentEnd,
+           boolean cbcSweep) {
       if (this.enabled && level != null && trajectory != null && !level.isClientSide()) {
          List<Trajectory.Sample> samples = trajectory.trajectory().samples();
 
@@ -52,7 +61,9 @@ public class ObstructionChecker {
             }
 
             Vec3 from = fromSample.position();
-            Vec3 to = lastSegmentEnd != null && toSample.tick() == maxTick ? lastSegmentEnd : toSample.position();
+
+            boolean clippedAtTarget = lastSegmentEnd != null && toSample.tick() == maxTick;
+            Vec3 to = clippedAtTarget ? lastSegmentEnd : cbcSweep ? cbcSweepEnd(fromSample, toSample) : toSample.position();
             if (!(from.distanceToSqr(to) < 1.0E-10)) {
                ClipContext context = new ClipContext(from, to, Block.COLLIDER, Fluid.NONE, CollisionContext.empty());
                HitResult hit = level.clip(context);
@@ -80,4 +91,9 @@ public class ObstructionChecker {
          return ObstructionResult.clearPath();
       }
    }
+
+   static Vec3 cbcSweepEnd(Trajectory.Sample from, Trajectory.Sample to) {
+      return from.position().add(to.velocity());
+   }
+
 }

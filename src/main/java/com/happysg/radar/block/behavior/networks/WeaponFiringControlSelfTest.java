@@ -9,6 +9,7 @@ import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.targeting.PitchConstraint;
 import com.happysg.radar.targeting.ProjectileModel;
 import com.happysg.radar.targeting.TargetingSolverSelfTest;
+import com.happysg.radar.targeting.RigidBodyLaunchMath;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.core.BlockPos;
@@ -37,6 +38,8 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkBigCannonFingerprintTracksLiveProperties());
         results.add(checkOrdinaryMotionKeepsPendingSolve());
         results.add(checkFireFreshnessWindow());
+        results.add(checkAsyncSableOriginPrediction());
+        results.add(checkAsyncSableLaunchVelocity());
         results.add(checkAsyncBallisticAimHandoff());
         results.add(checkDirectAdapterAimGating());
         results.add(checkSublevelFrameTracksCarrierRotation());
@@ -332,6 +335,51 @@ public final class WeaponFiringControlSelfTest {
     }
 
     private static TargetingSolverSelfTest.Result
+    checkAsyncSableOriginPrediction() {
+        Vec3 shipOrigin = new Vec3(10.0, 4.0, -8.0);
+        Vec3 linearVelocity = new Vec3(0.4, 0.0, 0.1);
+        Vec3 angularVelocity = new Vec3(0.0, 0.04, 0.0);
+
+        double probeDistance = 8.0;
+
+        Vec3 probeX = new Vec3(probeDistance, 0.0, 0.0);
+        Vec3 probeY = new Vec3(0.0, probeDistance, 0.0);
+        Vec3 probeZ = new Vec3(0.0, 0.0, probeDistance);
+
+        RigidBodyLaunchMath.Motion motion =
+                RigidBodyLaunchMath.fromVelocityProbes(
+                        shipOrigin, linearVelocity,
+                        linearVelocity.add(angularVelocity.cross(probeX)),
+                        linearVelocity.add(angularVelocity.cross(probeY)),
+                        linearVelocity.add(angularVelocity.cross(probeZ)),
+                        probeDistance
+                );
+
+        if (motion == null) {
+            return result("async_sable_origin_prediction", false, "Failed to construct rigid-body motion");
+        }
+
+        Vec3 originalSteeringOrigin = shipOrigin.add(6.0, 0.0, 0.0);
+
+        long elapsedTicks = 3L;
+        int leadTicks = 5;
+
+        Vec3 expectedCurrentFutureOrigin = motion.futurePosition(originalSteeringOrigin, elapsedTicks + leadTicks);
+
+        double steadyError = WeaponFiringControl.asyncSableOriginPredictionErrorSquared(motion, originalSteeringOrigin, elapsedTicks, leadTicks, expectedCurrentFutureOrigin);
+        Vec3 deviatedCurrentFutureOrigin = expectedCurrentFutureOrigin.add(2.0, 0.0, 0.0);
+
+        double deviationError = WeaponFiringControl.asyncSableOriginPredictionErrorSquared(motion, originalSteeringOrigin, elapsedTicks, leadTicks, deviatedCurrentFutureOrigin);
+        double missingMotionError = WeaponFiringControl.asyncSableOriginPredictionErrorSquared(null, originalSteeringOrigin, elapsedTicks, leadTicks, expectedCurrentFutureOrigin);
+
+        boolean passed = steadyError < 1.0e-12 && deviationError > 1.0 && Double.isInfinite(missingMotionError)
+                && WeaponFiringControl.isAsyncSolutionFreshForFire(elapsedTicks, 0.0, steadyError)
+                && !WeaponFiringControl.isAsyncSolutionFreshForFire(elapsedTicks, 0.0, deviationError);
+
+        return result("async_sable_origin_prediction", passed, "steadyError=" + steadyError + " deviationError=" + deviationError + " missingMotion=" + missingMotionError);
+    }
+
+    private static TargetingSolverSelfTest.Result
     checkAsyncBallisticAimHandoff() {
         WeaponFiringControl.AimUpdateMode firstSolution =
                 WeaponFiringControl.selectAimUpdateMode(true, true);
@@ -366,6 +414,73 @@ public final class WeaponFiringControlSelfTest {
                 "timeline=" + firstSolution + "->" + pending + "->"
                         + nextSolution + " initial=" + initialWait
                         + " direct=" + intentionalDirect);
+    }
+
+    private static RigidBodyLaunchMath.Motion sampledMotion(
+            Vec3 origin,
+            Vec3 velocity,
+            Vec3 omega
+    ) {
+        double distance = 8.0;
+
+        return RigidBodyLaunchMath.fromVelocityProbes(
+                origin,
+                velocity,
+                velocity.add(omega.cross(new Vec3(distance, 0, 0))),
+                velocity.add(omega.cross(new Vec3(0, distance, 0))),
+                velocity.add(omega.cross(new Vec3(0, 0, distance))),
+                distance
+        );
+    }
+
+    private static TargetingSolverSelfTest.Result
+    checkAsyncSableLaunchVelocity() {
+        Vec3 pivot = new Vec3(12.0, 3.0, -8.0);
+        Vec3 velocity = new Vec3(0.2, 0.0, -0.1);
+        Vec3 omega = new Vec3(0.0, 0.03, 0.0);
+
+        RigidBodyLaunchMath.Motion original = sampledMotion(pivot, velocity, omega);
+
+        if (original == null) {
+            return result("async_sable_launch_velocity", false, "Original motion unavailable");
+        }
+
+        long elapsed = 3L;
+        int lead = 5;
+        int flightTicks = 80;
+        double barrelOffset = 8.0;
+        Vec3 direction = new Vec3(1.0, 0.0, 0.0);
+
+        Vec3 livePivot = original.futurePosition(pivot, elapsed);
+        Vec3 liveVelocity = original.futureVelocity(pivot, elapsed);
+
+        RigidBodyLaunchMath.Motion steady = sampledMotion(livePivot, liveVelocity, omega);
+        RigidBodyLaunchMath.Motion changedSpeed = sampledMotion(livePivot, liveVelocity.add(0.1, 0.0, 0.0), omega);
+        RigidBodyLaunchMath.Motion changedRotation = sampledMotion(livePivot, liveVelocity, omega.add(0.0, 0.05, 0.0));
+
+        double steadyError =
+                WeaponFiringControl.asyncSableLaunchVelocityErrorSquared(
+                        original, steady, pivot, livePivot,
+                        direction, elapsed, lead, barrelOffset
+                );
+
+        double speedError =
+                WeaponFiringControl.asyncSableLaunchVelocityErrorSquared(
+                        original, changedSpeed, pivot, livePivot,
+                        direction, elapsed, lead, barrelOffset
+                );
+
+        double rotationError =
+                WeaponFiringControl.asyncSableLaunchVelocityErrorSquared(
+                        original, changedRotation, pivot, livePivot,
+                        direction, elapsed, lead, barrelOffset
+                );
+
+        boolean passed = WeaponFiringControl.asyncSableVelocityWithinTolerance(steadyError, flightTicks)
+                && !WeaponFiringControl.asyncSableVelocityWithinTolerance(speedError, flightTicks)
+                && !WeaponFiringControl.asyncSableVelocityWithinTolerance(rotationError, flightTicks);
+
+        return result("async_sable_launch_velocity", passed, "steady=" + steadyError + " changedSpeed=" + speedError + " changedRotation=" + rotationError);
     }
 
     private static TargetingSolverSelfTest.Result

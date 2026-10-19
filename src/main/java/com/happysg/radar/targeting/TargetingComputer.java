@@ -72,7 +72,7 @@ public class TargetingComputer {
             ProjectileSimulator.SimulationResult trajectory = TargetingComputer.this.projectileSimulator.simulate(launchPosition, direction, snapshot.inheritedVelocity(), projectileModel, estimatedTicks);
             Vec3 predictedTarget = TargetingComputer.this.targetPredictor.predictPosition(snapshot, (double)estimatedTicks);
             double missDistance = trajectory.endPosition().distanceTo(predictedTarget);
-            ObstructionResult obstruction = obstructionChecker.check(snapshot.level(), trajectory, estimatedTicks);
+            ObstructionResult obstruction = obstructionChecker.check(snapshot.level(), trajectory, estimatedTicks, null, projectileModel.cbcPhysics() && !projectileModel.usesCustomDynamics());
             TargetingDebugInfo debugData = new TargetingDebugInfo(snapshot.targetPosition(), predictedTarget, trajectory.endPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), snapshot.inheritedVelocity(), trajectory.trajectory().samples(), estimatedTicks, missDistance, yawDeg, pitchDeg, snapshot.currentYawDeg(), snapshot.currentPitchDeg(), this.confidenceFromMiss(missDistance), obstruction);
             List<String> debug = new ArrayList<>();
             debug.add("solver=placeholder_direct");

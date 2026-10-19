@@ -102,6 +102,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     protected DetectionConfig filter = DetectionConfig.DEFAULT;
     private BlockPos lastKnownPos = BlockPos.ZERO;
     public final List<SafeZone> safeZones = new ArrayList<>();
+    private boolean safeZoneSyncPending = false;
 
     @Override
     public List<MonitorContactSnapshot> getMonitorContacts() {
@@ -267,7 +268,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 updateCacheServerOrClient();
                 if (isController()) {
                     ARADTargetDesignationHandler.validateSelection(sl, this);
-                    if (level.getGameTime() % 20 == 0) {
+
+                    if (safeZoneSyncPending) {
                         pushSafeZonesToFilterer(sl);
                     }
                 }
@@ -280,6 +282,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
                 sendData();
             }
+        }
+
+        if (level instanceof ServerLevel serverLevel && isController() && serverLevel.getGameTime() % 40 == 0) {
+            ARADTargetDesignationHandler.replayMissingJammerSelections(serverLevel, this);
         }
 
         if (!level.isClientSide && level.getGameTime() % 40 == 0) {
@@ -1397,8 +1403,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     public void setControllerPos(BlockPos newController, int size) {
         if (level instanceof ServerLevel sl) {
             BlockPos oldController = this.controller == null ? worldPosition : this.controller;
-            NetworkData data = NetworkData.get(sl);
-            data.retargetEndpoint(sl.dimension(), oldController, newController);
+
+            if (!oldController.equals(newController)) {
+                NetworkData.get(sl).retargetEndpoint(sl.dimension(), oldController, newController);
+                ARADData.get(sl).updateMonitorPosition(sl.dimension(), oldController, newController);
+            }
         }
 
         this.controller = newController;
@@ -1480,7 +1489,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             return;
         }
 
-        Client.showSafeZone(this);
+        Client.showSafeZone(getController());
     }
 
     @OnlyIn(Dist.CLIENT)
@@ -1506,16 +1515,16 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (level == null) {
             return false;
         }
-        SubLevelAccess clickedSubLevel = Mods.SABLE.isLoaded()
-                ? SableUtils.getShipManagingPos(level, pos)
-                : null;
-        Vec3 worldPosition = clickedSubLevel == null
-                ? Vec3.atCenterOf(pos)
-                : SableUtils.getWorldVec(level, pos);
-        boolean removed = safeZones.removeIf(safeZone -> safeZone.contains(level, worldPosition));
+
+        MonitorBlockEntity owner = getController();
+        SubLevelAccess clickedSubLevel = Mods.SABLE.isLoaded() ? SableUtils.getShipManagingPos(level, pos) : null;
+        Vec3 worldPosition = clickedSubLevel == null ? Vec3.atCenterOf(pos) : SableUtils.getWorldVec(level, pos);
+        boolean removed = owner.safeZones.removeIf(safeZone -> safeZone.contains(level, worldPosition));
+
         if (removed) {
-            syncSafeZones();
+            owner.syncSafeZones();
         }
+
         return removed;
     }
 
@@ -1529,21 +1538,29 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     private void syncSafeZones() {
+        safeZoneSyncPending = true;
         setChanged();
         sendData();
+
         if (level instanceof ServerLevel serverLevel) {
             pushSafeZonesToFilterer(serverLevel);
         }
     }
 
     private void pushSafeZonesToFilterer(ServerLevel serverLevel) {
+        if (!isController()) {
+            return;
+        }
+
         NetworkData.Group group = getNetworkGroup(serverLevel);
         if (group == null) {
             return;
         }
+
         BlockPos filtererPos = group.key.filtererPos();
         if (serverLevel.getBlockEntity(filtererPos) instanceof NetworkFiltererBlockEntity filterer) {
             filterer.updateSafeZones(safeZones);
+            safeZoneSyncPending = false;
         }
     }
 

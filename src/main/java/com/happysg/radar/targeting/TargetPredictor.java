@@ -10,9 +10,15 @@ public class TargetPredictor {
    public Vec3 predictPosition(TargetingSnapshot snapshot, double ticksAhead) {
       if (snapshot == null) {
          return Vec3.ZERO;
-      } else {
-         return this.predictPosition(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), ticksAhead);
       }
+
+      RigidBodyTargetMotion rigidMotion = snapshot.rigidBodyTargetMotion();
+
+      if (rigidMotion != null) {
+         return rigidMotion.positionAt(ticksAhead);
+      }
+
+      return this.predictPosition(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), ticksAhead);
    }
 
    public Vec3 predictPosition(Vec3 position, Vec3 velocity, Vec3 acceleration, double ticksAhead) {
@@ -26,10 +32,17 @@ public class TargetPredictor {
    public Vec3 predictPosition(TargetingSnapshot snapshot, double ticksAhead, double accelerationTrust) {
       if (snapshot == null) {
          return Vec3.ZERO;
-      } else {
-         Vec3 acceleration = this.sanitizeAcceleration(snapshot.targetAcceleration()).scale(clamp01(accelerationTrust));
-         return this.predictPosition(snapshot.targetPosition(), snapshot.targetVelocity(), acceleration, ticksAhead);
       }
+
+      RigidBodyTargetMotion rigidMotion = snapshot.rigidBodyTargetMotion();
+
+      if (rigidMotion != null) {
+         return rigidMotion.positionAt(ticksAhead);
+      }
+
+      Vec3 acceleration = this.sanitizeAcceleration(snapshot.targetAcceleration()).scale(clamp01(accelerationTrust));
+
+      return this.predictPosition(snapshot.targetPosition(), snapshot.targetVelocity(), acceleration, ticksAhead);
    }
 
    @Nullable

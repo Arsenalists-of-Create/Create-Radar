@@ -64,6 +64,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     public record ChaffSuppression(String targetId, long untilTick) {}
     private static final String NBT_INVENTORY = "Inventory";
     private static final String NBT_SLOT_NBT  = "SlotNbt";
+    private static final String NBT_SAFE_ZONES = "SafeZones";
     private static final Logger LOGGER = LogUtils.getLogger();
 
     // Legacy keys (for backwards compatibility with old saves)
@@ -330,6 +331,16 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             } else {
                 applySelectedTarget(sl, data, group, null, false);
             }
+            return;
+        }
+
+        if (selected != null && selected.position() != null && AutoTargetingHelper.isInSafeZone(selected.position(), safeZones, sl)) {
+            if (selectedWasAuto && targeting.autoTarget()) {
+                dropOrReselectAuto(sl, data, group);
+            } else {
+                applySelectedTarget(sl, data, group, null, false);
+            }
+
             return;
         }
 
@@ -1065,8 +1076,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             chaffAutoIgnoredTargetId = null;
         }
 
-        updateSafeZones(safeZones);
-
         selectedWasAuto = false;
 
         NetworkData data = NetworkData.get(sl);
@@ -1088,17 +1097,21 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
     public void updateSafeZones(@Nullable List<SafeZone> safeZones) {
         List<SafeZone> updated = safeZones == null ? List.of() : List.copyOf(safeZones);
-        if (this.safeZones.equals(updated)) {
-            return;
+        boolean changed = !this.safeZones.equals(updated);
+
+        if (changed) {
+            this.safeZones = new ArrayList<>(updated);
+            setChanged();
         }
-        this.safeZones = new ArrayList<>(updated);
+
+        endpointCacheUntilTick = -1;
+        endpointRepushRequired = true;
+
         if (level instanceof ServerLevel serverLevel) {
-            for (AutoPitchControllerBlockEntity pitch : getWeaponEndpointsCached(serverLevel)) {
+            for (AutoPitchControllerBlockEntity pitch : getWeaponEndpointBlockEntities()) {
                 pitch.setSafeZones(this.safeZones);
             }
         }
-        lastPushedSafeZonesHash = safeZonesHash(this.safeZones);
-        setChanged();
     }
 
     public void onBinocularsTriggered(Player player, ItemStack binos, boolean reset) {
@@ -1152,23 +1165,48 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
     }
 
-    private List<AutoPitchControllerBlockEntity> getWeaponEndpointsCached(ServerLevel sl) {
+    private List<AutoPitchControllerBlockEntity> getWeaponEndpointsCached(
+            ServerLevel sl) {
+
         long now = sl.getGameTime();
 
-        // reuse for 20 ticks (1 second). Tune to 10-40 as desired.
         if (now <= endpointCacheUntilTick && endpointCache != null) {
             return endpointCache;
         }
 
-        endpointCache = getWeaponEndpointBlockEntities();
+        List<AutoPitchControllerBlockEntity> previous = endpointCache;
+        List<AutoPitchControllerBlockEntity> refreshed =
+                getWeaponEndpointBlockEntities();
+
+        boolean instancesChanged =
+                previous == null
+                        || previous.size() != refreshed.size();
+
+        if (!instancesChanged) {
+            for (int i = 0; i < refreshed.size(); i++) {
+                if (previous.get(i) != refreshed.get(i)) {
+                    instancesChanged = true;
+                    break;
+                }
+            }
+        }
+
+        endpointCache = refreshed;
         long signature = 1L;
+
         for (AutoPitchControllerBlockEntity endpoint : endpointCache) {
             signature = 31L * signature + endpoint.getBlockPos().asLong();
         }
-        if (signature != endpointCacheSignature) {
+
+        if (signature != endpointCacheSignature || instancesChanged) {
             endpointCacheSignature = signature;
             endpointRepushRequired = true;
+
+            for (AutoPitchControllerBlockEntity pitch : endpointCache) {
+                pitch.setSafeZones(safeZones);
+            }
         }
+
         endpointCacheUntilTick = now + 20;
         return endpointCache;
     }
@@ -1339,6 +1377,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         nbt.put(NBT_INVENTORY, inventory.serializeNBT(registries));
         saveSlotNbt(nbt);
+        ListTag zonesTag = new ListTag();
+        for (SafeZone zone : safeZones) {
+            zonesTag.add(zone.save());
+        }
+        nbt.put(NBT_SAFE_ZONES, zonesTag);
         nbt.putBoolean("SelectedWasAuto", selectedWasAuto);
         nbt.putLong("LastKnownPos", lastKnownPos.asLong());
         if (level instanceof ServerLevel serverLevel) {
@@ -1373,6 +1416,17 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     protected void loadAdditional(CompoundTag nbt, HolderLookup.Provider registries) {
         super.loadAdditional(nbt, registries);
 
+        safeZones = new ArrayList<>();
+        if (nbt.contains(NBT_SAFE_ZONES, Tag.TAG_LIST)) {
+            ListTag zonesTag = nbt.getList(NBT_SAFE_ZONES, Tag.TAG_COMPOUND);
+
+            for (int i = 0; i < zonesTag.size(); i++) {
+                safeZones.add(SafeZone.load(level, zonesTag.getCompound(i)));
+            }
+        }
+
+        endpointRepushRequired = true;
+        lastPushedSafeZonesHash = Long.MIN_VALUE;
         selectedWasAuto = nbt.getBoolean("SelectedWasAuto");
         if (nbt.contains(NBT_INVENTORY, Tag.TAG_COMPOUND)) {
             inventory.deserializeNBT(registries, nbt.getCompound(NBT_INVENTORY));

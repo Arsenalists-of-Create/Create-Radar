@@ -5,6 +5,7 @@ import com.happysg.radar.api.arad.ARADTargeting;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlockEntity;
+import com.happysg.radar.block.arad.jammer.JammerBlockEntity;
 import com.happysg.radar.compat.Mods;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
@@ -102,6 +103,58 @@ final class ARADTargetDesignationHandler {
         controller.setChanged();
         controller.sendData();
         return true;
+    }
+
+    static void replayMissingJammerSelections(ServerLevel level, MonitorBlockEntity monitor) {
+        MonitorBlockEntity controller = monitor.getController();
+
+        String sourceId = controller.getSelectedRwrSource();
+        if (sourceId == null || !controller.isAradLinked()) {
+            return;
+        }
+
+        ARADData data = ARADData.get(level);
+        BlockPos monitorPos = controller.getControllerPos();
+        BlockPos rwrPos = data.getRwrForMonitor(level.dimension(), monitorPos);
+
+        if (rwrPos == null) {
+            return;
+        }
+
+        ARADData.Group group = data.getGroup(level.dimension(), rwrPos);
+
+        if (group == null || group.jammerEndpoints.isEmpty()) {
+            return;
+        }
+
+        for (BlockPos otherPos : group.monitorEndpoints) {
+            if (otherPos.equals(monitorPos)) {
+                continue;
+            }
+
+            if (!level.isLoaded(otherPos)) {
+                return;
+            }
+
+            if (level.getBlockEntity(otherPos) instanceof MonitorBlockEntity other && other.isController() && other.getSelectedRwrSource() != null) {
+                return;
+            }
+        }
+
+        for (BlockPos jammerPos : group.jammerEndpoints) {
+            if (!level.isLoaded(jammerPos)) {
+                continue;
+            }
+
+            if (!(level.getBlockEntity(jammerPos) instanceof JammerBlockEntity jammer)) {
+                continue;
+            }
+
+            if (jammer.getSelectedEmitterInfo() == null || !sourceId.equals(jammer.getSelectedEmitterSource())) {
+                assign(level, controller, sourceId);
+                return;
+            }
+        }
     }
 
     static void validateSelection(ServerLevel level, MonitorBlockEntity monitor) {

@@ -99,7 +99,7 @@ public final class CBCMuzzleUtil {
         }
 
         if (cannon instanceof MountedBigCannonContraption) {
-            Vec3 center = poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
+            Vec3 center = poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 0);
             Vec3 forward = getForwardWorld(poce);
             if (forward.lengthSqr() < 1.0E-8) {
                 return center;
@@ -134,7 +134,7 @@ public final class CBCMuzzleUtil {
             return anchor;
         }
 
-        double spawnBackoff = Mods.CBC_AT.isLoaded() && CBCATCannonCompat.isCBCATCannon(cannon) ? 1.5 : 2.0;
+        double spawnBackoff = cannon instanceof MountedAutocannonContraption || (Mods.CBC_AT.isLoaded() && CBCATCannonCompat.isCBCATCannon(cannon)) ? 1.5 : 2.0;
         return anchor.subtract(forward.normalize().scale(spawnBackoff));
     }
 

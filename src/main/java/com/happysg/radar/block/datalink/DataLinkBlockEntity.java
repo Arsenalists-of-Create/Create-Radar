@@ -76,6 +76,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         repairSavedDataPosition();
         refreshWeaponRuntime();
         restoreWeaponFilterLinkFallback();
+        reconcileSavedRadarEndpoint();
         updateGatheredData();
     }
 
@@ -347,6 +348,34 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         }
     }
 
+    private void reconcileSavedRadarEndpoint() {
+        if (!(level instanceof ServerLevel serverLevel) || serverLevel.getGameTime() % 20 != 0) {
+            return;
+        }
+
+        BlockState state = getBlockState();
+
+        if (!state.hasProperty(DataLinkBlock.LINK_STYLE) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR) {
+            return;
+        }
+
+        BlockPos canonicalTarget = NetworkData.get(serverLevel).peekEndpointForDataLink(serverLevel.dimension(), worldPosition);
+
+        if (canonicalTarget == null) {
+            canonicalTarget = ARADData.get(serverLevel).peekEndpointForDataLink(serverLevel.dimension(), worldPosition);
+        }
+
+        if (canonicalTarget == null || canonicalTarget.equals(getTargetPosition()) || !serverLevel.hasChunkAt(canonicalTarget)) {
+            return;
+        }
+
+        if (AllDataBehaviors.targetOf(serverLevel, canonicalTarget) == null) {
+            return;
+        }
+
+        target(canonicalTarget);
+    }
+
     private void restoreWeaponFilterLinkFallback() {
         if (!(level instanceof ServerLevel serverLevel)
                 || serverLevel.getGameTime() % 20 != 0) {
@@ -509,6 +538,19 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     public void onLoad() {
         super.onLoad();
         refreshWeaponRuntime();
+
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel).markContactTopologyDirty();
+        }
+    }
+
+    @Override
+    public void onChunkUnloaded() {
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel).markContactTopologyDirty();
+        }
+
+        super.onChunkUnloaded();
     }
 
 }

@@ -1108,7 +1108,7 @@ public final class WeaponNetworkRuntime {
         boolean removed = linksByDataLink.entrySet().removeIf(entry -> {
             BlockPos dataLinkPos = entry.getKey();
             if (!level.isLoaded(dataLinkPos)) {
-                return true;
+                return false;
             }
 
             BlockEntity blockEntity = level.getBlockEntity(dataLinkPos);
@@ -1241,11 +1241,11 @@ public final class WeaponNetworkRuntime {
     }
 
     private boolean isExplicitEndpointAvailable(LinkEntry link) {
-        if (!level.isLoaded(link.endpointPos())) {
+        if (!level.isLoaded(link.dataLinkPos()) || !level.isLoaded(link.endpointPos())) {
             return false;
         }
-        return endpointType(level.getBlockEntity(link.endpointPos()))
-                == link.type();
+
+        return endpointType(level.getBlockEntity(link.endpointPos())) == link.type();
     }
 
     private boolean isExplicitMountAvailable(BlockPos mountPos) {
