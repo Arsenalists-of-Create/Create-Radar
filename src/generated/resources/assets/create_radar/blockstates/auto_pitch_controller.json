@@ -1,3 +1,4 @@
+
 {
   "variants": {
     "facing=east,swivel_mode=false": {
@@ -6,13 +7,15 @@
     },
     "facing=east,swivel_mode=true": {
       "model": "create_radar:block/swivel_controller",
+      "x": 90,
       "y": 90
     },
     "facing=north,swivel_mode=false": {
       "model": "create_radar:block/auto_pitch_controller"
     },
     "facing=north,swivel_mode=true": {
-      "model": "create_radar:block/swivel_controller"
+      "model": "create_radar:block/swivel_controller",
+      "x": 90
     },
     "facing=south,swivel_mode=false": {
       "model": "create_radar:block/auto_pitch_controller",
@@ -20,6 +23,7 @@
     },
     "facing=south,swivel_mode=true": {
       "model": "create_radar:block/swivel_controller",
+      "x": 90,
       "y": 180
     },
     "facing=west,swivel_mode=false": {
@@ -28,6 +32,7 @@
     },
     "facing=west,swivel_mode=true": {
       "model": "create_radar:block/swivel_controller",
+      "x": 90,
       "y": 270
     }
   }
