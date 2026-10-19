@@ -1420,10 +1420,13 @@ public class NetworkData extends SavedData {
         ListTag weapons = new ListTag();
         for (BlockPos pos : group.weaponEndpoints) {
             CompoundTag weapon = writeEndpointSnapshot(group, pos, encoder);
-            BlockPos mount = posFromKey(controllerToWeaponMount.get(key(group.key.dim(), pos)));
-            if (mount != null) {
+            String mountKey = controllerToWeaponMount.get(key(group.key.dim(), pos));
+
+            if (mountKey != null) {
+                BlockPos mount = posFromKey(mountKey);
                 weapon.put("MountPos", encoder.apply(mount));
             }
+
             weapons.add(weapon);
         }
         tag.put("WeaponEndpoints", weapons);
