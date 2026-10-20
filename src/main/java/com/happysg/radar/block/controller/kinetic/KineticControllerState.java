@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.kinetic;
 
+import com.happysg.radar.compat.cbc.DirectCbcMountMotion;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -20,16 +21,19 @@ public final class KineticControllerState {
     private static final String NBT_KEY = "KineticController";
     private static final double SPEED_EPSILON = 1.0e-5;
     private static final double STOP_RPM = 0.05;
-    private static final double PROPORTIONAL_RPM_PER_DEGREE = 0.6 / 0.3;
     private static final int REVERSAL_HOLD_TICKS = 5;
     private static final int VERIFY_TIMEOUT_TICKS = 40;
     private static final int SETTLE_TICKS = 3;
-    private static final int WATCHDOG_STALL_TICKS = 40;
-    private static final double MAX_SETPOINT_COMPENSATION_DEGREES = 5.0;
-    private static final double FINE_APPROACH_DEGREES = 5.0;
-    private static final double FINE_APPROACH_STEP_FRACTION = 0.25;
+    private static final double MAX_PHYSICAL_SETPOINT_LEAD_DEGREES = 8.0;
+    private static final double PROFILE_RPM_PER_DEGREE_PER_TICK = 12.0;
+    private static final double PHYSICAL_BRAKE_LOOKAHEAD_TICKS = 2.0;
+    private static final double PHYSICAL_VELOCITY_SAMPLE_WEIGHT = 0.75;
+    private static final double MAX_PHYSICAL_SAMPLE_STEP_DEGREES = 90.0;
 
     private final CannonAxis axis;
+    private final DirectCbcMountMotion.State swivelMotion = new DirectCbcMountMotion.State();
+    private double lastSampledPhysicalAngle = Double.NaN;
+    private double physicalAngularVelocityDegPerTick;
 
     @Nullable private KineticMountAdapter activeAdapter;
     @Nullable private KineticMountFrame frame;
@@ -52,7 +56,6 @@ public final class KineticControllerState {
     @Nullable private String blockedReason;
 
     private double commandedGeneratorRpm;
-    private double smoothedGeneratorRpm;
     private int driveSign;
     private int candidateDriveSign;
     private int driveSignVotes;
@@ -73,8 +76,6 @@ public final class KineticControllerState {
     private double watchdogLastPhysical = Double.NaN;
     private double watchdogLastDestination = Double.NaN;
     private double watchdogMaxStep;
-    private double watchdogLastError = Double.NaN;
-    private int watchdogStallTicks;
     private boolean continuousTracking;
     private double trackingToleranceDegrees = Double.POSITIVE_INFINITY;
     private double stopRpm = STOP_RPM;
@@ -133,11 +134,9 @@ public final class KineticControllerState {
                  boolean generatorIsolated,
                  ControllerAngleDelta angleDelta,
                  DoubleConsumer commandGenerator) {
-        controllerAngleDelta = angleDelta == null
-                ? ControllerAngleDelta.SHORTEST : angleDelta;
+        controllerAngleDelta = angleDelta == null ? ControllerAngleDelta.SHORTEST : angleDelta;
         double tolerance = effectiveTolerance(toleranceDegrees);
-        stopRpm = Math.max(SPEED_EPSILON, Math.min(STOP_RPM,
-                tolerance * PROPORTIONAL_RPM_PER_DEGREE * 0.25));
+        stopRpm = Math.max(SPEED_EPSILON, Math.min(STOP_RPM, tolerance * 0.5));
         onTargetChanged(running, controllerTargetDegrees, tolerance);
 
         if (resolution == null || resolution.selection() == KineticMountAdapterResolution.Selection.ABSENT) {
@@ -248,23 +247,20 @@ public final class KineticControllerState {
 
         double bearingTarget = adapter.getTargetAngleDegrees();
         double physicalAngle = adapter.getPhysicalAngleDegrees();
+
         if (!Double.isFinite(bearingTarget) || !Double.isFinite(physicalAngle)) {
             failClosed(commandGenerator, false, "physical_feedback_unavailable");
             return true;
         }
+
+        samplePhysicalAngularVelocity(physicalAngle);
         desiredBearingTarget = frame.bearingTargetFor(observedTarget);
         bearingSetpointDegrees = bearingTarget;
         physicalBearingDegrees = physicalAngle;
-        remainingDegrees = plannedBearingDelta(
-                physicalAngle, desiredBearingTarget);
-        double setpointRemaining = plannedBearingDelta(
-                bearingTarget, desiredBearingTarget);
-        double requestedCompensation = clamp(
-                remainingDegrees,
-                -MAX_SETPOINT_COMPENSATION_DEGREES,
-                MAX_SETPOINT_COMPENSATION_DEGREES);
-        setpointCompensationDegrees = requestedCompensation;
+        remainingDegrees = plannedBearingDelta(physicalAngle, desiredBearingTarget);
+        double setpointRemaining = plannedBearingDelta(bearingTarget, desiredBearingTarget);
 
+        setpointCompensationDegrees = 0.0;
         observeDriveSign(bearingTarget, tolerance);
         lastBearingAngle = bearingTarget;
 
@@ -275,12 +271,8 @@ public final class KineticControllerState {
             return true;
         }
 
-        if (watchdogActive && !watchdogAllows(bearingTarget, physicalAngle,
-                desiredBearingTarget, tolerance)) {
-            failClosed(commandGenerator, true,
-                    blockedReason == null
-                            ? "physical_feedback_not_converging"
-                            : blockedReason);
+        if (watchdogActive && !watchdogAllows(bearingTarget, physicalAngle, desiredBearingTarget, tolerance)) {
+            failClosed(commandGenerator, true, blockedReason == null ? "watchdog_travel_bound_exceeded" : blockedReason);
             return true;
         }
 
@@ -318,59 +310,83 @@ public final class KineticControllerState {
             return true;
         }
 
-        // Physical feedback is authoritative, but the controlled endpoint is a
-        // position setpoint. Use the physical error to request a bounded lead,
-        // then close the inner loop on that compensated setpoint. This avoids
-        // integrating physical lag into an ever-growing bearing target.
-        double controlDegrees = setpointRemaining + requestedCompensation;
-        // Tight firing tolerances require corrections after a normal move
-        // would have stopped. Approach gently so physical lag does not turn
-        // those small corrections into repeated overshoot/reversal cycles.
-        double proportionalGain = tolerance < toleranceDegrees
-                && Math.abs(remainingDegrees) < 1.0
-                ? PROPORTIONAL_RPM_PER_DEGREE * 0.5
-                : PROPORTIONAL_RPM_PER_DEGREE;
-        double rawRpm = clamp(controlDegrees * proportionalGain, -maximumRpm, maximumRpm) * driveSign;
-        rawRpm = limitSetpointCompensation(adapter, rawRpm, controlDegrees, bearingTarget, desiredBearingTarget);
-        rawRpm = limitPhysicalApproachRpm(adapter, rawRpm, remainingDegrees, tolerance);
 
-        if (!watchdogActive) {
-            beginWatchdog(adapter, bearingTarget, physicalAngle, desiredBearingTarget,
-                    maximumRpm);
+        double maximumStep = adapter.effectiveDegreesPerTick(maximumRpm);
+        if (!Double.isFinite(maximumStep) || maximumStep <= SPEED_EPSILON) {
+            failClosed(commandGenerator, false, "swivel_speed_conversion_invalid");
+            return true;
         }
+
+        double plannedStep = swivelMotion.nextStep(setpointRemaining, maximumStep * PROFILE_RPM_PER_DEGREE_PER_TICK);
+        double physicalSetpointLead = plannedBearingDelta(physicalAngle, bearingTarget);
+        boolean leadLimited = false;
+
+        if (Math.abs(plannedStep) > SPEED_EPSILON) {
+            double direction = Math.signum(plannedStep);
+
+            double physicalRemaining = Math.max(0.0, remainingDegrees * direction);
+            double closingVelocity = Math.max(0.0, physicalAngularVelocityDegPerTick * direction);
+
+            double projectedRemaining = physicalRemaining - closingVelocity * PHYSICAL_BRAKE_LOOKAHEAD_TICKS;
+            double maximumLead = MAX_PHYSICAL_SETPOINT_LEAD_DEGREES;
+
+            if (closingVelocity > SPEED_EPSILON) {
+                maximumLead = Math.min(maximumLead, Math.max(0.0, projectedRemaining));
+            }
+
+            double existingForwardLead = physicalSetpointLead * direction;
+            boolean predictedToPassTarget = closingVelocity > SPEED_EPSILON && projectedRemaining <= 0.0;
+            double availableLead = predictedToPassTarget ? 0.0 : Math.max(0.0, maximumLead - existingForwardLead);
+
+            if (Math.abs(plannedStep) > availableLead) {
+                plannedStep = Math.copySign(availableLead, plannedStep);
+                leadLimited = true;
+
+                swivelMotion.reset();
+            }
+        }
+
+
+        double rawRpm = clamp(plannedStep / maximumStep * maximumRpm, -maximumRpm, maximumRpm) * driveSign;
+        if (!watchdogActive) {
+            beginWatchdog(adapter, bearingTarget, physicalAngle, desiredBearingTarget, maximumRpm);
+        }
+
         if (Math.abs(rawRpm) <= stopRpm) {
-            stopGenerator(commandGenerator);
+
+            if (leadLimited) {
+                holdGenerator(commandGenerator);
+            } else {
+                stopGenerator(commandGenerator);
+            }
+
             if (!adapter.wakePhysicalAssembly()) {
                 failClosed(commandGenerator, true, "physical_assembly_could_not_wake");
                 return true;
             }
+
             setLifecycle(KineticControllerLifecycle.SETTLING);
             return true;
         }
+
         if (reversalTicks > 0) {
             reversalTicks--;
             stopGenerator(commandGenerator);
             setLifecycle(KineticControllerLifecycle.REVERSING);
             return true;
         }
+
         if (Math.abs(commandedGeneratorRpm) > stopRpm
-                && Math.signum(commandedGeneratorRpm) != Math.signum(rawRpm)) {
+                && Math.signum(commandedGeneratorRpm)
+                != Math.signum(rawRpm)) {
+
             reversalTicks = REVERSAL_HOLD_TICKS;
             stopGenerator(commandGenerator);
             setLifecycle(KineticControllerLifecycle.REVERSING);
             return true;
         }
 
-        double smoothing = Math.abs(controlDegrees) <= 5.0 ? 0.5 : 0.4;
-        smoothedGeneratorRpm += (rawRpm - smoothedGeneratorRpm) * smoothing;
-        smoothedGeneratorRpm = limitSetpointCompensation(adapter, smoothedGeneratorRpm, controlDegrees, bearingTarget, desiredBearingTarget);
-        smoothedGeneratorRpm = limitPhysicalApproachRpm(adapter, smoothedGeneratorRpm, remainingDegrees, tolerance);
-
-        if (Math.abs(smoothedGeneratorRpm) < stopRpm) {
-            smoothedGeneratorRpm = 0.0;
-        }
-
-        commandGenerator(commandGenerator, smoothedGeneratorRpm);
+        commandGenerator(commandGenerator, rawRpm);
 
         if (adapter.hasSequenceContext()) {
             failClosed(commandGenerator, true, "sequence_context_present");
@@ -438,7 +454,6 @@ public final class KineticControllerState {
         }
         continuousTracking = true;
         watchdogActive = false;
-        watchdogStallTicks = 0;
         hardBlocked = false;
     }
 
@@ -453,7 +468,6 @@ public final class KineticControllerState {
         }
         continuousTracking = false;
         watchdogActive = false;
-        watchdogStallTicks = 0;
         hardBlocked = false;
     }
 
@@ -612,7 +626,7 @@ public final class KineticControllerState {
         if (driveSignVotes >= 3) {
             driveSign = observedSign;
             driveSignVotes = 0;
-            smoothedGeneratorRpm = 0.0;
+            swivelMotion.reset();
             reversalTicks = REVERSAL_HOLD_TICKS;
             syncRequested = true;
         }
@@ -631,121 +645,70 @@ public final class KineticControllerState {
         watchdogLastPhysical = physicalAngle;
         watchdogLastDestination = destination;
         watchdogMaxStep = adapter.effectiveDegreesPerTick(maximumRpm);
-        watchdogLastError = watchdogInitialError;
-        watchdogStallTicks = 0;
     }
 
-    private boolean watchdogAllows(double bearingAngle, double physicalAngle,
-                                   double destination, double tolerance) {
+    private boolean watchdogAllows(double bearingAngle, double physicalAngle, double destination, double tolerance) {
         if (!watchdogActive) {
             return false;
         }
-        double bearingStep = KineticAngleMath.shortestDelta(
-                watchdogLastBearing, bearingAngle);
-        double destinationStep = plannedBearingDelta(
-                watchdogLastDestination, destination);
-        double physicalStep = KineticAngleMath.shortestDelta(
-                watchdogLastPhysical, physicalAngle);
-        double priorRemaining = plannedBearingDelta(
-                watchdogLastPhysical, watchdogLastDestination);
+
+        double bearingStep = KineticAngleMath.shortestDelta(watchdogLastBearing, bearingAngle);
+        double destinationStep = plannedBearingDelta(watchdogLastDestination, destination);
+        double physicalStep = KineticAngleMath.shortestDelta(watchdogLastPhysical, physicalAngle);
+
         watchdogBearingTravel += Math.abs(bearingStep);
         watchdogDestinationTravel += Math.abs(destinationStep);
         watchdogPhysicalTravel += Math.abs(physicalStep);
+
         watchdogLastBearing = bearingAngle;
         watchdogLastPhysical = physicalAngle;
         watchdogLastDestination = destination;
-        double allowance = watchdogInitialError + watchdogDestinationTravel
-                + 2.0 * Math.max(watchdogMaxStep, tolerance)
-                + 2.0 * MAX_SETPOINT_COMPENSATION_DEGREES;
-        boolean withinTravelBound = watchdogBearingTravel <= allowance + 1.0e-6
-                && watchdogPhysicalTravel <= allowance + 1.0e-6;
-        if (!withinTravelBound) {
+
+        double allowance = watchdogInitialError + watchdogDestinationTravel + 2.0 * Math.max(watchdogMaxStep, tolerance) + 2.0 * MAX_PHYSICAL_SETPOINT_LEAD_DEGREES;
+
+        if (watchdogBearingTravel > allowance + 1.0e-6 || watchdogPhysicalTravel > allowance + 1.0e-6) {
             blockedReason = "watchdog_travel_bound_exceeded";
             return false;
         }
-        double progressThreshold = Math.max(1.0e-7, tolerance * 0.05);
-        double currentError = Math.abs(plannedBearingDelta(
-                physicalAngle, destination));
-        boolean movedTowardPriorTarget = Math.abs(physicalStep) > progressThreshold
-                && Math.signum(physicalStep) == Math.signum(priorRemaining);
-        boolean reducedError = Double.isFinite(watchdogLastError)
-                && currentError + progressThreshold < watchdogLastError;
-        watchdogStallTicks = movedTowardPriorTarget || reducedError
-                ? 0 : watchdogStallTicks + 1;
-        watchdogLastError = currentError;
-        if (watchdogStallTicks > WATCHDOG_STALL_TICKS) {
-            blockedReason = "physical_feedback_not_converging";
-            return false;
-        }
+
         return true;
     }
 
-    private double limitPhysicalApproachRpm(KineticMountAdapter adapter, double requestedRpm, double physicalErrorDegrees, double toleranceDegrees) {
-        if (!Double.isFinite(requestedRpm)
-                || !Double.isFinite(physicalErrorDegrees)
-                || Math.abs(physicalErrorDegrees) > FINE_APPROACH_DEGREES
-                || requestedRpm == 0.0) {
-            return requestedRpm;
+    private double plannedBearingDelta(double currentBearingDegrees, double destinationBearingDegrees) {
+        if (frame == null || !Double.isFinite(currentBearingDegrees) || !Double.isFinite(destinationBearingDegrees)) {
+            return KineticAngleMath.shortestDelta(currentBearingDegrees, destinationBearingDegrees);
         }
 
-        double requestedStep = adapter.effectiveDegreesPerTick(Math.abs(requestedRpm));
-
-        if (!Double.isFinite(requestedStep) || requestedStep <= 0.0) {
-            return requestedRpm;
-        }
-
-        double allowedStep = Math.max(Math.max(0.0, toleranceDegrees) * 0.5, Math.abs(physicalErrorDegrees) * FINE_APPROACH_STEP_FRACTION);
-
-        if (requestedStep <= allowedStep) {
-            return requestedRpm;
-        }
-
-        return requestedRpm * allowedStep / requestedStep;
-    }
-
-    private double limitSetpointCompensation(KineticMountAdapter adapter,
-                                             double requestedRpm,
-                                             double controlDegrees,
-                                             double bearingTarget,
-                                             double destination) {
-        int direction = (int) Math.signum(controlDegrees);
-        if (direction == 0 || Math.abs(requestedRpm) <= stopRpm) {
-            return requestedRpm;
-        }
-        double setpointRemaining = plannedBearingDelta(
-                bearingTarget, destination);
-        boolean beforeDestination = Math.abs(setpointRemaining) > 1.0e-6
-                && Math.signum(setpointRemaining) == direction;
-        double headroom = beforeDestination
-                ? Math.abs(setpointRemaining)
-                + MAX_SETPOINT_COMPENSATION_DEGREES
-                : MAX_SETPOINT_COMPENSATION_DEGREES
-                - Math.abs(setpointRemaining);
-        if (headroom <= 1.0e-6) {
-            return 0.0;
-        }
-        double requestedStep = adapter.effectiveDegreesPerTick(
-                Math.abs(requestedRpm));
-        if (!Double.isFinite(requestedStep) || requestedStep <= headroom) {
-            return requestedRpm;
-        }
-        return requestedRpm * headroom / requestedStep;
-    }
-
-    private double plannedBearingDelta(double currentBearingDegrees,
-                                       double destinationBearingDegrees) {
-        if (frame == null || !Double.isFinite(currentBearingDegrees)
-                || !Double.isFinite(destinationBearingDegrees)) {
-            return KineticAngleMath.shortestDelta(
-                    currentBearingDegrees, destinationBearingDegrees);
-        }
-        double currentController = frame.controllerTargetFor(
-                currentBearingDegrees);
-        double destinationController = frame.controllerTargetFor(
-                destinationBearingDegrees);
-        double controllerDelta = controllerAngleDelta.remainingDegrees(
-                currentController, destinationController);
+        double currentController = frame.controllerTargetFor(currentBearingDegrees);
+        double destinationController = frame.controllerTargetFor(destinationBearingDegrees);
+        double controllerDelta = controllerAngleDelta.remainingDegrees(currentController, destinationController);
         return frame.conversionSign() * controllerDelta;
+    }
+
+    private void samplePhysicalAngularVelocity(double physicalAngle) {
+        if (!Double.isFinite(physicalAngle)) {
+            resetPhysicalMotionSample();
+            return;
+        }
+
+        if (!Double.isFinite(lastSampledPhysicalAngle)) {
+            physicalAngularVelocityDegPerTick = 0.0;
+        } else {
+            double step = KineticAngleMath.shortestDelta(lastSampledPhysicalAngle, physicalAngle);
+
+            if (!Double.isFinite(step) || Math.abs(step) > MAX_PHYSICAL_SAMPLE_STEP_DEGREES) {
+                physicalAngularVelocityDegPerTick = 0.0;
+            } else {
+                physicalAngularVelocityDegPerTick = physicalAngularVelocityDegPerTick * (1.0 - PHYSICAL_VELOCITY_SAMPLE_WEIGHT) + step * PHYSICAL_VELOCITY_SAMPLE_WEIGHT;
+            }
+        }
+
+        lastSampledPhysicalAngle = physicalAngle;
+    }
+
+    private void resetPhysicalMotionSample() {
+        lastSampledPhysicalAngle = Double.NaN;
+        physicalAngularVelocityDegPerTick = 0.0;
     }
 
     private void failClosed(DoubleConsumer commandGenerator,
@@ -763,22 +726,29 @@ public final class KineticControllerState {
         command.accept(commandedGeneratorRpm);
     }
 
-    private void stopGenerator(DoubleConsumer command) {
-        boolean changed = Math.abs(commandedGeneratorRpm) > SPEED_EPSILON
-                || Math.abs(smoothedGeneratorRpm) > SPEED_EPSILON;
+    private void holdGenerator(DoubleConsumer command) {
+        boolean changed = Math.abs(commandedGeneratorRpm) > SPEED_EPSILON;
+
         commandedGeneratorRpm = 0.0;
-        smoothedGeneratorRpm = 0.0;
         verificationTicks = 0;
         command.accept(0.0);
+
         if (changed) {
             syncRequested = true;
         }
+    }
+
+    private void stopGenerator(DoubleConsumer command) {
+        swivelMotion.reset();
+        holdGenerator(command);
     }
 
     private void resetEndpointSession(boolean resetFrame) {
         lockedLastTick = false;
         settleTicks = 0;
         reversalTicks = 0;
+        swivelMotion.reset();
+        resetPhysicalMotionSample();
         verificationTicks = 0;
         desiredBearingTarget = Double.NaN;
         remainingDegrees = Double.NaN;
@@ -877,7 +847,7 @@ public final class KineticControllerState {
     /** Stops output but deliberately preserves the watchdog budget across topology churn. */
     public void invalidate() {
         commandedGeneratorRpm = 0.0;
-        smoothedGeneratorRpm = 0.0;
+        swivelMotion.reset();
         verificationTicks = 0;
         settleTicks = 0;
         setAtDestination(false);
@@ -887,7 +857,7 @@ public final class KineticControllerState {
 
     public void release() {
         commandedGeneratorRpm = 0.0;
-        smoothedGeneratorRpm = 0.0;
+        swivelMotion.reset();
         activeAdapter = null;
         continuousTracking = false;
         trackingToleranceDegrees = Double.POSITIVE_INFINITY;
@@ -911,7 +881,7 @@ public final class KineticControllerState {
         commandRevision = 0;
         frame = null;
         commandedGeneratorRpm = 0.0;
-        smoothedGeneratorRpm = 0.0;
+        swivelMotion.reset();
         resetEndpointSession(false);
 
         if (!wasMoved && parent.contains(NBT_KEY, Tag.TAG_COMPOUND)) {

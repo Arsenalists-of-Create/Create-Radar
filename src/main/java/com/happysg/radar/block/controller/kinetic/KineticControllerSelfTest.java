@@ -48,14 +48,10 @@ public final class KineticControllerSelfTest {
 
     private static void checkAngleMath(List<String> failures) {
         expectClose(failures, "wrap_negative", KineticAngleMath.wrap360(-1.0), 359.0);
-        expectClose(failures, "shortest_forward_wrap",
-                KineticAngleMath.shortestDelta(359.0, 1.0), 2.0);
-        expectTrue(failures, "inclusive_wrapped_min",
-                KineticAngleMath.isInInclusiveWrappedInterval(350.0, 350.0, 10.0));
-        expectTrue(failures, "inclusive_wrapped_max",
-                KineticAngleMath.isInInclusiveWrappedInterval(10.0, 350.0, 10.0));
-        expectFalse(failures, "wrapped_interval_rejects",
-                KineticAngleMath.isInInclusiveWrappedInterval(180.0, 350.0, 10.0));
+        expectClose(failures, "shortest_forward_wrap", KineticAngleMath.shortestDelta(359.0, 1.0), 2.0);
+        expectTrue(failures, "inclusive_wrapped_min", KineticAngleMath.isInInclusiveWrappedInterval(350.0, 350.0, 10.0));
+        expectTrue(failures, "inclusive_wrapped_max", KineticAngleMath.isInInclusiveWrappedInterval(10.0, 350.0, 10.0));
+        expectFalse(failures, "wrapped_interval_rejects", KineticAngleMath.isInInclusiveWrappedInterval(180.0, 350.0, 10.0));
     }
 
     private static void checkMovementLimits(List<String> failures) {
@@ -428,72 +424,60 @@ public final class KineticControllerSelfTest {
         FakeRig offsetRig = new FakeRig();
         offsetRig.adapter.targetAngle = 30.0;
         offsetRig.adapter.physicalAngle = 25.0;
-        KineticControllerState offsetState =
-                new KineticControllerState(CannonAxis.YAW);
-        KineticMountAdapterResolution offsetPresent =
-                KineticMountAdapterResolution.present(offsetRig.adapter);
+        KineticControllerState offsetState = new KineticControllerState(CannonAxis.YAW);
+        KineticMountAdapterResolution offsetPresent = KineticMountAdapterResolution.present(offsetRig.adapter);
         tick(offsetState, offsetRig, offsetPresent, true, 30.0);
         tick(offsetState, offsetRig, offsetPresent, true, 30.0);
-        expectTrue(failures, "physical_offset_drives_correction_when_setpoint_matches",
-                Math.abs(offsetRig.commandedRpm) > EPSILON);
+        expectClose(failures, "physical_offset_does_not_overdrive_setpoint", offsetRig.commandedRpm, 0.0);
 
         FakeRig stuckPhysicalRig = new FakeRig();
         stuckPhysicalRig.physicalFollowFraction = 0.0;
         stuckPhysicalRig.availableInputRpm = 96.0;
-        KineticControllerState stuckPhysicalState =
-                new KineticControllerState(CannonAxis.YAW);
-        KineticMountAdapterResolution stuckPhysicalPresent =
-                KineticMountAdapterResolution.present(stuckPhysicalRig.adapter);
+        KineticControllerState stuckPhysicalState = new KineticControllerState(CannonAxis.YAW);
+        KineticMountAdapterResolution stuckPhysicalPresent = KineticMountAdapterResolution.present(stuckPhysicalRig.adapter);
         double maximumPastTarget = 0.0;
         for (int i = 0; i < 100 && !stuckPhysicalState.isBlocked(); i++) {
             stuckPhysicalRig.advance();
-            tick(stuckPhysicalState, stuckPhysicalRig,
-                    stuckPhysicalPresent, true, 20.0);
-            maximumPastTarget = Math.max(maximumPastTarget,
-                    KineticAngleMath.shortestDelta(
-                            20.0, stuckPhysicalRig.adapter.targetAngle));
+            tick(stuckPhysicalState, stuckPhysicalRig, stuckPhysicalPresent, true, 20.0);
+            maximumPastTarget = Math.max(maximumPastTarget, KineticAngleMath.shortestDelta(20.0, stuckPhysicalRig.adapter.targetAngle));
         }
-        expectTrue(failures, "stuck_physical_pose_fails_closed",
-                stuckPhysicalState.isBlocked());
-        expectTrue(failures, "setpoint_compensation_is_bounded",
-                maximumPastTarget <= 5.0 + 1.0e-6);
-        expectTrue(failures, "stuck_physical_reason_is_reported",
-                "physical_feedback_not_converging".equals(
-                        stuckPhysicalState.getBlockedReason()));
+        expectFalse(failures, "stalled_physical_pose_remains_recoverable", stuckPhysicalState.isBlocked());
+        expectTrue(failures, "profile_never_overdrives_destination", maximumPastTarget <= 1.0e-6);
+        expectTrue(failures, "stalled_physical_pose_has_no_block_reason", stuckPhysicalState.getBlockedReason() == null);
+
+        stuckPhysicalRig.physicalFollowFraction = 0.35;
+
+        for (int i = 0; i < 160 && !stuckPhysicalState.isReady(stuckPhysicalPresent, true, 20.0, 0.5) && !stuckPhysicalState.isBlocked(); i++) {
+            stuckPhysicalRig.advance();
+            tick(stuckPhysicalState, stuckPhysicalRig, stuckPhysicalPresent, true, 20.0);
+        }
+
+        expectFalse(failures, "stalled_swivel_recovers_without_blocking", stuckPhysicalState.isBlocked());
+        expectTrue(failures, "stalled_swivel_reaches_target_after_recovery", stuckPhysicalState.isReady(stuckPhysicalPresent, true, 20.0, 0.5));
 
         double[] targets = {30.0, -25.0, 45.0, 0.0};
         for (CannonAxis axis : CannonAxis.values()) {
             FakeRig laggedRig = new FakeRig(axis);
             laggedRig.physicalFollowFraction = 0.35;
-            KineticControllerState laggedState =
-                    new KineticControllerState(axis);
-            KineticMountAdapterResolution laggedPresent =
-                    KineticMountAdapterResolution.present(laggedRig.adapter);
+            KineticControllerState laggedState = new KineticControllerState(axis);
+            KineticMountAdapterResolution laggedPresent = KineticMountAdapterResolution.present(laggedRig.adapter);
             for (int sweep = 0; sweep < targets.length; sweep++) {
                 double target = targets[sweep];
                 for (int i = 0; i < 160
-                        && !laggedState.isReady(
-                        laggedPresent, true, target, 0.5)
+                        && !laggedState.isReady(laggedPresent, true, target, 0.5)
                         && !laggedState.isBlocked(); i++) {
                     laggedRig.advance();
-                    tick(laggedState, laggedRig,
-                            laggedPresent, true, target);
+                    tick(laggedState, laggedRig, laggedPresent, true, target);
                 }
-                String prefix = "lagged_" + axis.name().toLowerCase()
-                        + "_sweep_" + sweep;
+
+                String prefix = "lagged_" + axis.name().toLowerCase() + "_sweep_" + sweep;
                 if (laggedState.isBlocked()) {
-                    failures.add(prefix + "_not_blocked reason="
-                            + laggedState.getBlockedReason());
+                    failures.add(prefix + "_not_blocked reason=" + laggedState.getBlockedReason());
                 }
-                expectTrue(failures, prefix + "_settles",
-                        laggedState.isReady(
-                                laggedPresent, true, target, 0.5));
-                expectTrue(failures, prefix + "_physical_error_cleared",
-                        Math.abs(KineticAngleMath.shortestDelta(
-                                laggedRig.adapter.physicalAngle, target)) <= 0.5);
-                expectTrue(failures, prefix + "_setpoint_error_cleared",
-                        Math.abs(KineticAngleMath.shortestDelta(
-                                laggedRig.adapter.targetAngle, target)) <= 0.5);
+
+                expectTrue(failures, prefix + "_settles", laggedState.isReady(laggedPresent, true, target, 0.5));
+                expectTrue(failures, prefix + "_physical_error_cleared", Math.abs(KineticAngleMath.shortestDelta(laggedRig.adapter.physicalAngle, target)) <= 0.5);
+                expectTrue(failures, prefix + "_setpoint_error_cleared", Math.abs(KineticAngleMath.shortestDelta(laggedRig.adapter.targetAngle, target)) <= 0.5);
             }
         }
     }
