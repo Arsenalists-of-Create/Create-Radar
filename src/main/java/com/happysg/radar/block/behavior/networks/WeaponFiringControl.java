@@ -1637,7 +1637,6 @@ public class WeaponFiringControl {
                                     Vec3 shooterVel = adapterShot == null
                                             ? this.getPlatformVelocityAtMuzzle(serverLevel, cannonMuzzleWorld)
                                             : finiteOrZero(adapterShot.inheritedVelocity());
-                                    this.getPlatformAcceleration(serverLevel, shooterVel);
                                     Vec3 targetVel;
                                     Vec3 targetAccel;
                                     Vec3 rawTargetPos;
@@ -3399,8 +3398,7 @@ public class WeaponFiringControl {
         }
 
         Vec3 predictedShooterVel = sableMotion != null ? sableMotion.futureVelocity(muzzleWorldPos, predictedTicks) : safeShooterVel;
-        Vec3 predictedAngularVelocity = sableMotion != null && aimGeometry.coupled() ? sableMotion.angularVelocity() : Vec3.ZERO;
-
+        Vec3 predictedAngularVelocity = sableMotion != null && aimGeometry.coupled() ? sableMotion.angularVelocityAt(predictedTicks) : Vec3.ZERO;
         RigidBodyTargetMotion rigidTarget = this.captureRigidBodyTargetMotion(serverLevel, targetSublevel, rawTargetPos, targetWorldPos, safeTargetVel, guidancePositionOffset, predictedTicks);
 
         Vec3 delayedTargetPos = rigidTarget != null
@@ -3976,7 +3974,7 @@ public class WeaponFiringControl {
                             .launchPivotPosition(predictedPivotPos)
                             .muzzleForwardOffset(aimGeometry.muzzleForwardOffset())
                             .inheritedVelocity(predictedShooterVel)
-                            .launchAngularVelocity(sableMotion != null && aimGeometry.coupled() ? sableMotion.angularVelocity() : Vec3.ZERO)
+                            .launchAngularVelocity(sableMotion != null && aimGeometry.coupled() ? sableMotion.angularVelocityAt(predictedTicks) : Vec3.ZERO)
                             .targetPosition(delayedTargetPos)
                             .targetVelocity(delayedTargetVel)
                             .targetAcceleration(rigidTarget != null ? Vec3.ZERO : safeTargetAccel)
@@ -4773,22 +4771,41 @@ public class WeaponFiringControl {
                 ? null
                 : translateTargetAabb(targetAabb, Vec3.ZERO, delayedTarget.subtract(solvePos));
 
+        RigidBodyLaunchMath.Motion shooterMotion = null;
+
+        if (side.mount != null && this.isSableMount(side.mount)) {
+            SubLevelAccess mountShip = SableCompanion.INSTANCE.getContaining(serverLevel, side.mount.getBlockPos());
+            shooterMotion = SableLaunchMotion.capture(serverLevel, mountShip);
+        }
+
+        Vec3 predictedMuzzle = shooterMotion != null ? shooterMotion.futurePosition(geometry.muzzlePosition(), predictedTicks) : geometry.muzzlePosition();
+        Vec3 predictedPivot = null;
+
+        if (geometry.coupled()) {
+            predictedPivot = shooterMotion != null ? shooterMotion.futurePosition(geometry.steeringOrigin(), predictedTicks) : geometry.steeringOrigin();
+        }
+
         Vec3 inheritedVelocity;
 
         if (shot.adapter != null) {
             inheritedVelocity = finiteOrZero(shot.adapter.inheritedVelocity());
+        } else if (shooterMotion != null) {
+            inheritedVelocity = shooterMotion.futureVelocity(geometry.muzzlePosition(), predictedTicks);
         } else if (side.mount != null) {
             inheritedVelocity = this.getPlatformVelocityAtMuzzle(serverLevel, side.mount, geometry.muzzlePosition());
         } else {
             inheritedVelocity = Vec3.ZERO;
         }
 
+        Vec3 launchAngularVelocity = shooterMotion != null && geometry.coupled() ? shooterMotion.angularVelocityAt(predictedTicks) : Vec3.ZERO;
+
         return TargetingSnapshot
                 .builder(serverLevel)
-                .muzzlePosition(geometry.muzzlePosition())
-                .launchPivotPosition(geometry.coupled() ? geometry.steeringOrigin() : null)
+                .muzzlePosition(predictedMuzzle)
+                .launchPivotPosition(predictedPivot)
                 .muzzleForwardOffset(geometry.muzzleForwardOffset())
                 .inheritedVelocity(inheritedVelocity)
+                .launchAngularVelocity(launchAngularVelocity)
                 .targetPosition(delayedTarget)
                 .targetVelocity(delayedTargetVel)
                 .targetAcceleration(rigidTarget != null ? Vec3.ZERO : safeTargetAccel)
@@ -4800,8 +4817,8 @@ public class WeaponFiringControl {
                 .quadraticDrag(model.quadraticDrag())
                 .cbcPhysics(model.cbcPhysics())
                 .dragDensity(model.dragDensity())
-                .maxFlightTicks(sideSolverFlightTicks(shot, geometry.muzzlePosition(), delayedTarget))
-                .gameTime(serverLevel.getGameTime())
+                .maxFlightTicks(sideSolverFlightTicks(shot, predictedMuzzle, delayedTarget))
+                .gameTime(serverLevel.getGameTime() + predictedTicks)
                 .currentYawDeg(currentSideYawDeg(side))
                 .currentPitchDeg(currentSidePitchDeg(side, shot))
                 .targetSublevelId(this.targetSublevel == null ? null : this.targetSublevel.getUniqueId())

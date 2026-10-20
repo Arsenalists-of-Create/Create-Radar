@@ -99,7 +99,7 @@ public record DetectionConfig(boolean player, boolean sable, boolean contraption
         return track.getColor();
     }
 
-    private boolean test(TrackCategory trackCategory) {
+    public boolean test(TrackCategory trackCategory) {
         if (trackCategory == TrackCategory.MISSILE) {
             return true;
         } else if (trackCategory == TrackCategory.PLAYER) {

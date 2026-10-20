@@ -98,6 +98,12 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     /** Client renders from this list (synced via packet). */
     protected Collection<RadarTrack> cachedTracks = new ArrayList<>();
 
+    @Nullable
+    private Collection<RadarTrack> lastSerializedTracksSource;
+    @Nullable
+    private CompoundTag lastSerializedTracksTag;
+    private long lastSerializedTracksGameTime = Long.MIN_VALUE;
+
     /** Keep as field because renderer uses it (coloring). */
     protected DetectionConfig filter = DetectionConfig.DEFAULT;
     private DetectionConfig lastSerializedFilter;
@@ -945,25 +951,49 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             }
 
             for (RadarContact contact : contacts) {
-                RadarTrack track = RadarContactTrackAdapter.toTrack(contact, gameTime);
-
-                if (track == null || !det.test(track)) {
+                if (contact == null) {
                     continue;
                 }
 
-                String id = track.getId();
-
+                String id = contact.getId();
                 if (id == null || id.isBlank()) {
                     continue;
+                }
+
+                RadarTrack track;
+
+                if (contact instanceof RadarTrack existing) {
+                    if (!det.test(existing)) {
+                        continue;
+                    }
+
+                    track = existing;
+                } else {
+                    var category = contact.getCategory();
+
+                    if (category == null || !det.test(RadarContactTrackAdapter.toInternalCategory(category))) {
+                        continue;
+                    }
+
+                    track = RadarContactTrackAdapter.toTrack(contact, gameTime);
+
+                    if (track == null) {
+                        continue;
+                    }
                 }
 
                 merged.merge(id, track, DirectionalJammingService::preferObservation);
             }
         }
 
-        if (Mods.SABLE.isLoaded() && level instanceof ServerLevel serverLevel) {
-            String networkSecret = monitorNetworkSecret(serverLevel);
-            for (RadarTrack track : merged.values()) {
+        List<RadarTrack> displayTracks = new ArrayList<>(merged.size());
+        ServerLevel serverLevel = Mods.SABLE.isLoaded() && level instanceof ServerLevel sl ? sl : null;
+        String networkSecret = serverLevel == null ? null : monitorNetworkSecret(serverLevel);
+
+        for (RadarTrack sourceTrack : merged.values()) {
+            RadarTrack track = sourceTrack.copy();
+
+            if (serverLevel != null) {
                 if (track.trackCategory() == TrackCategory.SABLE) {
                     if (!track.isSynthetic()) {
                         track.setFriendly(isFriendlySublevel(track, networkSecret));
@@ -973,10 +1003,14 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     track.setFriendly(false);
                     track.clearSilhouette();
                 }
+
                 DirectionalJammingService.applyFriendlyInterference(track, serverLevel.getGameTime());
             }
+
+            displayTracks.add(track);
         }
-        cachedTracks = List.copyOf(merged.values());
+
+        cachedTracks = List.copyOf(displayTracks);
 
         if (!level.isClientSide) {
             activetrack = resolveActiveTrack();
@@ -1710,6 +1744,20 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
     }
 
+    // assumes serialized NBT isnt modified after being attached to a packet
+    private CompoundTag getCachedNetworkTracksTag() {
+        long gameTime = level == null ? Long.MIN_VALUE : level.getGameTime();
+
+        if (lastSerializedTracksTag == null || lastSerializedTracksSource != cachedTracks || lastSerializedTracksGameTime != gameTime) {
+
+            lastSerializedTracksTag = RadarTrackUtil.serializeNBTList(cachedTracks);
+            lastSerializedTracksSource = cachedTracks;
+            lastSerializedTracksGameTime = gameTime;
+        }
+
+        return lastSerializedTracksTag;
+    }
+
     private CompoundTag getCachedFilterTag() {
         if (lastSerializedFilterTag == null || !filter.equals(lastSerializedFilter)) {
             lastSerializedFilterTag = filter.toTag();
@@ -1755,7 +1803,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.put("RwrContacts", writeRwrInfos());
 
             tag.put("Filter", getCachedFilterTag());
-            tag.put("tracks", RadarTrackUtil.serializeNBTList(cachedTracks));
+            tag.put("tracks", getCachedNetworkTracksTag());
         } else {
             if (selectedRwrRadarPos != null) {
                 tag.put("SelectedRwrRadarPos", NbtUtils.writeBlockPos(selectedRwrRadarPos));

@@ -64,6 +64,7 @@ public final class TargetingSolverSelfTest {
       results.add(checkTrustedAccelerationPrediction());
       results.add(checkLaunchTimeTargetRebase());
       results.add(checkRigidBodyLaunchPrediction());
+      results.add(checkRigidBodyAccelerationPrediction());
       results.add(checkRigidBodyTargetRotation());
       results.add(checkRotatingRigidBodyIntercept());
       results.add(checkCandidateSpecificMuzzleVelocity());
@@ -275,6 +276,31 @@ public final class TargetingSolverSelfTest {
 
       boolean passed = close(sampled.angularVelocity(), omega) && future.distanceTo(expectedPosition) < 1.0e-6 && futureVelocity.distanceTo(expectedVelocity) < 1.0e-6;
       return new Result("rigid_body_launch_prediction", passed, "future=" + future + " velocity=" + futureVelocity + " omega=" + sampled.angularVelocity());
+   }
+
+   private static Result checkRigidBodyAccelerationPrediction() {
+      Vec3 origin = Vec3.ZERO;
+      Vec3 linearVelocity = new Vec3(0.2, 0.0, 0.0);
+      Vec3 angularVelocity = new Vec3(0.0, 0.1, 0.0);
+
+      Vec3 linearAcceleration = new Vec3(0.02, 0.0, 0.0);
+      Vec3 angularAcceleration = new Vec3(0.0, 0.01, 0.0);
+
+      RigidBodyLaunchMath.Motion motion = new RigidBodyLaunchMath.Motion(origin, linearVelocity, angularVelocity, linearAcceleration, angularAcceleration);
+
+      double t = 5.0;
+      Vec3 point = new Vec3(10.0, 0.0, 0.0);
+      double angle = 0.1 * t + 0.5 * 0.01 * t * t;
+      Vec3 rotated = new Vec3(10.0 * Math.cos(angle), 0.0, -10.0 * Math.sin(angle));
+
+      Vec3 expectedPosition = origin.add(linearVelocity.scale(t)).add(linearAcceleration.scale(0.5 * t * t)).add(rotated);
+      Vec3 expectedVelocity = linearVelocity.add(linearAcceleration.scale(t)).add(new Vec3(0.0, 0.1 + 0.01 * t, 0.0).cross(rotated));
+
+      Vec3 actualPosition = motion.futurePosition(point, t);
+      Vec3 actualVelocity = motion.futureVelocity(point, t);
+
+      boolean passed = actualPosition.distanceToSqr(expectedPosition) < 1.0e-10 && actualVelocity.distanceToSqr(expectedVelocity) < 1.0e-10;
+      return new Result("rigid_body_acceleration_prediction", passed, "position=" + actualPosition + " velocity=" + actualVelocity);
    }
 
    private static Result checkRigidBodyTargetRotation() {

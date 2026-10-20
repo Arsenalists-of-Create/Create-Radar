@@ -1,8 +1,11 @@
 package com.happysg.radar.compat.sable;
 
 import com.happysg.radar.targeting.RigidBodyLaunchMath;
+import com.happysg.radar.compat.cbc.AccelerationTracker;
 import dev.ryanhcode.sable.companion.SableCompanion;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 import javax.annotation.Nullable;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
@@ -27,13 +30,33 @@ public final class SableLaunchMotion {
             Vec3 velocityY = velocityAt(level, ship, origin.add(0, SAMPLE_DISTANCE, 0));
             Vec3 velocityZ = velocityAt(level, ship, origin.add(0, 0, SAMPLE_DISTANCE));
 
-            return RigidBodyLaunchMath.fromVelocityProbes(
-                    origin,
-                    originVelocity,
-                    velocityX,
-                    velocityY,
-                    velocityZ,
-                    SAMPLE_DISTANCE
+            RigidBodyLaunchMath.Motion measured = RigidBodyLaunchMath.fromVelocityProbes(origin, originVelocity, velocityX, velocityY, velocityZ, SAMPLE_DISTANCE);
+
+            if (measured == null) {
+                return null;
+            }
+
+            String key = ship.getUniqueId() + "|" + level.dimension().location() + "|rigid_motion|";
+
+            UUID linearId = UUID.nameUUIDFromBytes((key + "linear").getBytes(StandardCharsets.UTF_8));
+            UUID angularId = UUID.nameUUIDFromBytes((key + "angular").getBytes(StandardCharsets.UTF_8));
+
+            long tick = level.getGameTime();
+            Vec3 linearAcceleration = AccelerationTracker.getAccelerationPerTick2(linearId, measured.linearVelocity(), tick);
+
+            Vec3 angularAcceleration = AccelerationTracker.getAccelerationPerTick2(angularId, measured.angularVelocity(), tick);
+            double maxAngularAcceleration = 0.02;
+
+            if (angularAcceleration.lengthSqr() > maxAngularAcceleration * maxAngularAcceleration) {
+                angularAcceleration = angularAcceleration.normalize().scale(maxAngularAcceleration);
+            }
+
+            return new RigidBodyLaunchMath.Motion(
+                    measured.origin(),
+                    measured.linearVelocity(),
+                    measured.angularVelocity(),
+                    linearAcceleration,
+                    angularAcceleration
             );
 
         } catch (RuntimeException e) {

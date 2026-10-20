@@ -159,38 +159,11 @@ public class CannonMountPitch {
             return false;
         }
 
-        if (Mods.SABLE.isLoaded() && controller.firingControl.usesSublevelAimFrame()) {
-            List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, p, sl);
-            boolean hasLegalAngles = angles != null && angles.stream()
-                    .anyMatch(candidate -> candidate != null
-                            && candidate.size() >= 2
-                            && controller.firingControl.canApplyMountCommand(
-                            candidate.get(0), candidate.get(1)));
-            if (!hasLegalAngles) {
-                return false;
-            }
-        } else {
-            var effectivePitch = controller.getMovementLimits()
-                    .intersection(controller.getSupportedMovementLimits())
-                    .orElse(null);
-
-            if (effectivePitch == null) {
-                return false;
-            }
-
-            Vec3 origin = controller.getRayStart();
-            if (origin == null) {
-                return false;
-            }
-
-            List<Double> pitches = CannonTargeting.calculatePitch(mount, origin, p, sl);
-
-            if (pitches == null || pitches.stream().noneMatch(pitch -> pitch != null && effectivePitch.allowsControllerTarget(pitch, 0.0))) {
-                return false;
-            }
+        if (controller.firingControl.usesSublevelAimFrame()) {
+            return true;
         }
 
-        return true;
+        return controller.getMovementLimits().intersection(controller.getSupportedMovementLimits()).isPresent();
     }
 
     private void rotateCBC(CannonMountContext mount) {

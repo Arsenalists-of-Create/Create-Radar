@@ -40,7 +40,7 @@ public final class RadarContactTrackAdapter {
         );
     }
 
-    private static TrackCategory toInternalCategory(RadarContactCategory category) {
+    public static TrackCategory toInternalCategory(RadarContactCategory category) {
         return switch (category) {
             case PLAYER -> TrackCategory.PLAYER;
             case MOB -> TrackCategory.MOB;

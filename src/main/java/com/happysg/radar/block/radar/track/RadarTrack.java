@@ -244,24 +244,35 @@ public class RadarTrack implements RadarContact {
         }
         tag.putLong("scannedTime", scannedTime);
         tag.putString("CategoryId", trackCategory.name());
-        tag.putInt("Category", trackCategory.ordinal());
+
+        if (!compactMotion) {
+            tag.putInt("Category", trackCategory.ordinal());
+        }
+
         tag.putString("entityType", entityType);
-        tag.putFloat("eh", entityheight );
-        tag.putBoolean("Friendly", friendly);
-        tag.putBoolean("Synthetic", synthetic);
+        tag.putFloat("eh", entityheight);
+
+        if (!compactMotion || friendly) {
+            tag.putBoolean("Friendly", friendly);
+        }
+
+        if (!compactMotion || synthetic) {
+            tag.putBoolean("Synthetic", synthetic);
+        }
         if (jammingData != null) {
             CompoundTag jamming = new CompoundTag();
             jamming.putString("RadarSource", jammingData.radarSourceId());
             jamming.putFloat("OuterStrength", jammingData.outerStrength());
-            jamming.putFloat("DirectionalStrength",
-                    jammingData.directionalStrength());
+            jamming.putFloat("DirectionalStrength", jammingData.directionalStrength());
             jamming.putFloat("SevereStrength", jammingData.severeStrength());
-            jamming.putFloat("FriendlyOutageChance",
-                    jammingData.friendlyOutageChance());
-            writeVec3(jamming, "GuidancePositionOffset",
-                    jammingData.guidancePositionOffset());
-            writeVec3(jamming, "GuidanceVelocityOffset",
-                    jammingData.guidanceVelocityOffset());
+            jamming.putFloat("FriendlyOutageChance", jammingData.friendlyOutageChance());
+            if (!compactMotion || !Vec3.ZERO.equals(jammingData.guidancePositionOffset())) {
+                writeVec3(jamming, "GuidancePositionOffset", jammingData.guidancePositionOffset());
+            }
+
+            if (!compactMotion || !Vec3.ZERO.equals(jammingData.guidanceVelocityOffset())) {
+                writeVec3(jamming, "GuidanceVelocityOffset", jammingData.guidanceVelocityOffset());
+            }
             jamming.putLong("SampleToken", jammingData.sampleToken());
             tag.put("Jamming", jamming);
         }
