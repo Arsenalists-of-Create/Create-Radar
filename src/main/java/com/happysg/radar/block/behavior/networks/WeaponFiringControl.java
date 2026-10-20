@@ -698,7 +698,7 @@ public class WeaponFiringControl {
                 if (this.isOutOfKnownRange(target)) {
                     return false;
                 } else {
-                    LOGGER.debug("LOS DBG: trackCat={} entityType={} height={} blocksHigh={} target={}", new Object[]{this.activetrack != null ? this.activetrack.trackCategory() : "null", this.activetrack != null ? this.activetrack.entityType() : "null", height, blocksHigh, target});
+                    //LOGGER.debug("LOS DBG: trackCat={} entityType={} height={} blocksHigh={} target={}", new Object[]{this.activetrack != null ? this.activetrack.trackCategory() : "null", this.activetrack != null ? this.activetrack.entityType() : "null", height, blocksHigh, target});
 
                     for(int h = blocksHigh - 1; h >= 0; --h) {
                         Vec3 end = target.add((double)0.0F, (double)h + (double)0.5F, (double)0.0F);
@@ -1042,14 +1042,12 @@ public class WeaponFiringControl {
             this.sharedYawController = null;
             this.dualTopologyValid = this.controlView.validTopology();
             boolean dual = isDualNetwork();
-            long structuralYawCount = yawControllers.stream().filter(AutoYawControllerBlockEntity::hasStructuralKineticSelectionForTargeting).count();
 
             if (dual) {
+                long structuralYawCount = yawControllers.stream().filter(AutoYawControllerBlockEntity::hasStructuralKineticSelectionForTargeting).count();
                 DualYawMode yawMode = selectDualYawMode(yawControllers.size(), (int) structuralYawCount);
-
                 if (yawMode == DualYawMode.SHARED_STRUCTURAL) {
-                    this.sharedYawController =
-                            yawControllers.iterator().next();
+                    this.sharedYawController = yawControllers.iterator().next();
                 } else if (yawMode == DualYawMode.INVALID_MIXED) {
                     this.dualTopologyValid = false;
                 }

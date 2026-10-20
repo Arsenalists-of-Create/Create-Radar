@@ -412,6 +412,10 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
     }
 
     public boolean canLockRwrTarget(RwrTargetReference target, ServerLevel level) {
+        return canLockRwrTarget(target, level, false);
+    }
+
+    public boolean canLockRwrTarget(RwrTargetReference target, ServerLevel level, boolean visibilityConfirmed) {
         if (!target.isLiveLockTarget(level)) {
             return false;
         }
@@ -428,7 +432,7 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
             return false;
         }
 
-        return !isOccludedWithPolicy(
+        return visibilityConfirmed || !isOccludedWithPolicy(
                 level,
                 radarPos,
                 pos.get(),

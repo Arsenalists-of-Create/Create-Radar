@@ -343,6 +343,10 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     public boolean canLockRwrTarget(RwrTargetReference target, ServerLevel level) {
+        return canLockRwrTarget(target, level, false);
+    }
+
+    public boolean canLockRwrTarget(RwrTargetReference target, ServerLevel level, boolean visibilityConfirmed) {
         if (!target.isLiveLockTarget(level)) {
             return false;
         }
@@ -360,7 +364,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return false;
         }
 
-        return !isOccludedWithPolicy(level, radarPos, pos.get(), () -> RadarOcclusion.isOccluded(
+        return visibilityConfirmed || !isOccludedWithPolicy(level, radarPos, pos.get(), () -> RadarOcclusion.isOccluded(
                 bearingEntity,
                 radarPos,
                 level,

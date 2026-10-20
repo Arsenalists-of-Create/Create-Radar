@@ -670,10 +670,10 @@ public class CannonUtil {
 //        }
 
         if (isBigCannon(cannon)) {
-            LOGGER.debug("   • BigCannon speed = {}", getBigCannonSpeed(level,cannon, (PitchOrientedContraptionEntity)cannon.entity));
+            //LOGGER.debug("   • BigCannon speed = {}", getBigCannonSpeed(level,cannon, (PitchOrientedContraptionEntity)cannon.entity));
             return getBigCannonSpeed(level, cannon ,(PitchOrientedContraptionEntity)cannon.entity);
         } else if (isAutocannonFamily(cannon)) {
-            LOGGER.debug("   • AutoCannon speed = {}", getAutoCannonSpeed(cannon));
+            //LOGGER.debug("   • AutoCannon speed = {}", getAutoCannonSpeed(cannon));
             return getAutoCannonSpeed(cannon);
         }
 //        else if(isRotaryCannon(cannon)){
@@ -685,13 +685,13 @@ public class CannonUtil {
 //            return getMediumCannonSpeed(cannon);
 //        }
         else if(isTwinAutocannon(cannon)){
-            LOGGER.debug("   • TwinACannon speed = {}", getAutoCannonSpeed(cannon));
+            //LOGGER.debug("   • TwinACannon speed = {}", getAutoCannonSpeed(cannon));
             return getAutoCannonSpeed(cannon);
         } else if(isHeavyAutocannon(cannon)){
-            LOGGER.debug("   • HeavyACannon speed = {}", getAutoCannonSpeed(cannon));
+            //LOGGER.debug("   • HeavyACannon speed = {}", getAutoCannonSpeed(cannon));
             return getAutoCannonSpeed(cannon);
         }
-        LOGGER.debug("   • No known cannon type → returning 0");
+        //LOGGER.debug("   • No known cannon type → returning 0");
         return 0;
     }
 
