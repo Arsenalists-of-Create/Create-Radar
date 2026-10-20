@@ -7,6 +7,7 @@ import com.happysg.radar.api.radar.rwr.RadarRwrEvaluation;
 import com.happysg.radar.api.radar.rwr.RadarRwrTarget;
 import com.happysg.radar.api.tracking.RadarContact;
 import com.happysg.radar.api.tracking.RadarSource;
+import com.happysg.radar.api.network.RadarNetworkApi;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.arad.jammer.DirectionalJammingService;
 import com.happysg.radar.block.behavior.networks.NetworkData;
@@ -60,7 +61,6 @@ import javax.annotation.Nullable;
 import java.util.*;
 
 public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSafeNBT, TransformableBlockEntity {
-
     public record ChaffSuppression(String targetId, long untilTick) {}
     private static final String NBT_INVENTORY = "Inventory";
     private static final String NBT_SLOT_NBT  = "SlotNbt";
@@ -111,6 +111,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private RadarTrack currenttrack;
     private List<RadarTrack> cachedTracks = List.of();
     private DetectionConfig detectionCache = DetectionConfig.DEFAULT;
+    private long lastContactRefreshTick = Long.MIN_VALUE;
     public @Nullable RadarTrack activeTrackCache;
     private long compassTrackValidationTick = Long.MIN_VALUE;
     private @Nullable String compassTrackValidationId;
@@ -253,11 +254,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         targeting = readTargetingFromSlot();
 
-        detectionCache = DetectionConfig.fromTag(group.detectionTag);
 
         // resolve radar
-        List<RadarSource> radars =
-                getRunningRadarSources(sl, group);
+        List<RadarSource> radars = getRunningRadarSources(sl, group);
+        refreshContactCache(sl, group, radars);
 
         if (radars.isEmpty()) {
             cachedTracks = List.of();
@@ -276,37 +276,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
             return;
         }
-
-        // rebuild track cache filtered
-        LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
-
-        long gameTime = sl.getGameTime();
-
-        for (RadarSource radar : radars) {
-            Collection<? extends RadarContact> contacts = radar.getContacts();
-
-            if (contacts == null) {
-                continue;
-            }
-
-            for (RadarContact contact : contacts) {
-                RadarTrack track = RadarContactTrackAdapter.toTrack(contact, gameTime);
-
-                if (track == null || !detectionCache.test(track)) {
-                    continue;
-                }
-
-                String id = track.getId();
-
-                if (id == null || id.isBlank()) {
-                    continue;
-                }
-
-                merged.merge(id, track, DirectionalJammingService::preferObservation);
-            }
-        }
-
-        cachedTracks = List.copyOf(merged.values());
 
         // resolve current selected track from group.selectedTargetId
         RadarTrack selected = resolveSelectedTrack(group.selectedTargetId);
@@ -541,6 +510,48 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             endpointRepushRequired = false;
             pushToEndpoints(selected);
         }
+    }
+
+    private void refreshContactCache(ServerLevel sl, NetworkData.Group group, List<RadarSource> radars) {
+        long gameTime = sl.getGameTime();
+        if (lastContactRefreshTick == gameTime) {
+            return;
+        }
+
+        detectionCache = DetectionConfig.fromTag(group.detectionTag);
+        if (radars.isEmpty()) {
+            cachedTracks = List.of();
+            lastContactRefreshTick = gameTime;
+            return;
+        }
+
+        LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
+        for (RadarSource radar : radars) {
+            Collection<? extends RadarContact> contacts = radar.getContacts();
+
+            if (contacts == null) {
+                continue;
+            }
+
+            for (RadarContact contact : contacts) {
+                RadarTrack track = RadarContactTrackAdapter.toTrack(contact, gameTime);
+
+                if (track == null || !detectionCache.test(track)) {
+                    continue;
+                }
+
+                String id = track.getId();
+
+                if (id == null || id.isBlank()) {
+                    continue;
+                }
+
+                merged.merge(id, track, DirectionalJammingService::preferObservation);
+            }
+        }
+
+        cachedTracks = List.copyOf(merged.values());
+        lastContactRefreshTick = gameTime;
     }
 
     private List<RadarRwrEmitter> getRunningRwrEmitters(ServerLevel sl, NetworkData.Group group) {
@@ -1334,8 +1345,20 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return activeTrackCache;
     }
 
-    public List<? extends RadarContact> getRadarContacts() {
-        return List.copyOf(cachedTracks);
+    public List<RadarTrack> getRadarContacts() {
+        if (level instanceof ServerLevel sl) {
+            long gameTime = sl.getGameTime();
+
+            if (gameTime % 5 == 0 && lastContactRefreshTick != gameTime) {
+                NetworkData.Group group = NetworkData.get(sl).getGroup(sl.dimension(), worldPosition);
+
+                if (group != null) {
+                    refreshContactCache(sl, group, getRunningRadarSources(sl, group));
+                }
+            }
+        }
+
+        return cachedTracks;
     }
 
     private void saveSlotNbt(CompoundTag nbt) {
@@ -1544,6 +1567,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         NetworkData.Group group = data.getOrCreateGroup(sl.dimension(), worldPosition);
 
         data.setAllFilters(group, targeting, ident, detection);
+        lastContactRefreshTick = Long.MIN_VALUE;
+
         applyDetectionToRadar(sl, group, detection);
     }
 

@@ -88,7 +88,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         }
     }
 
-    private record SweepCandidate(Entity entity, String id, boolean untracked, double distanceSquared) {}
+    private record SweepCandidate(Entity entity, String id, boolean untracked, double distanceSquared, int nearestSensorIndex) {}
 
     @Override
     public void tick() {
@@ -175,16 +175,23 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         return sensors;
     }
 
-    private boolean isWithinSensorRange(Vec3 target, List<Vec3> sensors) {
+    private int nearestSensorIndex(Vec3 target, List<Vec3> sensors) {
         double rangeSquared = range * range;
+        double nearestDistance = Double.POSITIVE_INFINITY;
+        int nearestIndex = -1;
 
-        for (Vec3 sensor : sensors) {
-            if (sensor.distanceToSqr(target) <= rangeSquared) {
-                return true;
+        for (int i = 0; i < sensors.size(); i++) {
+            double distance = sensors.get(i).distanceToSqr(target);
+
+            if (distance > rangeSquared) continue;
+
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestIndex = i;
             }
         }
 
-        return false;
+        return nearestIndex;
     }
 
     private void scanCurrentSweep(ServerLevel level, List<Vec3> sensors) {
@@ -209,11 +216,11 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, sweepFov))
                 continue;
 
-            if (!isWithinSensorRange(target, sensors))
-                continue;
+            int nearestIndex = nearestSensorIndex(target, sensors);
+            if (nearestIndex < 0) continue;
 
             String id = entity.getUUID().toString();
-            inSector.add(new SweepCandidate(entity, id, !radarTracks.containsKey(id), target.distanceToSqr(sweepCenter)));
+            inSector.add(new SweepCandidate(entity, id, !radarTracks.containsKey(id), target.distanceToSqr(sweepCenter), nearestIndex));
         }
 
 
@@ -232,7 +239,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
 
             Entity entity = candidate.entity();
 
-            if (!detectNow(level, entity.position(), sensors, budget)) {
+            if (!detectNow(level, entity.position(), sensors, budget, candidate.nearestSensorIndex())) {
                 continue;
             }
 
@@ -271,11 +278,9 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, sweepFov))
                 continue;
 
-            if (!isWithinSensorRange(target, sensors))
-                continue;
-
-            if (!detectNow(level, target, sensors, budget))
-                continue;
+            int nearestIndex = nearestSensorIndex(target, sensors);
+            if (nearestIndex < 0) continue;
+            if (!detectNow(level, target, sensors, budget, nearestIndex)) continue;
 
             radarTracks.compute(ship.getUniqueId().toString(), (id, track) -> {
                 if (track == null) return RadarTrackUtil.getRadarTrack(ship, level);
@@ -286,39 +291,15 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         }
     }
 
-    private boolean detectNow(ServerLevel level, Vec3 target, List<Vec3> sensors, ScanBudget budget) {
-        if (!budget.hasCapacity())
-            return false;
-
+    private boolean detectNow(ServerLevel level, Vec3 target, List<Vec3> sensors, ScanBudget budget, int nearestIndex) {
+        if (!budget.hasCapacity()) return false;
         budget.contactsLeft--;
-
-        int nearestIndex = -1;
-        double nearestDistance = Double.POSITIVE_INFINITY;
-
-        for (int i = 0; i < sensors.size(); i++) {
-            double distance = sensors.get(i).distanceToSqr(target);
-
-            if (distance > range * range)
-                continue;
-
-            if (distance < nearestDistance) {
-                nearestDistance = distance;
-                nearestIndex = i;
-            }
-        }
-
-        if (nearestIndex < 0)
-            return false;
-
-        if (testSensor(level, sensors.get(nearestIndex), target, budget))
-            return true;
+        if (nearestIndex < 0) return false;
+        if (testSensor(level, sensors.get(nearestIndex), target, budget)) return true;
 
         for (int i = 0; i < sensors.size() && budget.canTrace(); i++) {
-            if (i == nearestIndex)
-                continue;
-
-            if (testSensor(level, sensors.get(i), target, budget))
-                return true;
+            if (i == nearestIndex) continue;
+            if (testSensor(level, sensors.get(i), target, budget)) return true;
         }
 
         return false;
@@ -416,12 +397,13 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         double[] pendingAirSamples = null;
         int pendingAirCount = 0;
 
-        List<SubLevel> intersectingShips = List.of();
+        List<ShipOccupancyProbe> intersectingShips = List.of();
         boolean sableActive = false;
 
         BlockPos.MutableBlockPos worldPos = new BlockPos.MutableBlockPos();
         LevelChunk currentChunk = null;
         LevelChunkSection currentSection = null;
+        boolean currentSectionAllAir = false;
 
         int currentChunkX = Integer.MIN_VALUE;
         int currentChunkZ = Integer.MIN_VALUE;
@@ -451,6 +433,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
                 currentChunkZ = chunkZ;
 
                 currentSection = null;
+                currentSectionAllAir = false;
                 currentSectionY = Integer.MIN_VALUE;
             }
 
@@ -469,9 +452,10 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
                 if (currentSection == null || currentSectionY != sectionY) {
                     currentSectionY = sectionY;
                     currentSection = currentChunk.getSection(currentChunk.getSectionIndex(y));
+                    currentSectionAllAir = currentSection.hasOnlyAir();
                 }
 
-                isAir = currentSection.getBlockState(x & 15, y & 15, z & 15).isAir();
+                isAir = currentSectionAllAir || currentSection.getBlockState(x & 15, y & 15, z & 15).isAir();
             }
 
             if (isAir && !(x == startX && y == startY && z == startZ)) {
@@ -516,8 +500,12 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
                             return false;
                         }
 
-                        intersectingShips = ships;
+                        List<ShipOccupancyProbe> probes = new ArrayList<>(ships.size());
+                        for (SubLevel ship : ships) {
+                            probes.add(new ShipOccupancyProbe(ship));
+                        }
 
+                        intersectingShips = probes;
                         shipPos = new BlockPos.MutableBlockPos();
                         shipScratch = new Vector3d();
                         int correctedAirBlocks = 0;
@@ -581,43 +569,56 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         return false;
     }
 
-    private static boolean isOccupiedInSable(
-            Collection<SubLevel> ships,
-            double worldX,
-            double worldY,
-            double worldZ,
-            BlockPos.MutableBlockPos localPos,
-            Vector3d worldScratch
-    ) {
-        for (SubLevel ship : ships) {
-
-            Level shipLevel = ship.getLevel();
-
-            if (shipLevel == null) {
-                continue;
-            }
-
-            Vector3d local = ship.logicalPose()
-                    .transformPositionInverse(
-                            worldScratch.set(worldX, worldY, worldZ)
-                    );
-
-            localPos.set(
-                    Mth.floor(local.x),
-                    Mth.floor(local.y),
-                    Mth.floor(local.z)
-            );
-
-            if (!shipLevel.hasChunkAt(localPos)) {
-                continue;
-            }
-
-            if (!shipLevel.getBlockState(localPos).isAir()) {
+    private static boolean isOccupiedInSable(Collection<ShipOccupancyProbe> ships, double worldX, double worldY, double worldZ, BlockPos.MutableBlockPos localPos, Vector3d worldScratch) {
+        for (ShipOccupancyProbe ship : ships) {
+            if (ship.isOccupied(worldX, worldY, worldZ, localPos, worldScratch)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static final class ShipOccupancyProbe {
+        private final SubLevel ship;
+        private final Level level;
+
+        private int lastChunkX = Integer.MIN_VALUE;
+        private int lastChunkZ = Integer.MIN_VALUE;
+        private boolean lastChunkAvailable;
+        private LevelChunk lastLoadedChunk;
+
+        private ShipOccupancyProbe(SubLevel ship) {
+            this.ship = ship;
+            this.level = ship.getLevel();
+        }
+
+        private boolean isOccupied(double worldX, double worldY, double worldZ, BlockPos.MutableBlockPos localPos, Vector3d worldScratch) {
+            if (level == null) {
+                return false;
+            }
+
+            Vector3d local = ship.logicalPose().transformPositionInverse(worldScratch.set(worldX, worldY, worldZ));
+            localPos.set(Mth.floor(local.x), Mth.floor(local.y), Mth.floor(local.z));
+
+            int chunkX = localPos.getX() >> 4;
+            int chunkZ = localPos.getZ() >> 4;
+
+            if (chunkX != lastChunkX || chunkZ != lastChunkZ) {
+                lastChunkX = chunkX;
+                lastChunkZ = chunkZ;
+                lastLoadedChunk = null;
+
+                if (level instanceof ServerLevel serverLevel) {
+                    lastLoadedChunk = serverLevel.getChunkSource().getChunkNow(chunkX, chunkZ);
+                }
+
+                lastChunkAvailable = lastLoadedChunk != null || level.hasChunkAt(localPos);
+            }
+
+            if (!lastChunkAvailable) return false;
+            return lastLoadedChunk != null ? !lastLoadedChunk.getBlockState(localPos).isAir() : !level.getBlockState(localPos).isAir();
+        }
     }
 
     private static double initialTMax(double start, int cell, int step, double delta) {

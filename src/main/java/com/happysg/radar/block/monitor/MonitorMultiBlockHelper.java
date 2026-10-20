@@ -2,9 +2,13 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlocks;
+import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -20,8 +24,7 @@ public class MonitorMultiBlockHelper {
     private static boolean forming;
 
     public static void onPlace(BlockState pState, Level pLevel, BlockPos pPos, BlockState pOldState, boolean pIsMoving) {
-        if (forming || pIsMoving)
-            return;
+        if (forming || pIsMoving) return;
 
         Direction originFacing = pState.getValue(FACING);
         BlockPos bestController = null;
@@ -78,6 +81,7 @@ public class MonitorMultiBlockHelper {
                     pLevel.setBlockAndUpdate(pos, pState.setValue(SHAPE, shape));
                     if (pLevel.getBlockEntity(pos) instanceof MonitorBlockEntity monitor) {
                         monitor.setControllerPos(pPos, size);
+                        monitor.setSplitContactSuppressed(false);
                     }
                 }
             }
@@ -87,49 +91,96 @@ public class MonitorMultiBlockHelper {
     }
 
     private static void destroyMulti(BlockState pState, Level pLevel, BlockPos removedPos, BlockPos controllerPos, int size) {
-        if (size == 1)
-            return;
+        if (size == 1) return;
+        BlockPos linkedSurvivor = null;
+
+        if (pLevel instanceof ServerLevel sl) {
+            NetworkData network = NetworkData.get(sl);
+            ARADData arad = ARADData.get(sl);
+            Direction right = pState.getValue(FACING).getClockWise();
+
+            for (int i = 0; i < size && linkedSurvivor == null; i++) {
+                for (int j = 0; j < size; j++) {
+                    BlockPos pos = controllerPos.above(i).relative(right, j);
+                    if (pos.equals(removedPos)) continue;
+                    if (!(sl.getBlockEntity(pos) instanceof MonitorBlockEntity monitor) || !controllerPos.equals(monitor.getControllerPos())) continue;
+
+                    DataLinkBlockEntity link = findAttachedMonitorLink(sl, pos, controllerPos);
+                    if (link == null) continue;
+
+                    linkedSurvivor = pos.immutable();
+                    BlockPos linkPos = link.getBlockPos();
+
+                    if (controllerPos.equals(network.peekEndpointForDataLink(sl.dimension(), linkPos))) {
+                        network.retargetEndpoint(sl.dimension(), controllerPos, linkedSurvivor);
+                    }
+
+                    if (controllerPos.equals(arad.peekEndpointForDataLink(sl.dimension(), linkPos))) {
+                        arad.updateMonitorPosition(sl.dimension(), controllerPos, linkedSurvivor);
+                    }
+
+                    link.target(linkedSurvivor);
+                    break;
+                }
+            }
+        }
+
         if (pLevel.getBlockEntity(removedPos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
             monitor.onDataLinkRemoved();
             monitor.setControllerPos(removedPos, 1);
         }
+
         Direction facing = pState.getValue(FACING);
         for (int i = 0; i < size; i++) {
             for (int j = 0; j < size; j++) {
                 BlockPos pos = controllerPos.above(i).relative(facing.getClockWise(), j);
-                if (pos.equals(removedPos))
-                    continue;
+                if (pos.equals(removedPos)) continue;
+
                 if (pLevel.getBlockEntity(pos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
                     monitor.onDataLinkRemoved();
                     monitor.setControllerPos(pos, 1);
+                    monitor.setSplitContactSuppressed(!pos.equals(linkedSurvivor));
                     pLevel.setBlockAndUpdate(pos, pState.setValue(SHAPE, MonitorBlock.Shape.SINGLE));
                 }
             }
         }
     }
 
+    private static DataLinkBlockEntity findAttachedMonitorLink(ServerLevel level, BlockPos monitorPos, BlockPos controllerPos) {
+        NetworkData network = NetworkData.get(level);
+        ARADData arad = ARADData.get(level);
 
+        for (Direction direction : Direction.values()) {
+            BlockPos linkPos = monitorPos.relative(direction);
+
+            if (!(level.getBlockEntity(linkPos) instanceof DataLinkBlockEntity link)) continue;
+            if (!monitorPos.equals(link.getSourcePosition())) continue;
+
+            if (controllerPos.equals(network.peekEndpointForDataLink(level.dimension(), linkPos)) || controllerPos.equals(arad.peekEndpointForDataLink(level.dimension(), linkPos))) {
+                return link;
+            }
+        }
+
+        return null;
+    }
 
     public static int getSize(Level pLevel, BlockPos pPos) {
-        if (!pLevel.getBlockState(pPos).is(ModBlocks.MONITOR.get()))
-            return 0;
+        if (!pLevel.getBlockState(pPos).is(ModBlocks.MONITOR.get())) return 0;
         Direction facing = pLevel.getBlockState(pPos).getValue(FACING);
         int potentialsize = 0;
+
         for (int i = 0; i < RadarConfig.server().monitorMaxSize.get(); i++) {
             AtomicBoolean valid = new AtomicBoolean(true);
             BlockPos.betweenClosed(pPos, pPos.above(i).relative(facing.getClockWise(), i)).forEach(p -> {
                 BlockState state = pLevel.getBlockState(p);
-                if (!state.is(ModBlocks.MONITOR.get()) || state.getValue(FACING) != facing)
-                    valid.set(false);
+                if (!state.is(ModBlocks.MONITOR.get()) || state.getValue(FACING) != facing) valid.set(false);
             });
-            if (valid.get())
-                potentialsize = i + 1;
-            else
-                break;
-        }
-        if (potentialsize == 1)
-            return 1;
 
+            if (valid.get()) potentialsize = i + 1;
+            else break;
+        }
+
+        if (potentialsize == 1) return 1;
         return potentialsize;
 
     }

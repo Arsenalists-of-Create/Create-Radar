@@ -210,8 +210,14 @@ public class ARADData extends SavedData {
                 BlockPos next = current.relative(dir);
                 if (!visited.add(next)) continue;
 
+                if (!level.hasChunkAt(next)) continue;
                 BlockPos monitorPos = normalizeMonitor(level, next);
                 if (monitorPos == null) continue;
+
+                if (level.getBlockEntity(next) instanceof MonitorBlockEntity monitor && monitor.getSize() == 1 && !isMonitorDatalinked(group.key.dim(), monitorPos)) {
+                    continue;
+                }
+
                 if (radarData.getEndpointOrigin(group.key.dim(), monitorPos) == NetworkData.LinkOrigin.DATALINK) continue;
 
                 if (reachable.add(monitorPos)) {
@@ -461,11 +467,24 @@ public class ARADData extends SavedData {
     }
 
     @Nullable
-    private static BlockPos normalizeMonitor(ServerLevel level, BlockPos pos) {
+    private BlockPos normalizeMonitor(ServerLevel level, BlockPos pos) {
         BlockEntity be = level.getBlockEntity(pos);
-        if (!(be instanceof MonitorBlockEntity monitor)) return null;
+
+        if (!(be instanceof MonitorBlockEntity monitor)) {
+            return null;
+        }
+
         BlockPos controllerPos = monitor.getControllerPos();
-        return controllerPos == null ? pos : controllerPos;
+
+        if (controllerPos == null) {
+            controllerPos = pos;
+        }
+
+        if (monitor.isSplitContactSuppressed() && !isMonitorDatalinked(level.dimension(), controllerPos)) {
+            return null;
+        }
+
+        return controllerPos;
     }
 
     public static ARADData load(CompoundTag root, HolderLookup.Provider registries) {

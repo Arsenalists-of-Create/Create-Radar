@@ -5,6 +5,7 @@ import com.happysg.radar.api.radar.*;
 import com.happysg.radar.api.radar.rwr.RadarRwrTypes;
 import com.happysg.radar.api.tracking.RadarContact;
 import com.happysg.radar.api.tracking.RadarSource;
+import com.happysg.radar.api.network.RadarNetworkApi;
 import com.happysg.radar.block.behavior.networks.INetworkNode;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.SafeZone;
@@ -111,6 +112,19 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     private BlockPos lastKnownPos = BlockPos.ZERO;
     public final List<SafeZone> safeZones = new ArrayList<>();
     private boolean safeZoneSyncPending = false;
+
+    private boolean splitContactSuppressed = false;
+    public boolean isSplitContactSuppressed() {
+        return splitContactSuppressed;
+    }
+
+    public void setSplitContactSuppressed(boolean suppressed) {
+        if (splitContactSuppressed == suppressed) return;
+
+        splitContactSuppressed = suppressed;
+        setChanged();
+        sendData();
+    }
 
     @Override
     public List<MonitorContactSnapshot> getMonitorContacts() {
@@ -287,7 +301,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 // keep controller's displayed selection consistent with network
                 MonitorBlockEntity controllerBe = getController();
                 if (controllerBe != null) {
-                    controllerBe.activetrack = controllerBe.resolveActiveTrackFromCache();
+                    controllerBe.activetrack = controllerBe.resolveActiveTrack();
                 }
 
                 sendData();
@@ -906,7 +920,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (selectedEntity == null)
             return null;
 
-        for (RadarTrack track : cachedTracks) {
+        for (RadarTrack track : getTracks()) {
             if (selectedEntity.equals(track.getId()) || selectedEntity.equals(track.id())) {
                 return track;
             }
@@ -929,69 +943,20 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             return;
         }
 
-        // Server: rebuild and apply filter
-        List<RadarSource> radars = getRunningRadarSources();
+        Collection<? extends RadarContact> contacts =
+                RadarNetworkApi.getContacts(
+                        (ServerLevel) level, getControllerPos());
 
-        if (radars.isEmpty()) {
-            cachedTracks = List.of();
-            activetrack = null;
-            selectedEntity = null;
-            return;
-        }
-
-        DetectionConfig det = this.filter;
-        LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
-        long gameTime = level.getGameTime();
-
-        for (RadarSource radar : radars) {
-            Collection<? extends RadarContact> contacts = radar.getContacts();
-
-            if (contacts == null) {
-                continue;
-            }
-
-            for (RadarContact contact : contacts) {
-                if (contact == null) {
-                    continue;
-                }
-
-                String id = contact.getId();
-                if (id == null || id.isBlank()) {
-                    continue;
-                }
-
-                RadarTrack track;
-
-                if (contact instanceof RadarTrack existing) {
-                    if (!det.test(existing)) {
-                        continue;
-                    }
-
-                    track = existing;
-                } else {
-                    var category = contact.getCategory();
-
-                    if (category == null || !det.test(RadarContactTrackAdapter.toInternalCategory(category))) {
-                        continue;
-                    }
-
-                    track = RadarContactTrackAdapter.toTrack(contact, gameTime);
-
-                    if (track == null) {
-                        continue;
-                    }
-                }
-
-                merged.merge(id, track, DirectionalJammingService::preferObservation);
-            }
-        }
-
-        List<RadarTrack> displayTracks = new ArrayList<>(merged.size());
+        List<RadarTrack> displayTracks = new ArrayList<>(contacts.size());
         ServerLevel serverLevel = Mods.SABLE.isLoaded() && level instanceof ServerLevel sl ? sl : null;
         String networkSecret = serverLevel == null ? null : monitorNetworkSecret(serverLevel);
 
-        for (RadarTrack sourceTrack : merged.values()) {
-            RadarTrack track = sourceTrack.copy();
+        for (RadarContact contact : contacts) {
+            RadarTrack track = RadarContactTrackAdapter.toTrack(contact, level.getGameTime());
+
+            if (track == null) {
+                continue;
+            }
 
             if (serverLevel != null) {
                 if (track.trackCategory() == TrackCategory.SABLE) {
@@ -1542,7 +1507,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         AtomicReference<Vec3> targetPos = new AtomicReference<>();
 
         if (selectedEntity != null) {
-            targetPos.set(AutoTargetingHelper.resolveSelectedTargetPos(selectedEntity, getController().cachedTracks));
+            targetPos.set(AutoTargetingHelper.resolveSelectedTargetPos(selectedEntity, getController().getTracks()));
         }
 
         if (targetPos.get() == null)
@@ -1700,9 +1665,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 ? DetectionConfig.fromTag(tag.getCompound("Filter"))
                 : DetectionConfig.DEFAULT;
 
-        radius = tag.contains("Size", Tag.TAG_INT)
-                ? tag.getInt("Size")
-                : 1;
+        radius = tag.contains("Size", Tag.TAG_INT) ? tag.getInt("Size") : 1;
+        splitContactSuppressed = tag.getBoolean("SplitContactSuppressed");
 
         if (clientPacket && tag.contains("tracks", Tag.TAG_COMPOUND)) {
             cachedTracks = RadarTrackUtil.deserializeListNBT(tag.getCompound("tracks"));
@@ -1783,25 +1747,21 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(tag, registries,clientPacket);
 
-        if (controller != null)
-            tag.put("Controller", NbtUtils.writeBlockPos(controller));
-
+        if (controller != null) tag.put("Controller", NbtUtils.writeBlockPos(controller));
         if (selectedEntity != null) tag.putString("SelectedEntity", selectedEntity);
         if (hoveredEntity != null) tag.putString("HoveredEntity", hoveredEntity);
         if (selectedRwrSource != null) tag.putString("SelectedRwrSource", selectedRwrSource);
         tag.putBoolean("AradLinked", aradLinked);
-
         tag.putInt("Size", radius);
+        tag.putBoolean("SplitContactSuppressed", splitContactSuppressed);
 
         if (clientPacket) {
             tag.putBoolean("HasRadarPos", radarPos != null);
 
-            if (radarPos != null)
-                tag.put("radarPos", NbtUtils.writeBlockPos(radarPos));
+            if (radarPos != null) tag.put("radarPos", NbtUtils.writeBlockPos(radarPos));
 
             tag.put("Radars", writeRadarInfos());
             tag.put("RwrContacts", writeRwrInfos());
-
             tag.put("Filter", getCachedFilterTag());
             tag.put("tracks", getCachedNetworkTracksTag());
         } else {

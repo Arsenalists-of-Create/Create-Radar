@@ -134,9 +134,12 @@ public final class RadarOcclusion {
                         return null;
                     }
 
+                    if (currentCounter.isAllAirSection(level, pos)) {
+                        return null;
+                    }
+
                     BlockState state = level.getBlockState(pos);
-                    if (state.canOcclude() && state.isSolidRender(level, pos)
-                            && currentCounter.incrementAndIsExceeded()) {
+                    if (state.canOcclude() && state.isSolidRender(level, pos) && currentCounter.incrementAndIsExceeded()) {
                         return Boolean.TRUE;
                     }
                     return null;
@@ -174,6 +177,12 @@ public final class RadarOcclusion {
         private int lastChunkZ = Integer.MIN_VALUE;
         private boolean lastChunkAvailable;
 
+        private @Nullable Level lastSectionLevel;
+        private int lastSectionChunkX = Integer.MIN_VALUE;
+        private int lastSectionChunkZ = Integer.MIN_VALUE;
+        private int lastSectionY = Integer.MIN_VALUE;
+        private boolean lastSectionAllAir;
+
         private boolean isChunkAvailable(Level level, BlockPos pos) {
             int chunkX = pos.getX() >> 4;
             int chunkZ = pos.getZ() >> 4;
@@ -188,10 +197,37 @@ public final class RadarOcclusion {
             return lastChunkAvailable;
         }
 
-        private SolidBlockCounter(int limit) {
-            this.limit = Math.max(0, limit);
+        private boolean isAllAirSection(Level level, BlockPos pos) {
+            if (!(level instanceof ServerLevel serverLevel) || level.isOutsideBuildHeight(pos.getY())) {
+                return false;
+            }
+
+            int chunkX = pos.getX() >> 4;
+            int chunkZ = pos.getZ() >> 4;
+            int sectionY = pos.getY() >> 4;
+
+            if (lastSectionLevel != level || lastSectionChunkX != chunkX || lastSectionChunkZ != chunkZ || lastSectionY != sectionY) {
+                lastSectionLevel = level;
+                lastSectionChunkX = chunkX;
+                lastSectionChunkZ = chunkZ;
+                lastSectionY = sectionY;
+                lastSectionAllAir = false;
+
+                var chunk = serverLevel.getChunkSource().getChunkNow(chunkX, chunkZ);
+
+                if (chunk != null) {
+                    int index = chunk.getSectionIndex(pos.getY());
+
+                    if (index >= 0 && index < chunk.getSections().length) {
+                        lastSectionAllAir = chunk.getSection(index).hasOnlyAir();
+                    }
+                }
+            }
+
+            return lastSectionAllAir;
         }
 
+        private SolidBlockCounter(int limit) { this.limit = Math.max(0, limit); }
         private boolean incrementAndIsExceeded() {
             return ++count > limit;
         }

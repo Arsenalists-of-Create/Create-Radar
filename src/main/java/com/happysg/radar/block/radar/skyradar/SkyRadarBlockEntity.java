@@ -711,7 +711,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         boolean lockCapable = scanningBehavior.canLockRwrTarget(target, level);
         // Exact locks are explicit RWR runtime state; monitor/network selection and owned aim are intentionally ignored here.
         boolean locked = RadarContactRegistry.isExactLockedOn(level, getEmitterId(), target);
-        float signalStrength = detectable ? scanningBehavior.signalStrengthForRwrReceiver(receiver, level) : 0.0F;
+        float signalStrength = detectable ? scanningBehavior.signalStrengthForVisibleRwrReceiver(receiver, level) : 0.0F;
         return new RwrContactEvaluation(emitting, detectable, lockCapable, locked, signalStrength);
     }
 

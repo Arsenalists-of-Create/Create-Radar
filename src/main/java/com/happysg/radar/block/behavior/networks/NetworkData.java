@@ -878,7 +878,19 @@ public class NetworkData extends SavedData {
         if (be instanceof MonitorBlockEntity monitor) {
             BlockPos controllerPos = monitor.getControllerPos();
 
-            return new ContactEndpoint(ContactKind.MONITOR, controllerPos != null ? controllerPos : pos, null);
+            if (monitor.getSize() == 1 && getEndpointOrigin(level.dimension(), controllerPos) != LinkOrigin.DATALINK) {
+                return null;
+            }
+
+            if (controllerPos == null) {
+                controllerPos = pos;
+            }
+
+            if (monitor.isSplitContactSuppressed() && getEndpointOrigin(level.dimension(), controllerPos) != LinkOrigin.DATALINK) {
+                return null;
+            }
+
+            return new ContactEndpoint(ContactKind.MONITOR, controllerPos, null);
         }
 
         if (be instanceof AutoPitchControllerBlockEntity) {

@@ -436,27 +436,18 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
         );
     }
 
-    public float signalStrengthForRwrReceiver(RwrTargetReference receiver, ServerLevel level) {
+    public float signalStrengthForVisibleRwrReceiver(RwrTargetReference receiver, ServerLevel level) {
         Optional<Vec3> pos = receiver.resolvePosition(level);
         if (pos.isEmpty()) {
             return 0.0F;
         }
+
         Vec3 radarPos = PhysicsHandler.getWorldVec(radarEntity);
-        if (!isInPassiveRwrSkyRadarVolume(
-                pos.get(),
-                radarPos
-        )) {
+        if (!isInPassiveRwrSkyRadarVolume(pos.get(), radarPos)) {
             return 0.0F;
         }
 
-        boolean occluded = isOccludedWithPolicy(
-                level,
-                radarPos,
-                pos.get(),
-                () -> RadarOcclusion.isOccluded(radarEntity, radarPos, level, receiver, pos.get(), RadarType.SKY)
-        );
-
-        return occluded ? 0.0F : redstoneSignalFor(pos.get(), radarPos);
+        return redstoneSignalFor(pos.get(), radarPos);
     }
 
     private boolean canScanTarget(RwrTargetReference target, ServerLevel level) {
@@ -510,8 +501,9 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
     private void scanForSableTracks() {
         if (blockEntity.getLevel() == null || !Mods.SABLE.isLoaded()) return;
         double passiveRange = range * RWR_PASSIVE_RANGE_MULTIPLIER;
-        RadarScanningBlockBehavior.splitAABB(getRadarAABB(passiveRange), 1024).forEach(aabb ->
-                SableUtils.getLoadedShips(blockEntity.getLevel(), aabb).forEach(scannedShips::add));
+        for (SubLevelAccess ship : SableUtils.getLoadedShips(blockEntity.getLevel(), getRadarAABB(passiveRange))) {
+            scannedShips.add(ship);
+        }
 
         scannedShips.remove(SableUtils.getShipManagingPos(blockEntity));
     }
