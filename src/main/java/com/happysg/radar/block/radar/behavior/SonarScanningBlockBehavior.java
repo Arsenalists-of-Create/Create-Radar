@@ -88,6 +88,8 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         }
     }
 
+    private record SweepCandidate(Entity entity, String id, boolean untracked, double distanceSquared) {}
+
     @Override
     public void tick() {
         super.tick();
@@ -134,14 +136,12 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
 
         AABB scanBounds = createScanBounds(sensors);
 
-        for (AABB section : RadarScanningBlockBehavior.splitAABB(scanBounds, 256.0)) {
-            for (Entity entity : level.getEntitiesOfClass(Entity.class, section, this::shouldScanEntity)) {
-                if (entity instanceof AbstractContraptionEntity contraption && sonar.isAttachedTo(contraption)) {
-                    continue;
-                }
-
-                entityCandidates.add(entity);
+        for (Entity entity : level.getEntitiesOfClass(Entity.class, scanBounds, this::shouldScanEntity)) {
+            if (entity instanceof AbstractContraptionEntity contraption && sonar.isAttachedTo(contraption)) {
+                continue;
             }
+
+            entityCandidates.add(entity);
         }
 
         if (Mods.SABLE.isLoaded() && scanSable) {
@@ -195,7 +195,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         double sweepAngle = Mth.positiveModulo(180.0 - sonar.getGlobalAngle() + sweepStep * 0.5, 360.0);
         double sweepFov = Math.min(360.0, Math.max(RadarConfig.server().sonarFOV.get(), Math.abs(sweepStep)));
 
-        List<Entity> inSector = new ArrayList<>();
+        List<SweepCandidate> inSector = new ArrayList<>();
 
         for (Entity entity : entityCandidates) {
             if (entity.level() != level || !shouldScanEntity(entity))
@@ -212,32 +212,34 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             if (!isWithinSensorRange(target, sensors))
                 continue;
 
-            inSector.add(entity);
+            String id = entity.getUUID().toString();
+            inSector.add(new SweepCandidate(entity, id, !radarTracks.containsKey(id), target.distanceToSqr(sweepCenter)));
         }
 
 
-        inSector.sort(Comparator
-                .comparing((Entity entity) -> !radarTracks.containsKey(entity.getUUID().toString()))
-                .thenComparingDouble(entity -> entity.position().distanceToSqr(sweepCenter)));
+        inSector.sort(Comparator.comparing(SweepCandidate::untracked).thenComparingDouble(SweepCandidate::distanceSquared));
 
         ScanBudget budget = new ScanBudget();
-
         boolean shipsFirst = (level.getGameTime() & 1L) == 0L;
-
         if (shipsFirst && Mods.SABLE.isLoaded() && scanSable) {
             scanSableShips(level, sensors, sweepCenter, sweepAngle, sweepFov, budget);
         }
 
-        for (Entity entity : inSector) {
-            if (!budget.hasCapacity())
+        for (SweepCandidate candidate : inSector) {
+            if (!budget.hasCapacity()) {
                 break;
+            }
 
-            if (!detectNow(level, entity.position(), sensors, budget))
+            Entity entity = candidate.entity();
+
+            if (!detectNow(level, entity.position(), sensors, budget)) {
                 continue;
+            }
 
-            radarTracks.compute(entity.getUUID().toString(), (id, track) -> {
-                if (track == null)
+            radarTracks.compute(candidate.id(), (id, track) -> {
+                if (track == null) {
                     return new RadarTrack(entity);
+                }
 
                 track.updateRadarTrack(entity);
                 return track;

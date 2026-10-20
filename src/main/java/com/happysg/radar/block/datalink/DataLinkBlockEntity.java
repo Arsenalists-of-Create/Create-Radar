@@ -448,16 +448,19 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         if (!(level instanceof ServerLevel serverLevel)) {
             return null;
         }
+
         if (filtererOffset != null) {
             BlockPos relativeFilterer = worldPosition.offset(filtererOffset);
-            if (serverLevel.getBlockEntity(relativeFilterer) instanceof NetworkFiltererBlockEntity) {
+
+            if (serverLevel.hasChunkAt(relativeFilterer) && serverLevel.getBlockEntity(relativeFilterer) instanceof NetworkFiltererBlockEntity) {
                 return relativeFilterer;
             }
         }
-        if (filtererWorldPosFallback != null
-                && serverLevel.getBlockEntity(filtererWorldPosFallback) instanceof NetworkFiltererBlockEntity) {
+
+        if (filtererWorldPosFallback != null && serverLevel.hasChunkAt(filtererWorldPosFallback) && serverLevel.getBlockEntity(filtererWorldPosFallback) instanceof NetworkFiltererBlockEntity) {
             return filtererWorldPosFallback;
         }
+
         return null;
     }
 
@@ -514,8 +517,10 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         if (!serverLevel.hasChunkAt(relativeTarget)) {
             return true;
         }
-        if (getBlockState().hasProperty(DataLinkBlock.LINK_STYLE)
-                && getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER) {
+        if (!serverLevel.hasChunkAt(targetWorldPosFallback)) {
+            return false;
+        }
+        if (getBlockState().hasProperty(DataLinkBlock.LINK_STYLE) && getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER) {
             return serverLevel.getBlockEntity(relativeTarget) == null && serverLevel.getBlockEntity(targetWorldPosFallback) != null;
         }
         return AllDataBehaviors.targetOf(serverLevel, relativeTarget) == null

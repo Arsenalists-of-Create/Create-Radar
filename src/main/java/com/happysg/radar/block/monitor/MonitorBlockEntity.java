@@ -100,21 +100,25 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     /** Keep as field because renderer uses it (coloring). */
     protected DetectionConfig filter = DetectionConfig.DEFAULT;
+    private DetectionConfig lastSerializedFilter;
+    private CompoundTag lastSerializedFilterTag;
     private BlockPos lastKnownPos = BlockPos.ZERO;
     public final List<SafeZone> safeZones = new ArrayList<>();
     private boolean safeZoneSyncPending = false;
 
     @Override
     public List<MonitorContactSnapshot> getMonitorContacts() {
-        if (cachedTracks == null || cachedTracks.isEmpty()) {
+        Collection<RadarTrack> tracks = getTracks();
+
+        if (tracks == null || tracks.isEmpty()) {
             return List.of();
         }
 
-        return cachedTracks.stream().map(track -> new MonitorContactSnapshot(track.id(), track.position(), true, "create_radar")).toList();
+        return tracks.stream().map(track -> new MonitorContactSnapshot(track.id(), track.position(), true, "create_radar")).toList();
     }
 
     @Override
-    public RadarDetectionSettings getMonitorDetectionSettings() { return filter.toApiSettings(); }
+    public RadarDetectionSettings getMonitorDetectionSettings() { return getDisplayDataOwner().filter.toApiSettings(); }
 
     @Override
     public BlockPos getMonitorControllerPos() { return getControllerPos(); }
@@ -259,7 +263,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 //            setSelectedTargetServer(activetrack);
 //        }
 
-        if (!level.isClientSide && level instanceof ServerLevel sl) {
+        if (!level.isClientSide && level instanceof ServerLevel sl && isController()) {
             int monitorSyncInterval = getMonitorSyncIntervalTicks(sl);
             if (level.getGameTime() % monitorSyncInterval == 0) {
                 syncFromNetwork(sl);
@@ -342,6 +346,21 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         this.radarCache.clear();
         this.radarInfos = List.of();
         this.rwrInfos = List.of();
+
+        // Clear all old display contacts and selection state.
+        this.cachedTracks = List.of();
+        this.activetrack = null;
+        this.selectedEntity = null;
+        this.hoveredEntity = null;
+
+        this.selectedRwrSource = null;
+        this.hoveredRwrSource = null;
+        this.selectedRwrRadarPos = null;
+        this.selectedRwrPos = null;
+
+        this.rwrLockHoldTicks.clear();
+        this.rwrBearingNoise.clear();
+
         this.controller = null;
         this.aradLinked = false;
 
@@ -1231,7 +1250,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public List<RwrDisplayInfo> getRwrInfos() {
-        return rwrInfos;
+        MonitorBlockEntity owner = getDisplayDataOwner();
+        return owner == this ? rwrInfos : owner.getRwrInfos();
     }
 
     private String monitorNetworkSecret(ServerLevel level) {
@@ -1342,19 +1362,28 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public List<RadarDisplayInfo> getRadarInfos() {
-        return radarInfos;
+        MonitorBlockEntity owner = getDisplayDataOwner();
+        return owner == this ? radarInfos : owner.getRadarInfos();
     }
 
     @Override
     public List<MonitorRadarSnapshot> getRadarSnapshots() {
-        if (radarInfos.isEmpty()) {
+        List<RadarDisplayInfo> infos = getRadarInfos();
+
+        if (infos.isEmpty()) {
             return List.of();
         }
 
-        return radarInfos.stream().map(RadarDisplayInfo::toApiSnapshot).toList();
+        return infos.stream().map(RadarDisplayInfo::toApiSnapshot).toList();
     }
 
     public List<RadarDisplayInfo> getRunningRadarInfos() {
+        MonitorBlockEntity owner = getDisplayDataOwner();
+
+        if (owner != this) {
+            return owner.getRunningRadarInfos();
+        }
+
         if (radarInfos.isEmpty()) return List.of();
         List<RadarDisplayInfo> running = new ArrayList<>();
         for (RadarDisplayInfo info : radarInfos) {
@@ -1429,13 +1458,32 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         return this;
     }
 
+    private MonitorBlockEntity getDisplayDataOwner() {
+        if (isController() || level == null) {
+            return this;
+        }
+
+        BlockPos controllerPos = getControllerPos();
+
+        if (!level.hasChunkAt(controllerPos)) {
+            return this;
+        }
+
+        if (level.getBlockEntity(controllerPos) instanceof MonitorBlockEntity owner && owner.isController()) {
+            return owner;
+        }
+
+        return this;
+    }
+
     @Override
     protected AABB createRenderBoundingBox() {
         return super.createRenderBoundingBox().inflate(10);
     }
 
     public Collection<RadarTrack> getTracks() {
-        return cachedTracks;
+        MonitorBlockEntity owner = getDisplayDataOwner();
+        return owner == this ? cachedTracks : owner.getTracks();
     }
 
     public float getRange() {
@@ -1662,6 +1710,27 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
     }
 
+    private CompoundTag getCachedFilterTag() {
+        if (lastSerializedFilterTag == null || !filter.equals(lastSerializedFilter)) {
+            lastSerializedFilterTag = filter.toTag();
+            lastSerializedFilter = new DetectionConfig(
+                    filter.player(),
+                    filter.sable(),
+                    filter.contraption(),
+                    filter.mob(),
+                    filter.projectile(),
+                    filter.animal(),
+                    filter.item(),
+                    List.copyOf(filter.blacklistPlayers()),
+                    List.copyOf(filter.whitelistPlayers()),
+                    List.copyOf(filter.blacklistSable()),
+                    List.copyOf(filter.whitelistSable())
+            );
+        }
+
+        return lastSerializedFilterTag.copy();
+    }
+
     @Override
     protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(tag, registries,clientPacket);
@@ -1685,7 +1754,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.put("Radars", writeRadarInfos());
             tag.put("RwrContacts", writeRwrInfos());
 
-            tag.put("Filter", filter.toTag());
+            tag.put("Filter", getCachedFilterTag());
             tag.put("tracks", RadarTrackUtil.serializeNBTList(cachedTracks));
         } else {
             if (selectedRwrRadarPos != null) {
@@ -1696,9 +1765,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             }
             if (level instanceof ServerLevel slevel) {
                 if (getNetworkGroup(slevel) == null) {
-                    if (radarPos != null)
-                        tag.put("radarPos", NbtUtils.writeBlockPos(radarPos));
-                    tag.put("Filter", filter.toTag());
+                    if (radarPos != null) tag.put("radarPos", NbtUtils.writeBlockPos(radarPos));
+                    tag.put("Filter", getCachedFilterTag());
                 }
             }
         }

@@ -34,6 +34,15 @@ public final class CBCATRocketAimSolver extends SimulatedAimSolver {
         return super.solve(snapshot, projectileModel, obstructionChecker);
     }
 
+    @Override
+    public List<TargetingResult> solveObstructionAlternatives(TargetingSnapshot snapshot, ProjectileModel projectileModel) {
+        if (!(projectileModel instanceof CBCATRocketProjectileModel)) {
+            return List.of();
+        }
+
+        return super.solveObstructionAlternatives(snapshot, projectileModel);
+    }
+
     public static TargetingComputer createComputer(ObstructionChecker obstructionChecker) {
         ProjectileSimulator simulator = new ProjectileSimulator();
         TargetPredictor predictor = new TargetPredictor();

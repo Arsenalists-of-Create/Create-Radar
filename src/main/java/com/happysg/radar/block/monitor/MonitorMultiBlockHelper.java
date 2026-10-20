@@ -90,6 +90,7 @@ public class MonitorMultiBlockHelper {
         if (size == 1)
             return;
         if (pLevel.getBlockEntity(removedPos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
+            monitor.onDataLinkRemoved();
             monitor.setControllerPos(removedPos, 1);
         }
         Direction facing = pState.getValue(FACING);
@@ -99,8 +100,8 @@ public class MonitorMultiBlockHelper {
                 if (pos.equals(removedPos))
                     continue;
                 if (pLevel.getBlockEntity(pos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
-                    monitor.setControllerPos(pos, 1);
                     monitor.onDataLinkRemoved();
+                    monitor.setControllerPos(pos, 1);
                     pLevel.setBlockAndUpdate(pos, pState.setValue(SHAPE, MonitorBlock.Shape.SINGLE));
                 }
             }

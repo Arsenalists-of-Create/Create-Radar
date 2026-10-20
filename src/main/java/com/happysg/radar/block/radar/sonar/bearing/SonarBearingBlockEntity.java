@@ -35,6 +35,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     private boolean structureValid;
     private UUID emitterId = UUID.randomUUID();
     private final Set<BlockPos> savedSensorPositions = new HashSet<>();
+    private Set<BlockPos> sensorPositionsSnapshot = Set.of();
     private BlockPos lastKnownPos = BlockPos.ZERO;
     private static final double REFERENCE_SONAR_RPM = 196.0;
     private static final int SWEEP_SYNC_INTERVAL_TICKS = 100;
@@ -168,6 +169,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
         savedSensorPositions.clear();
         savedSensorPositions.addAll(contraption.getSensorPositions());
+        sensorPositionsSnapshot = Set.copyOf(savedSensorPositions);
 
         Direction direction = getradarDirection();
         contraption.removeBlocksFromWorld(level, BlockPos.ZERO);
@@ -240,6 +242,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         panelCount = 0;
         structureValid = false;
         savedSensorPositions.clear();
+        sensorPositionsSnapshot = Set.of();
 
         updateScanningBehavior();
 
@@ -266,7 +269,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     public Collection<BlockPos> getSensorPositions() {
-        return Set.copyOf(savedSensorPositions);
+        return sensorPositionsSnapshot;
     }
 
     private void updateScanningBehavior() {
@@ -446,6 +449,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         for (long packed : tag.getLongArray("SensorPositions")) {
             savedSensorPositions.add(BlockPos.of(packed));
         }
+        sensorPositionsSnapshot = Set.copyOf(savedSensorPositions);
 
         if (tag.hasUUID("EmitterId")) {
             emitterId = tag.getUUID("EmitterId");

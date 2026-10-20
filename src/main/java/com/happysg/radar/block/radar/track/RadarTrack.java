@@ -167,16 +167,20 @@ public class RadarTrack implements RadarContact {
 
     public static RadarTrack deserializeNBT(CompoundTag tag) {
         TrackCategory category = readTrackCategory(tag);
+        long[] motion = tag.getLongArray("MotionBits");
 
-        RadarTrack track = new RadarTrack(
-                tag.getString("id"),
-                new Vec3(tag.getDouble("x"), tag.getDouble("y"), tag.getDouble("z")),
-                new Vec3(tag.getDouble("vx"), tag.getDouble("vy"), tag.getDouble("vz")),
-                tag.getLong("scannedTime"),
-                category,
-                tag.getString("entityType"),
-                tag.getFloat("eh")
-        );
+        Vec3 position;
+        Vec3 velocity;
+
+        if (motion.length == 6) {
+            position = new Vec3(Double.longBitsToDouble(motion[0]), Double.longBitsToDouble(motion[1]), Double.longBitsToDouble(motion[2]));
+            velocity = new Vec3(Double.longBitsToDouble(motion[3]), Double.longBitsToDouble(motion[4]), Double.longBitsToDouble(motion[5]));
+        } else {
+            position = new Vec3(tag.getDouble("x"), tag.getDouble("y"), tag.getDouble("z"));
+            velocity = new Vec3(tag.getDouble("vx"), tag.getDouble("vy"), tag.getDouble("vz"));
+        }
+
+        RadarTrack track = new RadarTrack(tag.getString("id"), position, velocity, tag.getLong("scannedTime"), category, tag.getString("entityType"), tag.getFloat("eh"));
 
         track.friendly = tag.getBoolean("Friendly");
         track.synthetic = tag.getBoolean("Synthetic");
@@ -211,14 +215,33 @@ public class RadarTrack implements RadarContact {
 
 
     public CompoundTag serializeNBT() {
+        return writeNBT(false);
+    }
+
+    public CompoundTag serializeNetworkNBT() {
+        return writeNBT(true);
+    }
+
+    private CompoundTag writeNBT(boolean compactMotion) {
         CompoundTag tag = new CompoundTag();
         tag.putString("id", id);
-        tag.putDouble("x", position.x);
-        tag.putDouble("y", position.y);
-        tag.putDouble("z", position.z);
-        tag.putDouble("vx", velocity.x);
-        tag.putDouble("vy", velocity.y);
-        tag.putDouble("vz", velocity.z);
+        if (compactMotion) {
+            tag.putLongArray("MotionBits", new long[] {
+                    Double.doubleToRawLongBits(position.x),
+                    Double.doubleToRawLongBits(position.y),
+                    Double.doubleToRawLongBits(position.z),
+                    Double.doubleToRawLongBits(velocity.x),
+                    Double.doubleToRawLongBits(velocity.y),
+                    Double.doubleToRawLongBits(velocity.z)
+            });
+        } else {
+            tag.putDouble("x", position.x);
+            tag.putDouble("y", position.y);
+            tag.putDouble("z", position.z);
+            tag.putDouble("vx", velocity.x);
+            tag.putDouble("vy", velocity.y);
+            tag.putDouble("vz", velocity.z);
+        }
         tag.putLong("scannedTime", scannedTime);
         tag.putString("CategoryId", trackCategory.name());
         tag.putInt("Category", trackCategory.ordinal());

@@ -2664,7 +2664,28 @@ public class WeaponFiringControl {
                 return null;
             }
 
-            TargetingResult validated = this.validateAsyncTargetingResult(serverLevel, cannonContraption, asyncResult.request(), asyncResult.result());
+            TargetingResult validated = null;
+            if (asyncResult.alternatives() == null) {
+                TargetingValidation primary = this.validateAsyncTargetingResult(serverLevel, cannonContraption, asyncResult.request(), asyncResult.result());
+
+                if (primary.obstructed() && !(asyncResult.request().projectileModel() instanceof CBCMWCannonCompat.LauncherProjectileModel)) {
+                    this.clearTargetingResultCache();
+                    this.submitAsyncObstructionFallback(asyncResult.request());
+                    return null;
+                }
+
+                validated = primary.result();
+            } else {
+                for (TargetingResult candidate : asyncResult.alternatives()) {
+                    TargetingValidation assessment = this.validateAsyncTargetingResult(serverLevel, cannonContraption, asyncResult.request(), candidate);
+
+                    if (assessment.result() != null) {
+                        validated = assessment.result();
+                        break;
+                    }
+                }
+            }
+
             if (validated == null) {
                 ++this.asyncSolveRejected;
                 this.clearTargetingResultCache();
@@ -3009,6 +3030,11 @@ public class WeaponFiringControl {
             @Nullable SubLevelAccess targetSublevel,
             TargetMotionClass targetMotionClass, int trackingLeadTicks,
             @Nullable UUID targetMotionId) {
+
+        if (this.pendingTargetingFuture != null && this.pendingTargetingFuture.isDone()) {
+            return;
+        }
+
         ResolvedProjectileState currentProjectile = this.resolveProjectileState(cannonContraption, serverLevel);
         if (currentProjectile == null || currentProjectile.solverKind() == SolverKind.CBCMS_SERVER) {
             return;
@@ -3051,13 +3077,33 @@ public class WeaponFiringControl {
 
             TargetingComputer computer = this.targetingComputerFor(request.solverKind(), true);
             TargetingSnapshot workerSnapshot = request.snapshot().withoutLiveLevel();
-            this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, computer.solve(workerSnapshot, request.projectileModel())), TARGETING_EXECUTOR);
+            this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, computer.solve(workerSnapshot, request.projectileModel()), null), TARGETING_EXECUTOR);
             ++this.asyncSolveSubmitted;
         } catch (RejectedExecutionException rejected) {
             this.pendingTargetingRequest = null;
             this.pendingTargetingFuture = null;
             ++this.asyncSolveRejected;
             LOGGER.debug("WFC TargetingComputer async solve queue is full; skipping request for mount={} target={}", request.mountPos(), request.targetId());
+        }
+    }
+
+    private void submitAsyncObstructionFallback(AsyncTargetingRequest request) {
+        if (this.pendingTargetingFuture != null) {
+            return;
+        }
+
+        try {
+            TargetingComputer computer = this.targetingComputerFor(request.solverKind(), true);
+            TargetingSnapshot workerSnapshot = request.snapshot().withoutLiveLevel();
+            this.pendingTargetingRequest = request;
+            this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, null, computer.solveObstructionAlternatives(workerSnapshot, request.projectileModel())), TARGETING_EXECUTOR);
+            ++this.asyncSolveSubmitted;
+        } catch (RejectedExecutionException rejected) {
+            this.pendingTargetingRequest = null;
+            this.pendingTargetingFuture = null;
+            ++this.asyncSolveRejected;
+
+            LOGGER.debug("WFC async obstruction fallback queue full: mount={} target={}", request.mountPos(), request.targetId());
         }
     }
 
@@ -3444,18 +3490,10 @@ public class WeaponFiringControl {
         }
 
         long now = serverLevel.getGameTime();
+        String stateKey = targetSublevel.getUniqueId() + ":" + state;
+        long interval = Objects.equals(stateKey, this.lastRigidTargetDiagnosticState) ? 100L : 20L;
 
-        String stateKey =
-                targetSublevel.getUniqueId() + ":" + state;
-
-        long interval = Objects.equals(
-                stateKey,
-                this.lastRigidTargetDiagnosticState
-        ) ? 100L : 20L;
-
-        if (this.lastRigidTargetDiagnosticTick != Long.MIN_VALUE
-                && now >= this.lastRigidTargetDiagnosticTick
-                && now - this.lastRigidTargetDiagnosticTick < interval) {
+        if (this.lastRigidTargetDiagnosticTick != Long.MIN_VALUE && now >= this.lastRigidTargetDiagnosticTick && now - this.lastRigidTargetDiagnosticTick < interval) {
             return;
         }
 
@@ -3700,16 +3738,15 @@ public class WeaponFiringControl {
         return Double.isFinite(angle) ? angle : null;
     }
 
-    @Nullable
-    private TargetingResult validateAsyncTargetingResult(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, AsyncTargetingRequest request, @Nullable TargetingResult result) {
+    private TargetingValidation validateAsyncTargetingResult(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, AsyncTargetingRequest request, @Nullable TargetingResult result) {
         if (result == null || !result.valid() || !result.hasShot() || result.aimSolution() == null) {
-            return null;
+            return TargetingValidation.invalid();
         }
 
         AimSolution aim = result.aimSolution();
         Vec3 direction = aim.aimDirection();
         if (direction == null || direction.lengthSqr() < 1.0E-12) {
-            return null;
+            return TargetingValidation.invalid();
         }
 
         TargetingSnapshot snapshot = request.snapshot();
@@ -3718,7 +3755,7 @@ public class WeaponFiringControl {
         if (currentProjectile == null
                 || !request.shotFingerprint().equals(currentProjectile.fingerprint())
                 || request.solverKind() != currentProjectile.solverKind()) {
-            return null;
+            return TargetingValidation.invalid();
         }
 
         int validationTicks = Math.max(1, Math.min(snapshot.maxFlightTicks(), result.predictedFlightTicks() + 1));
@@ -3727,7 +3764,7 @@ public class WeaponFiringControl {
         try {
             trajectory = this.validationProjectileSimulator.simulate(snapshot.launchPosition(direction), direction, snapshot.inheritedVelocityAt(direction), model, validationTicks, snapshot.level());
         } catch (LoadedFluidDrag.Unavailable ignored) {
-            return null;
+            return TargetingValidation.invalid();
         }
 
         if (model instanceof CBCMWCannonCompat.LauncherProjectileModel launcherModel) {
@@ -3738,12 +3775,12 @@ public class WeaponFiringControl {
                 Vec3 position = samples.get(i).position();
                 BlockPos pos = BlockPos.containing(position);
                 if (serverLevel.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4) == null) {
-                    return null;
+                    return TargetingValidation.invalid();
                 }
 
                 double actualFluidDrag = LoadedFluidDrag.sample(serverLevel, pos);
                 if (!Double.isFinite(actualFluidDrag) || Math.abs(actualFluidDrag - expectedFluidDrag) > 1.0E-6) {
-                    return null;
+                    return TargetingValidation.invalid();
                 }
             }
         }
@@ -3779,7 +3816,6 @@ public class WeaponFiringControl {
 
                 Vec3 travel = relativeTo.subtract(relativeFrom);
                 double lengthSquared = travel.lengthSqr();
-
                 double fraction = lengthSquared < 1.0E-12 ? 0.0 : Math.max(0.0, Math.min(1.0, intersection.subtract(relativeFrom).dot(travel) / lengthSquared));
 
                 segmentImpact = from.position().lerp(to.position(), fraction);
@@ -3798,7 +3834,7 @@ public class WeaponFiringControl {
 
                     Vec3 segmentEnd = to.tick() == segmentImpactTick ? segmentImpact : to.position();
                     if (this.pathTouchesSafeZone(from.position(), segmentEnd)) {
-                        return null;
+                        return TargetingValidation.invalid();
                     }
                 }
             }
@@ -3817,7 +3853,7 @@ public class WeaponFiringControl {
 
             Vec3 segmentEnd = segmentImpact != null && to.tick() == pathEndTick ? segmentImpact : to.position();
             if (this.pathTouchesSafeZone(from.position(), segmentEnd)) {
-                return null;
+                return TargetingValidation.invalid();
             }
         }
 
@@ -3825,52 +3861,10 @@ public class WeaponFiringControl {
         ObstructionResult obstruction = this.mainThreadObstructionChecker.check(serverLevel, trajectory, pathEndTick, segmentImpact, cbcSweep);
 
         if (obstruction.clear() || this.isValidatedObstructionAtTarget(snapshot, obstruction)) {
-            return result;
+            return TargetingValidation.accepted(result);
         }
 
-        if (model instanceof CBCMWCannonCompat.LauncherProjectileModel) {
-            return null;
-        }
-
-        TargetingComputer computer = this.targetingComputerFor(currentProjectile.solverKind(), false);
-        TargetingResult fallback = computer.solve(snapshot, model);
-
-        if (fallback == null || !fallback.valid() || !fallback.hasShot() || fallback.aimSolution() == null) {
-            return null;
-        }
-
-        if (this.safeZones != null && !this.safeZones.isEmpty()) {
-            Vec3 fallbackDirection = fallback.aimSolution().aimDirection();
-
-            if (!finite(fallbackDirection) || fallbackDirection.lengthSqr() < 1.0E-12) {
-                return null;
-            }
-
-            int fallbackTicks = Math.max(1, Math.min(snapshot.maxFlightTicks(), fallback.predictedFlightTicks()));
-            ProjectileSimulator.SimulationResult fallbackTrajectory;
-
-            try {
-                fallbackTrajectory = this.validationProjectileSimulator.simulate(
-                        snapshot.launchPosition(fallbackDirection),
-                        fallbackDirection,
-                        snapshot.inheritedVelocityAt(fallbackDirection),
-                        model,
-                        fallbackTicks,
-                        snapshot.level());
-            } catch (LoadedFluidDrag.Unavailable ignored) {
-                return null;
-            }
-
-            List<Trajectory.Sample> samples = fallbackTrajectory.samples();
-
-            for (int i = 0; i + 1 < samples.size(); i++) {
-                if (this.pathTouchesSafeZone(samples.get(i).position(), samples.get(i + 1).position())) {
-                    return null;
-                }
-            }
-        }
-
-        return fallback;
+        return TargetingValidation.blockedPath();
     }
 
     private boolean isValidatedObstructionAtTarget(TargetingSnapshot snapshot, ObstructionResult obstruction) {
@@ -7125,7 +7119,20 @@ public class WeaponFiringControl {
             @Nullable RigidBodyLaunchMath.Motion shooterMotion
     ) {}
 
-    private static record AsyncTargetingResult(AsyncTargetingRequest request, @Nullable TargetingResult result) {
+    private static record AsyncTargetingResult(AsyncTargetingRequest request, @Nullable TargetingResult result, @Nullable List<TargetingResult> alternatives) {}
+
+    private record TargetingValidation(@Nullable TargetingResult result, boolean obstructed) {
+        static TargetingValidation invalid() {
+            return new TargetingValidation(null, false);
+        }
+
+        static TargetingValidation blockedPath() {
+            return new TargetingValidation(null, true);
+        }
+
+        static TargetingValidation accepted(TargetingResult result) {
+            return new TargetingValidation(result, false);
+        }
     }
 
     private static ExecutorService createTargetingExecutor() {

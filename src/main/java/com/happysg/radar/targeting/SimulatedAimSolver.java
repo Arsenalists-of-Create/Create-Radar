@@ -45,6 +45,162 @@ public class SimulatedAimSolver implements AimSolver {
       this.targetPredictor = targetPredictor == null ? new TargetPredictor() : targetPredictor;
    }
 
+   public List<TargetingResult> solveObstructionAlternatives(
+           TargetingSnapshot snapshot,
+           ProjectileModel model
+   ) {
+      if (snapshot == null || model == null
+              || !snapshot.isValid()
+              || !snapshot.pitchConstraint().hasReachablePitch()) {
+         return List.of();
+      }
+
+      if (snapshot.targetPosition()
+              .distanceToSqr(snapshot.steeringOrigin()) < 1.0E-8) {
+         return List.of();
+      }
+
+      long startedNanos = System.nanoTime();
+      SolveStats stats = new SolveStats();
+      InitialGuess initial = initialGuess(snapshot, model);
+
+      int horizon = initialHorizon(snapshot, initial.interceptTicks);
+      List<Candidate> candidates = new ArrayList<>();
+
+      // Preserve the precise analytic and drag-math approaches.
+      // World obstruction is checked later on the server thread.
+      Candidate analytic = tryAnalyticCandidate(
+              snapshot, model, ObstructionChecker.NONE, initial, stats);
+
+      if (analytic != null) {
+         candidates.add(analytic);
+      }
+
+      Candidate dragMath = tryDragMathCandidate(
+              snapshot, model, ObstructionChecker.NONE,
+              initial, horizon, stats);
+
+      if (dragMath != null) {
+         candidates.add(dragMath);
+      }
+
+      // Use the existing candidate-search and refinement algorithms.
+      // Search both low and high arcs so an obstructed preferred
+      // trajectory does not immediately eliminate alternative shots.
+      while (true) {
+         EvaluationContext context =
+                 new EvaluationContext(snapshot, model, horizon, stats);
+
+         List<Candidate> low = searchCandidates(context, initial);
+         refineShortlist(context, low);
+
+         List<Candidate> high =
+                 searchHighArcCandidates(context, initial);
+         refineShortlist(context, high);
+
+         candidates.addAll(low);
+         candidates.addAll(high);
+
+         boolean foundAcceptable = false;
+
+         for (Candidate candidate : candidates) {
+            if (isAcceptableShot(snapshot, candidate)
+                    && !nearHorizon(candidate, horizon)) {
+               foundAcceptable = true;
+               break;
+            }
+         }
+
+         if (foundAcceptable || horizon >= snapshot.maxFlightTicks()) {
+            break;
+         }
+
+         int expanded = Math.min(
+                 snapshot.maxFlightTicks(),
+                 Math.max(
+                         horizon + HORIZON_MARGIN_TICKS,
+                         horizon * 2
+                 )
+         );
+
+         if (expanded == horizon) {
+            break;
+         }
+
+         horizon = expanded;
+      }
+
+      double highArcFloor = highArcPitchFloor(initial.pitchDeg);
+
+      // Preserve the requested arc preference, then rank by
+      // the existing solver score.
+      candidates.sort(Comparator.<Candidate>comparingInt(candidate -> {
+         boolean highArc = candidate.pitchDeg >= highArcFloor;
+         return highArc == snapshot.preferHighArc() ? 0 : 1;
+      }).thenComparingDouble(candidate -> candidate.score));
+
+      List<TargetingResult> results = new ArrayList<>(8);
+      int preferredArcCount = 0;
+      int alternateArcCount = 0;
+
+      for (Candidate candidate : candidates) {
+         if (!isAcceptableShot(snapshot, candidate)) {
+            continue;
+         }
+
+         boolean candidateHighArc = candidate.pitchDeg >= highArcFloor;
+         boolean preferredArc = candidateHighArc == snapshot.preferHighArc();
+
+         if (preferredArc ? preferredArcCount >= 4 : alternateArcCount >= 4) {
+            continue;
+         }
+
+         boolean duplicate = false;
+
+         for (TargetingResult existing : results) {
+            if (Math.abs(existing.desiredYawDeg() - candidate.yawDeg) < 0.05 && Math.abs(existing.desiredPitchDeg() - candidate.pitchDeg) < 0.05) {
+               duplicate = true;
+               break;
+            }
+         }
+
+         if (duplicate) {
+            continue;
+         }
+
+         boolean highArc = candidateHighArc;
+
+         TargetingResult result = buildResult(
+                 snapshot,
+                 model,
+                 initial,
+                 candidate,
+                 0,
+                 0.0,
+                 highArc ? "high" : "low",
+                 "none",
+                 stats,
+                 startedNanos
+         );
+
+         if (result != null && result.valid() && result.hasShot()) {
+            results.add(result);
+
+            if (preferredArc) {
+               preferredArcCount++;
+            } else {
+               alternateArcCount++;
+            }
+         }
+
+         if (preferredArcCount >= 4 && alternateArcCount >= 4) {
+            break;
+         }
+      }
+
+      return List.copyOf(results);
+   }
+
    public TargetingResult solve(TargetingSnapshot snapshot, ProjectileModel projectileModel, ObstructionChecker obstructionChecker) {
       if (snapshot == null || projectileModel == null || !snapshot.isValid()) {
          return TargetingResult.invalid("invalid snapshot");

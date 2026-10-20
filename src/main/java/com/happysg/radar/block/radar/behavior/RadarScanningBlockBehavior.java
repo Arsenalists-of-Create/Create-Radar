@@ -306,12 +306,14 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     public static boolean isWithinHorizontalFov(Vec3 radarPos, Vec3 target, double angle, double fov) {
-        double horizontalDistance = Math.sqrt(Math.pow(target.x() - radarPos.x(), 2) + Math.pow(target.z() - radarPos.z(), 2));
+        double dx = target.x() - radarPos.x();
+        double dz = target.z() - radarPos.z();
 
-        if (horizontalDistance < 2)
+        if (dx * dx + dz * dz < 4.0) {
             return true;
+        }
 
-        double angleToEntity = Math.toDegrees(Math.atan2(target.x() - radarPos.x(), target.z() - radarPos.z()));
+        double angleToEntity = Math.toDegrees(Math.atan2(dx, dz));
         angleToEntity = (angleToEntity + 360) % 360;
         double angleDiff = Math.abs(angleToEntity - angle);
 

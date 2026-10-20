@@ -70,7 +70,7 @@ public class RadarTrackUtil {
     public static CompoundTag serializeNBTList(Collection<RadarTrack> tracks) {
         ListTag list = new ListTag();
         for (RadarTrack track : tracks) {
-            list.add(track.serializeNBT());
+            list.add(track.serializeNetworkNBT());
         }
         CompoundTag tag = new CompoundTag();
         tag.put("tracks", list);

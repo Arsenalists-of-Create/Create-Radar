@@ -33,6 +33,22 @@ public class TargetingComputer {
       }
    }
 
+   public List<TargetingResult> solveObstructionAlternatives(TargetingSnapshot snapshot, ProjectileModel model) {
+      if (snapshot == null || model == null || !snapshot.isValid()) {
+         return List.of();
+      }
+
+      if (!(solver instanceof SimulatedAimSolver simulated)) {
+         return List.of();
+      }
+
+      try {
+         return simulated.solveObstructionAlternatives(snapshot, model);
+      } catch (LoadedFluidDrag.Unavailable ignored) {
+         return List.of();
+      }
+   }
+
    public TargetingResult solve(TargetingSnapshot snapshot, ProjectileModel model) {
       if (snapshot == null || model == null || !snapshot.isValid()) {
          return TargetingResult.invalid("invalid snapshot or projectile model");

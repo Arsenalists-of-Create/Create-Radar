@@ -468,6 +468,30 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
                 .setNormal(pose, 0, 1, 0);
     }
 
+    private void renderCenteredContactSprite(VertexConsumer buffer, Matrix4f matrix, Color color, float alpha, float depth, MonitorProjection.Quad quad) {
+        final float uvMin = 0.375f;
+        final float uvMax = 0.625f;
+
+        float centerX = (quad.minX() + quad.maxX()) * 0.5f;
+        float centerZ = (quad.minZ() + quad.maxZ()) * 0.5f;
+
+        float halfWidth = (quad.maxX() - quad.minX()) * 0.125f;
+        float halfHeight = (quad.maxZ() - quad.minZ()) * 0.125f;
+
+        float x0 = centerX - halfWidth;
+        float x1 = centerX + halfWidth;
+        float z0 = centerZ - halfHeight;
+        float z1 = centerZ + halfHeight;
+
+        float r = color.getRedAsFloat();
+        float g = color.getGreenAsFloat();
+        float b = color.getBlueAsFloat();
+
+        addVertex(buffer, matrix, x0, depth, z0, r, g, b, alpha, uvMin, uvMin);
+        addVertex(buffer, matrix, x1, depth, z0, r, g, b, alpha, uvMax, uvMin);
+        addVertex(buffer, matrix, x1, depth, z1, r, g, b, alpha, uvMax, uvMax);
+        addVertex(buffer, matrix, x0, depth, z1, r, g, b, alpha, uvMin, uvMax);
+    }
 
     private void renderRadarTracks(MonitorProjection projection, MonitorBlockEntity monitor, PoseStack ms, MultiBufferSource bufferSource) {
         AtomicInteger depthCounter = new AtomicInteger(0);
@@ -508,19 +532,16 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         VertexConsumer buffer = getBuffer(bufferSource, track.getSprite());
         Matrix4f m = ms.last().pose();
         Matrix3f n = ms.last().normal();
-        renderVertices(buffer, m, n, color, alpha, depth, quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
+        renderCenteredContactSprite(buffer, m, color, alpha, depth, quad);
         renderSableSilhouette(track, monitor, projection, ms, bufferSource, depth - 0.0003f, alpha, partialTicksFromMinecraft());
 
         // Render selection indicators if needed
         if (track.id().equals(monitor.hoveredEntity)) {
-            renderVertices(getBuffer(bufferSource, MonitorSprite.TARGET_HOVERED),
-                    m, n, new Color(255, 255, 0), alpha, depth - 0.0001f,
-                    quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
+            renderCenteredContactSprite(getBuffer(bufferSource, MonitorSprite.TARGET_HOVERED), m, new Color(255, 255, 0), alpha, depth - 0.0001f, quad);
         }
+
         if (track.id().equals(monitor.selectedEntity)) {
-            renderVertices(getBuffer(bufferSource, MonitorSprite.TARGET_SELECTED),
-                    m, n, new Color(255, 0, 0), alpha, depth - 0.0002f,
-                    quad.minX(), quad.minZ(), quad.maxX(), quad.maxZ());
+            renderCenteredContactSprite(getBuffer(bufferSource, MonitorSprite.TARGET_SELECTED), m, new Color(255, 0, 0), alpha, depth - 0.0002f, quad);
         }
 
         String slug = getSlugForTrack(track, monitor);
