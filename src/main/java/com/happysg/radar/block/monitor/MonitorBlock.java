@@ -2,6 +2,7 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.api.monitor.client.MonitorScreenRegistry;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.compat.sable.SableMonitorRelocation;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlockEntityTypes;
@@ -58,16 +59,24 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
 
     @Override
     public void onRemove(@NotNull BlockState pState, @NotNull Level pLevel, @NotNull BlockPos pPos, @NotNull BlockState pNewState, boolean pIsMoving) {
-        if (!pState.is(pNewState.getBlock())
-                && pLevel instanceof ServerLevel serverLevel
-                && pLevel.getBlockEntity(pPos) instanceof MonitorBlockEntity monitor) {
+        boolean sableRelocation = pLevel instanceof ServerLevel serverLevel && SableMonitorRelocation.isRelocating(serverLevel, pPos);
+
+        if (pIsMoving || sableRelocation) {
+            super.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
+            return;
+        }
+
+        if (!pState.is(pNewState.getBlock()) && pLevel instanceof ServerLevel serverLevel && pLevel.getBlockEntity(pPos) instanceof MonitorBlockEntity monitor) {
             ARADTargetDesignationHandler.clear(serverLevel, monitor.getController());
         }
-        MonitorMultiBlockHelper.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
+
+        MonitorMultiBlockHelper.onRemove(pState, pLevel, pPos, pNewState, false);
+
         if (!pState.is(pNewState.getBlock()) && pLevel instanceof ServerLevel sl) {
             NetworkData.get(sl).onEndpointRemoved(sl, pPos);
             ARADData.get(sl).onEndpointRemoved(sl, pPos);
         }
+
         super.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
     }
 

@@ -67,7 +67,8 @@ public class MonitorMultiBlockHelper {
             Direction facing = pLevel.getBlockState(pPos).getValue(FACING);
             for (int i = 0; i < size; i++) {
                 for (int j = 0; j < size; j++) {
-                    if (i == 0 && j == 0) shape = MonitorBlock.Shape.LOWER_RIGHT;
+                    if (size == 1) shape = MonitorBlock.Shape.SINGLE;
+                    else if (i == 0 && j == 0) shape = MonitorBlock.Shape.LOWER_RIGHT;
                     else if (i == 0 && j == size - 1) shape = MonitorBlock.Shape.LOWER_LEFT;
                     else if (i == size - 1 && j == 0) shape = MonitorBlock.Shape.UPPER_RIGHT;
                     else if (i == size - 1 && j == size - 1) shape = MonitorBlock.Shape.UPPER_LEFT;
@@ -81,13 +82,29 @@ public class MonitorMultiBlockHelper {
                     pLevel.setBlockAndUpdate(pos, pState.setValue(SHAPE, shape));
                     if (pLevel.getBlockEntity(pos) instanceof MonitorBlockEntity monitor) {
                         monitor.setControllerPos(pPos, size);
-                        monitor.setSplitContactSuppressed(false);
+
+                        if (size > 1) {
+                            monitor.setSplitContactSuppressed(false);
+                        }
                     }
                 }
             }
         } finally {
             forming = false;
         }
+    }
+
+    public static void restoreAfterSableMove(ServerLevel level, BlockPos controllerPos, int size) {
+        if (size < 1 || size > RadarConfig.server().monitorMaxSize.get()) {
+            return;
+        }
+
+        BlockState state = level.getBlockState(controllerPos);
+        if (!state.is(ModBlocks.MONITOR.get())) {
+            return;
+        }
+
+        formMulti(state, level, controllerPos, size);
     }
 
     private static void destroyMulti(BlockState pState, Level pLevel, BlockPos removedPos, BlockPos controllerPos, int size) {

@@ -666,16 +666,14 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return true;
         }
 
-        Mount mount = supportsPhysBearingMounts() ? resolveMount() : null;
-        if (mount != null && mount.kind == MountKind.PHYS
-                && Mods.VS_CLOCKWORK.isLoaded()) {
-            return physHandler.atTargetPitch(
-                    mount.phys, lag, minimumToleranceDegrees,
-                    maximumToleranceDegrees);
+        Mount mount = resolveMount();
+
+        if (mount != null && mount.kind == MountKind.PHYS && supportsPhysBearingMounts() && Mods.VS_CLOCKWORK.isLoaded()) {
+            return physHandler.atTargetPitch(mount.phys, lag, minimumToleranceDegrees, maximumToleranceDegrees);
         }
 
         if (mount != null && mount.kind == MountKind.API && mount.api != null) {
-            return apiHandler.atTargetPitch(mount.api, lag, minimumToleranceDegrees);
+            return apiHandler.atTargetPitch(mount.api, lag, minimumToleranceDegrees, maximumToleranceDegrees);
         }
 
         return false;
@@ -1689,17 +1687,17 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public boolean isControllerRunning() {
         return isRunning;
     }
-
     boolean isRunningController() {
         return isRunning;
     }
 
+
     @Override
     public void onChunkUnloaded() {
         if (level != null && !level.isClientSide()) {
+            clearFiringControl();
             if (level instanceof ServerLevel serverLevel) {
-                WeaponNetworkRuntime.get(serverLevel)
-                        .unregisterContactController(worldPosition);
+                WeaponNetworkRuntime.get(serverLevel).unregisterContactController(worldPosition);
             }
             stopDebugSwivelFollow("controller_chunk_unloaded", false);
             releaseKineticActuator();

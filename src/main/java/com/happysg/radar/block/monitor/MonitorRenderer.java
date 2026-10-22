@@ -3,6 +3,8 @@ package com.happysg.radar.block.monitor;
 import com.happysg.radar.api.monitor.MonitorRadarSnapshot;
 import com.happysg.radar.api.monitor.client.MonitorRadarRenderRegistry;
 import com.happysg.radar.api.monitor.client.MonitorRadarRenderer;
+import com.happysg.radar.api.monitor.MonitorContactSnapshot;
+import com.happysg.radar.api.monitor.client.MonitorContactContributorRegistry;
 import com.happysg.radar.api.monitor.client.MonitorRadarWorldRenderContext;
 import com.happysg.radar.api.monitor.client.MonitorRwrIconRegistry;
 import com.happysg.radar.api.radar.RadarDisplayProfile;
@@ -26,6 +28,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import com.simibubi.create.foundation.blockEntity.renderer.SmartBlockEntityRenderer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
@@ -65,6 +68,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     private static final float PONDER_CONTACT_HALO_SCALE = 1.25f;
     private static final float PONDER_CONTACT_HALO_DEPTH_GAP = 0.001f;
     private static final Color PONDER_CONTACT_HALO_COLOR = new Color(0x07100a);
+    private static final Color ADDON_CONTACT_COLOR = new Color(0x55FFFF);
     private static final float LABEL_SCALE = 0.003f;
     private static final float LABEL_Z_OFFSET = 0.03f;
     private static final float LABEL_DEPTH_NUDGE = 0.00025f;
@@ -173,7 +177,17 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
                         partialTicks
                 );
 
-                if (customRenderer.renderWorld(context)) {
+                boolean handled = false;
+                ms.pushPose();
+                try {
+                    handled = customRenderer.renderWorld(context);
+                } catch (RuntimeException exception) {
+                    MonitorAddonCallbackSafety.warnOnce("renderWorld", customRenderer, exception);
+                } finally {
+                    ms.popPose();
+                }
+
+                if (handled) {
                     continue;
                 }
             }
@@ -190,6 +204,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         }
 
         renderRadarTracks(projection, blockEntity, ms, bufferSource);
+        renderContributorContacts(projection, blockEntity, ms, bufferSource);
         if (blockEntity.isPonderJammingVisual()) {
             renderPonderJammingWarning(blockEntity, ms, bufferSource);
         }
@@ -497,6 +512,52 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         AtomicInteger depthCounter = new AtomicInteger(0);
         for (RadarTrack track : monitor.getTracks()) {
             renderTrack(track, monitor, projection, ms, bufferSource, depthCounter.getAndIncrement());
+        }
+    }
+
+    private void renderContributorContacts(MonitorProjection projection, MonitorBlockEntity monitor, PoseStack ms, MultiBufferSource bufferSource) {
+        if (!(monitor.getLevel() instanceof ClientLevel clientLevel)) {
+            return;
+        }
+
+        List<MonitorContactSnapshot> contacts = MonitorContactContributorRegistry.collect(clientLevel, monitor.getBlockPos());
+
+        if (contacts.isEmpty()) {
+            return;
+        }
+
+        Matrix4f matrix = ms.last().pose();
+        int depthIndex = monitor.getTracks().size();
+
+        for (MonitorContactSnapshot contact : contacts) {
+            Vec3 position = contact.position();
+
+            if (!Double.isFinite(position.x) || !Double.isFinite(position.y) || !Double.isFinite(position.z)) continue;
+            MonitorProjection.DisplayPoint point = projection.project(position);
+            if (point.outside()) continue;
+
+            MonitorProjection.Quad quad = MonitorProjection.fullSizeQuad(point, monitor.getSize());
+            float depth = DEPTH_TRACK_BASE + depthIndex++ * DEPTH_TRACK_INCREMENT;
+
+            renderCenteredContactSprite(
+                    getBuffer(bufferSource, MonitorSprite.ENTITY_HITBOX),
+                    matrix,
+                    ADDON_CONTACT_COLOR,
+                    1.0f,
+                    depth,
+                    quad
+            );
+
+            if (contact.selectable() && contact.id().equals(monitor.hoveredEntity)) {
+                renderCenteredContactSprite(
+                        getBuffer(bufferSource, MonitorSprite.TARGET_HOVERED),
+                        matrix,
+                        new Color(255, 255, 0),
+                        1.0f,
+                        depth - 0.0001f,
+                        quad
+                );
+            }
         }
     }
 

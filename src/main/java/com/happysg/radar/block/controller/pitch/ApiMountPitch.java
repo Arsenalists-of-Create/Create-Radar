@@ -74,7 +74,7 @@ public class ApiMountPitch {
         controller.setChanged();
     }
 
-    public boolean atTargetPitch(RadarMountAdapter mount, boolean lag, double minimumToleranceDegrees) {
+    public boolean atTargetPitch(RadarMountAdapter mount, boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
         if (!mount.isValid() || !mount.isAssembled() || !mount.supportsPitch()) {
             return false;
         }
@@ -94,6 +94,10 @@ public class ApiMountPitch {
 
         if (Double.isFinite(minimumToleranceDegrees)) {
             tolerance = Math.max(tolerance, Math.max(0.0, minimumToleranceDegrees));
+        }
+
+        if (Double.isFinite(maximumToleranceDegrees)) {
+            tolerance = Math.min(tolerance, Math.max(0.0, maximumToleranceDegrees));
         }
 
         return Math.abs(target - current) < tolerance;

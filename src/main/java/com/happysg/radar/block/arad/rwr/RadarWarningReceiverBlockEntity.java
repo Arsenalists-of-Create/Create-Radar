@@ -1,5 +1,6 @@
 package com.happysg.radar.block.arad.rwr;
 
+import com.happysg.radar.api.arad.ARADTargeting;
 import com.happysg.radar.api.radar.rwr.RadarRwrEmitter;
 import com.happysg.radar.api.radar.rwr.RadarRwrEvaluation;
 import com.happysg.radar.api.radar.rwr.RadarRwrTarget;
@@ -28,6 +29,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,10 +42,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlock.ON_SHIP;
 
 public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
+    private static final Logger LOGGER = LogUtils.getLogger();
     boolean hasPlayed;
     private static final int LOCK_SOUND_UPDATE_PERIOD_TICKS = 10;
     private static final int ENGAGED_SOUND_UPDATE_PERIOD_TICKS = 10;
@@ -64,11 +69,15 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
     private final Set<String> knownInRangeSources = new HashSet<>();
     private final Map<String, Float> lastSweepBeamAngles = new HashMap<>();
     private final Map<String, Integer> exactLockHoldTicks = new HashMap<>();
+    private static final Set<Class<?>> WARNED_ADDON_EMITTERS = ConcurrentHashMap.newKeySet();
 
-    private record ReceiverTarget(UUID shipId, RwrTargetReference reference, Vec3 position) {
-    }
+    private record ReceiverTarget(UUID shipId, RwrTargetReference reference, Vec3 position) { }
+    private record AggregatedRwrContact(RwrRadarContact contact, List<Vec3> receiverPositions) { }
 
-    private record AggregatedRwrContact(RwrRadarContact contact, List<Vec3> receiverPositions) {
+    private static void warnAddonEmitter(Object emitter, RuntimeException exception) {
+        if (emitter != null && WARNED_ADDON_EMITTERS.add(emitter.getClass())) {
+            LOGGER.warn("RWR addon emitter {} failed", emitter.getClass().getName(), exception);
+        }
     }
 
     private static final class ContactAccumulator {
@@ -321,9 +330,38 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         Vec3 displayReceiverPos = receivers.get(0).position();
         Set<String> receiverSecrets = receiverSecrets(receivers);
         Map<String, ContactAccumulator> contactsBySource = new LinkedHashMap<>();
+        List<RadarRwrEmitter> addonEmitters = ARADTargeting.liveRwrEmitters(level).stream().filter(emitter -> !(emitter instanceof IRadar)).toList();
 
         for (ReceiverTarget receiver : receivers) {
-            for (String sourceId : RadarContactRegistry.getInRangeSources(level, receiver.shipId())) {
+            Set<String> sourceIds = new HashSet<>(RadarContactRegistry.getInRangeSources(level, receiver.shipId()));
+
+            for (RadarRwrEmitter emitter : addonEmitters) {
+                try {
+                    if (!emitter.isRwrEmitting()) {
+                        continue;
+                    }
+
+                    BlockPos emitterPos = emitter.getRwrEmitterPosition();
+                    float range = emitter.getRwrRange();
+                    if (emitterPos == null || !Float.isFinite(range) || range <= 0.0F) {
+                        continue;
+                    }
+
+                    Vec3 emitterWorldPos = PhysicsHandler.getWorldVec(level, emitterPos.getCenter());
+                    if (emitterWorldPos == null || !Double.isFinite(emitterWorldPos.x) || !Double.isFinite(emitterWorldPos.y) || !Double.isFinite(emitterWorldPos.z)) {
+                        continue;
+                    }
+
+                    double passiveRange = range * ARADTargeting.MAX_PASSIVE_RANGE_RATIO;
+                    if (horizontalDistanceSqr(receiver.position(), emitterWorldPos) <= passiveRange * passiveRange) {
+                        sourceIds.add(RadarContactRegistry.radarSourceId(level, emitterPos));
+                    }
+                } catch (RuntimeException exception) {
+                    warnAddonEmitter(emitter, exception);
+                }
+            }
+
+            for (String sourceId : sourceIds) {
                 Optional<BlockPos> radarPos = parseRadarSource(level, sourceId);
                 if (radarPos.isEmpty()) {
                     RadarContactRegistry.removeInRangeSource(level, receiver.shipId(), sourceId);
@@ -332,68 +370,65 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
 
                 BlockEntity be = level.getBlockEntity(radarPos.get());
 
-                if (!(be instanceof RadarRwrEmitter emitter) || !emitter.isRwrEmitting()) {
-                    RadarContactRegistry.removeInRangeSource(level, receiver.shipId(), sourceId);
-                    continue;
-                }
-
-                RwrContactEvaluation evaluation;
-
-                if (emitter instanceof IRadar radar) {
-                    evaluation = radar.evaluateRwrContact(level, receiver.reference(), receiver.reference());
-                } else {
-                    RadarRwrTarget publicTarget = new RadarRwrTarget(receiver.position(), receiver.shipId().toString());
-                    RadarRwrEvaluation publicEvaluation = emitter.evaluateRwrContact(level, publicTarget, publicTarget);
-
-                    if (publicEvaluation == null) {
+                try {
+                    if (!(be instanceof RadarRwrEmitter emitter) || !emitter.isRwrEmitting()) {
                         RadarContactRegistry.removeInRangeSource(level, receiver.shipId(), sourceId);
                         continue;
                     }
 
-                    evaluation = new RwrContactEvaluation(
-                            publicEvaluation.emitting(),
-                            publicEvaluation.detectable(),
-                            publicEvaluation.lockCapable(),
-                            publicEvaluation.locked(),
-                            publicEvaluation.signalStrength()
-                    );
-                }
+                    RwrContactEvaluation evaluation;
 
-                if (!evaluation.emitting() || !evaluation.detectableByReceiver()) {
-                    RadarContactRegistry.removeInRangeSource(level, receiver.shipId(), sourceId);
-                    continue;
-                }
+                    if (emitter instanceof IRadar radar) {
+                        evaluation = radar.evaluateRwrContact(level, receiver.reference(), receiver.reference());
+                    } else {
+                        RadarRwrTarget publicTarget = new RadarRwrTarget(receiver.position(), receiver.shipId().toString());
+                        RadarRwrEvaluation publicEvaluation = emitter.evaluateRwrContact(level, publicTarget, publicTarget);
 
-                BlockPos emitterPos = emitter.getRwrEmitterPosition();
-                Vec3 radarWorldPos = PhysicsHandler.getWorldVec(level, emitterPos);
-                float radarRange = emitter.getRwrRange();
+                        if (publicEvaluation == null) {
+                            RadarContactRegistry.removeInRangeSource(level, receiver.shipId(), sourceId);
+                            continue;
+                        }
 
-                boolean withinRadarRange = horizontalDistanceSqr(receiver.position(), radarWorldPos) <= radarRange * radarRange;
-                boolean engaged = RadarContactRegistry.isSourceEngaged(level, receiver.shipId(), sourceId);
-
-                boolean friendly = isFriendlyRadar(level, emitterPos, receiverSecrets);
-
-                contactsBySource
-                        .computeIfAbsent(
-                                sourceId,
-                                ignored -> new ContactAccumulator(
-                                        sourceId,
-                                        emitter,
-                                        displayReceiverPos,
-                                        radarWorldPos
-                                )
-                        )
-                        .accept(
-                                evaluation,
-                                withinRadarRange,
-                                engaged,
-                                friendly,
-                                receiver.position()
+                        evaluation = new RwrContactEvaluation(
+                                publicEvaluation.emitting(),
+                                publicEvaluation.detectable(),
+                                publicEvaluation.lockCapable(),
+                                publicEvaluation.locked(),
+                                publicEvaluation.signalStrength()
                         );
+                    }
+
+                    if (!evaluation.emitting() || !evaluation.detectableByReceiver() || !Float.isFinite(evaluation.signalStrength()) || evaluation.signalStrength() < 0.0F) {
+                        RadarContactRegistry.removeInRangeSource(level, receiver.shipId(), sourceId);
+                        continue;
+                    }
+
+                    BlockPos emitterPos = emitter.getRwrEmitterPosition();
+                    Vec3 radarWorldPos = PhysicsHandler.getWorldVec(level, emitterPos);
+                    float radarRange = emitter.getRwrRange();
+
+                    boolean withinRadarRange = horizontalDistanceSqr(receiver.position(), radarWorldPos) <= radarRange * radarRange;
+                    boolean engaged = RadarContactRegistry.isSourceEngaged(level, receiver.shipId(), sourceId);
+                    boolean friendly = isFriendlyRadar(level, emitterPos, receiverSecrets);
+
+                    contactsBySource.computeIfAbsent(sourceId, ignored -> new ContactAccumulator(
+                            sourceId, emitter, displayReceiverPos, radarWorldPos
+                    )).accept(evaluation, withinRadarRange, engaged, friendly, receiver.position());
+                } catch (RuntimeException exception) {
+                    if (be instanceof IRadar) {
+                        throw exception;
+                    }
+
+                    warnAddonEmitter(be, exception);
+                }
             }
 
             for (RwrRadarContact contact : ExternalRwrEmitterRegistry.contactsFor(
                     level, receiver.shipId(), receiver.reference(), displayReceiverPos)) {
+                if (!Float.isFinite(contact.signalStrength())) {
+                    continue;
+                }
+
                 RwrContactEvaluation evaluation = new RwrContactEvaluation(
                         true,
                         true,
@@ -401,11 +436,10 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
                         contact.exactLocked(),
                         contact.signalStrength()
                 );
+
                 contactsBySource
-                        .computeIfAbsent(contact.sourceId(), ignored -> new ContactAccumulator(
-                                contact.sourceId(), contact.radarPos(), contact.radarTypeId(), contact.bearingDegrees()))
-                        .accept(evaluation, contact.withinRadarRange(), contact.engaged(),
-                                contact.friendly(), receiver.position());
+                        .computeIfAbsent(contact.sourceId(), ignored -> new ContactAccumulator(contact.sourceId(), contact.radarPos(), contact.radarTypeId(), contact.bearingDegrees()))
+                        .accept(evaluation, contact.withinRadarRange(), contact.engaged(), contact.friendly(), receiver.position());
             }
         }
 

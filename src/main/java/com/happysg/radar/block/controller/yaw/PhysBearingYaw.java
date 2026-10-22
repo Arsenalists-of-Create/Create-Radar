@@ -52,15 +52,12 @@ public class PhysBearingYaw {
         return atTargetYaw(mount, lag, 0.0);
     }
 
-    public boolean atTargetYaw(PhysBearingBlockEntity mount, boolean lag,
-                               double minimumToleranceDegrees) {
+    public boolean atTargetYaw(PhysBearingBlockEntity mount, boolean lag, double minimumToleranceDegrees) {
         return atTargetYaw(mount, lag, minimumToleranceDegrees,
                 Double.POSITIVE_INFINITY);
     }
 
-    public boolean atTargetYaw(PhysBearingBlockEntity mount, boolean lag,
-                               double minimumToleranceDegrees,
-                               double maximumToleranceDegrees) {
+    public boolean atTargetYaw(PhysBearingBlockEntity mount, boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
         Double actualRad = mount.getActualAngle();
         if (actualRad == null) {
             return false;

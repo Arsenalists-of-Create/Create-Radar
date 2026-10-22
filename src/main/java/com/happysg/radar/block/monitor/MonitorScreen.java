@@ -1,8 +1,6 @@
 package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.CreateRadar;
-import com.happysg.radar.api.monitor.MonitorContactSelectionHandler;
-import com.happysg.radar.api.monitor.MonitorContactSelectionRegistry;
 import com.happysg.radar.api.monitor.MonitorContactSnapshot;
 import com.happysg.radar.api.monitor.MonitorRadarSnapshot;
 import com.happysg.radar.api.monitor.client.*;
@@ -240,7 +238,17 @@ public class MonitorScreen extends Screen {
                             partialTicks
                     );
 
-                    if (customRenderer.renderScreen(context)) {
+                    boolean handled = false;
+                    gg.pose().pushPose();
+                    try {
+                        handled = customRenderer.renderScreen(context);
+                    } catch (RuntimeException exception) {
+                        MonitorAddonCallbackSafety.warnOnce("renderScreen", customRenderer, exception);
+                    } finally {
+                        gg.pose().popPose();
+                    }
+
+                    if (handled) {
                         continue;
                     }
                 }
@@ -257,6 +265,7 @@ public class MonitorScreen extends Screen {
             }
 
             renderTracks(gg, monitor, projection);
+            renderContributorContacts(gg, monitor, projection);
         } finally {
             gg.disableScissor();
         }
@@ -1028,6 +1037,43 @@ public class MonitorScreen extends Screen {
         }
     }
 
+    private void renderContributorContacts(GuiGraphics gg, MonitorBlockEntity monitor, MonitorProjection projection) {
+        if (!(monitor.getLevel() instanceof ClientLevel clientLevel)) {
+            return;
+        }
+
+        List<MonitorContactSnapshot> contacts = MonitorContactContributorRegistry.collect(clientLevel, monitor.getBlockPos());
+        if (contacts.isEmpty()) return;
+
+        int spriteSize = Math.max(8, Math.round(256 * uiScale * getLabelZoomScale(monitor, projection)));
+        RenderSystem.enableBlend();
+
+        for (MonitorContactSnapshot contact : contacts) {
+            Vec3 position = contact.position();
+
+            if (!Double.isFinite(position.x) || !Double.isFinite(position.y) || !Double.isFinite(position.z)) continue;
+            MonitorProjection.DisplayPoint point = projection.project(position);
+            if (point.outside()) continue;
+
+            int px = (int) (left + (0.5f + point.xOffset()) * uiSize);
+            int py = (int) (top + (0.5f + point.zOffset()) * uiSize);
+
+            int sx = px - spriteSize / 2;
+            int sy = py - spriteSize / 2;
+
+            gg.setColor(0.33f, 1.0f, 1.0f, 1.0f);
+            gg.blit(MonitorSprite.ENTITY_HITBOX.getTexture(), sx, sy, 0, 0, spriteSize, spriteSize, spriteSize, spriteSize);
+
+            if (contact.selectable() && hoveredContact != null && contact.id().equals(hoveredContact.id()) && contact.sourceType().equals(hoveredContact.sourceType())) {
+                gg.setColor(1f, 1f, 0f, 1f);
+                gg.blit(MonitorSprite.TARGET_HOVERED.getTexture(), sx, sy, 0, 0, spriteSize, spriteSize, spriteSize, spriteSize);
+            }
+        }
+
+        gg.setColor(1f, 1f, 1f, 1f);
+        RenderSystem.disableBlend();
+    }
+
     private float getLabelZoomScale(MonitorBlockEntity monitor, MonitorProjection projection) {
         float autofitHalfSpan = MonitorProjection.create(monitor).halfSpan();
         if (autofitHalfSpan <= 0f)
@@ -1289,20 +1335,17 @@ public class MonitorScreen extends Screen {
             return true;
         }
 
-        if (button != 0 || monitor == null || !isMouseOverRadar((int) mouseX, (int) mouseY))
-            return true;
+        if (button != 0 || monitor == null || !isMouseOverRadar((int) mouseX, (int) mouseY)) return true;
 
         MonitorProjection projection = currentProjection(monitor);
         updateHoverFromMouse(monitor, projection, (int) mouseX, (int) mouseY);
         if (hoveredContact != null) {
-            MonitorContactSelectionHandler handler = MonitorContactSelectionRegistry.get(hoveredContact.sourceType()).orElse(null);
-
-            if (handler != null && Minecraft.getInstance().player != null && handler.onSelect(Minecraft.getInstance().player, controllerPos, hoveredContact)) {
-                return true;
+            if ("create_radar".equals(hoveredContact.sourceType())) {
+                monitor.selectedEntity = hoveredContact.id();
+                MonitorSelectionPacket.send(controllerPos, hoveredContact.id());
+            } else {
+                MonitorSelectionPacket.send(controllerPos, hoveredContact.id(), hoveredContact.sourceType());
             }
-
-            monitor.selectedEntity = hoveredContact.id();
-            MonitorSelectionPacket.send(controllerPos, hoveredContact.id());
 
             return true;
         }

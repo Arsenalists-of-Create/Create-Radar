@@ -2,6 +2,8 @@ package com.happysg.radar.block.radar.track;
 
 import com.happysg.radar.api.tracking.RadarContact;
 import com.happysg.radar.api.tracking.RadarContactCategory;
+import com.happysg.radar.api.jamming.DirectionalJammingApi;
+import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 
@@ -29,15 +31,43 @@ public final class RadarContactTrackAdapter {
             return null;
         }
 
-        return new RadarTrack(
+        DirectionalJammingApi.ReportedContact reported = contact instanceof DirectionalJammingApi.ReportedContact value ? value : null;
+
+        RadarTrack track = new RadarTrack(
                 id,
                 contact.getPosition(),
                 contact.getVelocity(),
-                gameTime,
+                reported == null ? gameTime : reported.scannedTime(),
                 toInternalCategory(contact.getCategory()),
-                "create_radar:external_contact",
-                1.0F
+                reported == null || reported.entityType() == null ? "create_radar:external_contact" : reported.entityType(),
+                reported == null ? 1.0F : reported.entityHeight()
         );
+
+        if (reported != null) {
+            track.setFriendly(reported.friendly());
+            track.setSynthetic(reported.synthetic());
+
+            DirectionalJammingApi.JammingState jamming = reported.jamming();
+
+            if (jamming != null) {
+                track.setJammingData(new RadarTrack.JammingData(
+                        jamming.radarSourceId(),
+                        jamming.outerStrength(),
+                        jamming.directionalStrength(),
+                        jamming.severeStrength(),
+                        jamming.friendlyOutageChance(),
+                        jamming.guidancePositionOffset(),
+                        jamming.guidanceVelocityOffset(),
+                        jamming.sampleToken()
+                ));
+            }
+        }
+
+        return track;
+    }
+
+    private static boolean finite(Vec3 value) {
+        return value != null && Double.isFinite(value.x) && Double.isFinite(value.y) && Double.isFinite(value.z);
     }
 
     public static TrackCategory toInternalCategory(RadarContactCategory category) {

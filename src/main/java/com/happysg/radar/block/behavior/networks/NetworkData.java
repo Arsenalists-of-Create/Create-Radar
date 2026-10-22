@@ -1,5 +1,6 @@
 package com.happysg.radar.block.behavior.networks;
 
+import com.happysg.radar.api.controller.RadarAimController;
 import com.happysg.radar.api.network.RadarNetworkControllerMovedEvent;
 import com.happysg.radar.api.network.RadarNetworkLifecycleEvent;
 import com.happysg.radar.api.radar.NetworkRadarSource;
@@ -8,6 +9,7 @@ import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
+import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
@@ -289,11 +291,18 @@ public class NetworkData extends SavedData {
      * Safe even if the BE doesn't implement anything.
      */
     private void notifyNodeDisconnected(ServerLevel level, @Nullable BlockPos pos) {
-        if (pos == null) return;
+        if (pos == null) {
+            return;
+        }
 
         BlockEntity be = level.getBlockEntity(pos);
+
         if (be instanceof INetworkNode node) {
             node.onNetworkDisconnected();
+        }
+
+        if (be instanceof RadarAimController controller && !(be instanceof AutoPitchControllerBlockEntity) && !(be instanceof AutoYawControllerBlockEntity)) {
+            controller.setContact(null);
         }
     }
 
@@ -988,6 +997,10 @@ public class NetworkData extends SavedData {
         }
 
         if (group.weaponEndpoints.remove(endpointPos) || group.weaponEndpoints.remove(normalized)) {
+            if (level != null) {
+                notifyNodeDisconnected(level, endpointPos);
+            }
+
             String mountKey = controllerToWeaponMount.remove(endpointKey);
             if (mountKey != null) {
                 group.usedWeaponMounts.remove(posFromKey(mountKey));
@@ -1653,6 +1666,7 @@ public class NetworkData extends SavedData {
                 endpointOrigins.remove(endpointKey);
                 postRadarLifecycleEvent(level, group, endpointPos, null, RadarNetworkLifecycleEvent.Action.DETACHED);
             } else if (group.weaponEndpoints.remove(endpointPos)) {
+                notifyNodeDisconnected(level, endpointPos);
                 endpointToFilterer.remove(endpointKey);
                 endpointOrigins.remove(endpointKey);
 
@@ -1741,12 +1755,12 @@ public class NetworkData extends SavedData {
             endpointOrigins.remove(endpointKey);
             postRadarLifecycleEvent(level, group, endpointPos, null, RadarNetworkLifecycleEvent.Action.DETACHED);
         } else if (group.weaponEndpoints.remove(endpointPos)) {
+            notifyNodeDisconnected(level, endpointPos);
             endpointToFilterer.remove(endpointKey);
             endpointOrigins.remove(endpointKey);
 
             String mountKey = controllerToWeaponMount.remove(endpointKey);
-            if (mountKey != null
-                    && !groupReferencesMount(group, dim, mountKey)) {
+            if (mountKey != null && !groupReferencesMount(group, dim, mountKey)) {
                 BlockPos mp = posFromKey(mountKey);
                 group.usedWeaponMounts.remove(mp);
                 weaponMountToFilterer.remove(mountKey);

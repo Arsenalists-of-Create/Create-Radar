@@ -27,6 +27,7 @@ import com.happysg.radar.block.radar.skyradar.SkyRadarSublevelConnectorBlock;
 
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableAwareDataLinkBlock;
+import com.happysg.radar.compat.sable.SableMonitorFactory;
 import com.happysg.radar.compat.sable.SableDataLinkFactory;
 import com.simibubi.create.foundation.data.AssetLookup;
 import com.simibubi.create.foundation.data.BuilderTransformers;
@@ -46,7 +47,7 @@ import static com.simibubi.create.foundation.data.TagGen.axeOrPickaxe;
 @SuppressWarnings("removal")
 public class ModBlocks {
     public static final BlockEntry<MonitorBlock> MONITOR =
-            REGISTRATE.block("monitor", MonitorBlock::new)
+            REGISTRATE.block("monitor", ModBlocks::createMonitorBlock)
                     .initialProperties(SharedProperties::softMetal)
                     .properties(p -> p.noOcclusion())
                     .properties(p -> p.strength(0.8f))
@@ -66,6 +67,13 @@ public class ModBlocks {
                     .build()
                     .register();
 
+    private static MonitorBlock createMonitorBlock(BlockBehaviour.Properties properties) {
+        if (Mods.SABLE.isLoaded()) {
+            return SableMonitorFactory.create(properties);
+        }
+
+        return new MonitorBlock(properties);
+    }
 
     public static final BlockEntry<DataLinkBlock> RADAR_LINK =
             REGISTRATE.block("data_link", ModBlocks::createDataLinkBlock)

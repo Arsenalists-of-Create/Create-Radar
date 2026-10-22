@@ -1034,7 +1034,14 @@ public class WeaponFiringControl {
             }
 
             this.weaponSides = List.copyOf(resolvedSides);
+
             for (WeaponSide previous : previousSides) {
+                boolean retained = resolvedSides.stream().anyMatch(previous::sameWeapon);
+
+                if (!retained && previous.weapon != null) {
+                    previous.weapon.setFiring(false);
+                }
+
                 if (previous.pendingSolution != null) {
                     previous.cancelTargeting();
                 }
@@ -1077,12 +1084,11 @@ public class WeaponFiringControl {
         }
     }
 
-    private void clearControllerTopology(
-            Set<FireControllerBlockEntity> previousFires
-    ) {
+    private void clearControllerTopology(Set<FireControllerBlockEntity> previousFires) {
         for (FireControllerBlockEntity fire : previousFires) {
             fire.setPowered(false);
         }
+        stopWeaponOutput();
         this.invalidateSecondaryTargeting();
         this.controlView = null;
         this.weaponSides = List.of();
@@ -1390,6 +1396,9 @@ public class WeaponFiringControl {
             return;
         }
 
+        FiringAlignmentTolerance firingTolerance = firingAlignmentTolerance(shot.muzzlePosition().distanceTo(targetPos), RadarConfig.server().autoFireMaxLateralErrorBlocks.get(), this.activeAlignmentAxisCount());
+        this.lastFiringAlignmentTolerance = firingTolerance;
+
         boolean tPitchStructural = this.pitchController instanceof TPitchControllerBlockEntity && usesStructuralPitchForAuthority();
         boolean structuralPitchAccepted = true;
 
@@ -1440,7 +1449,7 @@ public class WeaponFiringControl {
                     sharedFireGates,
                     false,
                     minimumTolerance,
-                    Double.POSITIVE_INFINITY,
+                    firingTolerance.maximumDegrees(),
                     authorityShot
             );
 
@@ -1448,7 +1457,7 @@ public class WeaponFiringControl {
         }
 
         double minimumTolerance = shot.minimumFiringToleranceDegrees();
-        boolean aligned = hasCorrectGenericYawPitch(false, minimumTolerance);
+        boolean aligned = hasCorrectGenericYawPitch(false, minimumTolerance, firingTolerance.maximumDegrees());
         boolean safe = !this.passesSafeZone();
         boolean shouldFire = this.targetingConfig.autoFire() && shot.canTriggerFire() && structuralPitchAccepted && aligned && safe;
 
@@ -1463,7 +1472,7 @@ public class WeaponFiringControl {
         }
     }
 
-    private boolean hasCorrectGenericYawPitch(boolean lag, double minimumToleranceDegrees) {
+    private boolean hasCorrectGenericYawPitch(boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
         if (this.pitchController == null) {
             return false;
         }
@@ -1477,9 +1486,9 @@ public class WeaponFiringControl {
                 side = new WeaponSide(this.weapon.getMountPos(), null, this.weapon, this.yawController, this.fireController);
             }
 
-            pitch = isWeaponPitchAligned(side, lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
+            pitch = isWeaponPitchAligned(side, lag, minimumToleranceDegrees, maximumToleranceDegrees);
         } else {
-            pitch = this.pitchController.isAlignedForFiring(lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
+            pitch = this.pitchController.isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
         }
 
         boolean yaw = true;
@@ -1487,12 +1496,7 @@ public class WeaponFiringControl {
         RadarMountAdapter mount = this.weapon == null ? null : this.weapon.getMount();
 
         if (mount != null && mount.supportsYaw()) {
-            yaw = this.yawController == null
-                    || this.yawController.isAlignedForFiring(
-                    lag,
-                    minimumToleranceDegrees,
-                    Double.POSITIVE_INFINITY
-            );
+            yaw = this.yawController != null && this.yawController.isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
         }
 
         return pitch && yaw;

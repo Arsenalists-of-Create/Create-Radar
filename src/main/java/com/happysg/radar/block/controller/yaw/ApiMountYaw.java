@@ -66,7 +66,7 @@ public class ApiMountYaw {
         controller.setChanged();
     }
 
-    public boolean atTargetYaw(RadarMountAdapter mount, boolean lag, double minimumToleranceDegrees) {
+    public boolean atTargetYaw(RadarMountAdapter mount, boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
         if (!mount.isValid() || !mount.isAssembled() || !mount.supportsYaw()) {
             return false;
         }
@@ -86,6 +86,10 @@ public class ApiMountYaw {
 
         if (Double.isFinite(minimumToleranceDegrees)) {
             tolerance = Math.max(tolerance, Math.max(0.0, minimumToleranceDegrees));
+        }
+
+        if (Double.isFinite(maximumToleranceDegrees)) {
+            tolerance = Math.min(tolerance, Math.max(0.0, maximumToleranceDegrees));
         }
 
         return Math.abs(AutoYawControllerBlockEntity.shortestDelta(current, desired)) < tolerance;

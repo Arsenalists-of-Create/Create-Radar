@@ -272,9 +272,10 @@ public final class SableDataLinkRelocation {
         }
 
         invalidateControllers(level, first.newTarget());
+
         for (PreparedWeaponMove entry : prepared) {
-            finishRelocatedIndexes(level, entry.move(), entry.link(),
-                    results.get(entry.move()));
+            entry.link().finishAssemblyRelocation(entry.move().newTarget());
+            finishRelocatedIndexes(level, entry.move(), entry.link(), results.get(entry.move()));
         }
     }
 
@@ -404,9 +405,9 @@ public final class SableDataLinkRelocation {
             }
 
             newLink.finishAssemblyRelocation(move.newTarget());
-            newLink.finishAssemblyRelocation(move.newTarget());
         }
 
+        newLink.finishAssemblyRelocation(move.newTarget());
         finishRelocatedIndexes(level, move, newLink, weaponResult);
     }
 

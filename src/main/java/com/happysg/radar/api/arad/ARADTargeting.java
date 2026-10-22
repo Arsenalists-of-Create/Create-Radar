@@ -10,6 +10,7 @@ import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableAradTargetingAccess;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -18,17 +19,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Server-authoritative native-radar discovery and ARAD target construction.
@@ -48,8 +42,16 @@ public final class ARADTargeting {
     private static final double OUTER_MAX_RADIUS = 50.0;
 
     private static final Map<ResourceKey<Level>, Map<String, RwrEmitterHeartbeat>> RWR_EMITTERS = new HashMap<>();
+    private static final Set<Class<?>> WARNED_RWR_ADDONS = ConcurrentHashMap.newKeySet();
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private ARADTargeting() {}
+
+    private static void warnRwrAddon(RadarRwrEmitter emitter, RuntimeException exception) {
+        if (WARNED_RWR_ADDONS.add(emitter.getClass())) {
+            LOGGER.warn("Addon RWR emitter {} failed", emitter.getClass().getName(), exception);
+        }
+    }
 
     /** A live receiver reference and the world position used for exact range/error calculations. */
     public record Receiver(RwrTargetReference reference, Vec3 worldPosition, @Nullable UUID sublevelId) {
@@ -148,8 +150,20 @@ public final class ARADTargeting {
         Objects.requireNonNull(level, "level");
         Objects.requireNonNull(emitter, "emitter");
 
-        UUID emitterId = emitter.getRwrEmitterId();
-        BlockPos radarPos = emitter.getRwrEmitterPosition();
+        UUID emitterId;
+        BlockPos radarPos;
+
+        try {
+            emitterId = emitter.getRwrEmitterId();
+            radarPos = emitter.getRwrEmitterPosition();
+        } catch (RuntimeException exception) {
+            if (emitter instanceof IRadar) {
+                throw exception;
+            }
+
+            warnRwrAddon(emitter, exception);
+            return;
+        }
 
         if (emitterId == null || radarPos == null) {
             return;
@@ -162,8 +176,7 @@ public final class ARADTargeting {
                 .put(sourceId, new RwrEmitterHeartbeat(emitterId, radarPos.immutable(), level.getGameTime()));
     }
 
-    public static Optional<RadarRwrEmitter>
-    resolveRwrEmitter(ServerLevel level, String sourceId) {
+    public static Optional<RadarRwrEmitter> resolveRwrEmitter(ServerLevel level, String sourceId) {
         Objects.requireNonNull(level, "level");
 
         if (sourceId == null || sourceId.isBlank()) {
@@ -171,10 +184,19 @@ public final class ARADTargeting {
         }
 
         for (RadarRwrEmitter emitter : liveRwrEmitters(level)) {
-            String currentSourceId = RadarContactRegistry.radarSourceId(level, emitter.getRwrEmitterPosition());
+            try {
+                BlockPos emitterPos = emitter.getRwrEmitterPosition();
 
-            if (sourceId.equals(currentSourceId) && emitter.isRwrEmitting()) {
-                return Optional.of(emitter);
+                if (emitterPos != null && sourceId.equals(RadarContactRegistry.radarSourceId(level, emitterPos)) && emitter.isRwrEmitting()) {
+                    return Optional.of(emitter);
+                }
+
+            } catch (RuntimeException exception) {
+                if (emitter instanceof IRadar) {
+                    throw exception;
+                }
+
+                warnRwrAddon(emitter, exception);
             }
         }
 
@@ -185,12 +207,21 @@ public final class ARADTargeting {
         }
 
         BlockEntity blockEntity = level.getBlockEntity(radarPos);
+        if (!(blockEntity instanceof RadarRwrEmitter emitter) || blockEntity.isRemoved()) {
+            return Optional.empty();
+        }
 
-        if (!(blockEntity instanceof RadarRwrEmitter emitter)
-                || blockEntity.isRemoved()
-                || !emitter.isRwrEmitting()
-                || !sourceId.equals(RadarContactRegistry.radarSourceId(level, emitter.getRwrEmitterPosition())
-        )) {
+        try {
+            BlockPos emitterPos = emitter.getRwrEmitterPosition();
+            if (emitterPos == null || !emitter.isRwrEmitting() || !sourceId.equals(RadarContactRegistry.radarSourceId(level, emitterPos))) {
+                return Optional.empty();
+            }
+        } catch (RuntimeException exception) {
+            if (emitter instanceof IRadar) {
+                throw exception;
+            }
+
+            warnRwrAddon(emitter, exception);
             return Optional.empty();
         }
 
@@ -316,6 +347,19 @@ public final class ARADTargeting {
     }
 
     private static Optional<NativeRadarContact> toContact(ServerLevel level, Receiver receiver, RadarRwrEmitter emitter) {
+        if (emitter instanceof IRadar) {
+            return toContactUnchecked(level, receiver, emitter);
+        }
+
+        try {
+            return toContactUnchecked(level, receiver, emitter);
+        } catch (RuntimeException exception) {
+            warnRwrAddon(emitter, exception);
+            return Optional.empty();
+        }
+    }
+
+    private static Optional<NativeRadarContact> toContactUnchecked(ServerLevel level, Receiver receiver, RadarRwrEmitter emitter) {
         if (!emitter.isRwrEmitting()) {
             return Optional.empty();
         }
@@ -394,7 +438,7 @@ public final class ARADTargeting {
         ));
     }
 
-    private static List<RadarRwrEmitter> liveRwrEmitters(ServerLevel level) {
+    public static List<RadarRwrEmitter> liveRwrEmitters(ServerLevel level) {
         Map<String, RwrEmitterHeartbeat> dimensionEmitters = RWR_EMITTERS.get(level.dimension());
 
         if (dimensionEmitters == null || dimensionEmitters.isEmpty()) {
@@ -417,10 +461,32 @@ public final class ARADTargeting {
 
             BlockEntity blockEntity = level.getBlockEntity(heartbeat.radarPos());
 
-            if (!(blockEntity instanceof RadarRwrEmitter emitter) || blockEntity.isRemoved() || !heartbeat.emitterId()
-                    .equals(emitter.getRwrEmitterId()) || !heartbeat.radarPos()
-                    .equals(emitter.getRwrEmitterPosition()) || !entry.getKey()
-                    .equals(RadarContactRegistry.radarSourceId(level, emitter.getRwrEmitterPosition()))) {
+            if (!(blockEntity instanceof RadarRwrEmitter emitter)
+                    || blockEntity.isRemoved()) {
+                iterator.remove();
+                continue;
+            }
+
+            boolean valid;
+
+            try {
+                UUID emitterId = emitter.getRwrEmitterId();
+                BlockPos emitterPos = emitter.getRwrEmitterPosition();
+                valid = heartbeat.emitterId().equals(emitterId)
+                        && heartbeat.radarPos().equals(emitterPos)
+                        && emitterPos != null
+                        && entry.getKey().equals(RadarContactRegistry.radarSourceId(level, emitterPos));
+            } catch (RuntimeException exception) {
+                if (emitter instanceof IRadar) {
+                    throw exception;
+                }
+
+                warnRwrAddon(emitter, exception);
+                iterator.remove();
+                continue;
+            }
+
+            if (!valid) {
                 iterator.remove();
                 continue;
             }
@@ -439,7 +505,6 @@ public final class ARADTargeting {
         List<IRadar> radars = new ArrayList<>();
 
         for (RadarRwrEmitter emitter : liveRwrEmitters(level)) {
-
             if (emitter instanceof IRadar radar) {
                 radars.add(radar);
             }

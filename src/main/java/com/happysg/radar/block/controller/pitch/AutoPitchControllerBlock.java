@@ -113,15 +113,17 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (level instanceof ServerLevel sl && state.getBlock() != newState.getBlock() ) {
             if (level.getBlockEntity(pos) instanceof AutoPitchControllerBlockEntity pitch) {
+                if (pitch.firingControl != null) {
+                    pitch.firingControl.resetTarget();
+                }
+
                 pitch.releaseKineticActuator();
             }
-            boolean assemblyMove =
-                    SableDataLinkRelocation.isRelocatingEndpoint(sl, pos);
+            boolean assemblyMove = SableDataLinkRelocation.isRelocatingEndpoint(sl, pos);
             if (!assemblyMove) {
                 breakAttachedDataLinks(level, pos);
             }
-            WeaponNetworkRuntime.get(sl)
-                    .unregisterContactController(pos);
+            WeaponNetworkRuntime.get(sl).unregisterContactController(pos);
             if (!assemblyMove) {
                 NetworkData.get(sl).onEndpointRemoved(sl, pos);
             }

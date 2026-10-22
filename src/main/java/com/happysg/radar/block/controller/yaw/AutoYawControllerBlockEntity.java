@@ -544,7 +544,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         if (mount.kind == MountKind.API && mount.api != null) {
-            return apiHandler.atTargetYaw(mount.api, lag, minimumToleranceDegrees);
+            return apiHandler.atTargetYaw(mount.api, lag, minimumToleranceDegrees, maximumToleranceDegrees);
         }
 
         return false;

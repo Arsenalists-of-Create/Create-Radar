@@ -146,11 +146,25 @@ public class MonitorInputHandler {
                     controller.getMonitorContacts()
             );
 
-            MonitorContactSnapshot contact = handler.findContact(context);
+            MonitorContactSnapshot contact;
 
-            if (contact != null && contact.selectable()) {
-                return contact;
+            try {
+                contact = handler.findContact(context);
+            } catch (RuntimeException exception) {
+                MonitorAddonCallbackSafety.warnOnce("findContact", handler, exception);
+                continue;
             }
+
+            if (contact == null || !contact.selectable()) {
+                continue;
+            }
+
+            Vec3 position = contact.position();
+            if (position == null || !Double.isFinite(position.x) || !Double.isFinite(position.y) || !Double.isFinite(position.z)) {
+                continue;
+            }
+
+            return contact;
         }
 
         return null;
@@ -290,20 +304,32 @@ public class MonitorInputHandler {
             MonitorContactSnapshot customContact = findCustomContact(be.getLevel(), hit, controller);
 
             if (customContact != null) {
-                RadarTrack nativeTrack = findTrackByContactId(controller, customContact.id());
+                if (pPlayer.level().isClientSide) {
+                    return InteractionResult.SUCCESS;
+                }
 
-                if (nativeTrack != null) {
-                    be.selectedEntity = nativeTrack.id();
-                    be.setSelectedTargetServer(nativeTrack);
-                    be.notifyUpdate();
+                if ("create_radar".equals(customContact.sourceType())) {
+                    RadarTrack nativeTrack =
+                            findTrackByContactId(controller, customContact.id());
+
+                    if (nativeTrack != null) {
+                        controller.selectedEntity = nativeTrack.id();
+                        controller.setSelectedTargetServer(nativeTrack);
+                        controller.notifyUpdate();
+                    }
+
                     return InteractionResult.SUCCESS;
                 }
 
                 MonitorContactSelectionHandler handler = MonitorContactSelectionRegistry.get(customContact.sourceType()).orElse(null);
-
-                if (handler != null && handler.onSelect(pPlayer, controller.getControllerPos(), customContact)) {
-                    be.notifyUpdate();
-                    return InteractionResult.SUCCESS;
+                if (handler != null) {
+                    try {
+                        if (handler.onSelect(pPlayer, controller.getControllerPos(), customContact)) {
+                            controller.notifyUpdate();
+                        }
+                    } catch (RuntimeException exception) {
+                        MonitorAddonCallbackSafety.warnOnce("worldOnSelect", handler, exception);
+                    }
                 }
 
                 return InteractionResult.SUCCESS;

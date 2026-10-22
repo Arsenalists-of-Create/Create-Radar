@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.networkcontroller;
 
+import com.happysg.radar.api.controller.RadarAimController;
 import com.happysg.radar.api.radar.RadarDetectionConfigurable;
 import com.happysg.radar.api.radar.RadarDetectionSettings;
 import com.happysg.radar.api.radar.rwr.RadarRwrEmitter;
@@ -18,6 +19,7 @@ import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
+import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.radar.track.RadarContactTrackAdapter;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
@@ -66,6 +68,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private static final String NBT_SLOT_NBT  = "SlotNbt";
     private static final String NBT_SAFE_ZONES = "SafeZones";
     private static final Logger LOGGER = LogUtils.getLogger();
+    private long nextRadarCallbackWarningTick = Long.MIN_VALUE;
 
     // Legacy keys (for backwards compatibility with old saves)
     private static final String LEGACY_INV = "inv";
@@ -182,9 +185,19 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private boolean isVsShipStillLoaded(ServerLevel sl, @Nullable RadarTrack track) {
         if (!Mods.SABLE.isLoaded()) return true;
         if (track == null) return true;
+
+        if (track.isSynthetic()) return true;
         if (track.trackCategory() != TrackCategory.SABLE) return true;
 
-        UUID shipId = UUID.fromString(track.getId());
+        String id = track.getId();
+        if (id == null) return false;
+
+        UUID shipId;
+        try {
+            shipId = UUID.fromString(id);
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
         long now = sl.getGameTime();
 
         if (now > vsLoadedCacheUntilTick) {
@@ -509,6 +522,53 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             lastPushedJammingToken = jammingToken(selected);
             endpointRepushRequired = false;
             pushToEndpoints(selected);
+        } else {
+            pushToAddonAimControllers(selected);
+        }
+    }
+
+    private void warnRadarCallbackFailure(ServerLevel level, Object source, String callback, RuntimeException exception) {
+        long now = level.getGameTime();
+
+        if (nextRadarCallbackWarningTick != Long.MIN_VALUE && now < nextRadarCallbackWarningTick) {
+            return;
+        }
+
+        nextRadarCallbackWarningTick = now + 1200L;
+        LOGGER.warn("Radar callback {} failed from {} at {}", callback, source.getClass().getName(), worldPosition, exception);
+    }
+
+    @Nullable
+    private Collection<? extends RadarContact> getContactsSafely(ServerLevel level, RadarSource source) {
+        try {
+            return source.getContacts();
+        } catch (RuntimeException exception) {
+            warnRadarCallbackFailure(level, source, "getContacts", exception);
+            return null;
+        }
+    }
+
+    @Nullable
+    private RadarTrack toTrackSafely(ServerLevel level, RadarContact contact, long gameTime) {
+        try {
+            return RadarContactTrackAdapter.toTrack(contact, gameTime);
+        } catch (RuntimeException exception) {
+            warnRadarCallbackFailure(level, contact, "toTrack", exception);
+            return null;
+        }
+    }
+
+    @Nullable
+    private String getContactIdSafely(ServerLevel level, RadarContact contact) {
+        if (contact == null) {
+            return null;
+        }
+
+        try {
+            return contact.getId();
+        } catch (RuntimeException exception) {
+            warnRadarCallbackFailure(level, contact, "getId", exception);
+            return null;
         }
     }
 
@@ -527,14 +587,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
         for (RadarSource radar : radars) {
-            Collection<? extends RadarContact> contacts = radar.getContacts();
+            Collection<? extends RadarContact> contacts = getContactsSafely(sl, radar);
 
             if (contacts == null) {
                 continue;
             }
 
             for (RadarContact contact : contacts) {
-                RadarTrack track = RadarContactTrackAdapter.toTrack(contact, gameTime);
+                RadarTrack track = toTrackSafely(sl, contact, gameTime);
 
                 if (track == null || !detectionCache.test(track)) {
                     continue;
@@ -560,8 +620,23 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
             BlockEntity be = sl.getBlockEntity(endpoint.pos());
 
-            if (be instanceof RadarRwrEmitter emitter && emitter.isRwrEmitting()) {
-                emitters.add(emitter);
+            if (!(be instanceof RadarRwrEmitter emitter)) {
+                continue;
+            }
+
+            if (emitter instanceof IRadar) {
+                if (emitter.isRwrEmitting()) {
+                    emitters.add(emitter);
+                }
+                continue;
+            }
+
+            try {
+                if (emitter.isRwrEmitting()) {
+                    emitters.add(emitter);
+                }
+            } catch (RuntimeException exception) {
+                warnRadarCallbackFailure(sl, emitter, "isRwrEmitting", exception);
             }
         }
 
@@ -574,8 +649,12 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
             BlockEntity be = sl.getBlockEntity(endpoint.pos());
 
-            if (be instanceof RadarSource source && source.isRunning()) {
-                sources.add(source);
+            if (be instanceof RadarSource source) {
+                try {
+                    if (source.isRunning()) sources.add(source);
+                } catch (RuntimeException exception) {
+                    warnRadarCallbackFailure(sl, source, "isRunning", exception);
+                }
             }
         }
 
@@ -608,8 +687,25 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
 
         RadarRwrTarget publicTarget = new RadarRwrTarget(targetPosition.get(), targetId);
-        RadarRwrEvaluation evaluation = emitter.evaluateRwrContact(sl, publicTarget, publicTarget);
-        return evaluation == null ? RadarRwrEvaluation.notEmitting() : evaluation;
+
+        try {
+            RadarRwrEvaluation evaluation = emitter.evaluateRwrContact(sl, publicTarget, publicTarget);
+            if (evaluation == null) {
+                return RadarRwrEvaluation.notEmitting();
+            }
+
+            float signalStrength = evaluation.signalStrength();
+
+            if (!Float.isFinite(signalStrength) || signalStrength < 0.0F) {
+                return RadarRwrEvaluation.notEmitting();
+            }
+
+            return evaluation;
+
+        } catch (RuntimeException exception) {
+            warnRadarCallbackFailure(sl, emitter, "evaluateRwrContact", exception);
+            return RadarRwrEvaluation.notEmitting();
+        }
     }
 
     public @Nullable String getCommandGuidanceRadarSourceId(ServerLevel sl, UUID shipId) {
@@ -636,13 +732,22 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 continue;
             }
 
-            Collection<? extends RadarContact> contacts = source.getContacts();
+            Collection<? extends RadarContact> contacts = getContactsSafely(sl, source);
 
             if (contacts == null) {
                 continue;
             }
 
-            boolean tracksTarget = contacts.stream().anyMatch(contact -> contact != null && targetId.equals(contact.getId()));
+            boolean tracksTarget = false;
+
+            for (RadarContact contact : contacts) {
+                String contactId = getContactIdSafely(sl, contact);
+
+                if (targetId.equals(contactId)) {
+                    tracksTarget = true;
+                    break;
+                }
+            }
 
             if (!tracksTarget) {
                 continue;
@@ -650,7 +755,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
             RadarRwrEvaluation evaluation = evaluateRwrEmitter(sl, emitter, target);
 
-            if (evaluation == null || !evaluation.emitting() || !evaluation.detectable()) {
+            if (evaluation == null || !evaluation.emitting() || !evaluation.detectable() || !Float.isFinite(evaluation.signalStrength()) || evaluation.signalStrength() < 0.0F) {
                 continue;
             }
 
@@ -664,7 +769,21 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             strongestEmitter = findStrongestLockingRadar(sl, group, target);
         }
 
-        return strongestEmitter == null ? null : RadarContactRegistry.radarSourceId(sl, strongestEmitter.getRwrEmitterPosition());
+        if (strongestEmitter == null) {
+            return null;
+        }
+
+        try {
+            BlockPos emitterPos = strongestEmitter.getRwrEmitterPosition();
+            return emitterPos == null ? null : RadarContactRegistry.radarSourceId(sl, emitterPos);
+        } catch (RuntimeException exception) {
+            if (strongestEmitter instanceof IRadar) {
+                throw exception;
+            }
+
+            warnRadarCallbackFailure(sl, strongestEmitter, "getRwrEmitterPosition", exception);
+            return null;
+        }
     }
 
     private void markExactLocksForSelectedShip(ServerLevel sl, NetworkData.Group group, UUID shipId) {
@@ -672,7 +791,20 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         RadarRwrEmitter strongestEmitter = findStrongestLockingRadar(sl, group, target);
 
         if (strongestEmitter != null) {
-            RadarContactRegistry.markExactLocked(sl, strongestEmitter.getRwrEmitterId(), target, 10);
+            try {
+                UUID emitterId = strongestEmitter.getRwrEmitterId();
+
+                if (emitterId != null) {
+                    RadarContactRegistry.markExactLocked(sl, emitterId, target, 10);
+                }
+
+            } catch (RuntimeException exception) {
+                if (strongestEmitter instanceof IRadar) {
+                    throw exception;
+                }
+
+                warnRadarCallbackFailure(sl, strongestEmitter, "markExactLock", exception);
+            }
         }
     }
 
@@ -684,7 +816,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         for (RadarRwrEmitter emitter : getRunningRwrEmitters(sl, group)) {
             RadarRwrEvaluation evaluation = evaluateRwrEmitter(sl, emitter, target);
 
-            if (evaluation == null || !evaluation.emitting() || !evaluation.lockCapable()) {
+            if (evaluation == null || !evaluation.emitting() || !evaluation.lockCapable() || !Float.isFinite(evaluation.signalStrength()) || evaluation.signalStrength() < 0.0F) {
                 continue;
             }
 
@@ -829,6 +961,43 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             pitch.setAndAcquireTrack(track, cfg);
             pitch.setSafeZones(safeZones);
         }
+        pushToAddonAimControllers(track);
+    }
+
+    private void pushToAddonAimControllers(@Nullable RadarTrack track) {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        NetworkData data = NetworkData.get(serverLevel);
+        NetworkData.Group group = data.getGroup(serverLevel.dimension(), worldPosition);
+
+        if (group == null) {
+            return;
+        }
+
+        for (BlockPos endpointPos : data.getWeaponEndpoints(group)) {
+            if (!serverLevel.hasChunkAt(endpointPos)) {
+                continue;
+            }
+
+            if (!worldPosition.equals(data.getFiltererForEndpoint(serverLevel.dimension(), endpointPos))) {
+                continue;
+            }
+
+            BlockEntity endpoint = serverLevel.getBlockEntity(endpointPos);
+            if (endpoint == null || endpoint.isRemoved()) {
+                continue;
+            }
+
+            if (endpoint instanceof AutoPitchControllerBlockEntity || endpoint instanceof AutoYawControllerBlockEntity) {
+                continue;
+            }
+
+            if (endpoint instanceof RadarAimController controller) {
+                controller.setContact(track);
+            }
+        }
     }
 
     public @Nullable RadarTrack getSelectedTrackForChaff(@Nullable String selectedId) {
@@ -901,7 +1070,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         RadarTrack liveTrack = null;
 
         for (RadarSource radar : getRunningRadarSources(serverLevel, group)) {
-            Collection<? extends RadarContact> contacts = radar.getContacts();
+            Collection<? extends RadarContact> contacts = getContactsSafely(serverLevel, radar);
 
             if (contacts == null) {
                 continue;
@@ -912,7 +1081,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                     continue;
                 }
 
-                RadarTrack track = RadarContactTrackAdapter.toTrack(contact, gameTime);
+                RadarTrack track = toTrackSafely(serverLevel, contact, gameTime);
 
                 if (track == null || !selectedId.equals(track.getId())) {
                     continue;
@@ -1010,6 +1179,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             pitch.setAndAcquireTrack(null, cfg);
             pitch.setSafeZones(safeZones);
         }
+        pushToAddonAimControllers(null);
     }
 
     private void clearExactLocksForSelectedShip(ServerLevel sl, NetworkData.Group group, String targetId) {

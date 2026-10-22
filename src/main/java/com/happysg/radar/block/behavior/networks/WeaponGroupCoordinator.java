@@ -3,6 +3,7 @@ package com.happysg.radar.block.behavior.networks;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
+import com.happysg.radar.compat.sable.SableMonitorRelocation;
 import com.happysg.radar.debug.DiagnosticRecorder;
 import com.happysg.radar.debug.ConflictTraceRecorder;
 import net.minecraft.core.BlockPos;
@@ -37,6 +38,7 @@ public final class WeaponGroupCoordinator {
     public static void onLevelUnload(LevelEvent.Unload event) {
         if (event.getLevel() instanceof ServerLevel level) {
             SableDataLinkRelocation.clear(level);
+            SableMonitorRelocation.clear(level);
             WeaponNetworkRuntime.clear(level);
             LAST_ERROR_LOG.keySet().removeIf(key -> key.startsWith(level.dimension().location() + "|"));
         }
@@ -47,6 +49,7 @@ public final class WeaponGroupCoordinator {
         if (!(event.getLevel() instanceof ServerLevel sl)) return;
 
         SableDataLinkRelocation.process(sl);
+        SableMonitorRelocation.process(sl);
         WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(sl);
         runtime.reconcile();
 

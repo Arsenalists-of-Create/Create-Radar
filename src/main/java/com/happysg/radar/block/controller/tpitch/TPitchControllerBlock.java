@@ -240,38 +240,32 @@ public class TPitchControllerBlock extends KineticBlock
                         ? Direction.EAST
                         : Direction.SOUTH);
         Direction rotatedBranch = rotation.rotate(orientation.branchDirection());
-        return state.setValue(ORIENTATION,
-                Orientation.from(rotatedCrossbar.getAxis(), rotatedBranch));
+        return state.setValue(ORIENTATION, Orientation.from(rotatedCrossbar.getAxis(), rotatedBranch));
     }
 
     @Override
     protected BlockState mirror(BlockState state, Mirror mirror) {
         Orientation orientation = state.getValue(ORIENTATION);
-        return state.setValue(ORIENTATION, Orientation.from(
-                orientation.crossbarAxis(),
-                mirror.mirror(orientation.branchDirection())));
+        return state.setValue(ORIENTATION, Orientation.from(orientation.crossbarAxis(), mirror.mirror(orientation.branchDirection())));
     }
 
     @Override
-    public void onRemove(BlockState state, Level level, BlockPos pos,
-                         BlockState newState, boolean isMoving) {
-        if (level instanceof ServerLevel serverLevel
-                && state.getBlock() != newState.getBlock()) {
-            if (level.getBlockEntity(pos)
-                    instanceof TPitchControllerBlockEntity pitch) {
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (level instanceof ServerLevel serverLevel && state.getBlock() != newState.getBlock()) {
+            if (level.getBlockEntity(pos) instanceof TPitchControllerBlockEntity pitch) {
+                if (pitch.firingControl != null) {
+                    pitch.firingControl.resetTarget();
+                }
+
                 pitch.releaseKineticActuator();
             }
-            boolean assemblyMove =
-                    SableDataLinkRelocation.isRelocatingEndpoint(
-                            serverLevel, pos);
+            boolean assemblyMove = SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos);
             if (!assemblyMove) {
                 breakAttachedDataLinks(level, pos);
             }
-            WeaponNetworkRuntime.get(serverLevel)
-                    .unregisterContactController(pos);
+            WeaponNetworkRuntime.get(serverLevel).unregisterContactController(pos);
             if (!assemblyMove) {
-                NetworkData.get(serverLevel).onEndpointRemoved(
-                        serverLevel, pos);
+                NetworkData.get(serverLevel).onEndpointRemoved(serverLevel, pos);
             }
         }
         super.onRemove(state, level, pos, newState, isMoving);

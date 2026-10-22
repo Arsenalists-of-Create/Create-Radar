@@ -447,20 +447,25 @@ public final class DirectionalJammingService {
             float halfAngleDegrees,
             Collection<RadarTrack> rawTracks
     ) {
-        if (level == null || sourceId == null || sourceId.isBlank()
-                || emitterId == null || !finite(emitterPosition)
-                || rawTracks == null) {
+        if (level == null
+                || sourceId == null || sourceId.isBlank()
+                || emitterId == null
+                || !finite(emitterPosition)
+                || rawTracks == null
+                || !Double.isFinite(range) || range <= 0.0 || !Float.isFinite(halfAngleDegrees)
+                || (emitterForward != null && !finite(emitterForward))) {
+
             return rawTracks == null ? List.of() : rawTracks;
         }
         Tuning tuning = Tuning.current();
         if (!tuning.enabled) {
             return rawTracks;
         }
-        Contribution contribution = strongestContribution(level, sourceId,
-                emitterPosition, tuning);
+        Contribution contribution = strongestContribution(level, sourceId, emitterPosition, tuning);
         if (contribution == null) {
             return rawTracks;
         }
+
         return reportedTracks(level, sourceId, emitterId, emitterPosition,
                 new ObservationVolume(range, emitterForward, halfAngleDegrees),
                 rawTracks, tuning, contribution);
@@ -483,29 +488,23 @@ public final class DirectionalJammingService {
         long now = level.getGameTime();
         view.lastAccessTick = now;
 
-        List<RadarTrack> raw = rawTracks.stream()
-                .filter(java.util.Objects::nonNull).toList();
-        List<RadarTrack> reported = new ArrayList<>(raw.size()
-                + tuning.maxGhosts);
+        List<RadarTrack> raw = rawTracks.stream().filter(java.util.Objects::nonNull).toList();
+        List<RadarTrack> reported = new ArrayList<>(raw.size() + tuning.maxGhosts);
         Map<String, Boolean> seen = new HashMap<>();
         for (RadarTrack track : raw) {
             seen.put(track.getId(), Boolean.TRUE);
             if (shouldDropRealTrack(track, contribution, tuning, now)) {
                 continue;
             }
-            RadarTrack proxy = view.realViews.computeIfAbsent(track.getId(),
-                    ignored -> track.copy());
+            RadarTrack proxy = view.realViews.computeIfAbsent(track.getId(), ignored -> track.copy());
             proxy.copyMutableStateFrom(track);
-            applyCorruption(proxy, track, radarWorldPosition, contribution,
-                    tuning, now);
+            applyCorruption(proxy, track, radarWorldPosition, contribution, tuning, now);
             reported.add(proxy);
         }
         view.realViews.keySet().removeIf(id -> !seen.containsKey(id));
-        maintainGhosts(view, raw, volume, radarWorldPosition, contribution,
-                tuning, now);
+        maintainGhosts(view, raw, volume, radarWorldPosition, contribution, tuning, now);
         for (Ghost ghost : view.ghosts.values()) {
-            updateGhost(ghost, volume, radarWorldPosition, contribution,
-                    tuning, now);
+            updateGhost(ghost, volume, radarWorldPosition, contribution, tuning, now);
             reported.add(ghost.track());
         }
         return List.copyOf(reported);
@@ -545,11 +544,9 @@ public final class DirectionalJammingService {
             return;
         }
         Tuning tuning = Tuning.current();
-        float chance = clamp(track.getJammingData().friendlyOutageChance(),
-                0.0F, 1.0F);
+        float chance = clamp(track.getJammingData().friendlyOutageChance(), 0.0F, 1.0F);
         long epoch = Math.floorDiv(gameTime, tuning.friendlyPeriodTicks);
-        if (unitRandom(seed(track.getId(), track.getJammingData().radarSourceId(),
-                epoch, 0x6A09E667F3BCC909L)) < chance) {
+        if (unitRandom(seed(track.getId(), track.getJammingData().radarSourceId(), epoch, 0x6A09E667F3BCC909L)) < chance) {
             track.setFriendly(false);
         }
     }
@@ -562,10 +559,8 @@ public final class DirectionalJammingService {
         long now = level.getGameTime();
         state.contributions.values().removeIf(contribution ->
                 now - contribution.heartbeatTick < 0
-                        || now - contribution.heartbeatTick
-                        > CONTRIBUTION_TTL_TICKS);
-        state.views.values().removeIf(view -> now - view.lastAccessTick < 0
-                || now - view.lastAccessTick > VIEW_TTL_TICKS);
+                        || now - contribution.heartbeatTick > CONTRIBUTION_TTL_TICKS);
+        state.views.values().removeIf(view -> now - view.lastAccessTick < 0 || now - view.lastAccessTick > VIEW_TTL_TICKS);
         if (state.contributions.isEmpty() && state.views.isEmpty()) {
             DIMENSIONS.remove(level.dimension());
         }
@@ -577,17 +572,14 @@ public final class DirectionalJammingService {
         }
     }
 
-    private static Contribution strongestContribution(ServerLevel level,
-                                                       String sourceId,
-                                                       Vec3 radarWorldPosition,
-                                                       Tuning tuning) {
+    private static Contribution strongestContribution(ServerLevel level, String sourceId,
+            Vec3 radarWorldPosition, Tuning tuning) {
         DimensionState state = DIMENSIONS.get(level.dimension());
         if (state == null) {
             return null;
         }
         long now = level.getGameTime();
-        double spilloverRadiusSqr = tuning.spilloverRadiusBlocks
-                * tuning.spilloverRadiusBlocks;
+        double spilloverRadiusSqr = tuning.spilloverRadiusBlocks * tuning.spilloverRadiusBlocks;
         return effectiveContributions(state, now, tuning).stream()
                 .filter(contribution -> contributionAffectsRadar(
                         contribution.targetSourceId,
@@ -600,8 +592,7 @@ public final class DirectionalJammingService {
                                 + contribution.profile.directionalStrength
                                 * 10.0F
                                 + contribution.profile.outerStrength)
-                        .thenComparingLong(contribution ->
-                                contribution.jammerPos.asLong()))
+                        .thenComparingLong(contribution -> contribution.jammerPos.asLong()))
                 .orElse(null);
     }
 
@@ -631,8 +622,7 @@ public final class DirectionalJammingService {
         }
         return radius > 0.0F && finite(targetRadarWorldPosition)
                 && finite(radarWorldPosition)
-                && targetRadarWorldPosition.distanceToSqr(radarWorldPosition)
-                <= radiusSqr;
+                && targetRadarWorldPosition.distanceToSqr(radarWorldPosition) <= radiusSqr;
     }
 
     private static List<Contribution> effectiveContributions(
@@ -655,8 +645,7 @@ public final class DirectionalJammingService {
         List<Contribution> effective = new ArrayList<>(active.size());
         for (int index = 0; index < active.size(); index++) {
             Contribution contribution = active.get(index);
-            effective.add(contribution.withProfile(
-                    contribution.profile.balanced(sizes[index])));
+            effective.add(contribution.withProfile(contribution.profile.balanced(sizes[index])));
         }
         return List.copyOf(effective);
     }
@@ -664,16 +653,14 @@ public final class DirectionalJammingService {
     static boolean isActiveContribution(Profile profile, long now,
                                         long heartbeatTick) {
         long age = now - heartbeatTick;
-        return profile != null && profile.active()
-                && age >= 0 && age <= CONTRIBUTION_TTL_TICKS;
+        return profile != null && profile.active() && age >= 0 && age <= CONTRIBUTION_TTL_TICKS;
     }
 
     static boolean supportsRadarType(String radarType) {
         return !"sonar".equalsIgnoreCase(radarType);
     }
 
-    static int[] clusterSizes(List<ClusterIdentity> identities,
-                              float requestedRadius) {
+    static int[] clusterSizes(List<ClusterIdentity> identities, float requestedRadius) {
         int size = identities == null ? 0 : identities.size();
         int[] parents = new int[size];
         int[] ranks = new int[size];
@@ -684,8 +671,7 @@ public final class DirectionalJammingService {
         double radiusSqr = radius * radius;
         for (int first = 0; first < size; first++) {
             for (int second = first + 1; second < size; second++) {
-                if (clusterConnected(identities.get(first),
-                        identities.get(second), radius, radiusSqr)) {
+                if (clusterConnected(identities.get(first), identities.get(second), radius, radiusSqr)) {
                     union(parents, ranks, first, second);
                 }
             }
@@ -701,18 +687,14 @@ public final class DirectionalJammingService {
         return result;
     }
 
-    private static boolean clusterConnected(ClusterIdentity first,
-                                            ClusterIdentity second,
-                                            float radius,
-                                            double radiusSqr) {
+    private static boolean clusterConnected(ClusterIdentity first, ClusterIdentity second,
+            float radius, double radiusSqr) {
         if (radius > 0.0F && finite(first.worldPosition)
                 && finite(second.worldPosition)
-                && first.worldPosition.distanceToSqr(second.worldPosition)
-                <= radiusSqr) {
+                && first.worldPosition.distanceToSqr(second.worldPosition) <= radiusSqr) {
             return true;
         }
-        if (first.aradGroupRoot != null
-                && first.aradGroupRoot.equals(second.aradGroupRoot)) {
+        if (first.aradGroupRoot != null && first.aradGroupRoot.equals(second.aradGroupRoot)) {
             return true;
         }
         for (UUID id : first.connectedSublevels) {
@@ -736,8 +718,7 @@ public final class DirectionalJammingService {
         return root;
     }
 
-    private static void union(int[] parents, int[] ranks,
-                              int first, int second) {
+    private static void union(int[] parents, int[] ranks, int first, int second) {
         int firstRoot = find(parents, first);
         int secondRoot = find(parents, second);
         if (firstRoot == secondRoot) {
@@ -767,24 +748,19 @@ public final class DirectionalJammingService {
         NoiseSample outer = noise(raw.position(), radarWorldPosition,
                 tuning.outerErrorDegrees * contribution.profile.outerStrength,
                 tuning.outerPeriodTicks, now,
-                seed(raw.getId(), contribution.targetSourceId, 0L,
-                        0xBB67AE8584CAA73BL));
+                seed(raw.getId(), contribution.targetSourceId, 0L, 0xBB67AE8584CAA73BL));
         NoiseSample visible = NoiseSample.ZERO;
         if (directional && contribution.profile.directionalStrength > 0.0F) {
             visible = visible.add(noise(raw.position(), radarWorldPosition,
-                    tuning.directionalErrorDegrees
-                            * contribution.profile.directionalStrength,
+                    tuning.directionalErrorDegrees * contribution.profile.directionalStrength,
                     tuning.directionalPeriodTicks, now,
-                    seed(raw.getId(), contribution.targetSourceId, 0L,
-                            0x3C6EF372FE94F82BL)));
+                    seed(raw.getId(), contribution.targetSourceId, 0L, 0x3C6EF372FE94F82BL)));
         }
         if (contribution.profile.severeStrength > 0.0F) {
             visible = visible.add(noise(raw.position(), radarWorldPosition,
-                    tuning.severeErrorDegrees
-                            * contribution.profile.severeStrength,
+                    tuning.severeErrorDegrees * contribution.profile.severeStrength,
                     tuning.severePeriodTicks, now,
-                    seed(raw.getId(), contribution.targetSourceId, 0L,
-                            0xA54FF53A5F1D36F1L)));
+                    seed(raw.getId(), contribution.targetSourceId, 0L, 0xA54FF53A5F1D36F1L)));
         }
         NoiseSample guidance = outer.add(visible);
         proxy.setPosition(raw.position().add(visible.offset));
@@ -799,27 +775,19 @@ public final class DirectionalJammingService {
                 guidance.velocityOffset,
                 mix64(guidance.token
                         ^ Float.floatToIntBits(contribution.profile.outerStrength)
-                        ^ ((long) Float.floatToIntBits(
-                        contribution.profile.directionalStrength) << 17)
-                        ^ ((long) Float.floatToIntBits(
-                        contribution.profile.severeStrength) << 33))));
-        proxy.setSynthetic(false);
+                        ^ ((long) Float.floatToIntBits(contribution.profile.directionalStrength) << 17)
+                        ^ ((long) Float.floatToIntBits(contribution.profile.severeStrength) << 33))));
+        proxy.setSynthetic(raw.isSynthetic());
     }
 
-    private static boolean shouldDropRealTrack(
-            RadarTrack track,
-            Contribution contribution,
-            Tuning tuning,
-            long now
-    ) {
+    private static boolean shouldDropRealTrack(RadarTrack track, Contribution contribution, Tuning tuning, long now) {
         if (contribution.profile.severeStrength <= 0.0F) {
             return false;
         }
-        float chance = severeStateChance(contribution.profile,
-                tuning.minDropoutChance, tuning.maxDropoutChance);
+
+        float chance = severeStateChance(contribution.profile, tuning.minDropoutChance, tuning.maxDropoutChance);
         long epoch = Math.floorDiv(now, tuning.statePeriodTicks);
-        return unitRandom(seed(track.getId(), contribution.targetSourceId,
-                epoch, 0x510E527FADE682D1L)) < chance;
+        return unitRandom(seed(track.getId(), contribution.targetSourceId, epoch, 0x510E527FADE682D1L)) < chance;
     }
 
     private static void maintainGhosts(
@@ -841,21 +809,18 @@ public final class DirectionalJammingService {
             view.ghosts.clear();
             return;
         }
-        int desired = Math.round(Mth.lerp(contribution.profile.severeProgress,
-                tuning.minGhosts, tuning.maxGhosts)
+        int desired = Math.round(Mth.lerp(contribution.profile.severeProgress, tuning.minGhosts, tuning.maxGhosts)
                 * contribution.profile.severeStateScale());
         desired = Mth.clamp(desired, 0, tuning.maxGhosts);
         while (view.ghosts.size() > desired) {
-            UUID last = view.ghosts.keySet().stream().reduce((a, b) -> b)
-                    .orElse(null);
+            UUID last = view.ghosts.keySet().stream().reduce((a, b) -> b).orElse(null);
             if (last == null) {
                 break;
             }
             view.ghosts.remove(last);
         }
         while (view.ghosts.size() < desired) {
-            Ghost ghost = createGhost(view, raw, volume, radarWorldPosition,
-                    contribution, tuning, now);
+            Ghost ghost = createGhost(view, raw, volume, radarWorldPosition, contribution, tuning, now);
             view.ghosts.put(UUID.fromString(ghost.track.getId()), ghost);
         }
     }
@@ -870,8 +835,7 @@ public final class DirectionalJammingService {
             long now
     ) {
         long sequence = view.nextGhostSequence++;
-        long randomSeed = seed(contribution.targetSourceId, "ghost", sequence,
-                0x9B05688C2B3E6C1FL);
+        long randomSeed = seed(contribution.targetSourceId, "ghost", sequence, 0x9B05688C2B3E6C1FL);
         RandomSource random = RandomSource.create(randomSeed);
         UUID id = UUID.nameUUIDFromBytes((contribution.targetSourceId + "|"
                 + sequence).getBytes(StandardCharsets.UTF_8));

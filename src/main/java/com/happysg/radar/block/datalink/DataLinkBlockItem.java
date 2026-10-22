@@ -483,7 +483,8 @@ public class DataLinkBlockItem extends BlockItem {
         boolean canAttach = switch (endpoint.type()) {
             case RADAR -> data.canAttachRadar(group, endpointPos);
             case MONITOR -> data.canAttachMonitor(group, endpointPos);
-            case WEAPON_CONTROLLER, CUSTOM -> false;
+            case WEAPON_CONTROLLER -> serverLevel.hasChunkAt(endpointPos) && serverLevel.getBlockEntity(endpointPos) != null && data.canReserveWeaponEndpoint(group, endpointPos);
+            case CUSTOM -> false;
         };
 
         if (!canAttach) {
@@ -514,7 +515,8 @@ public class DataLinkBlockItem extends BlockItem {
             }
 
             case MONITOR -> data.attachMonitor(serverLevel, group, endpointPos);
-            case WEAPON_CONTROLLER, CUSTOM -> {}
+            case WEAPON_CONTROLLER -> { data.reserveWeaponEndpoint(group, endpointPos); }
+            case CUSTOM -> {}
         }
 
         data.addDataLinkToGroup(group, placedPos, endpointPos);
