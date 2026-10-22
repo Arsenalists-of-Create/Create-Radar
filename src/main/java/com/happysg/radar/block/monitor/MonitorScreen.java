@@ -1340,6 +1340,13 @@ public class MonitorScreen extends Screen {
         MonitorProjection projection = currentProjection(monitor);
         updateHoverFromMouse(monitor, projection, (int) mouseX, (int) mouseY);
         if (hoveredContact != null) {
+            if (hoveredContact.id().equals(monitor.selectedEntity)) {
+                monitor.selectedEntity = null;
+                monitor.activetrack = null;
+                MonitorSelectionPacket.send(controllerPos, null);
+                return true;
+            }
+
             if ("create_radar".equals(hoveredContact.sourceType())) {
                 monitor.selectedEntity = hoveredContact.id();
                 MonitorSelectionPacket.send(controllerPos, hoveredContact.id());
