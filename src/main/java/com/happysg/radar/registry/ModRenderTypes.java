@@ -42,6 +42,34 @@ public class ModRenderTypes extends RenderType {
 
     private static final RenderType SOLID_POLYGON_OFFSET = createSolidPolygonOffset();
 
+    private static final BiFunction<ResourceLocation, Boolean, RenderType> CONTACTS =
+            Util.memoize((texture, unused) -> {
+                CompositeState state = CompositeState.builder()
+                        .setShaderState(RENDERTYPE_ENTITY_TRANSLUCENT_SHADER)
+                        .setTextureState(new TextureStateShard(texture, false, false))
+                        .setTransparencyState(TRANSLUCENT_TRANSPARENCY)
+                        .setLayeringState(POLYGON_OFFSET_LAYERING)
+                        .setCullState(NO_CULL)
+                        .setLightmapState(LIGHTMAP)
+                        .setOverlayState(OVERLAY)
+                        .setWriteMaskState(COLOR_WRITE)
+                        .createCompositeState(false);
+
+                return create(
+                        "radar_contacts",
+                        DefaultVertexFormat.NEW_ENTITY,
+                        VertexFormat.Mode.QUADS,
+                        256,
+                        false,
+                        false,
+                        state
+                );
+            });
+
+    public static RenderType contacts(ResourceLocation texture) {
+        return CONTACTS.apply(texture, false);
+    }
+
     private static RenderType createSolidPolygonOffset() {
         CompositeState state = CompositeState.builder()
                 .setShaderState(POSITION_COLOR_SHADER)

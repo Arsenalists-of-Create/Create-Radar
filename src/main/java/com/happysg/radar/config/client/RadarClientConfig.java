@@ -30,4 +30,13 @@ public class RadarClientConfig extends ConfigBase {
     public ConfigFloat sableSilhouetteCellSize = f(0.35f, 0.1f, "sableSilhouetteCellSize", "Projected grid cell size for Sable radar silhouettes. Lower values make diagonals smoother but cost more render work");
     public ConfigBool sableSilhouetteDebugOverlay = b(false, "sableSilhouetteDebugOverlay", "Render Sable radar silhouettes in a distinct debug color");
     public ConfigBool sableSilhouetteDebugFallbackRectangle = b(false, "sableSilhouetteDebugFallbackRectangle", "Render a simple debug rectangle for Sable contacts whose silhouette geometry is missing");
+
+    public ConfigGroup modSounds = group(3, "modSounds", "Mod Sounds");
+    public ConfigInt modSoundsVolume = i(100, 0, 100, "modSoundsVolume", "Master volume for Create: Radars sounds");
+    public ConfigInt rwrLockVolume = i(100, 0, 100, "rwrLockVolume", "RWR lock warning volume");
+    public ConfigInt rwrInRangeVolume = i(100, 0, 100, "rwrInRangeVolume", "RWR in-range warning volume");
+    public ConfigInt rwrSweepVolume = i(100, 0, 100, "rwrSweepVolume", "RWR sweep warning volume");
+    public ConfigInt rwrEngagedVolume = i(100, 0, 100, "rwrEngagedVolume", "RWR engagement warning volume");
+    public ConfigInt sonarPingVolume = i(100, 0, 100, "sonarPingVolume", "Sonar ping volume");
+    public ConfigInt sonarHumVolume = i(100, 0, 100, "sonarHumVolume", "Sonar ambient hum volume");
 }

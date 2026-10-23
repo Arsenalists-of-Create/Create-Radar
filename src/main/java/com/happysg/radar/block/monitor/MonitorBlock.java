@@ -88,18 +88,29 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
     }
 
     @Override
-    protected @NotNull InteractionResult useWithoutItem(@NotNull BlockState state,
-                                                        @NotNull Level level,
-                                                        @NotNull BlockPos pos,
-                                                        Player player,
-                                                        @NotNull BlockHitResult hit) {
+    protected @NotNull InteractionResult useWithoutItem(
+            @NotNull BlockState state,
+            @NotNull Level level,
+            @NotNull BlockPos pos,
+            Player player,
+            @NotNull BlockHitResult hit) {
+
         BlockEntity blockEntity = level.getBlockEntity(pos);
-        if (blockEntity instanceof MonitorBlockEntity monitor && monitor.getController().isAradLinked()) {
+        if (!(blockEntity instanceof MonitorBlockEntity monitor)) {
+            return InteractionResult.PASS;
+        }
+
+        MonitorBlockEntity controller = monitor.getController();
+        if (controller == null) {
+            return InteractionResult.PASS;
+        }
+
+        if (controller.isAradLinked()) {
             return onBlockEntityUse(
                     level,
                     pos,
-                    monitorBlockEntity -> MonitorInputHandler.onUse(
-                            monitorBlockEntity.getController(),
+                    be -> MonitorInputHandler.onUse(
+                            be.getController(),
                             player,
                             InteractionHand.MAIN_HAND,
                             hit,
@@ -108,46 +119,24 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
             );
         }
 
-        if (level.isClientSide && RadarConfig.client().useGuiByDefault.get()) {
-            BlockEntity be = blockEntity;
-            if (be instanceof MonitorBlockEntity monitor) {
-                if (monitor.getController().isAradLinked()) {
-                    return InteractionResult.sidedSuccess(level.isClientSide);
-                }
-                if (level.isClientSide) {
-                    openMonitorScreenClient(monitor);
-                }
+        if (level.isClientSide) {
+            boolean guiByDefault = RadarConfig.client().useGuiByDefault.get();
+            boolean openGui = guiByDefault != player.isShiftKeyDown();
 
-                return InteractionResult.sidedSuccess(level.isClientSide);
-            }
-        }
-
-        if (player.isShiftKeyDown()) {
-            BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof MonitorBlockEntity monitor && isGuiHotspot(monitor, hit)) {
-                if (monitor.getController().isAradLinked()) {
-                    return InteractionResult.sidedSuccess(level.isClientSide);
-                }
-                // i only open the GUI on the client
-                if (level.isClientSide) {
-                    openMonitorScreenClient(monitor);
-                }
-
-                return InteractionResult.sidedSuccess(level.isClientSide);
-            }
-        }
-
-        return onBlockEntityUse(
-                level,
-                pos,
-                monitorBlockEntity -> MonitorInputHandler.onUse(
-                        monitorBlockEntity.getController(),
+            if (openGui) {
+                openMonitorScreenClient(monitor);
+            } else {
+                MonitorInputHandler.onUse(
+                        controller,
                         player,
                         InteractionHand.MAIN_HAND,
                         hit,
                         state.getValue(FACING)
-                )
-        );
+                );
+            }
+        }
+
+        return InteractionResult.SUCCESS;
     }
 
     @Override

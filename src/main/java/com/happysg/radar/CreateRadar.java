@@ -7,6 +7,7 @@ import com.happysg.radar.block.radar.sonar.bearing.SonarHumLoopSoundManager;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorInputHandler;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.client.RadarSoundSettingsHandler;
 import com.happysg.radar.compat.cbc.CbcRadarWeaponRegistration;
 import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
 import com.happysg.radar.compat.sable.SableSilhouetteClientCache;
@@ -134,8 +135,8 @@ public class CreateRadar {
     public static void clientInit(FMLClientSetupEvent event) {
         PonderIndex.addPlugin(new RadarPonderPlugin());
         NeoForge.EVENT_BUS.addListener(MonitorInputHandler::monitorPlayerHovering);
+        NeoForge.EVENT_BUS.addListener(RadarSoundSettingsHandler::onPlaySound);
         NeoForge.EVENT_BUS.addListener(CreateRadar::clientDisconnect);
-
     }
 
     private static void clientDisconnect(ClientPlayerNetworkEvent.LoggingOut event) {

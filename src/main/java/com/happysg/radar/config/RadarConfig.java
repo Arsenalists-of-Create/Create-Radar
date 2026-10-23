@@ -28,8 +28,6 @@ public class RadarConfig {
     }
     public static boolean DEBUG_BEAMS = false;
 
-
-
     public static RadarServerConfig server() {
         return server;
     }

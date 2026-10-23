@@ -45,10 +45,8 @@ import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.slf4j.Logger;
 
-import javax.annotation.Nullable;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Renders radar monitor displays with tracks, grids, sweeps and other visual elements.
@@ -69,6 +67,8 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     private static final float PONDER_CONTACT_HALO_DEPTH_GAP = 0.001f;
     private static final Color PONDER_CONTACT_HALO_COLOR = new Color(0x07100a);
     private static final Color ADDON_CONTACT_COLOR = new Color(0x55FFFF);
+    private static final Color CONTACT_HOVER_COLOR = new Color(255, 255, 0);
+    private static final Color CONTACT_SELECTED_COLOR = new Color(255, 0, 0);
     private static final float LABEL_SCALE = 0.003f;
     private static final float LABEL_Z_OFFSET = 0.03f;
     private static final float LABEL_DEPTH_NUDGE = 0.00025f;
@@ -203,8 +203,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             renderSweep(radarInfo, blockEntity, projection, ms, bufferSource, radarCenter, scale, partialTicks);
         }
 
-        renderRadarTracks(projection, blockEntity, ms, bufferSource);
-        renderContributorContacts(projection, blockEntity, ms, bufferSource);
+        renderBatchedContacts(projection, blockEntity, ms, bufferSource, partialTicks);
         if (blockEntity.isPonderJammingVisual()) {
             renderPonderJammingWarning(blockEntity, ms, bufferSource);
         }
@@ -508,121 +507,192 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         addVertex(buffer, matrix, x0, depth, z1, r, g, b, alpha, uvMin, uvMax);
     }
 
-    private void renderRadarTracks(MonitorProjection projection, MonitorBlockEntity monitor, PoseStack ms, MultiBufferSource bufferSource) {
-        AtomicInteger depthCounter = new AtomicInteger(0);
-        for (RadarTrack track : monitor.getTracks()) {
-            renderTrack(track, monitor, projection, ms, bufferSource, depthCounter.getAndIncrement());
-        }
+    private void renderBatchedContact(
+            VertexConsumer buffer,
+            Matrix4f matrix,
+            Color color,
+            float alpha,
+            float depth,
+            MonitorProjection.Quad quad,
+            MonitorSprite sprite) {
+
+        if (buffer == null || alpha <= 0f) return;
+
+        int index = MonitorContactAtlas.index(sprite);
+        if (index < 0) return;
+
+        MonitorContactAtlas.Bounds bounds = MonitorContactAtlas.bounds(index);
+        if (bounds == null) return;
+
+        float localU0 = bounds.minU();
+        float localV0 = bounds.minV();
+        float localU1 = bounds.maxU();
+        float localV1 = bounds.maxV();
+
+        float u0 = MonitorContactAtlas.u(index, localU0);
+        float u1 = MonitorContactAtlas.u(index, localU1);
+        float v0 = MonitorContactAtlas.v(index, localV0);
+        float v1 = MonitorContactAtlas.v(index, localV1);
+
+        float centerX = (quad.minX() + quad.maxX()) * 0.5f;
+        float centerZ = (quad.minZ() + quad.maxZ()) * 0.5f;
+
+        float width = quad.maxX() - quad.minX();
+        float height = quad.maxZ() - quad.minZ();
+
+        float x0 = centerX + (localU0 - 0.5f) * width;
+        float x1 = centerX + (localU1 - 0.5f) * width;
+        float z0 = centerZ + (localV0 - 0.5f) * height;
+        float z1 = centerZ + (localV1 - 0.5f) * height;
+
+        float r = color.getRedAsFloat();
+        float g = color.getGreenAsFloat();
+        float b = color.getBlueAsFloat();
+
+        addVertex(buffer, matrix, x0, depth, z0, r, g, b, alpha, u0, v0);
+        addVertex(buffer, matrix, x1, depth, z0, r, g, b, alpha, u1, v0);
+        addVertex(buffer, matrix, x1, depth, z1, r, g, b, alpha, u1, v1);
+        addVertex(buffer, matrix, x0, depth, z1, r, g, b, alpha, u0, v1);
     }
 
-    private void renderContributorContacts(MonitorProjection projection, MonitorBlockEntity monitor, PoseStack ms, MultiBufferSource bufferSource) {
-        if (!(monitor.getLevel() instanceof ClientLevel clientLevel)) {
-            return;
-        }
-
-        List<MonitorContactSnapshot> contacts = MonitorContactContributorRegistry.collect(clientLevel, monitor.getBlockPos());
-
-        if (contacts.isEmpty()) {
-            return;
-        }
-
+    private void renderBatchedContacts(
+            MonitorProjection projection,
+            MonitorBlockEntity monitor,
+            PoseStack ms,
+            MultiBufferSource bufferSource,
+            float partialTicks) {
+        VertexConsumer buffer = getContactBuffer(bufferSource);
         Matrix4f matrix = ms.last().pose();
-        int depthIndex = monitor.getTracks().size();
 
-        for (MonitorContactSnapshot contact : contacts) {
-            Vec3 position = contact.position();
+        long gameTime = monitor.getLevel().getGameTime();
+        int size = monitor.getSize();
 
-            if (!Double.isFinite(position.x) || !Double.isFinite(position.y) || !Double.isFinite(position.z)) continue;
-            MonitorProjection.DisplayPoint point = projection.project(position);
+        String hoveredId = monitor.hoveredEntity;
+        String selectedId = monitor.selectedEntity;
+
+        DetectionConfig filter = monitor.filter;
+
+        MonitorProjection.Quad hoveredQuad = null;
+        MonitorProjection.Quad selectedQuad = null;
+        float hoveredAlpha = 1.0f;
+        float selectedAlpha = 1.0f;
+
+        for (RadarTrack track : monitor.getTracks()) {
+            MonitorProjection.DisplayPoint point = projection.project(track.position());
             if (point.outside()) continue;
+            MonitorProjection.Quad quad = MonitorProjection.fullSizeQuad(point, size);
+            float depth = DEPTH_TRACK_BASE;
+            float age = gameTime - track.scannedTime();
+            float alpha = 1.0f - age / 100.0f;
+            float spriteAlpha = Mth.clamp(alpha, 0.0f, 1.0f);
 
-            MonitorProjection.Quad quad = MonitorProjection.fullSizeQuad(point, monitor.getSize());
-            float depth = DEPTH_TRACK_BASE + depthIndex++ * DEPTH_TRACK_INCREMENT;
+            if (buffer != null && spriteAlpha > 0.0f) {
+                Color color = filter.getColor(track);
+                renderBatchedContact(
+                        buffer,
+                        matrix,
+                        color,
+                        spriteAlpha,
+                        depth,
+                        quad,
+                        track.getSprite()
+                );
 
-            renderCenteredContactSprite(
-                    getBuffer(bufferSource, MonitorSprite.ENTITY_HITBOX),
-                    matrix,
-                    ADDON_CONTACT_COLOR,
-                    1.0f,
-                    depth,
-                    quad
+                if (track.id().equals(hoveredId)) {
+                    hoveredQuad = quad;
+                    hoveredAlpha = spriteAlpha;
+                }
+
+                if (track.id().equals(selectedId)) {
+                    selectedQuad = quad;
+                    selectedAlpha = spriteAlpha;
+                }
+            }
+
+            renderSableSilhouette(
+                    track,
+                    monitor,
+                    projection,
+                    ms,
+                    bufferSource,
+                    depth - 0.0003f,
+                    alpha,
+                    partialTicks
             );
 
-            if (contact.selectable() && contact.id().equals(monitor.hoveredEntity)) {
-                renderCenteredContactSprite(
-                        getBuffer(bufferSource, MonitorSprite.TARGET_HOVERED),
-                        matrix,
-                        new Color(255, 255, 0),
-                        1.0f,
-                        depth - 0.0001f,
-                        quad
+            String slug = getSlugForTrack(track, monitor);
+            if (slug != null) {
+
+                float xCenter = (quad.minX() + quad.maxX()) * 0.5f;
+                float zCenter = (quad.minZ() + quad.maxZ()) * 0.5f;
+                float zBelow = zCenter + LABEL_Z_OFFSET;
+                zBelow = Mth.clamp(zBelow, (1f - size) + 0.04f, 1f - 0.04f);
+
+                renderTrackLabel(
+                        ms,
+                        bufferSource,
+                        slug,
+                        xCenter,
+                        zBelow,
+                        depth,
+                        alpha
                 );
             }
         }
-    }
 
-    private void renderTrack(RadarTrack track, MonitorBlockEntity monitor, MonitorProjection projection,
-                             PoseStack ms, MultiBufferSource bufferSource,
-                             int depthMultiplier) {
-        int size = monitor.getSize();
+        if (buffer != null && monitor.getLevel() instanceof ClientLevel clientLevel) {
+            List<MonitorContactSnapshot> contacts = MonitorContactContributorRegistry.collect(clientLevel, monitor.getBlockPos());
+            for (MonitorContactSnapshot contact : contacts) {
+                Vec3 position = contact.position();
+                if (!Double.isFinite(position.x) || !Double.isFinite(position.y) || !Double.isFinite(position.z)) {
+                    continue;
+                }
+                MonitorProjection.DisplayPoint point = projection.project(position);
+                if (point.outside()) continue;
+                MonitorProjection.Quad quad = MonitorProjection.fullSizeQuad(point, size);
+                float depth = DEPTH_TRACK_BASE;
+                renderBatchedContact(
+                        buffer,
+                        matrix,
+                        ADDON_CONTACT_COLOR,
+                        1.0f,
+                        depth,
+                        quad,
+                        MonitorSprite.ENTITY_HITBOX
+                );
 
-        MonitorProjection.DisplayPoint point = projection.project(track.position());
-
-        // Skip tracks that are outside the display range
-        if (point.outside()) {
-            return;
+                if (contact.selectable() && contact.id().equals(hoveredId)) {
+                    hoveredQuad = quad;
+                    hoveredAlpha = 1.0f;
+                }
+            }
         }
 
-        MonitorProjection.Quad quad = MonitorProjection.fullSizeQuad(point, size);
+        if (buffer != null) {
+            if (hoveredQuad != null && hoveredAlpha > 0.0f) {
+                renderBatchedContact(
+                        buffer,
+                        matrix,
+                        CONTACT_HOVER_COLOR,
+                        hoveredAlpha,
+                        DEPTH_TRACK_BASE - 0.0001f,
+                        hoveredQuad,
+                        MonitorSprite.TARGET_HOVERED
+                );
+            }
 
-        // Calculate depth to prevent z-fighting between tracks
-        float depth = DEPTH_TRACK_BASE + (depthMultiplier * DEPTH_TRACK_INCREMENT);
-
-        // Calculate fade based on track age
-        long currentTime = monitor.getLevel().getGameTime();
-        float trackAge = currentTime - track.scannedTime();
-        float fadeTime = 100f; // Time in ticks for track to fade out
-        float fade = Math.min(1.0f, trackAge / fadeTime);
-        float alpha = 1.0f - fade;
-
-        // Get track color from filter
-        DetectionConfig filter = monitor.filter;
-        Color color = filter.getColor(track);
-
-        // Render base track
-        VertexConsumer buffer = getBuffer(bufferSource, track.getSprite());
-        Matrix4f m = ms.last().pose();
-        Matrix3f n = ms.last().normal();
-        renderCenteredContactSprite(buffer, m, color, alpha, depth, quad);
-        renderSableSilhouette(track, monitor, projection, ms, bufferSource, depth - 0.0003f, alpha, partialTicksFromMinecraft());
-
-        // Render selection indicators if needed
-        if (track.id().equals(monitor.hoveredEntity)) {
-            renderCenteredContactSprite(getBuffer(bufferSource, MonitorSprite.TARGET_HOVERED), m, new Color(255, 255, 0), alpha, depth - 0.0001f, quad);
+            if (selectedQuad != null && selectedAlpha > 0.0f) {
+                renderBatchedContact(
+                        buffer,
+                        matrix,
+                        CONTACT_SELECTED_COLOR,
+                        selectedAlpha,
+                        DEPTH_TRACK_BASE - 0.0002f,
+                        selectedQuad,
+                        MonitorSprite.TARGET_SELECTED
+                );
+            }
         }
-
-        if (track.id().equals(monitor.selectedEntity)) {
-            renderCenteredContactSprite(getBuffer(bufferSource, MonitorSprite.TARGET_SELECTED), m, new Color(255, 0, 0), alpha, depth - 0.0002f, quad);
-        }
-
-        String slug = getSlugForTrack(track, monitor);
-        if (slug != null) {
-            // i anchor the label to the center of the track quad
-            float xCenter = (quad.minX() + quad.maxX()) * 0.5f;
-            float zCenter = (quad.minZ() + quad.maxZ()) * 0.5f;
-
-            // i nudge it "down" the screen ( +Z on your monitor plane )
-            float zBelow = zCenter + LABEL_Z_OFFSET;
-
-            // i clamp so it stays visible
-            zBelow = Mth.clamp(zBelow, (1f - size) + 0.04f, 1f - 0.04f);
-
-            renderTrackLabel(ms, bufferSource, slug, xCenter, zBelow, depth, alpha);
-        }
-    }
-
-    private float partialTicksFromMinecraft() {
-        return Minecraft.getInstance().getTimer().getGameTimeDeltaPartialTick(true);
     }
 
     private void renderSableSilhouette(RadarTrack track, MonitorBlockEntity monitor, MonitorProjection projection,
@@ -661,6 +731,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             }
             return;
         }
+
 
         long gameTime = monitor.getLevel().getGameTime();
 
@@ -702,6 +773,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         if (projected == null || projected.isEmpty()) {
             return;
         }
+
 
         Color lineColor = RadarConfig.client().sableSilhouetteDebugOverlay.get() ? new Color(0x00ffff) : sableTrackColor(track);
         float r = lineColor.getRedAsFloat();
@@ -850,6 +922,12 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
      */
     private VertexConsumer getBuffer(MultiBufferSource bufferSource, MonitorSprite sprite) {
         return bufferSource.getBuffer(ModRenderTypes.polygonOffset(sprite.getTexture()));
+    }
+
+    private VertexConsumer getContactBuffer(MultiBufferSource bufferSource) {
+        ResourceLocation texture = MonitorContactAtlas.texture();
+        if (texture == null) return null;
+        return bufferSource.getBuffer(ModRenderTypes.contacts(texture));
     }
 
     private VertexConsumer getRwrContactBuffer(MultiBufferSource bufferSource, ResourceLocation texture, MonitorBlockEntity blockEntity) {

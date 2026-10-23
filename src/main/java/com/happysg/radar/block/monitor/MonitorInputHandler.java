@@ -3,6 +3,7 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.api.monitor.*;
 import com.happysg.radar.block.radar.track.RadarTrack;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionHand;
@@ -32,39 +33,19 @@ public class MonitorInputHandler {
         };
     }
 
-    public static RadarTrack findTrack(Level level, Vec3 hit, MonitorBlockEntity controller) {
-        if (controller.getRunningRadarInfos().isEmpty())
-            return null;
+    public static RadarTrack findTrack(Level level, BlockHitResult hit, MonitorBlockEntity controller) {
 
+        if (controller.getRunningRadarInfos().isEmpty()) return null;
+        MonitorProjection.DisplayPoint hitPoint = AradMonitorGeometry.hitPoint(level, controller, hit);
+        if (hitPoint == null) return null;
         MonitorProjection projection = MonitorProjection.create(controller);
-
-        Direction facing = level.getBlockState(controller.getControllerPos())
-                .getValue(MonitorBlock.FACING).getClockWise();
-        Direction monitorFacing = level.getBlockState(controller.getControllerPos())
-                .getValue(MonitorBlock.FACING);
-
-        int size = controller.getSize();
-        Vec3 center = Vec3.atCenterOf(controller.getControllerPos())
-                .add(facing.getStepX() * (size - 1) / 2.0, (size - 1) / 2.0, facing.getStepZ() * (size - 1) / 2.0);
-
-        Vec3 relative = hit.subtract(center);
-        relative = adjustRelativeVectorForFacing(relative, monitorFacing);
-
-        float sizeadj = size == 1 ? 0.5f : ((size - 1) / 2f);
-        if (size == 2)
-            sizeadj = 0.75f;
-
-        float hitX = (float) (relative.x / sizeadj) * 0.5f;
-        float hitZ = (float) (relative.z / sizeadj) * 0.5f;
-        double bestDistance = 0.04f;
+        double bestDistance = 0.04;
         RadarTrack bestTrack = null;
         for (RadarTrack track : controller.cachedTracks) {
             MonitorProjection.DisplayPoint point = projection.project(track.position());
-            if (point.outside())
-                continue;
-
-            double dx = point.xOffset() - hitX;
-            double dz = point.zOffset() - hitZ;
+            if (point.outside()) continue;
+            double dx = point.xOffset() - hitPoint.xOffset();
+            double dz = point.zOffset() - hitPoint.zOffset();
             double distance = dx * dx + dz * dz;
             if (distance < bestDistance) {
                 bestDistance = distance;
@@ -74,21 +55,24 @@ public class MonitorInputHandler {
         return bestTrack;
     }
 
-    public static @Nullable MonitorContactSnapshot findCustomContact(Level level, Vec3 hit, MonitorBlockEntity controller) {
+    public static @Nullable MonitorContactSnapshot findCustomContact(Level level, BlockHitResult hit, MonitorBlockEntity controller) {
         List<MonitorRadarSnapshot> radars = controller.getRunningRadarSnapshots();
-
         if (radars.isEmpty()) {
             return null;
         }
 
-        Direction widthDirection = level
-                .getBlockState(controller.getControllerPos())
-                .getValue(MonitorBlock.FACING)
-                .getClockWise();
+        MonitorProjection.DisplayPoint hitPoint = AradMonitorGeometry.hitPoint(level, controller, hit);
+        if (hitPoint == null) {
+            return null;
+        }
 
-        Direction monitorFacing = level
-                .getBlockState(controller.getControllerPos())
-                .getValue(MonitorBlock.FACING);
+        Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
+
+        double displayXOffset = hitPoint.xOffset();
+        double displayZOffset = hitPoint.zOffset();
+
+        double normalizedX = displayXOffset * 2.0;
+        double normalizedZ = displayZOffset * 2.0;
 
         Set<ResourceLocation> visitedTypes = new HashSet<>();
 
@@ -100,7 +84,6 @@ public class MonitorInputHandler {
             }
 
             MonitorWorldHitTestHandler handler = MonitorWorldHitTestRegistry.get(typeId).orElse(null);
-
             if (handler == null) {
                 continue;
             }
@@ -110,41 +93,21 @@ public class MonitorInputHandler {
             int width = Math.max(1, extension.monitorWidth());
             int height = Math.max(1, extension.monitorHeight());
 
-            Vec3 center = Vec3.atCenterOf(controller.getControllerPos()).add(
-                    widthDirection.getStepX() * (width - 1) / 2.0,
-                    (height - 1) / 2.0,
-                    widthDirection.getStepZ() * (width - 1) / 2.0
-            );
-
-            Vec3 relative = adjustRelativeVectorForFacing(hit.subtract(center), monitorFacing);
-
-            double widthAdj = dimensionAdjustment(width);
-            double heightAdj = dimensionAdjustment(height);
-
-            double normalizedX = relative.x / widthAdj;
-            double normalizedZ = relative.z / heightAdj;
-
-            double displayXOffset = normalizedX * 0.5;
-            double displayZOffset = normalizedZ * 0.5;
-
-            MonitorWorldHitTestContext context = new MonitorWorldHitTestContext(
-                    level,
-                    controller.getControllerPos(),
-                    monitorFacing,
-                    hit,
-
-                    normalizedX,
-                    normalizedZ,
-
-                    displayXOffset,
-                    displayZOffset,
-
-                    width,
-                    height,
-
-                    radars,
-                    controller.getMonitorContacts()
-            );
+            MonitorWorldHitTestContext context =
+                    new MonitorWorldHitTestContext(
+                            level,
+                            controller.getControllerPos(),
+                            monitorFacing,
+                            hit.getLocation(),
+                            normalizedX,
+                            normalizedZ,
+                            displayXOffset,
+                            displayZOffset,
+                            width,
+                            height,
+                            radars,
+                            controller.getMonitorContacts()
+                    );
 
             MonitorContactSnapshot contact;
 
@@ -160,6 +123,7 @@ public class MonitorInputHandler {
             }
 
             Vec3 position = contact.position();
+
             if (position == null || !Double.isFinite(position.x) || !Double.isFinite(position.y) || !Double.isFinite(position.z)) {
                 continue;
             }
@@ -168,18 +132,6 @@ public class MonitorInputHandler {
         }
 
         return null;
-    }
-
-    private static double dimensionAdjustment(int dimension) {
-        if (dimension <= 1) {
-            return 0.5;
-        }
-
-        if (dimension == 2) {
-            return 0.75;
-        }
-
-        return (dimension - 1) / 2.0;
     }
 
     private static @Nullable RadarTrack findTrackByContactId(MonitorBlockEntity controller, String contactId) {
@@ -246,8 +198,8 @@ public class MonitorInputHandler {
                     hoveredAradMonitor = monitor;
                     hoveredAradSource = contact == null ? null : contact.sourceId();
                 } else {
-                    MonitorContactSnapshot customContact = findCustomContact(level, hit, monitor);
-                    RadarTrack track = customContact == null ? findTrack(level, hit, monitor) : null;
+                    MonitorContactSnapshot customContact = findCustomContact(level, result, monitor);
+                    RadarTrack track = customContact == null ? findTrack(level, result, monitor) : null;
 
                     String oldHovered = monitor.hoveredEntity;
                     String newHovered = customContact != null ? customContact.id() : track != null ? track.id() : null;
@@ -272,8 +224,10 @@ public class MonitorInputHandler {
 
     public static InteractionResult onUse(MonitorBlockEntity be, Player pPlayer, InteractionHand pHand, BlockHitResult pHit, Direction facing) {
         MonitorBlockEntity controller = be.getController();
-        if (!controller.isLinked())
+
+        if (controller == null || !controller.isLinked()) {
             return InteractionResult.FAIL;
+        }
 
         if (controller.isAradLinked()) {
             if (controller.getLevel() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
@@ -281,68 +235,46 @@ public class MonitorInputHandler {
                     ARADTargetDesignationHandler.clearFromPlayer(serverLevel, controller);
                 } else {
                     MonitorBlockEntity.RwrDisplayInfo contact = findRwrContact(serverLevel, pHit, controller);
-                    if (contact != null) {
+
+                    if (contact == null || contact.sourceId().equals(controller.getSelectedRwrSource())) {
+                        ARADTargetDesignationHandler.clearFromPlayer(serverLevel, controller);
+                    } else {
                         ARADTargetDesignationHandler.assign(serverLevel, controller, contact.sourceId());
                     }
                 }
             }
+
             return InteractionResult.SUCCESS;
         }
 
-
-        if (pPlayer.isShiftKeyDown()) {
-            be.setSelectedTargetServer(null);
-            be.notifyUpdate();
-        } else {
-            Vec3 hit = pHit.getLocation();
-            var pick = pPlayer.pick(5, 0.0F, false);
-
-            if (pick instanceof BlockHitResult pickHit) {
-                hit = pickHit.getLocation();
-            }
-
-            MonitorContactSnapshot customContact = findCustomContact(be.getLevel(), hit, controller);
-
-            if (customContact != null) {
-                if (pPlayer.level().isClientSide) {
-                    return InteractionResult.SUCCESS;
-                }
-
-                if ("create_radar".equals(customContact.sourceType())) {
-                    RadarTrack nativeTrack =
-                            findTrackByContactId(controller, customContact.id());
-
-                    if (nativeTrack != null) {
-                        controller.selectedEntity = nativeTrack.id();
-                        controller.setSelectedTargetServer(nativeTrack);
-                        controller.notifyUpdate();
-                    }
-
-                    return InteractionResult.SUCCESS;
-                }
-
-                MonitorContactSelectionHandler handler = MonitorContactSelectionRegistry.get(customContact.sourceType()).orElse(null);
-                if (handler != null) {
-                    try {
-                        if (handler.onSelect(pPlayer, controller.getControllerPos(), customContact)) {
-                            controller.notifyUpdate();
-                        }
-                    } catch (RuntimeException exception) {
-                        MonitorAddonCallbackSafety.warnOnce("worldOnSelect", handler, exception);
-                    }
-                }
-
-                return InteractionResult.SUCCESS;
-            }
-
-            RadarTrack track = findTrack(be.getLevel(), hit, controller);
-
-            if (track != null) {
-                be.selectedEntity = track.id();
-                be.setSelectedTargetServer(track);
-                be.notifyUpdate();
-            }
+        if (!pPlayer.level().isClientSide) {
+            return InteractionResult.SUCCESS;
         }
+
+        Vec3 hit = pHit.getLocation();
+        MonitorContactSnapshot customContact = findCustomContact(pPlayer.level(), pHit, controller);
+        if (customContact != null) {
+            String id = customContact.id();
+
+            if (id.equals(controller.selectedEntity)) {
+                MonitorSelectionPacket.send(controller.getControllerPos(), null);
+            } else if ("create_radar".equals(customContact.sourceType())) {
+                MonitorSelectionPacket.send(controller.getControllerPos(), id);
+            } else {
+                MonitorSelectionPacket.send(controller.getControllerPos(), id, customContact.sourceType());
+            }
+
+            return InteractionResult.SUCCESS;
+        }
+
+        RadarTrack track = findTrack(pPlayer.level(), pHit, controller);
+
+        if (track == null || track.id().equals(controller.selectedEntity)) {
+            MonitorSelectionPacket.send(controller.getControllerPos(), null);
+        } else {
+            MonitorSelectionPacket.send(controller.getControllerPos(), track.id());
+        }
+
         return InteractionResult.SUCCESS;
     }
 }

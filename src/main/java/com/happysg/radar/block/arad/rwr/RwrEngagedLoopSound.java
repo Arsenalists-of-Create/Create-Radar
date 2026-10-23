@@ -1,5 +1,6 @@
 package com.happysg.radar.block.arad.rwr;
 
+import com.happysg.radar.client.RadarSoundVolume;
 import com.happysg.radar.registry.ModSounds;
 import net.minecraft.client.resources.sounds.AbstractTickableSoundInstance;
 import net.minecraft.core.BlockPos;
@@ -38,6 +39,10 @@ public class RwrEngagedLoopSound extends AbstractTickableSoundInstance {
     }
 
     @Override
-    public void tick() {
+    public void tick() {}
+
+    @Override
+    public float getVolume() {
+        return super.getVolume() * RadarSoundVolume.multiplier(getLocation());
     }
 }

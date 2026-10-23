@@ -10,13 +10,12 @@ import java.util.Objects;
 public final class SubLevelSilhouette {
 
     private static final double EPSILON = 1.0e-8;
-
+    private static final Comparator<Vec2> POINT_ORDER = Comparator.comparingDouble(Vec2::x).thenComparingDouble(Vec2::z);
     private final List<LocalBox> localBoxes;
 
     private SubLevelSilhouette(final List<LocalBox> localBoxes) {
         this.localBoxes = List.copyOf(localBoxes);
     }
-
     public static Builder builder() {
         return new Builder();
     }
@@ -95,7 +94,7 @@ public final class SubLevelSilhouette {
                 for (int zBit = 0; zBit < 2; zBit++) {
                     final double z = zBit == 0 ? box.minZ : box.maxZ;
                     projector.transform(x, y, z, transformed);
-                    addUnique(points, new Vec2(transformed.x, transformed.z));
+                    addUnique(points, transformed.x, transformed.z);
                 }
             }
         }
@@ -103,46 +102,56 @@ public final class SubLevelSilhouette {
         return new Polygon(convexHull(points));
     }
 
-    private static void addUnique(final List<Vec2> points, final Vec2 candidate) {
+    private static void addUnique(final List<Vec2> points, final double x, final double z) {
         for (final Vec2 existing : points) {
-            final double dx = existing.x - candidate.x;
-            final double dz = existing.z - candidate.z;
+            final double dx = existing.x - x;
+            final double dz = existing.z - z;
+
             if (dx * dx + dz * dz <= EPSILON * EPSILON) {
                 return;
             }
         }
-        points.add(candidate);
+
+        points.add(new Vec2(x, z));
     }
 
     /** Monotone-chain hull. Result is counter-clockwise without a repeated first point. */
     private static List<Vec2> convexHull(final List<Vec2> input) {
-        if (input.size() <= 2) {
+        final int count = input.size();
+
+        if (count <= 2) {
             return List.copyOf(input);
         }
 
-        final ArrayList<Vec2> sorted = new ArrayList<>(input);
-        sorted.sort(Comparator.comparingDouble(Vec2::x).thenComparingDouble(Vec2::z));
+        input.sort(POINT_ORDER);
+        final ArrayList<Vec2> lower = new ArrayList<>(count);
 
-        final ArrayList<Vec2> lower = new ArrayList<>();
-        for (final Vec2 point : sorted) {
+        for (int i = 0; i < count; i++) {
+            final Vec2 point = input.get(i);
+
             while (lower.size() >= 2 && cross(lower.get(lower.size() - 2), lower.get(lower.size() - 1), point) <= EPSILON) {
                 lower.remove(lower.size() - 1);
             }
+
             lower.add(point);
         }
 
-        final ArrayList<Vec2> upper = new ArrayList<>();
-        for (int index = sorted.size() - 1; index >= 0; index--) {
-            final Vec2 point = sorted.get(index);
+        final ArrayList<Vec2> upper = new ArrayList<>(count);
+
+        for (int i = count - 1; i >= 0; i--) {
+            final Vec2 point = input.get(i);
+
             while (upper.size() >= 2 && cross(upper.get(upper.size() - 2), upper.get(upper.size() - 1), point) <= EPSILON) {
                 upper.remove(upper.size() - 1);
             }
+
             upper.add(point);
         }
 
         lower.remove(lower.size() - 1);
         upper.remove(upper.size() - 1);
         lower.addAll(upper);
+
         return lower;
     }
 
@@ -160,10 +169,14 @@ public final class SubLevelSilhouette {
             final double cellMinZ = grid.originZ + z * grid.cellSize;
             final double cellMaxZ = cellMinZ + grid.cellSize;
             for (int x = startX; x <= endX; x++) {
+                final int cellIndex = grid.index(x, z);
+                if (occupied.get(cellIndex)) continue;
+
                 final double cellMinX = grid.originX + x * grid.cellSize;
                 final double cellMaxX = cellMinX + grid.cellSize;
+
                 if (polygonIntersectsCell(polygon, cellMinX, cellMinZ, cellMaxX, cellMaxZ)) {
-                    occupied.set(grid.index(x, z));
+                    occupied.set(cellIndex);
                 }
             }
         }
@@ -173,32 +186,41 @@ public final class SubLevelSilhouette {
      * Conservative polygon/cell overlap. The conservative behavior prevents thin angled pieces
      * from disappearing merely because no cell center lands inside their projected polygon.
      */
-    private static boolean polygonIntersectsCell(final Polygon polygon, final double minX, final double minZ,
-                                                  final double maxX, final double maxZ) {
+    private static boolean polygonIntersectsCell(
+            final Polygon polygon,
+            final double minX, final double minZ,
+            final double maxX, final double maxZ) {
+
+        if (maxX < polygon.minX - EPSILON || minX > polygon.maxX + EPSILON || maxZ < polygon.minZ - EPSILON || minZ > polygon.maxZ + EPSILON) {
+            return false;
+        }
+
+        // Check whether a polygon vertex is inside the cell.
         for (final Vec2 point : polygon.points) {
-            if (point.x >= minX - EPSILON && point.x <= maxX + EPSILON
-                && point.z >= minZ - EPSILON && point.z <= maxZ + EPSILON) {
+            if (point.x >= minX - EPSILON && point.x <= maxX + EPSILON && point.z >= minZ - EPSILON && point.z <= maxZ + EPSILON) {
                 return true;
             }
         }
 
-        final Vec2 bottomLeft = new Vec2(minX, minZ);
-        final Vec2 bottomRight = new Vec2(maxX, minZ);
-        final Vec2 topRight = new Vec2(maxX, maxZ);
-        final Vec2 topLeft = new Vec2(minX, maxZ);
-
-        if (polygon.contains(bottomLeft) || polygon.contains(bottomRight)
-            || polygon.contains(topRight) || polygon.contains(topLeft)) {
+        // Check whether a cell corner is inside the polygon.
+        if (polygon.contains(minX, minZ)
+                || polygon.contains(maxX, minZ)
+                || polygon.contains(maxX, maxZ)
+                || polygon.contains(minX, maxZ)) {
             return true;
         }
 
-        for (int index = 0; index < polygon.points.size(); index++) {
+        // Check polygon edges against the four cell edges.
+        final int count = polygon.points.size();
+
+        for (int index = 0; index < count; index++) {
             final Vec2 a = polygon.points.get(index);
-            final Vec2 b = polygon.points.get((index + 1) % polygon.points.size());
-            if (segmentsIntersect(a, b, bottomLeft, bottomRight)
-                || segmentsIntersect(a, b, bottomRight, topRight)
-                || segmentsIntersect(a, b, topRight, topLeft)
-                || segmentsIntersect(a, b, topLeft, bottomLeft)) {
+            final Vec2 b = polygon.points.get((index + 1) % count);
+
+            if (segmentsIntersect(a, b, minX, minZ, maxX, minZ)
+                    || segmentsIntersect(a, b, maxX, minZ, maxX, maxZ)
+                    || segmentsIntersect(a, b, maxX, maxZ, minX, maxZ)
+                    || segmentsIntersect(a, b, minX, maxZ, minX, minZ)) {
                 return true;
             }
         }
@@ -206,26 +228,42 @@ public final class SubLevelSilhouette {
         return false;
     }
 
-    private static boolean segmentsIntersect(final Vec2 a, final Vec2 b, final Vec2 c, final Vec2 d) {
-        final double abC = cross(a, b, c);
-        final double abD = cross(a, b, d);
-        final double cdA = cross(c, d, a);
-        final double cdB = cross(c, d, b);
+    private static boolean segmentsIntersect(
+            final Vec2 a, final Vec2 b,
+            final double cx, final double cz,
+            final double dx, final double dz) {
+
+        final double abC = cross(a.x, a.z, b.x, b.z, cx, cz);
+        final double abD = cross(a.x, a.z, b.x, b.z, dx, dz);
+        final double cdA = cross(cx, cz, dx, dz, a.x, a.z);
+        final double cdB = cross(cx, cz, dx, dz, b.x, b.z);
 
         if (((abC > EPSILON && abD < -EPSILON) || (abC < -EPSILON && abD > EPSILON))
-            && ((cdA > EPSILON && cdB < -EPSILON) || (cdA < -EPSILON && cdB > EPSILON))) {
+                && ((cdA > EPSILON && cdB < -EPSILON) || (cdA < -EPSILON && cdB > EPSILON))) {
             return true;
         }
 
-        return Math.abs(abC) <= EPSILON && pointOnSegment(c, a, b)
-            || Math.abs(abD) <= EPSILON && pointOnSegment(d, a, b)
-            || Math.abs(cdA) <= EPSILON && pointOnSegment(a, c, d)
-            || Math.abs(cdB) <= EPSILON && pointOnSegment(b, c, d);
+        return Math.abs(abC) <= EPSILON
+                && pointOnSegment(cx, cz, a.x, a.z, b.x, b.z) || Math.abs(abD) <= EPSILON
+                && pointOnSegment(dx, dz, a.x, a.z, b.x, b.z) || Math.abs(cdA) <= EPSILON
+                && pointOnSegment(a.x, a.z, cx, cz, dx, dz) || Math.abs(cdB) <= EPSILON
+                && pointOnSegment(b.x, b.z, cx, cz, dx, dz);
     }
 
-    private static boolean pointOnSegment(final Vec2 point, final Vec2 a, final Vec2 b) {
-        return point.x >= Math.min(a.x, b.x) - EPSILON && point.x <= Math.max(a.x, b.x) + EPSILON
-            && point.z >= Math.min(a.z, b.z) - EPSILON && point.z <= Math.max(a.z, b.z) + EPSILON;
+    private static double cross(
+            final double ax, final double az,
+            final double bx, final double bz,
+            final double px, final double pz) {
+
+        return (bx - ax) * (pz - az) - (bz - az) * (px - ax);
+    }
+
+    private static boolean pointOnSegment(
+            final double px, final double pz,
+            final double ax, final double az,
+            final double bx, final double bz) {
+
+        return px >= Math.min(ax, bx) - EPSILON && px <= Math.max(ax, bx) + EPSILON && pz >= Math.min(az, bz) - EPSILON && pz <= Math.max(az, bz) + EPSILON;
     }
 
     private static List<LineSegment> extractBoundary(final GridSpec grid, final BitSet occupied, final int maxSegments) {
@@ -471,7 +509,7 @@ public final class SubLevelSilhouette {
             return areaTwice * areaTwice;
         }
 
-        private boolean contains(final Vec2 point) {
+        private boolean contains(final double x, final double z) {
             if (this.points.size() < 3) {
                 return false;
             }
@@ -479,10 +517,12 @@ public final class SubLevelSilhouette {
             for (int index = 0; index < this.points.size(); index++) {
                 final Vec2 a = this.points.get(index);
                 final Vec2 b = this.points.get((index + 1) % this.points.size());
-                if (cross(a, b, point) < -EPSILON) {
+
+                if (cross(a.x, a.z, b.x, b.z, x, z) < -EPSILON) {
                     return false;
                 }
             }
+
             return true;
         }
     }

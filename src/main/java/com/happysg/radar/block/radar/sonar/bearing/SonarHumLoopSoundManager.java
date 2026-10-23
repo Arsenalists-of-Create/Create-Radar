@@ -2,6 +2,7 @@
 package com.happysg.radar.block.radar.sonar.bearing;
 
 import com.happysg.radar.api.physics.RadarPhysics;
+import com.happysg.radar.client.RadarSoundVolume;
 import com.happysg.radar.registry.ModSounds;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.sounds.AbstractTickableSoundInstance;
@@ -104,6 +105,11 @@ public final class SonarHumLoopSoundManager {
 
         private void stopLoop() {
             stop();
+        }
+
+        @Override
+        public float getVolume() {
+            return super.getVolume() * RadarSoundVolume.multiplier(getLocation());
         }
     }
 }
