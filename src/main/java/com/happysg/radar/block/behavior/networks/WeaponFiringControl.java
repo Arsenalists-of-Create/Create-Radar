@@ -1777,10 +1777,10 @@ public class WeaponFiringControl {
                                             }
                                         }
 
-                                    if (best > (double)0.0F) {
-                                        this.maxSimDistanceBlocks = best;
+                                        if (best > (double)0.0F) {
+                                            this.maxSimDistanceBlocks = best;
+                                        }
                                     }
-                                }
 
                                     int trackingLeadTicks = this.targetTrackingLeadTicks(motion.motionClass());
                                     Vec3 trackingSolvePos = predictTarget(solvePos, targetVel, targetAccel, (double)trackingLeadTicks, motion.motionClass(), (double)-0.08F);
@@ -3049,7 +3049,7 @@ public class WeaponFiringControl {
                     && Objects.equals(targetMotionId, pending.targetId());
             boolean keepPending = pending != null
                     && shouldKeepPendingSolve(
-                            age, samePendingTarget, !differentShot);
+                    age, samePendingTarget, !differentShot);
             if (keepPending) {
                 return;
             }
@@ -4619,15 +4619,15 @@ public class WeaponFiringControl {
 
                         boolean stationaryRevalidationCandidate =
                                 age > ASYNC_TARGETING_FIRE_FRESH_TICKS
-                                && age <= ASYNC_TARGETING_TASK_TIMEOUT_TICKS
-                                && targetMotionClass == TargetMotionClass.STEADY
-                                && targetVelocity != null
-                                && targetAcceleration != null
-                                && targetVelocity.lengthSqr() <= 1.0E-6
-                                && targetAcceleration.lengthSqr() <= 1.0E-6
-                                && solvePos.distanceToSqr(cached.solvePos()) <= 0.01
-                                && geometry.steeringOrigin().distanceToSqr(
-                                cached.snapshot().steeringOrigin()) <= 0.01;
+                                        && age <= ASYNC_TARGETING_TASK_TIMEOUT_TICKS
+                                        && targetMotionClass == TargetMotionClass.STEADY
+                                        && targetVelocity != null
+                                        && targetAcceleration != null
+                                        && targetVelocity.lengthSqr() <= 1.0E-6
+                                        && targetAcceleration.lengthSqr() <= 1.0E-6
+                                        && solvePos.distanceToSqr(cached.solvePos()) <= 0.01
+                                        && geometry.steeringOrigin().distanceToSqr(
+                                        cached.snapshot().steeringOrigin()) <= 0.01;
 
                         side.aimValid = !evaluation.yawConstrained() && (recentSolution || stationaryRevalidationCandidate);
                     }
@@ -6847,7 +6847,7 @@ public class WeaponFiringControl {
     }
 
     private boolean rayReachesTargetSublevel(Vec3 start, Vec3 end,
-                                              UUID targetId) {
+                                             UUID targetId) {
         for (SafeZone zone : this.safeZones) {
             if (zone != null && zone.intersects(this.level, start, end)) {
                 return false;
@@ -6994,7 +6994,7 @@ public class WeaponFiringControl {
             if (yawLimitFrame != null) {
                 Vec3 boundaryDirection = yawLimitFrame.worldDirection(
                         appliedYaw, yawLimitFrame.controllerTargetDegrees(
-                        CannonAxis.PITCH, worldAimDirection));
+                                CannonAxis.PITCH, worldAimDirection));
                 appliedYaw = wrap360(pitchConstraint.mountYawPitch(
                         boundaryDirection).yawDeg() + 270.0);
             }

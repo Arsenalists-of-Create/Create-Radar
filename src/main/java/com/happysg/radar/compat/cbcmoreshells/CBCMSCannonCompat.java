@@ -182,9 +182,7 @@ public final class CBCMSCannonCompat {
         int lifetime = entry.launchProfile().resolveLifetimeTicks(launch.baseLifetime(), addedLifetime, cannon.commandLifetimeModifier, equipmentLifetime);
 
         BallisticPropertiesComponent ballistics = new BallisticPropertiesComponent(gravity, drag, quadraticDrag, 0, 0, 0, 0);
-        DimensionMunitionProperties dimension = DimensionMunitionPropertiesHandler.getProperties(level);
-
-        ProjectileModel model = ProjectileModel.cbc(speed, gravity * dimension.gravityMultiplier(), drag, dimension.dragMultiplier(), quadraticDrag);
+        ProjectileModel model = new CBCMSDualCannonProjectileModel(speed, gravity, drag, quadraticDrag, lifetime);
 
         String ammunitionId = String.valueOf(BuiltInRegistries.BLOCK.getKey(assembly.pieces().getFirst().state().getBlock()));
         StringBuilder fingerprintData = new StringBuilder().append(ammunitionId).append('|').append(model).append('|').append(ballistics).append('|').append(lifetime);
@@ -202,7 +200,7 @@ public final class CBCMSCannonCompat {
                 MuzzlePolicy.OUTSIDE_CENTER_BACKOFF_TWO,
                 ammunitionId,
                 digest(fingerprintData.toString()),
-                true,
+                false,
                 "dual_centerline_shaolib"
         );
     }
