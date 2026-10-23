@@ -1,6 +1,9 @@
 package com.happysg.radar.block.behavior.networks;
 
 import com.happysg.radar.api.controller.RadarAimController;
+import com.happysg.radar.api.datalink.RadarDataLinkEndpointType;
+import com.happysg.radar.api.datalink.RadarDataLinkLifecycle;
+import com.happysg.radar.api.network.RadarContactNetworkEndpoint;
 import com.happysg.radar.api.network.RadarNetworkControllerMovedEvent;
 import com.happysg.radar.api.network.RadarNetworkLifecycleEvent;
 import com.happysg.radar.api.radar.NetworkRadarSource;
@@ -12,10 +15,6 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
-import com.happysg.radar.block.radar.bearing.RadarBearingBlock;
-import com.happysg.radar.block.radar.plane.StationaryRadarBlock;
-import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
-import com.happysg.radar.block.radar.sonar.bearing.SonarBearingBlock;
 import com.happysg.radar.registry.ModBlocks;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
@@ -920,6 +919,29 @@ public class NetworkData extends SavedData {
             return new ContactEndpoint(ContactKind.RADAR, radarPos, null);
         }
 
+        if (be instanceof RadarContactNetworkEndpoint apiEndpoint) {
+            RadarDataLinkEndpointType type = apiEndpoint.getContactNetworkEndpointType();
+
+            if (type == null) {
+                return null;
+            }
+
+            return switch (type) {
+                case RADAR -> new ContactEndpoint(ContactKind.RADAR, pos.immutable(), null);
+                case MONITOR -> new ContactEndpoint(ContactKind.MONITOR, pos.immutable(), null);
+                case WEAPON_CONTROLLER -> {
+                    BlockPos mountPos = apiEndpoint.getContactWeaponMountPos();
+                    if (mountPos == null || !level.hasChunkAt(mountPos) || level.getBlockEntity(mountPos) == null) {
+                        yield null;
+                    }
+
+                    yield new ContactEndpoint(ContactKind.WEAPON, pos.immutable(), mountPos.immutable());
+                }
+
+                case CUSTOM -> null;
+            };
+        }
+
         return null;
     }
 
@@ -1633,6 +1655,10 @@ public class NetworkData extends SavedData {
         if (endpointKey != null && group != null && level != null) {
             BlockPos endpointPos = posFromKey(endpointKey);
 
+            BlockEntity lifecycleBe = level.hasChunkAt(endpointPos) ? level.getBlockEntity(endpointPos) : null;
+            RadarDataLinkLifecycle lifecycle = lifecycleBe instanceof RadarDataLinkLifecycle callback ? callback : null;
+            boolean lifecycleWasAttached = group.monitorEndpoints.contains(endpointPos) || group.radarEndpoints.contains(endpointPos) || group.weaponEndpoints.contains(endpointPos);
+
             BlockPos normalizedEndpoint = endpointPos;
             BlockEntity endpointBe = level.getBlockEntity(endpointPos);
             if (endpointBe instanceof MonitorBlockEntity endpointMonitor) {
@@ -1672,18 +1698,24 @@ public class NetworkData extends SavedData {
 
                 // If you use controllerToWeaponMount, free it deterministically
                 String mountKey = controllerToWeaponMount.remove(endpointKey);
-                if (mountKey != null
-                        && !groupReferencesMount(group, dim, mountKey)) {
+                if (mountKey != null && !groupReferencesMount(group, dim, mountKey)) {
                     BlockPos mp = posFromKey(mountKey);
                     group.usedWeaponMounts.remove(mp);
                     weaponMountToFilterer.remove(mountKey);
+                }
+            }
+
+            if (lifecycle != null && lifecycleWasAttached) {
+                try {
+                    lifecycle.onRadarDataLinkDetached(level, group.key.filtererPos().immutable(), dataLinkPos.immutable());
+                } catch (RuntimeException exception) {
+                    com.mojang.logging.LogUtils.getLogger().warn("Addon Data Link detachment callback failed at {}", endpointPos, exception);
                 }
             }
         }
 
         // autodelete empty group
         cleanupIfEmpty(filtererKey);
-
         setDirty();
     }
 

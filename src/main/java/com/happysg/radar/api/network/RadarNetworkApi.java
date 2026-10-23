@@ -210,4 +210,37 @@ public final class RadarNetworkApi {
 
         return NetworkData.get(level).updateMonitorPosition(level.dimension(), oldPos, newPos);
     }
+
+    /**
+     * Resolves the weapon mount associated with a controller.
+     */
+    public static Optional<BlockPos> getWeaponMountForController(ServerLevel level, BlockPos controllerPos) {
+        if (level == null || controllerPos == null) {
+            return Optional.empty();
+        }
+
+        return Optional.ofNullable(NetworkData.get(level).getWeaponMountForController(level.dimension(), controllerPos));
+    }
+
+    /**
+     * Returns the network controller that owns a weapon mount.
+     */
+    public static Optional<BlockPos> getNetworkControllerForWeaponMount(ServerLevel level, BlockPos mountPos) {
+        if (level == null || mountPos == null) {
+            return Optional.empty();
+        }
+
+        return Optional.ofNullable(NetworkData.get(level).getFiltererForWeaponMount(level.dimension(), mountPos));
+    }
+
+    /**
+     * Returns the network controller that owns a Data Link block.
+     */
+    public static Optional<BlockPos> getNetworkControllerForDataLink(ServerLevel level, BlockPos dataLinkPos) {
+        if (level == null || dataLinkPos == null) {
+            return Optional.empty();
+        }
+
+        return Optional.ofNullable(NetworkData.get(level).getFiltererForDataLink(level.dimension(), dataLinkPos));
+    }
 }

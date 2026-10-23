@@ -530,6 +530,15 @@ public class DataLinkBlockItem extends BlockItem {
             return InteractionResult.SUCCESS;
         }
 
+        BlockEntity endpointBe = serverLevel.hasChunkAt(endpointPos) ? serverLevel.getBlockEntity(endpointPos) : null;
+        if (endpointBe instanceof RadarDataLinkLifecycle lifecycle) {
+            try {
+                lifecycle.onRadarDataLinkAttached(serverLevel, filtererPos.immutable(), placedPos.immutable());
+            } catch (RuntimeException exception) {
+                com.mojang.logging.LogUtils.getLogger().warn("Addon Data Link attachment callback failed at {}", endpointPos, exception);
+            }
+        }
+
         sendSuccess(use.player());
         clearLinkTag(use.stack());
 

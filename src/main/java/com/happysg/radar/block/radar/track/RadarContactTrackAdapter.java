@@ -2,6 +2,7 @@ package com.happysg.radar.block.radar.track;
 
 import com.happysg.radar.api.tracking.RadarContact;
 import com.happysg.radar.api.tracking.RadarContactCategory;
+import com.happysg.radar.api.tracking.RadarContactMetadata;
 import com.happysg.radar.api.jamming.DirectionalJammingApi;
 import net.minecraft.world.phys.Vec3;
 
@@ -32,16 +33,33 @@ public final class RadarContactTrackAdapter {
         }
 
         DirectionalJammingApi.ReportedContact reported = contact instanceof DirectionalJammingApi.ReportedContact value ? value : null;
+        RadarContactMetadata metadata = reported == null && contact instanceof RadarContactMetadata value ? value : null;
+
+        long scannedTime = reported != null ? reported.scannedTime() : metadata != null && metadata.getRadarScannedTime() >= 0L ? metadata.getRadarScannedTime() : gameTime;
+        String entityType = reported != null ? reported.entityType() : metadata != null ? metadata.getRadarEntityType() : null;
+        if (entityType == null || entityType.isBlank()) {
+            entityType = "create_radar:external_contact";
+        }
+
+        float entityHeight = reported != null ? reported.entityHeight() : metadata != null ? metadata.getRadarEntityHeight() : 1.0F;
+        if (!Float.isFinite(entityHeight) || entityHeight < 0.0F) {
+            entityHeight = 1.0F;
+        }
 
         RadarTrack track = new RadarTrack(
                 id,
                 contact.getPosition(),
                 contact.getVelocity(),
-                reported == null ? gameTime : reported.scannedTime(),
+                scannedTime,
                 toInternalCategory(contact.getCategory()),
-                reported == null || reported.entityType() == null ? "create_radar:external_contact" : reported.entityType(),
-                reported == null ? 1.0F : reported.entityHeight()
+                entityType,
+                entityHeight
         );
+
+        if (metadata != null) {
+            track.setFriendly(metadata.isRadarFriendly());
+            track.setSynthetic(metadata.isRadarSynthetic());
+        }
 
         if (reported != null) {
             track.setFriendly(reported.friendly());

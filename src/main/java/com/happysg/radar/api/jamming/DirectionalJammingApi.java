@@ -7,6 +7,7 @@ import com.happysg.radar.block.radar.track.RadarContactTrackAdapter;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.BlockPos;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -16,8 +17,7 @@ import java.util.UUID;
 
 /**
  * Public integration for directional radar jamming.
- * Callers provide ordinary public {@link RadarContact}s. Create: Radars
- * performs all native track conversion and jamming internally.
+ * Callers provide ordinary public {@link RadarContact}s.
  */
 public final class DirectionalJammingApi {
     private DirectionalJammingApi() {}
@@ -29,7 +29,7 @@ public final class DirectionalJammingApi {
             Vec3 forward,
             double range,
             float halfAngleDegrees
-    ) { }
+    ) {}
 
     /**
      * Public description of jamming state attached to a reported contact.
@@ -57,7 +57,6 @@ public final class DirectionalJammingApi {
 
     /**
      * Public contact returned by the directional-jamming system.
-     * The position and velocity represent the contact as actually observed by the emitter
      */
     public record ReportedContact(
             String id,
@@ -107,11 +106,8 @@ public final class DirectionalJammingApi {
     ) { }
 
     /**
-     * Applies Create: Radars directional-jamming effects to an external radar
+     * Applies directional-jamming effects to an external radar
      * emitter's canonical contacts.
-     * The supplied contacts should represent the emitter's clean/raw
-     * observations. Returned contacts may contain corrupted positions,
-     * velocities, dropouts, or synthetic contacts.
      */
     public static Collection<RadarContact> reportedTracks(ServerLevel level, EmitterContext emitter, Collection<? extends RadarContact> rawContacts) {
         if (rawContacts == null) {
@@ -198,6 +194,51 @@ public final class DirectionalJammingApi {
                 synthetic,
                 jamming == null ? 0L : jamming.sampleToken()
         );
+    }
+
+
+    /**
+     * Registers or refreshes an external jammer contribution.
+     *
+     * @param level server level containing the jammer
+     * @param jammerPos canonical jammer block position
+     * @param targetSourceId target radar's source ID
+     * @param jammerWorldPosition jammer position in world space
+     * @param targetRadarWorldPosition target radar in world space
+     * @param jammerRpm current jammer RPM
+     * @param radarRollingRpm target radar rolling RPM
+     * @param radarRollingRate target radar rolling RPM rate
+     * @param alignmentDegrees angular alignment error in degrees
+     */
+    public static void heartbeatJammer(
+            ServerLevel level,
+            BlockPos jammerPos,
+            String targetSourceId,
+            Vec3 jammerWorldPosition,
+            Vec3 targetRadarWorldPosition,
+            float jammerRpm,
+            float radarRollingRpm,
+            float radarRollingRate,
+            float alignmentDegrees
+    ) {
+        DirectionalJammingService.heartbeat(
+                level,
+                jammerPos,
+                targetSourceId,
+                jammerWorldPosition,
+                targetRadarWorldPosition,
+                jammerRpm,
+                radarRollingRpm,
+                radarRollingRate,
+                alignmentDegrees
+        );
+    }
+
+    /**
+     * Immediately removes an external jammer contribution.
+     */
+    public static void removeJammer(ServerLevel level, BlockPos jammerPos) {
+        DirectionalJammingService.remove(level, jammerPos);
     }
 
     private static ReportedContact toPublic(RadarTrack track) {
