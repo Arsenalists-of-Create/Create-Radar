@@ -608,36 +608,6 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
                     selectedAlpha = spriteAlpha;
                 }
             }
-
-            renderSableSilhouette(
-                    track,
-                    monitor,
-                    projection,
-                    ms,
-                    bufferSource,
-                    depth - 0.0003f,
-                    alpha,
-                    partialTicks
-            );
-
-            String slug = getSlugForTrack(track, monitor);
-            if (slug != null) {
-
-                float xCenter = (quad.minX() + quad.maxX()) * 0.5f;
-                float zCenter = (quad.minZ() + quad.maxZ()) * 0.5f;
-                float zBelow = zCenter + LABEL_Z_OFFSET;
-                zBelow = Mth.clamp(zBelow, (1f - size) + 0.04f, 1f - 0.04f);
-
-                renderTrackLabel(
-                        ms,
-                        bufferSource,
-                        slug,
-                        xCenter,
-                        zBelow,
-                        depth,
-                        alpha
-                );
-            }
         }
 
         if (buffer != null && monitor.getLevel() instanceof ClientLevel clientLevel) {
@@ -690,6 +660,47 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
                         DEPTH_TRACK_BASE - 0.0002f,
                         selectedQuad,
                         MonitorSprite.TARGET_SELECTED
+                );
+            }
+
+
+        }
+
+        for (RadarTrack track : monitor.getTracks()) {
+            MonitorProjection.DisplayPoint point = projection.project(track.position());
+            if (point.outside()) continue;
+            MonitorProjection.Quad quad = MonitorProjection.fullSizeQuad(point, size);
+
+            float depth = DEPTH_TRACK_BASE;
+            float age = gameTime - track.scannedTime();
+            float alpha = 1.0f - age / 100.0f;
+
+            renderSableSilhouette(
+                    track,
+                    monitor,
+                    projection,
+                    ms,
+                    bufferSource,
+                    depth - 0.0003f,
+                    alpha,
+                    partialTicks
+            );
+
+            String slug = getSlugForTrack(track, monitor);
+            if (slug != null) {
+                float xCenter = (quad.minX() + quad.maxX()) * 0.5f;
+                float zCenter = (quad.minZ() + quad.maxZ()) * 0.5f;
+                float zBelow = zCenter + LABEL_Z_OFFSET;
+                zBelow = Mth.clamp(zBelow, (1f - size) + 0.04f, 1f - 0.04f);
+
+                renderTrackLabel(
+                        ms,
+                        bufferSource,
+                        slug,
+                        xCenter,
+                        zBelow,
+                        depth,
+                        alpha
                 );
             }
         }
