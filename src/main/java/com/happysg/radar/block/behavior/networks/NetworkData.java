@@ -806,14 +806,19 @@ public class NetworkData extends SavedData {
         while (!queue.isEmpty()) {
             BlockPos current = queue.removeFirst();
 
+            boolean fromMonitor = level.hasChunkAt(current) && level.getBlockEntity(current) instanceof MonitorBlockEntity;
             for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
                 BlockPos next = current.relative(dir);
+
+                if (fromMonitor && level.hasChunkAt(next) && level.getBlockEntity(next) instanceof MonitorBlockEntity neighbor && !current.equals(neighbor.getControllerPos())) {
+                    continue;
+                }
+
                 if (!visited.add(next)) continue;
 
                 ContactEndpoint contact = classifyContactEndpoint(level, next);
                 if (contact == null) continue;
-                if (contact.kind() == ContactKind.MONITOR
-                        && ARADData.get(level).isMonitorDatalinked(group.key.dim(), contact.endpointPos())) {
+                if (contact.kind() == ContactKind.MONITOR && ARADData.get(level).getEndpointOrigin(group.key.dim(), contact.endpointPos()) != null) {
                     continue;
                 }
 
@@ -886,7 +891,7 @@ public class NetworkData extends SavedData {
         if (be instanceof MonitorBlockEntity monitor) {
             BlockPos controllerPos = monitor.getControllerPos();
 
-            if (monitor.getSize() == 1 && getEndpointOrigin(level.dimension(), controllerPos) != LinkOrigin.DATALINK) {
+            if (monitor.getSize() == 1 && getEndpointOrigin(level.dimension(), controllerPos) == null) {
                 return null;
             }
 

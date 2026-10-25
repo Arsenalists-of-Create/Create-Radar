@@ -206,19 +206,27 @@ public class ARADData extends SavedData {
         NetworkData radarData = NetworkData.get(level);
         while (!queue.isEmpty()) {
             BlockPos current = queue.removeFirst();
+            boolean fromMonitor = level.hasChunkAt(current) && level.getBlockEntity(current) instanceof MonitorBlockEntity;
             for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
                 BlockPos next = current.relative(dir);
+
+                if (fromMonitor && level.hasChunkAt(next) && level.getBlockEntity(next) instanceof MonitorBlockEntity neighbor && !current.equals(neighbor.getControllerPos())) {
+                    continue;
+                }
+
                 if (!visited.add(next)) continue;
 
                 if (!level.hasChunkAt(next)) continue;
                 BlockPos monitorPos = normalizeMonitor(level, next);
                 if (monitorPos == null) continue;
 
-                if (level.getBlockEntity(next) instanceof MonitorBlockEntity monitor && monitor.getSize() == 1 && !isMonitorDatalinked(group.key.dim(), monitorPos)) {
+                if (level.getBlockEntity(next) instanceof MonitorBlockEntity monitor && monitor.getSize() == 1 && getEndpointOrigin(group.key.dim(), monitorPos) == null) {
                     continue;
                 }
 
-                if (radarData.getEndpointOrigin(group.key.dim(), monitorPos) == NetworkData.LinkOrigin.DATALINK) continue;
+                if (radarData.getEndpointOrigin(group.key.dim(), monitorPos) != null) {
+                    continue;
+                }
 
                 if (reachable.add(monitorPos)) {
                     queue.add(monitorPos);

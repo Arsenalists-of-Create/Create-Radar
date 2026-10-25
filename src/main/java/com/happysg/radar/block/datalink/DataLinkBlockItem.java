@@ -44,6 +44,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -86,6 +88,50 @@ public class DataLinkBlockItem extends BlockItem {
 
     public DataLinkBlockItem(Block pBlock, Properties pProperties) {
         super(pBlock, pProperties);
+    }
+
+    private static boolean monitorAlreadyHasConnection(ServerLevel level, MonitorBlockEntity monitor) {
+        BlockPos controllerPos = monitor.getControllerPos();
+        var dim = level.dimension();
+
+        if (NetworkData.get(level).getEndpointOrigin(dim, controllerPos) != null || ARADData.get(level).getEndpointOrigin(dim, controllerPos) != null) {
+            return true;
+        }
+
+        if (!level.hasChunkAt(controllerPos)
+                || !(level.getBlockEntity(controllerPos) instanceof MonitorBlockEntity)) {
+            return true;
+        }
+
+        int size = monitor.getSize();
+        Direction right = level.getBlockState(controllerPos).getValue(HorizontalDirectionalBlock.FACING).getClockWise();
+
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                BlockPos pos = controllerPos.above(i).relative(right, j);
+
+                if (!(level.getBlockEntity(pos) instanceof MonitorBlockEntity part) || !controllerPos.equals(part.getControllerPos())) {
+                    continue;
+                }
+
+                for (Direction direction : Direction.values()) {
+                    BlockPos adjacent = pos.relative(direction);
+                    if (!level.hasChunkAt(adjacent)) continue;
+                    var adjacentEntity = level.getBlockEntity(adjacent);
+                    if (adjacentEntity instanceof NetworkFiltererBlockEntity || adjacentEntity instanceof RadarWarningReceiverBlockEntity) {
+                        return true;
+                    }
+
+                    if (adjacentEntity instanceof DataLinkBlockEntity link
+                            && pos.equals(link.getSourcePosition())
+                            && link.getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.RADAR) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     @SubscribeEvent
@@ -358,6 +404,12 @@ public class DataLinkBlockItem extends BlockItem {
             if (endpointPos == null) endpointPos = use.clickedPos();
         } else {
             endpointPos = use.clickedPos();
+        }
+
+        if (monitor != null && monitorAlreadyHasConnection(serverLevel, monitor)) {
+            sendError(use.player(), DATA_LINK_ARAD_MONITOR_CONFLICT);
+            clearLinkTag(use.stack());
+            return InteractionResult.FAIL;
         }
 
         BlockPos placedPos = getPlacementPos(use);
@@ -799,6 +851,11 @@ public class DataLinkBlockItem extends BlockItem {
 
         private static FilterCommit validateMonitor(LinkUse use, ServerLevel serverLevel, NetworkData data, NetworkData.Group group) {
             BlockPos monitorPos = normalizedMonitorPos(use);
+
+            if (use.be() instanceof MonitorBlockEntity monitor && monitorAlreadyHasConnection(serverLevel, monitor)) {
+                return FilterCommit.denied(DATA_LINK_FILTER_ATTACH_DENIED);
+            }
+
             if (ARADData.get(serverLevel).isMonitorDatalinked(serverLevel.dimension(), monitorPos)) {
                 return FilterCommit.denied(DATA_LINK_ARAD_MONITOR_CONFLICT);
             }

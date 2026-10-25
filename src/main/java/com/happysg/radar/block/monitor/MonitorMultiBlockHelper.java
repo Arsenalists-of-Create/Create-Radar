@@ -12,6 +12,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.happysg.radar.block.monitor.MonitorBlock.SHAPE;
@@ -61,6 +63,11 @@ public class MonitorMultiBlockHelper {
     }
 
     static void formMulti(BlockState pState, Level pLevel, BlockPos pPos, int size) {
+        formMulti(pState, pLevel, pPos, size, false);
+    }
+
+    private static void formMulti(BlockState pState, Level pLevel, BlockPos pPos, int size, boolean preserveSplitSuppression) {
+        boolean wasForming = forming;
         forming = true;
         try {
             MonitorBlock.Shape shape;
@@ -83,14 +90,14 @@ public class MonitorMultiBlockHelper {
                     if (pLevel.getBlockEntity(pos) instanceof MonitorBlockEntity monitor) {
                         monitor.setControllerPos(pPos, size);
 
-                        if (size > 1) {
+                        if (size > 1 && !preserveSplitSuppression) {
                             monitor.setSplitContactSuppressed(false);
                         }
                     }
                 }
             }
         } finally {
-            forming = false;
+            forming = wasForming;
         }
     }
 
@@ -109,58 +116,271 @@ public class MonitorMultiBlockHelper {
 
     private static void destroyMulti(BlockState pState, Level pLevel, BlockPos removedPos, BlockPos controllerPos, int size) {
         if (size == 1) return;
-        BlockPos linkedSurvivor = null;
 
-        if (pLevel instanceof ServerLevel sl) {
-            NetworkData network = NetworkData.get(sl);
-            ARADData arad = ARADData.get(sl);
-            Direction right = pState.getValue(FACING).getClockWise();
+        boolean wasForming = forming;
+        forming = true;
 
-            for (int i = 0; i < size && linkedSurvivor == null; i++) {
+        try {
+            BlockPos linkedSurvivor = null;
+
+            if (pLevel instanceof ServerLevel sl) {
+                NetworkData network = NetworkData.get(sl);
+                ARADData arad = ARADData.get(sl);
+                Direction right = pState.getValue(FACING).getClockWise();
+
+                for (int i = 0; i < size && linkedSurvivor == null; i++) {
+                    for (int j = 0; j < size; j++) {
+                        BlockPos pos = controllerPos.above(i).relative(right, j);
+                        if (pos.equals(removedPos)) continue;
+                        if (!(sl.getBlockEntity(pos) instanceof MonitorBlockEntity monitor) || !controllerPos.equals(monitor.getControllerPos())) continue;
+
+                        DataLinkBlockEntity link = findAttachedMonitorLink(sl, pos, controllerPos);
+                        if (link == null) continue;
+
+                        linkedSurvivor = pos.immutable();
+                        BlockPos linkPos = link.getBlockPos();
+
+                        if (controllerPos.equals(network.peekEndpointForDataLink(sl.dimension(), linkPos))) {
+                            network.retargetEndpoint(sl.dimension(), controllerPos, linkedSurvivor);
+                        }
+
+                        if (controllerPos.equals(arad.peekEndpointForDataLink(sl.dimension(), linkPos))) {
+                            arad.updateMonitorPosition(sl.dimension(), controllerPos, linkedSurvivor);
+                        }
+
+                        link.target(linkedSurvivor);
+                        break;
+                    }
+                }
+
+                if (linkedSurvivor == null) {
+                    var dim = sl.dimension();
+
+                    BlockPos filtererPos = network.getEndpointOrigin(dim, controllerPos) == NetworkData.LinkOrigin.CONTACT ? network.getFiltererForEndpoint(dim, controllerPos) : null;
+                    BlockPos rwrPos = arad.getEndpointOrigin(dim, controllerPos) == ARADData.LinkOrigin.CONTACT ? arad.getRwrForMonitor(dim, controllerPos) : null;
+
+                    if (filtererPos != null || rwrPos != null) {
+                        for (int i = 0; i < size && linkedSurvivor == null; i++) {
+                            for (int j = 0; j < size; j++) {
+                                BlockPos pos = controllerPos.above(i).relative(right, j);
+
+                                if (pos.equals(removedPos)) continue;
+
+                                if (!(sl.getBlockEntity(pos) instanceof MonitorBlockEntity monitor) || !controllerPos.equals(monitor.getControllerPos())) {
+                                    continue;
+                                }
+
+                                boolean networkContact = filtererPos != null && touchesExistingContact(sl, pos, controllerPos, filtererPos, network, arad, false);
+                                boolean rwrContact = rwrPos != null && touchesExistingContact(sl, pos, controllerPos, rwrPos, network, arad, true);
+
+                                if (!networkContact && !rwrContact) continue;
+                                linkedSurvivor = pos.immutable();
+                                if (networkContact) {
+                                    network.retargetEndpoint(dim, controllerPos, linkedSurvivor);
+                                }
+
+                                if (rwrContact) {
+                                    arad.updateMonitorPosition(dim, controllerPos, linkedSurvivor);
+                                }
+
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (linkedSurvivor == null && pLevel instanceof ServerLevel sl) {
+                NetworkData.get(sl).onEndpointRemoved(sl, controllerPos);
+                ARADData.get(sl).onEndpointRemoved(sl, controllerPos);
+            }
+
+            if (pLevel.getBlockEntity(removedPos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
+                monitor.onDataLinkRemoved();
+                monitor.setControllerPos(removedPos, 1);
+            }
+
+            Direction facing = pState.getValue(FACING);
+            for (int i = 0; i < size; i++) {
                 for (int j = 0; j < size; j++) {
-                    BlockPos pos = controllerPos.above(i).relative(right, j);
+                    BlockPos pos = controllerPos.above(i).relative(facing.getClockWise(), j);
                     if (pos.equals(removedPos)) continue;
-                    if (!(sl.getBlockEntity(pos) instanceof MonitorBlockEntity monitor) || !controllerPos.equals(monitor.getControllerPos())) continue;
 
-                    DataLinkBlockEntity link = findAttachedMonitorLink(sl, pos, controllerPos);
-                    if (link == null) continue;
-
-                    linkedSurvivor = pos.immutable();
-                    BlockPos linkPos = link.getBlockPos();
-
-                    if (controllerPos.equals(network.peekEndpointForDataLink(sl.dimension(), linkPos))) {
-                        network.retargetEndpoint(sl.dimension(), controllerPos, linkedSurvivor);
+                    if (pLevel.getBlockEntity(pos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
+                        monitor.onDataLinkRemoved();
+                        monitor.setControllerPos(pos, 1);
+                        monitor.setSplitContactSuppressed(!pos.equals(linkedSurvivor));
+                        pLevel.setBlockAndUpdate(pos, pState.setValue(SHAPE, MonitorBlock.Shape.SINGLE));
                     }
+                }
+            }
 
-                    if (controllerPos.equals(arad.peekEndpointForDataLink(sl.dimension(), linkPos))) {
-                        arad.updateMonitorPosition(sl.dimension(), controllerPos, linkedSurvivor);
+            reformRemainingMonitors(
+                    pState,
+                    pLevel,
+                    removedPos,
+                    controllerPos,
+                    size,
+                    linkedSurvivor
+            );
+
+            if (pLevel instanceof ServerLevel sl && linkedSurvivor != null && sl.getBlockEntity(linkedSurvivor) instanceof MonitorBlockEntity survivor) {
+                DataLinkBlockEntity link = findAttachedMonitorLink(sl, linkedSurvivor, survivor.getControllerPos());
+
+                if (link != null) {
+                    link.target(survivor.getControllerPos());
+                }
+            }
+
+        } finally {
+            forming = wasForming;
+        }
+    }
+
+    private static void reformRemainingMonitors(
+            BlockState state,
+            Level level,
+            BlockPos removedPos,
+            BlockPos originalController,
+            int originalSize,
+            BlockPos linkedSurvivor) {
+
+        Direction facing = state.getValue(FACING);
+        Direction right = facing.getClockWise();
+        Set<BlockPos> claimed = new HashSet<>();
+
+        // The physically connected monitor gets priority
+        // when selecting which smaller multiblock to form.
+        if (linkedSurvivor != null) {
+            boolean assigned = false;
+
+            for (int newSize = originalSize - 1;
+                 newSize >= 2 && !assigned;
+                 newSize--) {
+
+                for (int i = 0;
+                     i <= originalSize - newSize && !assigned;
+                     i++) {
+
+                    for (int j = 0;
+                         j <= originalSize - newSize;
+                         j++) {
+
+                        BlockPos candidate =
+                                originalController.above(i).relative(right, j);
+
+                        if (!contains(
+                                candidate, facing, newSize, linkedSurvivor)) {
+                            continue;
+                        }
+
+                        if (!canReformSquare(
+                                level, candidate, facing,
+                                newSize, removedPos, claimed)) {
+                            continue;
+                        }
+
+                        claimSquare(claimed, candidate, right, newSize);
+                        formMulti(state, level, candidate, newSize);
+
+                        assigned = true;
+                        break;
                     }
-
-                    link.target(linkedSurvivor);
-                    break;
                 }
             }
         }
 
-        if (pLevel.getBlockEntity(removedPos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
-            monitor.onDataLinkRemoved();
-            monitor.setControllerPos(removedPos, 1);
-        }
+        // Rebuild any other complete squares without overlapping
+        // formations that have already been assigned.
+        for (int newSize = originalSize - 1; newSize >= 2; newSize--) {
+            for (int i = 0; i <= originalSize - newSize; i++) {
+                for (int j = 0; j <= originalSize - newSize; j++) {
 
-        Direction facing = pState.getValue(FACING);
+                    BlockPos candidate =
+                            originalController.above(i).relative(right, j);
+
+                    if (!canReformSquare(
+                            level, candidate, facing,
+                            newSize, removedPos, claimed)) {
+                        continue;
+                    }
+
+                    claimSquare(claimed, candidate, right, newSize);
+                    formMulti(state, level, candidate, newSize, true);
+                }
+            }
+        }
+    }
+
+    private static boolean canReformSquare(Level level, BlockPos controller, Direction facing, int size, BlockPos removedPos, Set<BlockPos> claimed) {
+        Direction right = facing.getClockWise();
+
         for (int i = 0; i < size; i++) {
             for (int j = 0; j < size; j++) {
-                BlockPos pos = controllerPos.above(i).relative(facing.getClockWise(), j);
-                if (pos.equals(removedPos)) continue;
 
-                if (pLevel.getBlockEntity(pos) instanceof MonitorBlockEntity monitor && monitor.getControllerPos().equals(controllerPos)) {
-                    monitor.onDataLinkRemoved();
-                    monitor.setControllerPos(pos, 1);
-                    monitor.setSplitContactSuppressed(!pos.equals(linkedSurvivor));
-                    pLevel.setBlockAndUpdate(pos, pState.setValue(SHAPE, MonitorBlock.Shape.SINGLE));
+                BlockPos pos = controller.above(i).relative(right, j);
+                if (pos.equals(removedPos) || claimed.contains(pos)) {
+                    return false;
+                }
+
+                BlockState state = level.getBlockState(pos);
+
+                if (!state.is(ModBlocks.MONITOR.get()) || state.getValue(FACING) != facing) return false;
+                if (!(level.getBlockEntity(pos) instanceof MonitorBlockEntity monitor) || monitor.getSize() != 1 || !pos.equals(monitor.getControllerPos())) {
+                    return false;
                 }
             }
         }
+
+        return true;
+    }
+
+    private static void claimSquare(
+            Set<BlockPos> claimed,
+            BlockPos controller,
+            Direction right,
+            int size) {
+
+        for (int i = 0; i < size; i++) {
+            for (int j = 0; j < size; j++) {
+                claimed.add(controller.above(i).relative(right, j));
+            }
+        }
+    }
+
+    private static boolean touchesExistingContact(ServerLevel level, BlockPos candidate, BlockPos originalController, BlockPos source, NetworkData network, ARADData arad, boolean rwr) {
+        var dim = level.dimension();
+        for (Direction direction : Direction.values()) {
+            BlockPos adjacent = candidate.relative(direction);
+
+            if (!level.hasChunkAt(adjacent)) continue;
+
+            var adjacentEntity = level.getBlockEntity(adjacent);
+            if (adjacentEntity == null) continue;
+
+            BlockPos endpoint = adjacent;
+            if (adjacentEntity instanceof MonitorBlockEntity monitor) {
+                endpoint = monitor.getControllerPos();
+
+                if (originalController.equals(endpoint)) continue;
+            }
+
+            if (adjacent.equals(source)) {
+                return true;
+            }
+
+            if (rwr) {
+                if (source.equals(arad.getRwrForMonitor(dim, endpoint))) {
+                    return true;
+                }
+            } else {
+                if (source.equals(network.getFiltererForEndpoint(dim, endpoint))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static DataLinkBlockEntity findAttachedMonitorLink(ServerLevel level, BlockPos monitorPos, BlockPos controllerPos) {
@@ -224,8 +444,24 @@ public class MonitorMultiBlockHelper {
         for (int i = 0; i < size; i++) {
             for (int j = 0; j < size; j++) {
                 BlockPos pos = controller.above(i).relative(right, j);
-                if (!(level.getBlockEntity(pos) instanceof MonitorBlockEntity monitor)) continue;
-                if (monitor.getSize() >= size && !monitor.getControllerPos().equals(controller)) {
+
+                if (!(level.getBlockEntity(pos) instanceof MonitorBlockEntity monitor)) {
+                    continue;
+                }
+
+                int existingSize = monitor.getSize();
+                BlockPos existingController = monitor.getControllerPos();
+
+                if (existingSize <= 1 || existingController.equals(controller)) {
+                    continue;
+                }
+
+                if (existingSize >= size) {
+                    return true;
+                }
+
+                BlockPos existingOpposite = existingController.above(existingSize - 1).relative(right, existingSize - 1);
+                if (!contains(controller, facing, size, existingController) || !contains(controller, facing, size, existingOpposite)) {
                     return true;
                 }
             }
