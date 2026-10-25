@@ -810,6 +810,10 @@ public class DataLinkBlockItem extends BlockItem {
                 return FilterCommit.denied(DATA_LINK_ONLY_PITCH_ALLOWED);
             }
 
+            if (data.getEndpointOrigin(serverLevel.dimension(), use.clickedPos()) == NetworkData.LinkOrigin.DATALINK) {
+                return FilterCommit.denied(DATA_LINK_CONTROLLER_ALREADY_LINKED);
+            }
+
             WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(serverLevel);
             runtime.advertiseContactController(use.be());
             runtime.markContactTopologyDirty();
