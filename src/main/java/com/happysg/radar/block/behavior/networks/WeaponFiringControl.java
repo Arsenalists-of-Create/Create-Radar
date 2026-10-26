@@ -933,7 +933,6 @@ public class WeaponFiringControl {
             Vec3 p = start.add(dir.scale(d));
             server.sendParticles(new DustParticleOptions(new Vector3f(r, g, b), 1.0F), p.x, p.y, p.z, 1, (double)0.0F, (double)0.0F, (double)0.0F, (double)0.0F);
         }
-
     }
 
     public void clearBinoTarget() {
@@ -941,6 +940,8 @@ public class WeaponFiringControl {
         this.clearSublevelAimCache();
         this.binoMode = false;
         this.binoTargetPos = null;
+        this.targetSublevel = null;
+        this.targetShipId = null;
         this.target = null;
         this.activetrack = null;
         this.lastJammingSampleToken = Long.MIN_VALUE;
@@ -1276,10 +1277,10 @@ public class WeaponFiringControl {
         }
     }
 
-    @Nullable
     private Vec3 solveGenericBallisticAim(
             ServerLevel serverLevel, WeaponShotProfile shot,
-            Vec3 targetPos, Vec3 targetVelocity, Vec3 targetAcceleration
+            Vec3 targetPos, Vec3 targetVelocity, Vec3 targetAcceleration,
+            @Nullable RigidBodyTargetMotion rigidBinoTarget
     ) {
         ProjectileModel model = shot.projectileModel() == null ? null : ProjectileModelBridge.toInternal(shot.projectileModel());
 
@@ -1295,7 +1296,9 @@ public class WeaponFiringControl {
                         .inheritedVelocity(inheritedVelocity)
                         .targetPosition(targetPos)
                         .targetVelocity(targetVelocity)
-                        .targetAcceleration(targetAcceleration)
+                        .targetAcceleration(rigidBinoTarget != null ? Vec3.ZERO : targetAcceleration)
+                        .targetSublevelId(this.binoMode && this.targetSublevel != null ? this.targetSublevel.getUniqueId() : null)
+                        .rigidBodyTargetMotion(rigidBinoTarget)
                         .projectileSpeed(model.muzzleSpeed())
                         .gravity(model.gravity())
                         .drag(model.drag())
@@ -1359,26 +1362,76 @@ public class WeaponFiringControl {
 
         Vec3 targetPos = resolveGenericTargetPosition();
 
+        SubLevelAccess designatedShip = null;
+
+        if (this.binoMode && this.binoTargetPos != null && Mods.SABLE.isLoaded()) {
+            designatedShip = SableCompanion.INSTANCE.getContaining(serverLevel, this.binoTargetPos);
+
+            if (designatedShip != null) {
+                targetPos = this.toWorldPosition(serverLevel, this.binoTargetPos);
+            }
+        }
+
         if (!finite(targetPos)) {
             this.stopFireCannon();
             this.endStructuralRadarTracking();
             return;
         }
 
-        Vec3 targetVelocity = this.activetrack == null ? Vec3.ZERO : finiteOrZero(this.activetrack.velocity());
+        Vec3 targetVelocity = this.activetrack == null
+                ? Vec3.ZERO
+                : finiteOrZero(this.activetrack.velocity());
 
-        RadarTargetingSolution targetSolution = resolvePublicTargetingSolution(serverLevel, targetPos, targetVelocity, Vec3.ZERO);
+        Vec3 targetAcceleration = Vec3.ZERO;
+        RigidBodyLaunchMath.Motion shipMotion = null;
+
+        if (designatedShip != null
+                && shot.aimMode() == WeaponShotProfile.AimMode.BALLISTIC) {
+
+            shipMotion = SableLaunchMotion.capture(serverLevel, designatedShip);
+
+            if (shipMotion != null) {
+                targetVelocity = shipMotion.futureVelocity(targetPos, 0.0);
+
+                targetAcceleration = clampAcceleration(
+                        shipMotion.futureVelocity(targetPos, 1.0)
+                                .subtract(targetVelocity));
+            } else {
+                targetVelocity = VS2ShipVelocityTracker.getShipVelocityPerTick(
+                        designatedShip, serverLevel, targetPos);
+            }
+        }
+
+        Vec3 observedPos = targetPos;
+        Vec3 observedVelocity = targetVelocity;
+        Vec3 observedAcceleration = targetAcceleration;
+
+        RadarTargetingSolution targetSolution = resolvePublicTargetingSolution(serverLevel, targetPos, targetVelocity, targetAcceleration);
 
         targetPos = targetSolution.position();
         targetVelocity = targetSolution.velocity();
-        Vec3 targetAcceleration = targetSolution.acceleration();
+        targetAcceleration = targetSolution.acceleration();
+
+        boolean unmodifiedPoint = finite(targetPos)
+                && finite(targetVelocity)
+                && finite(targetAcceleration)
+                && observedPos.distanceToSqr(targetPos) <= 1.0e-8
+                && observedVelocity.distanceToSqr(targetVelocity) <= 1.0e-12
+                && observedAcceleration.distanceToSqr(targetAcceleration) <= 1.0e-12;
+
+        if (this.binoMode) {
+            this.targetSublevel = unmodifiedPoint ? designatedShip : null;
+            this.targetShipId = this.targetSublevel == null ? null : this.targetSublevel.getUniqueId();
+            this.rigidTargetExternalMotionOverride = designatedShip != null && !unmodifiedPoint;
+        }
+
+        RigidBodyTargetMotion rigidBinoTarget = shipMotion != null && unmodifiedPoint ? new RigidBodyTargetMotion(shipMotion, observedPos, 0.0) : null;
 
         Vec3 aimDirection;
-
         if (shot.aimMode() == WeaponShotProfile.AimMode.DIRECT) {
             aimDirection = directionFromTo(shot.muzzlePosition(), targetPos);
         } else {
-            aimDirection = solveGenericBallisticAim(serverLevel, shot, targetPos, targetVelocity, targetAcceleration);
+            aimDirection = solveGenericBallisticAim(serverLevel, shot, targetPos, targetVelocity, targetAcceleration, rigidBinoTarget);
         }
 
         if (!finite(aimDirection) || aimDirection.lengthSqr() < 1.0E-12) {
@@ -1645,7 +1698,7 @@ public class WeaponFiringControl {
                                     UUID targetMotionId = null;
                                     this.currentSublevelAim = null;
                                     this.rigidTargetExternalMotionOverride = false;
-                                    if (this.targetSublevel != null) {
+                                    if (this.targetSublevel != null && !this.binoMode) {
                                         Vec3 sublevelAimOrigin = finite(
                                                 cannonMuzzleWorld)
                                                 ? cannonMuzzleWorld
@@ -1706,15 +1759,30 @@ public class WeaponFiringControl {
                                             return;
                                         }
 
-                                        rawTargetPos = this.binoTargetPos.getCenter();
                                         this.target = this.toWorldPosition(serverLevel, this.binoTargetPos);
-                                        targetVel = Vec3.ZERO;
-                                        targetAccel = Vec3.ZERO;
+                                        rawTargetPos = this.target;
+
+                                        SubLevelAccess designatedShip = Mods.SABLE.isLoaded()
+                                                ? SableCompanion.INSTANCE.getContaining(serverLevel, this.binoTargetPos)
+                                                : null;
+
+                                        if (designatedShip != null) {
+                                            this.targetSublevel = designatedShip;
+                                            this.targetShipId = designatedShip.getUniqueId();
+                                            targetMotionId = this.targetShipId;
+
+                                            Vec3 measuredVelocity = this.toWorldVelocity(serverLevel, designatedShip, this.target);
+                                            targetVel = this.getSublevelTargetVelocityPerTick(designatedShip, this.target, serverLevel.getGameTime(), measuredVelocity);
+                                            targetAccel = AccelerationTracker.getAccelerationPerTick2(this.sublevelMotionSampleId(this.targetShipId), targetVel, serverLevel.getGameTime());
+                                        } else {
+                                            this.targetSublevel = null;
+                                            this.targetShipId = null;
+                                            targetVel = Vec3.ZERO;
+                                            targetAccel = Vec3.ZERO;
+                                        }
                                     }
 
-                                    TargetMotionEstimate motion = this.estimateTargetMotion(
-                                            serverLevel, targetMotionId, this.targetEntity,
-                                            this.target, targetVel, targetAccel);
+                                    TargetMotionEstimate motion = this.estimateTargetMotion(serverLevel, targetMotionId, this.targetEntity, this.target, targetVel, targetAccel);
                                     targetVel = motion.velocity();
                                     targetAccel = motion.acceleration();
 
@@ -2462,6 +2530,8 @@ public class WeaponFiringControl {
         } else {
             this.binoMode = false;
             this.binoTargetPos = null;
+            this.targetSublevel = null;
+            this.targetShipId = null;
             this.target = null;
             this.clearTargetingResultCache();
             this.invalidateSecondaryTargeting();

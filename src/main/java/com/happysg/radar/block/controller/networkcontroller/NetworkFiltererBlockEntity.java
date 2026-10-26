@@ -1873,7 +1873,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 cfg.mob(),
                 cfg.animal(),
                 cfg.projectile(),
-                cfg.contraption()
+                cfg.contraption(),
+                cfg.preferHighArc()
         );
     }
 
