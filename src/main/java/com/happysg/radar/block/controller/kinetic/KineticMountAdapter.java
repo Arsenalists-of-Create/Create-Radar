@@ -46,6 +46,15 @@ public interface KineticMountAdapter {
     @Nullable
     KineticMountFrame frameIdentity();
 
+    default double bearingTargetForControllerAngle(double controllerDegrees) {
+        KineticMountFrame frame = frameIdentity();
+        return frame == null ? Double.NaN : frame.bearingTargetFor(controllerDegrees);
+    }
+
+    default boolean hasDynamicPitchMapping() {
+        return false;
+    }
+
     /**
      * World basis of the bearing's containing (parent) level. This must never
      * be derived from the child assembly rotated by this bearing.

@@ -11,6 +11,6 @@
     "CAC",
     "EBE"
   ],
-  "result": { "id": "create_radar:jammer" },
+  "result": { "id": "create_radar:directional_jammer" },
   "show_notification": true
 }

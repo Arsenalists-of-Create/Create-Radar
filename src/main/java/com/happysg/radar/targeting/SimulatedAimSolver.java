@@ -17,11 +17,6 @@ import org.slf4j.Logger;
 
 public class SimulatedAimSolver implements AimSolver {
    private static final Logger LOGGER = LogUtils.getLogger();
-   private static final double MISS_SCORE_WEIGHT = (double)2.0F;
-   private static final double CONTINUITY_SCORE_WEIGHT = 0.015;
-   private static final double FLIGHT_TIME_SCORE_WEIGHT = (double)0.25F;
-   private static final double CONFIDENCE_SCORE_WEIGHT = (double)0.5F;
-   private static final double REJECT_SCORE = (double)1000000.0F;
    private static final int OBSTRUCTION_SHORTLIST_SIZE = 16;
    private static final int REFINEMENT_SHORTLIST_SIZE = 6;
    private static final int MAX_REFINEMENT_ITERATIONS = 28;
@@ -65,6 +60,10 @@ public class SimulatedAimSolver implements AimSolver {
       InitialGuess initial = initialGuess(snapshot, model);
 
       int horizon = initialHorizon(snapshot, initial.interceptTicks);
+
+      double preferredHighArcFloor = highArcPitchFloor(initial.pitchDeg);
+      boolean requireHighArc = snapshot.preferHighArc() && canReachHighArcPitch(snapshot, preferredHighArcFloor);
+
       List<Candidate> candidates = new ArrayList<>();
 
       // Preserve the precise analytic and drag-math approaches.
@@ -76,9 +75,7 @@ public class SimulatedAimSolver implements AimSolver {
          candidates.add(analytic);
       }
 
-      Candidate dragMath = tryDragMathCandidate(
-              snapshot, model, ObstructionChecker.NONE,
-              initial, horizon, stats);
+      Candidate dragMath = tryDragMathCandidate(snapshot, model, ObstructionChecker.NONE, initial, horizon, stats);
 
       if (dragMath != null) {
          candidates.add(dragMath);
@@ -88,15 +85,16 @@ public class SimulatedAimSolver implements AimSolver {
       // Search both low and high arcs so an obstructed preferred
       // trajectory does not immediately eliminate alternative shots.
       while (true) {
-         EvaluationContext context =
-                 new EvaluationContext(snapshot, model, horizon, stats);
+         EvaluationContext context = new EvaluationContext(snapshot, model, horizon, stats);
 
          List<Candidate> low = searchCandidates(context, initial);
          refineShortlist(context, low);
 
-         List<Candidate> high =
-                 searchHighArcCandidates(context, initial);
-         refineShortlist(context, high);
+         List<Candidate> high = canReachHighArcPitch(snapshot, preferredHighArcFloor) ? searchHighArcCandidates(context, initial) : List.of();
+
+         if (!high.isEmpty()) {
+            refineShortlist(context, high, preferredHighArcFloor);
+         }
 
          candidates.addAll(low);
          candidates.addAll(high);
@@ -105,7 +103,8 @@ public class SimulatedAimSolver implements AimSolver {
 
          for (Candidate candidate : candidates) {
             if (isAcceptableShot(snapshot, candidate)
-                    && !nearHorizon(candidate, horizon)) {
+                    && !nearHorizon(candidate, horizon)
+                    && (!requireHighArc || candidate.pitchDeg >= preferredHighArcFloor)) {
                foundAcceptable = true;
                break;
             }
@@ -339,60 +338,130 @@ public class SimulatedAimSolver implements AimSolver {
          }
       }
 
+      String highFallbackReason = snapshot.preferHighArc() ? "high_arc_unavailable" : "not_requested";
+      double highArcFloor = highArcPitchFloor(initial.pitchDeg);
+
+      if (snapshot.preferHighArc()) {
+
+         if (canReachHighArcPitch(snapshot, highArcFloor)) {
+            int highHorizon = horizon;
+
+            Candidate savedHigh = null;
+            RefinementSummary savedHighRefinement = null;
+
+            while (true) {
+               EvaluationContext context = new EvaluationContext(snapshot, projectileModel, highHorizon, stats);
+               int rejectedBefore = stats.pitchConstraintRejections;
+               List<Candidate> highShortlist = searchHighArcCandidates(context, initial);
+
+               for (Candidate seed : warmFallbackSeeds) {
+                  if (seed.pitchDeg >= highArcFloor) {
+                     addToShortlist(highShortlist, seed);
+                  }
+               }
+
+               RefinementSummary highRefinement = refineShortlist(context, highShortlist, highArcFloor);
+
+               stats.lastHighHorizon = highHorizon;
+
+               for (Candidate candidate : highShortlist) {
+                  if (candidate == null || candidate.pitchDeg < highArcFloor) {
+                     continue;
+                  }
+
+                  if (candidate.missDistance < stats.nearestHighMiss) {
+                     stats.nearestHighMiss = candidate.missDistance;
+                     stats.nearestHighPitch = candidate.pitchDeg;
+                     stats.nearestHighTime = candidate.flightTime;
+                  }
+               }
+
+               Candidate highBest = null;
+
+               for (Candidate candidate : highShortlist) {
+                  if (candidate == null || candidate.pitchDeg < highArcFloor || !isAcceptableShot(snapshot, candidate)) {
+                     continue;
+                  }
+
+                  Candidate checked = applyObstruction(snapshot, projectileModel, obstructionChecker, candidate);
+
+                  if (checked != null && checked.obstruction.blocked() && !isAcceptableShot(snapshot, checked)) {
+                     stats.highArcObstructed = true;
+                  }
+
+                  if (checked != null && isAcceptableShot(snapshot, checked) && (highBest == null || score(snapshot, checked) < score(snapshot, highBest))) {
+                     highBest = checked;
+                  }
+               }
+
+               if (highBest != null && highBest.pitchDeg >= highArcFloor && isAcceptableShot(snapshot, highBest)) {
+                  savedHigh = highBest;
+                  savedHighRefinement = highRefinement;
+
+                  if (!nearHorizon(highBest, highHorizon) || highHorizon >= maxHorizon) {
+                     return buildResult(
+                             snapshot, projectileModel, initial,
+                             highBest,
+                             highRefinement.iterations(),
+                             highRefinement.finalStepDeg(),
+                             "high", "none", stats, startedNanos);
+                  }
+
+               } else {
+                  highFallbackReason = highArcFailureReason(highShortlist, highBest, stats.pitchConstraintRejections > rejectedBefore);
+               }
+
+               if (highHorizon >= maxHorizon) {
+                  break;
+               }
+
+               int expanded = Math.min(maxHorizon, Math.max(highHorizon + HORIZON_MARGIN_TICKS, highHorizon * 2));
+               if (expanded == highHorizon) {
+                  break;
+               }
+
+               highHorizon = expanded;
+               ++stats.horizonExpansions;
+            }
+
+            if (savedHigh != null) {
+               return buildResult(
+                       snapshot, projectileModel, initial,
+                       savedHigh,
+                       savedHighRefinement.iterations(),
+                       savedHighRefinement.finalStepDeg(),
+                       "high", "none", stats, startedNanos);
+            }
+         } else {
+            highFallbackReason = "high_arc_outside_pitch_limits";
+         }
+      }
+
+      if (stats.highArcObstructed && ("high_arc_below_quality".equals(highFallbackReason) || "high_arc_unavailable".equals(highFallbackReason))) {
+         highFallbackReason = "high_arc_obstructed";
+      }
+
       Candidate best = null;
       RefinementSummary refinement = new RefinementSummary(null, 0, 0.0);
-      String selectedArc = "none";
-      String fallbackReason = snapshot.preferHighArc() ? "high_arc_unavailable" : "not_requested";
-      while(true) {
+
+      while (true) {
          EvaluationContext context = new EvaluationContext(snapshot, projectileModel, horizon, stats);
          List<Candidate> shortlist = this.searchCandidates(context, initial);
+
          for (Candidate warmSeed : warmFallbackSeeds) {
-            if (warmSeed.pitchDeg < highArcPitchFloor(initial.pitchDeg)) {
+            if (warmSeed.pitchDeg < highArcFloor) {
                addToShortlist(shortlist, warmSeed);
             }
          }
-         RefinementSummary lowRefinement = this.refineShortlist(context, shortlist);
-         Candidate lowBest = this.chooseObstructionCheckedBest(context, obstructionChecker, shortlist);
-         boolean lowAcceptable = lowBest != null && isAcceptableShot(snapshot, lowBest);
 
-         best = lowBest;
-         refinement = lowRefinement;
-         selectedArc = lowAcceptable ? "low" : "none";
-         fallbackReason = snapshot.preferHighArc() ? "high_arc_unavailable" : "not_requested";
-
-         if (snapshot.preferHighArc()) {
-            int rejectedBeforeHighSearch = stats.pitchConstraintRejections;
-            List<Candidate> highArcShortlist = this.searchHighArcCandidates(context, initial);
-            for (Candidate warmSeed : warmFallbackSeeds) {
-               if (warmSeed.pitchDeg >= highArcPitchFloor(initial.pitchDeg)) {
-                  addToShortlist(highArcShortlist, warmSeed);
-               }
-            }
-            RefinementSummary highArcRefinement = this.refineShortlist(context, highArcShortlist);
-            Candidate highArcBest = this.chooseObstructionCheckedBest(context, obstructionChecker, highArcShortlist);
-            if (highArcBest != null && highArcBest.pitchDeg >= highArcPitchFloor(initial.pitchDeg) && isAcceptableShot(snapshot, highArcBest)) {
-               best = highArcBest;
-               refinement = highArcRefinement;
-               selectedArc = "high";
-               fallbackReason = "none";
-            } else {
-               fallbackReason = highArcFailureReason(highArcShortlist, highArcBest, stats.pitchConstraintRejections > rejectedBeforeHighSearch);
-               if (lowAcceptable) {
-                  best = lowBest;
-                  refinement = lowRefinement;
-                  selectedArc = "low";
-               } else if (betterDiagnosticCandidate(snapshot, highArcBest, best) == highArcBest) {
-                  best = highArcBest;
-                  refinement = highArcRefinement;
-                  selectedArc = "none";
-               }
-            }
-         }
+         refinement = this.refineShortlist(context, shortlist);
+         best = this.chooseObstructionCheckedBest(context, obstructionChecker, shortlist);
 
          if (best == null) {
-            return this.noCandidateResult(snapshot, fallbackReason, stats, startedNanos);
+            return this.noCandidateResult(snapshot, highFallbackReason, stats, startedNanos);
          }
-         if (horizon >= maxHorizon || isAcceptableShot(snapshot, best) && !nearHorizon(best, horizon)) {
+
+         if (horizon >= maxHorizon || (isAcceptableShot(snapshot, best) && !nearHorizon(best, horizon))) {
             break;
          }
 
@@ -400,11 +469,18 @@ public class SimulatedAimSolver implements AimSolver {
          if (expanded == horizon) {
             break;
          }
+
          horizon = expanded;
          ++stats.horizonExpansions;
       }
 
-      return this.buildResult(snapshot, projectileModel, initial, best, refinement.iterations(), refinement.finalStepDeg(), selectedArc, fallbackReason, stats, startedNanos);
+      return this.buildResult(
+              snapshot, projectileModel, initial,
+              best,
+              refinement.iterations(),
+              refinement.finalStepDeg(),
+              isAcceptableShot(snapshot, best) ? "low" : "none",
+              highFallbackReason, stats, startedNanos);
    }
 
    @Nullable
@@ -458,7 +534,11 @@ public class SimulatedAimSolver implements AimSolver {
          }
 
          Candidate checked = this.applyObstruction(snapshot, model, obstructionChecker, candidate);
+
          if (!isAcceptableShot(snapshot, checked)) {
+            if (snapshot.preferHighArc() && highArc && checked != null && checked.obstruction.blocked()) {
+               stats.highArcObstructed = true;
+            }
             continue;
          }
 
@@ -694,14 +774,10 @@ public class SimulatedAimSolver implements AimSolver {
       debug.add("arcFallbackReason=" + fallbackReason);
       debug.add("pitchConstraint=" + snapshot.pitchConstraint().summary());
       debug.add("pitchConstraintRejections=" + stats.pitchConstraintRejections);
-      Vec3 selectedLaunch = snapshot.launchPosition(
-              TargetingMath.directionFromYawPitch(
-                      best.yawDeg, best.pitchDeg));
-      debug.add("range=" + selectedLaunch.distanceTo(
-              snapshot.targetPosition()));
+      Vec3 selectedLaunch = snapshot.launchPosition(TargetingMath.directionFromYawPitch(best.yawDeg, best.pitchDeg));
+      debug.add("range=" + selectedLaunch.distanceTo(snapshot.targetPosition()));
       debug.add("coupledMuzzle=" + snapshot.hasCoupledMuzzle());
-      debug.add("muzzleForwardOffset="
-              + snapshot.muzzleForwardOffset());
+      debug.add("muzzleForwardOffset=" + snapshot.muzzleForwardOffset());
       debug.add("candidateEvaluations=" + stats.candidateEvaluations);
       debug.add("simulatedTicks=" + stats.simulatedTicks);
       debug.add("horizonExpansions=" + stats.horizonExpansions);
@@ -724,21 +800,6 @@ public class SimulatedAimSolver implements AimSolver {
 
       if (RadarConfig.DEBUG_BEAMS) {
          LOGGER.debug("TargetingComputer simulated solve yaw={} pitch={} tick={} miss={} score={} confidence={} candidates={} ticks={} micros={} obstruction={}", best.yawDeg, best.pitchDeg, best.flightTick, best.missDistance, best.score, best.confidence, stats.candidateEvaluations, stats.simulatedTicks, elapsedMicros, best.obstruction.blocked() ? "blocked" : "clear");
-      }
-
-      if (snapshot.preferHighArc() && "low".equals(selectedArc) && !"none".equals(fallbackReason)) {
-         LOGGER.warn(
-                 "Simulated aim solver fell back from high arc to low arc: reason={} yaw={} pitch={} flightTicks={} miss={} range={} pitchConstraint={} muzzle={} target={}",
-                 fallbackReason,
-                 best.yawDeg,
-                 best.pitchDeg,
-                 best.flightTick,
-                 best.missDistance,
-                 selectedLaunch.distanceTo(snapshot.targetPosition()),
-                 snapshot.pitchConstraint().summary(),
-                 selectedLaunch,
-                 snapshot.targetPosition()
-         );
       }
 
       AimSolution solution = new AimSolution(best.yawDeg, best.pitchDeg, TargetingMath.directionFromYawPitch(best.yawDeg, best.pitchDeg), best.predictedTargetPosition, best.flightTick, best.missDistance);
@@ -1040,21 +1101,40 @@ public class SimulatedAimSolver implements AimSolver {
    private List<Candidate> searchHighArcCandidates(EvaluationContext context, InitialGuess initial) {
       List<Candidate> shortlist = new ArrayList<>(17);
       Candidate best = null;
-      double highArcFloor = highArcPitchFloor(initial.pitchDeg);
 
-      for(SearchPass pass : searchPasses()) {
+      double floor = highArcPitchFloor(initial.pitchDeg);
+      PitchConstraint limits = context.snapshot.pitchConstraint();
+
+      boolean upright = limits.upAxis().y >= 0.999999;
+
+      double minPitch = upright ? Math.max(floor, limits.minPitchDeg()) : floor;
+      double maxPitch = upright ? Math.min(PitchConstraint.SOLVER_MAX_PITCH_DEG, limits.maxPitchDeg()) : PitchConstraint.SOLVER_MAX_PITCH_DEG;
+
+      if (minPitch > maxPitch) {
+         return shortlist;
+      }
+
+      for (SearchPass pass : searchPasses()) {
          double centerYaw = best == null ? initial.yawDeg : best.yawDeg;
-         double centerPitch = best == null ? Math.max(45.0, initial.pitchDeg + 25.0) : best.pitchDeg;
+         double centerPitch = best == null ? Math.max(minPitch, Math.min(maxPitch, Math.max(45.0, initial.pitchDeg + 25.0))) : best.pitchDeg;
+         double firstPitchOffset = Math.max(-pass.pitchDownRange, minPitch - centerPitch);
+         double lastPitchOffset = Math.min(pass.pitchUpRange, maxPitch - centerPitch);
 
-         for(double yawOffset = -pass.yawRange; yawOffset <= pass.yawRange + 1.0E-9; yawOffset += pass.step) {
-            for(double pitchOffset = -pass.pitchDownRange; pitchOffset <= pass.pitchUpRange + 1.0E-9; pitchOffset += pass.step) {
+         if (firstPitchOffset > lastPitchOffset) {
+            continue;
+         }
+
+         for (double yawOffset = -pass.yawRange;
+              yawOffset <= pass.yawRange + 1.0E-9;
+              yawOffset += pass.step) {
+
+            for (double pitchOffset = firstPitchOffset; pitchOffset <= lastPitchOffset + 1.0E-9; pitchOffset += pass.step) {
+
                double yaw = TargetingMath.wrap180(centerYaw + yawOffset);
                double pitch = clampPitch(centerPitch + pitchOffset);
-               if (pitch < highArcFloor) {
-                  continue;
-               }
 
-               Candidate candidate = this.evaluate(context, yaw, pitch, ObstructionResult.clearPath());
+               Candidate candidate = evaluate(context, yaw, pitch, ObstructionResult.clearPath());
+
                if (candidate == null) {
                   continue;
                }
@@ -1069,6 +1149,11 @@ public class SimulatedAimSolver implements AimSolver {
       return shortlist;
    }
 
+   private static boolean canReachHighArcPitch(TargetingSnapshot snapshot, double highArcFloor) {
+      PitchConstraint limits = snapshot.pitchConstraint();
+      return limits.upAxis().y < 0.999999 || limits.maxPitchDeg() + 1.0E-6 >= highArcFloor;
+   }
+
    private static double highArcPitchFloor(double directPitchDeg) {
       // The two ideal ballistic branches straddle this angle; unlike a fixed floor,
       // it continues to separate them when the target is above or below the muzzle.
@@ -1076,6 +1161,10 @@ public class SimulatedAimSolver implements AimSolver {
    }
 
    private RefinementSummary refineShortlist(EvaluationContext context, List<Candidate> shortlist) {
+      return refineShortlist(context, shortlist, PitchConstraint.SOLVER_MIN_PITCH_DEG);
+   }
+
+   private RefinementSummary refineShortlist(EvaluationContext context, List<Candidate> shortlist, double minimumPitch) {
       if (shortlist.isEmpty()) {
          return new RefinementSummary(null, 0, 0.0);
       }
@@ -1090,7 +1179,7 @@ public class SimulatedAimSolver implements AimSolver {
       for (int i = 0; i < count; ++i) {
          RefinementResult result = this.refineCandidate(
                  context, shortlist.get(i), MAX_REFINEMENT_ITERATIONS,
-                 REFINEMENT_TARGET_BLOCKS, false);
+                 REFINEMENT_TARGET_BLOCKS, false, minimumPitch);
          totalIterations += result.iterations();
          finalStepDeg = Math.max(finalStepDeg, result.finalStepDeg());
          refined.add(result.candidate());
@@ -1107,9 +1196,11 @@ public class SimulatedAimSolver implements AimSolver {
       return new RefinementSummary(best, totalIterations, finalStepDeg);
    }
 
-   private RefinementResult refineCandidate(
-           EvaluationContext context, Candidate seed, int maxIterations,
-           double targetPrecisionBlocks, boolean prioritizeMissDistance) {
+   private RefinementResult refineCandidate(EvaluationContext context, Candidate seed, int maxIterations, double targetPrecisionBlocks, boolean prioritizeMissDistance) {
+      return refineCandidate(context, seed, maxIterations, targetPrecisionBlocks, prioritizeMissDistance, PitchConstraint.SOLVER_MIN_PITCH_DEG);
+   }
+
+   private RefinementResult refineCandidate(EvaluationContext context, Candidate seed, int maxIterations, double targetPrecisionBlocks, boolean prioritizeMissDistance, double minimumPitch) {
       TargetingSnapshot snapshot = context.snapshot;
       Vec3 seedDirection = TargetingMath.directionFromYawPitch(
               seed.yawDeg, seed.pitchDeg);
@@ -1132,6 +1223,11 @@ public class SimulatedAimSolver implements AimSolver {
 
                double yaw = TargetingMath.wrap180(best.yawDeg + (double)yawIndex * step);
                double pitch = clampPitch(best.pitchDeg + (double)pitchIndex * step);
+
+               if (pitch < minimumPitch) {
+                  continue;
+               }
+
                Candidate candidate = this.evaluate(context, yaw, pitch, ObstructionResult.clearPath());
                if (candidate != null && betterRefinementCandidate(
                        snapshot, candidate, iterationBest,
@@ -1728,6 +1824,11 @@ public class SimulatedAimSolver implements AimSolver {
 
    private static final class SolveStats {
       int candidateEvaluations;
+      double nearestHighMiss = Double.POSITIVE_INFINITY;
+      double nearestHighPitch = Double.NaN;
+      double nearestHighTime = Double.NaN;
+      int lastHighHorizon;
+      boolean highArcObstructed;
       long simulatedTicks;
       int horizonExpansions;
       int pitchConstraintRejections;

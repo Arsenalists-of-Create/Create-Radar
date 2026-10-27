@@ -3,7 +3,7 @@
   "key": {
     "A": { "item": "minecraft:note_block" },
     "B": { "tag": "c:plates/iron" },
-    "C": { "item": "c:plates/copper" },
+    "C": { "tag": "c:plates/copper" },
     "E": { "item": "create:electron_tube" }
   },
   "pattern": [

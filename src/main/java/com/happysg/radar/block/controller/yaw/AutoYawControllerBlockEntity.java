@@ -210,8 +210,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
             return DebugSwivelSweep.StartResult.failed("physical_feedback_unavailable");
         }
         double capturedTarget = frame.controllerTargetFor(physical);
-        double step = adapter.effectiveDegreesPerTick(
-                adapter.maximumDriveRpm(getAvailableInputSpeed()));
+        double step = adapter.effectiveDegreesPerTick(KineticControllerState.matchingDirectCbcDriveRpm(adapter, getAvailableInputSpeed()));
         debugSwivelSweep.start(degrees, capturedTarget, targetAngle, isRunning,
                 step, this::applyDebugSwivelCommand);
         return DebugSwivelSweep.StartResult.started(adapter.relativeDirection());
@@ -370,8 +369,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
                 && !kineticControllerState.isBlocked()
                 && (adapter.isEndpointFree() || adapter.isDrivenBy(worldPosition));
         double step = adapter == null ? 0.0
-                : adapter.effectiveDegreesPerTick(
-                        adapter.maximumDriveRpm(getAvailableInputSpeed()));
+                : adapter.effectiveDegreesPerTick(KineticControllerState.matchingDirectCbcDriveRpm(adapter, getAvailableInputSpeed()));
         String outcome = debugSwivelSweep.tick(valid, kineticControllerState.isAtDestination(),
                 step, this::applyDebugSwivelCommand);
         if (outcome != null && !"completed".equals(outcome)) {
@@ -958,7 +956,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()) {
             return 0.0;
         }
-        double rpm = adapter.maximumDriveRpm(getAvailableInputSpeed());
+        double rpm = KineticControllerState.matchingDirectCbcDriveRpm(adapter, getAvailableInputSpeed());
         return adapter.effectiveDegreesPerTick(rpm);
     }
 

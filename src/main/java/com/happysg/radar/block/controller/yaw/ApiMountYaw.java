@@ -1,50 +1,61 @@
 package com.happysg.radar.block.controller.yaw;
 
 import com.happysg.radar.api.mount.RadarMountAdapter;
+import com.happysg.radar.compat.cbc.DirectCbcMountMotion;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
 public class ApiMountYaw {
 
     private final AutoYawControllerBlockEntity controller;
 
+    private final DirectCbcMountMotion.State motionState = new DirectCbcMountMotion.State();
+    private BlockPos trackedMountPos;
+
     public ApiMountYaw(AutoYawControllerBlockEntity controller) {
         this.controller = controller;
     }
 
     public void tick(RadarMountAdapter mount) {
-        if (!controller.isRunningController()) {
+        if (controller.getLevel() == null || !controller.isRunningController() || !mount.isValid() || !mount.isAssembled() || !mount.supportsYaw()) {
+            motionState.reset();
+            trackedMountPos = null;
             return;
         }
 
-        if (!mount.isValid() || !mount.isAssembled() || !mount.supportsYaw()) {
+        BlockPos mountPos = mount.getMountPos();
+
+        if (!mountPos.equals(trackedMountPos)) {
+            motionState.reset();
+            trackedMountPos = mountPos.immutable();
+        }
+
+        double observedYaw = mount.getYaw();
+        double requestedYaw = controller.getTargetAngle();
+
+        if (!Double.isFinite(observedYaw) || !Double.isFinite(requestedYaw)) {
+            motionState.reset();
             return;
         }
 
-        double currentYaw = AutoYawControllerBlockEntity.wrap360(mount.getYaw());
-        double desiredYaw = AutoYawControllerBlockEntity.wrap360(controller.getTargetAngle());
-
-        if (!Double.isFinite(currentYaw) || !Double.isFinite(desiredYaw)) {
-            return;
-        }
+        double currentYaw = AutoYawControllerBlockEntity.wrap360(observedYaw);
+        double desiredYaw = AutoYawControllerBlockEntity.wrap360(requestedYaw);
 
         double yawDiff = AutoYawControllerBlockEntity.shortestDelta(currentYaw, desiredYaw);
+        double rpm = Math.abs(controller.getAvailableInputSpeed());
 
-        if (Math.abs(yawDiff) <= AutoYawControllerBlockEntity.getToleranceDeg()) {
-            mount.setYaw(desiredYaw);
+        if (!Double.isFinite(rpm) || rpm <= 0.0) {
+            motionState.reset();
             return;
         }
 
-        double rpm = Math.abs(controller.getSpeed());
-        if (rpm <= 0.0) {
+        double move = motionState.nextTrackingStep(yawDiff, rpm, desiredYaw, controller.getLevel().getGameTime(), true);
+
+        if (Math.abs(move) <= 1.0E-9) {
             return;
         }
 
-        double stepDeg = rpm / 24.0;
-        double move = Math.signum(yawDiff) * Math.min(Math.abs(yawDiff), stepDeg);
-
-        double nextYaw = AutoYawControllerBlockEntity.wrap360(currentYaw + move);
-
-        mount.setYaw(nextYaw);
+        mount.setYaw(AutoYawControllerBlockEntity.wrap360(currentYaw + move));
     }
 
     public void setTarget(RadarMountAdapter mount, Vec3 targetPos) {

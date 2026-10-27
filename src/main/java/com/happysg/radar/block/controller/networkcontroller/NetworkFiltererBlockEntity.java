@@ -111,8 +111,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     private  TargetingConfig targeting = TargetingConfig.DEFAULT;
     private List<SafeZone> safeZones = new ArrayList<>();
     private BlockPos lastKnownPos = BlockPos.ZERO;
-    private RadarTrack currenttrack;
     private List<RadarTrack> cachedTracks = List.of();
+    @Nullable
+    private String autoLimitRejectedTargetId;
+    private long autoLimitRejectedUntilTick = Long.MIN_VALUE;
     private DetectionConfig detectionCache = DetectionConfig.DEFAULT;
     private long lastContactRefreshTick = Long.MIN_VALUE;
     public @Nullable RadarTrack activeTrackCache;
@@ -474,6 +476,59 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                         autoVisibleSinceTick = Long.MIN_VALUE;
                     }
                 }
+            }
+        }
+
+        if (selected != null
+                && selectedWasAuto
+                && targeting.autoTarget()) {
+
+            boolean hasConfirmedWeapon = false;
+            boolean hasPendingWeapon = false;
+            boolean hasReachableWeapon = false;
+
+            for (AutoPitchControllerBlockEntity pitch
+                    : getWeaponEndpointsCached(sl)) {
+
+                if (!hasResolvableAutoShot(sl, pitch)) {
+                    continue;
+                }
+
+                WeaponFiringControl control = pitch.firingControl;
+
+                if (control == null) {
+                    hasPendingWeapon = true;
+                    continue;
+                }
+
+                Boolean reachable =
+                        control.getAutoAimLimitReachability(
+                                selected.getId(),
+                                sl.getGameTime()
+                        );
+
+                if (reachable == null) {
+                    hasPendingWeapon = true;
+                    continue;
+                }
+
+                hasConfirmedWeapon = true;
+
+                if (reachable) {
+                    hasReachableWeapon = true;
+                    break;
+                }
+            }
+
+
+            if (hasConfirmedWeapon && !hasReachableWeapon && !hasPendingWeapon) {
+                autoLimitRejectedTargetId = selected.getId();
+                autoLimitRejectedUntilTick = sl.getGameTime() + 40L;
+
+                List<RadarTrack> alternatives = cachedTracks.stream().filter(track -> track != null && !Objects.equals(track.getId(), selected.getId())).toList();
+                RadarTrack replacement = pickAutoTarget_PerCannon(sl, alternatives, safeZones);
+                applySelectedTarget(sl, data, group, replacement, replacement != null);
+                return;
             }
         }
 
@@ -1449,6 +1504,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             }
 
             if (chaffAutoIgnoredTargetId != null && chaffAutoIgnoredTargetId.equals(track.getId())) continue;
+            if (Objects.equals(track.getId(), autoLimitRejectedTargetId) && sl.getGameTime() < autoLimitRejectedUntilTick) continue;
 
             if (!cfg.test(track.trackCategory())) continue;
             if (!isVsShipStillLoaded(sl, track)) continue;
@@ -1509,6 +1565,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 rangeBatchEndpoints.get(i).endAutoTargetRangeBatch();
             }
         }
+    }
+
+    public boolean isSelectedTargetAutomatic() {
+        return selectedWasAuto;
     }
 
     public @Nullable RadarContact getActiveRadarContact() {

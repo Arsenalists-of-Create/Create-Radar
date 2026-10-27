@@ -204,7 +204,7 @@ public class CannonMountPitch {
             return;
         }
 
-        double move = motionState.nextStep(diff, rpm);
+        double move = controller.getLevel() != null ? motionState.nextTrackingStep(diff, rpm, controller.getTargetAngle(), controller.getLevel().getGameTime(), false) : motionState.nextStep(diff, rpm);
 
         //LOGGER.debug("RADAR_PITCH_MOVE diff={} rpm={} move={}", diff, rpm, move);
 

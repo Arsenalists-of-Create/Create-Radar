@@ -86,43 +86,11 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
             tickCbcMount(mount);
         }
 
-        double inputRpm = Math.abs(getAvailableInputSpeed());
         for (RadarMountAdapter mount : apiMounts) {
-            tickTPitchApiMount(mount, inputRpm);
+            tickApiMount(mount);
         }
 
         return true;
-    }
-
-    private void tickTPitchApiMount(RadarMountAdapter mount, double inputRpm) {
-        if (!mount.isValid() || !mount.isAssembled() || !mount.supportsPitch()) {
-            return;
-        }
-
-        double current = mount.getPitch();
-        double target = getTargetAngle();
-
-        if (!Double.isFinite(current) || !Double.isFinite(target)) {
-            return;
-        }
-
-        current = Math.max(-90.0, Math.min(90.0, current));
-        target = Math.max(-90.0, Math.min(90.0, target));
-
-        double diff = target - current;
-
-        if (Math.abs(diff) <= AutoPitchControllerBlockEntity.getCbcTolerance()) {
-            mount.setPitch(target);
-            return;
-        }
-
-        if (!Double.isFinite(inputRpm) || inputRpm <= 0.0) {
-            return;
-        }
-
-        double step = inputRpm / 24.0;
-        double next = current + Math.signum(diff) * Math.min(Math.abs(diff), step);
-        mount.setPitch(Math.max(-90.0, Math.min(90.0, next)));
     }
 
     @Override
@@ -339,7 +307,21 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
             return false;
         }
 
-        return isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
+        if (!isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees)) {
+            return false;
+        }
+
+        var adapter = resolution.adapter();
+        var aimFrame = adapter.aimFrame();
+        Vec3 actualDirection = adapter.getPhysicalWorldDirection();
+
+        if (aimFrame == null || actualDirection == null || actualDirection.lengthSqr() < 1.0e-12) {
+            return false;
+        }
+
+        double actualPitch = aimFrame.controllerTargetDegrees(CannonAxis.PITCH, actualDirection);
+        double allowedError = Double.isFinite(maximumToleranceDegrees) ? Math.min(1.0, Math.max(0.0, maximumToleranceDegrees)) : 1.0;
+        return Double.isFinite(actualPitch) && Math.abs(actualPitch - getTargetAngle()) <= allowedError;
     }
 
     /**

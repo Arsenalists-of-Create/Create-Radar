@@ -79,15 +79,11 @@ public class CannonMountYaw {
         if (!lag) {
             effectiveTolerance += RadarConfig.server().targetLoosenAmount.get();
         }
-        effectiveTolerance = Math.max(
-                effectiveTolerance, sanitizeTolerance(minimumToleranceDegrees));
-        effectiveTolerance = Math.min(effectiveTolerance,
-                sanitizeMaximumTolerance(maximumToleranceDegrees));
+        effectiveTolerance = Math.max(effectiveTolerance, sanitizeTolerance(minimumToleranceDegrees));
+        effectiveTolerance = Math.min(effectiveTolerance, sanitizeMaximumTolerance(maximumToleranceDegrees));
 
         double desired = AutoYawControllerBlockEntity.wrap360(controller.getTargetAngle());
-        double current = controller.hasLastCbcYawWritten()
-                ? AutoYawControllerBlockEntity.wrap360(controller.getLastCbcYawWritten())
-                : AutoYawControllerBlockEntity.wrap360(contraption.yaw);
+        double current = AutoYawControllerBlockEntity.wrap360(contraption.yaw);
 
         return Math.abs(AutoYawControllerBlockEntity.shortestDelta(current, desired)) < effectiveTolerance;
     }
@@ -127,7 +123,7 @@ public class CannonMountYaw {
             return;
         }
 
-        double move = motionState.nextStep(yawDiff, rpm);
+        double move = controller.getLevel() != null ? motionState.nextTrackingStep(yawDiff, rpm, desiredYaw, controller.getLevel().getGameTime(), true) : motionState.nextStep(yawDiff, rpm);
         if (Math.abs(move) <= 1.0E-9) {
             return;
         }

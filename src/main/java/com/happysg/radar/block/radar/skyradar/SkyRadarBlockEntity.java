@@ -170,8 +170,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         if (creative) {
             return RadarConfig.server().maxSkyRadarRange.get();
         }
-        return Math.min( dishCount * RadarConfig.server().skyRadarDishRangeIncrease.get(),
-                RadarConfig.server().maxSkyRadarRange.get());
+        return Math.min( dishCount * RadarConfig.server().skyRadarDishRangeIncrease.get(), RadarConfig.server().maxSkyRadarRange.get());
     }
 
     @Override
@@ -382,22 +381,13 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         setChanged();
     }
 
-    private OwnedTarget findOwnedTarget(
-            ServerLevel sl,
-            NetworkData.Group group,
-            String selectedId
-    ) {
+    private OwnedTarget findOwnedTarget(ServerLevel sl, NetworkData.Group group, String selectedId) {
         BlockPos closestRadarPos = null;
         Vec3 closestTargetPos = null;
         double closestDistance = Double.MAX_VALUE;
 
-        for (NetworkData.RadarEndpoint endpoint
-                : group.getRadarEndpoints()) {
-
-            BlockEntity be =
-                    sl.getBlockEntity(
-                            endpoint.pos()
-                    );
+        for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
+            BlockEntity be = sl.getBlockEntity(endpoint.pos());
 
             if (!(be instanceof RadarSource source) || !source.isRunning()) {
                 continue;
@@ -409,8 +399,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
                 continue;
             }
 
-            BlockPos sourcePos =
-                    endpoint.pos();
+            BlockPos sourcePos = endpoint.pos();
 
             if (be instanceof NetworkRadarSource networkRadar) {
                 BlockPos canonicalPos = networkRadar.getRadarPosition();
@@ -438,8 +427,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     }
 
     private static @Nullable RadarContact findContact(RadarSource source, String selectedId) {
-        Collection<? extends RadarContact> contacts =
-                source.getContacts();
+        Collection<? extends RadarContact> contacts = source.getContacts();
 
         if (contacts == null) {
             return null;
@@ -517,8 +505,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         super.addToGoggleTooltip(tooltip, isPlayerSneaking);
         tooltip.add(Component.literal(""));
         if (!isAtOperatingAltitude()) {
-            tooltip.add(Component.translatable(CreateRadar.MODID + ".radar.sky_radar_too_low",
-                    SkyRadarScanningBehavior.getMinimumOperatingY()));
+            tooltip.add(Component.translatable(CreateRadar.MODID + ".radar.sky_radar_too_low", SkyRadarScanningBehavior.getMinimumOperatingY()));
         }
         tooltip.add(Component.translatable(CreateRadar.MODID + ".radar.dish_count", dishCount));
         tooltip.add(Component.translatable(CreateRadar.MODID + ".radar.range", getRange()));
@@ -622,8 +609,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
 
     private float getReceiverYawOffset() {
         Direction facing = getSafeReceiverFacing();
-        float receiverAngle = (float) Math.toDegrees(Math.atan2(
-                facing.getStepX(), facing.getStepZ()));
+        float receiverAngle = (float) Math.toDegrees(Math.atan2(facing.getStepX(), facing.getStepZ()));
         return wrap360(receiverAngle + 180.0f);
     }
 
@@ -645,8 +631,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
                 && state.hasProperty(SkyRadarBlock.FACING)) {
             Direction migratedFacing = getSafeReceiverFacing();
             if (state.getValue(SkyRadarBlock.FACING) != migratedFacing) {
-                level.setBlockAndUpdate(getBlockPos(),
-                        state.setValue(SkyRadarBlock.FACING, migratedFacing));
+                level.setBlockAndUpdate(getBlockPos(), state.setValue(SkyRadarBlock.FACING, migratedFacing));
             }
         }
         setChanged();
@@ -748,7 +733,6 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         return getBlockPos();
     }
 
-
     private boolean ponderAnimationActive = false;
     private float ponderYaw = 0.0f;
     private float previousPonderYaw = 0.0f;
@@ -758,17 +742,14 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     private float ponderYawDeg;
     private float previousPonderYawDeg;
 
-
-
     public void tickPonderYaw() {
         previousPonderYaw = ponderYaw;
-
-        if (ponderYawTicksRemaining <= 0)
-            return;
+        if (ponderYawTicksRemaining <= 0) return;
 
         ponderYaw += ponderYawPerTick;
         ponderYawTicksRemaining--;
     }
+
     public void beginPonderVisual() {
         ponderVisualActive = true;
         ponderYawDeg = 0.0f;

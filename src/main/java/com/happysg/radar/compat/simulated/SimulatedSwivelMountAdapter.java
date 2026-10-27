@@ -12,6 +12,8 @@ import com.happysg.radar.block.controller.tpitch.TPitchControllerBlock;
 import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.compat.cbc.CannonMountContext;
+import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
+import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import com.simibubi.create.content.kinetics.RotationPropagator;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
@@ -854,6 +856,122 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         return initial == null
                 ? CannonCalibration.blockedWithMount()
                 : CannonCalibration.ready(initial);
+    }
+
+    private CannonMountContext tpitchSwivelCannon() {
+        if (!(controller instanceof TPitchControllerBlockEntity tPitch) || !(controller.getLevel() instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+
+        CannonMountContext selected = null;
+
+        for (BlockPos mountPos : WeaponNetworkRuntime.get(serverLevel).getExplicitMountsForController(controller.getBlockPos())) {
+            if (findTPitchSwivelSide(tPitch, mountPos) != relativeDirection) {
+                continue;
+            }
+
+            CannonMountContext candidate = CannonMountContext.of(controller.getLevel().getBlockEntity(mountPos));
+            if (candidate == null || !candidate.hasAssembledCannon() || selected != null) {
+                return null;
+            }
+
+            selected = candidate;
+        }
+
+        return selected;
+    }
+
+    private Vector3d tpitchBarrelForward(boolean neutralFrame) {
+        CannonMountContext mount = tpitchSwivelCannon();
+        if (mount == null) {
+            return null;
+        }
+
+        PitchOrientedContraptionEntity entity = mount.getContraption();
+        if (entity == null || !(entity.getContraption() instanceof AbstractMountedCannonContraption cannon) || cannon.initialOrientation() == null) {
+            return null;
+        }
+
+        Vec3 start = entity.toGlobalVector(Vec3.ZERO, 1.0f);
+        Vec3 end = entity.toGlobalVector(Vec3.atLowerCornerOf(cannon.initialOrientation().getNormal()), 1.0f);
+
+        Vector3d forward = new Vector3d(end.x - start.x, end.y - start.y, end.z - start.z);
+
+        SubLevel containing = Sable.HELPER.getContaining(mount.blockEntity());
+        if (containing == null || containing.isRemoved() || !forward.isFinite() || forward.lengthSquared() < 1.0e-12) {
+            return null;
+        }
+
+        if (!neutralFrame) {
+            containing.logicalPose().transformNormal(forward);
+        } else {
+            SubLevelContainer container = SubLevelContainer.getContainer(controller.getLevel());
+            SubLevel attached = container == null || bearing.getSubLevelID() == null ? null : container.getSubLevel(bearing.getSubLevelID());
+            BlockPos platePos = bearing.getPlatePos();
+
+            if (attached == null || attached.isRemoved() || platePos == null) {
+                return null;
+            }
+
+            BlockState bearingState = bearing.getBlockState();
+            BlockState plateState = controller.getLevel().getBlockState(platePos);
+
+            if (!bearingState.hasProperty(SwivelBearingBlock.FACING) || !plateState.hasProperty(SwivelBearingPlateBlock.FACING)) {
+                return null;
+            }
+
+            new Quaterniond(attached.logicalPose().orientation()).conjugate().mul(containing.logicalPose().orientation()).transform(forward);
+            new Quaterniond(bearingState.getValue(SwivelBearingBlock.FACING).getRotation()).mul(new Quaterniond(plateState.getValue(SwivelBearingPlateBlock.FACING).getRotation()).conjugate()).transform(forward);
+        }
+
+        return forward.isFinite() && forward.lengthSquared() > 1.0e-12 ? forward.normalize() : null;
+    }
+
+    @Override
+    public double bearingTargetForControllerAngle(double controllerDegrees) {
+        if (!(controller instanceof TPitchControllerBlockEntity)) {
+            return KineticMountAdapter.super.bearingTargetForControllerAngle(controllerDegrees);
+        }
+
+        Vector3d forward = tpitchBarrelForward(true);
+        double physical = getPhysicalAngleDegrees();
+
+        if (forward == null || !Double.isFinite(physical) || !Double.isFinite(controllerDegrees)) {
+            return Double.NaN;
+        }
+
+        Direction facing = bearing.getBlockState().getValue(SwivelBearingBlock.FACING);
+
+        double a = forward.y;
+        double b = facing.getStepZ() * forward.x - facing.getStepX() * forward.z;
+
+        double amplitude = Math.hypot(a, b);
+        double wanted = Math.sin(Math.toRadians(controllerDegrees));
+
+        if (amplitude < 0.15 || Math.abs(wanted) > amplitude + 1.0e-6) {
+            return Double.NaN;
+        }
+
+        double solution = Math.asin(Math.max(-1.0, Math.min(1.0, wanted / amplitude)));
+        double phase = Math.atan2(a, b);
+        double first = KineticAngleMath.wrap360(Math.toDegrees(solution - phase));
+        double second = KineticAngleMath.wrap360(Math.toDegrees(Math.PI - solution - phase));
+        return Math.abs(KineticAngleMath.shortestDelta(physical, first)) <= Math.abs(KineticAngleMath.shortestDelta(physical, second)) ? first : second;
+    }
+
+    @Override
+    public boolean hasDynamicPitchMapping() {
+        return controller instanceof TPitchControllerBlockEntity;
+    }
+
+    @Override
+    public Vec3 getPhysicalWorldDirection() {
+        if (!(controller instanceof TPitchControllerBlockEntity)) {
+            return KineticMountAdapter.super.getPhysicalWorldDirection();
+        }
+
+        Vector3d direction = tpitchBarrelForward(false);
+        return direction == null ? Vec3.ZERO : new Vec3(direction.x, direction.y, direction.z);
     }
 
     private static double controllerYawForCardinal(Direction direction) {

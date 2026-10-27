@@ -189,6 +189,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         cannonHandler.tick(mount);
     }
 
+    protected void tickApiMount(RadarMountAdapter mount) {
+        apiHandler.tick(mount);
+    }
+
     public void getFiringControl() {
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
@@ -349,7 +353,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         double applied = effective.clampControllerTarget(requestedAngle, 0.0);
 
-        LOGGER.debug("RADAR_PITCH_TARGET requested={} applied={} supported={}..{} running={}", requestedAngle, applied, effective.minDegrees(), effective.maxDegrees(), running);
+        //LOGGER.debug("RADAR_PITCH_TARGET requested={} applied={} supported={}..{} running={}", requestedAngle, applied, effective.minDegrees(), effective.maxDegrees(), running);
 
 
         targetLimitConstrained = !effective.allowsControllerTarget(requestedAngle, 0.0);
@@ -398,8 +402,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return DebugSwivelSweep.StartResult.failed("physical_feedback_unavailable");
         }
         double capturedTarget = frame.controllerTargetFor(physical);
-        double step = adapter.effectiveDegreesPerTick(
-                adapter.maximumDriveRpm(getAvailableInputSpeed()));
+        double step = adapter.effectiveDegreesPerTick(KineticControllerState.matchingDirectCbcDriveRpm(adapter, getAvailableInputSpeed()));
         debugSwivelSweep.start(degrees, capturedTarget, targetAngle, isRunning,
                 step, this::applyDebugSwivelCommand);
         return DebugSwivelSweep.StartResult.started(adapter.relativeDirection());
@@ -556,8 +559,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                 && !kineticControllerState.isBlocked()
                 && (adapter.isEndpointFree() || adapter.isDrivenBy(worldPosition));
         double step = adapter == null ? 0.0
-                : adapter.effectiveDegreesPerTick(
-                        adapter.maximumDriveRpm(getAvailableInputSpeed()));
+                : adapter.effectiveDegreesPerTick(KineticControllerState.matchingDirectCbcDriveRpm(adapter, getAvailableInputSpeed()));
         String outcome = debugSwivelSweep.tick(valid, kineticControllerState.isAtDestination(),
                 step, this::applyDebugSwivelCommand);
         if (outcome != null && !"completed".equals(outcome)) {
@@ -767,7 +769,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             getFiringControl();
         }
 
-        LOGGER.debug("PITCH setAndAcquireTrack track={} firingControl={}", tTrack == null ? "null" : tTrack.getId(), firingControl != null);
+        //LOGGER.debug("PITCH setAndAcquireTrack track={} firingControl={}", tTrack == null ? "null" : tTrack.getId(), firingControl != null);
 
         if (tTrack == null) {
             if (firingControl != null) {
@@ -787,7 +789,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         var view = getWeaponGroup();
         if (view == null) {
-            LOGGER.debug("PITCH {} getWeaponGroup() returned null - cannot aim/fire", worldPosition);
+            //LOGGER.debug("PITCH {} getWeaponGroup() returned null - cannot aim/fire", worldPosition);
             return;
         }
 
@@ -1313,7 +1315,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()) {
             return 0.0;
         }
-        double rpm = adapter.maximumDriveRpm(getAvailableInputSpeed());
+        double rpm = KineticControllerState.matchingDirectCbcDriveRpm(adapter, getAvailableInputSpeed());
         return adapter.effectiveDegreesPerTick(rpm);
     }
 

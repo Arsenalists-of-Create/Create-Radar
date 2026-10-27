@@ -22,8 +22,7 @@ import rbasamoyai.createbigcannons.munitions.config.components.BallisticProperti
  * part of the existing targeting solver self-test command.
  */
 public final class WeaponFiringControlSelfTest {
-    private WeaponFiringControlSelfTest() {
-    }
+    private WeaponFiringControlSelfTest() {}
 
     public static List<TargetingSolverSelfTest.Result> runChecks() {
         List<TargetingSolverSelfTest.Result> results = new ArrayList<>();

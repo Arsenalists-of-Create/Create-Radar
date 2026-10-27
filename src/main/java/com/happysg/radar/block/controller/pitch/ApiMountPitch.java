@@ -1,48 +1,75 @@
 package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.api.mount.RadarMountAdapter;
+import com.happysg.radar.compat.cbc.DirectCbcMountMotion;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public class ApiMountPitch {
 
     private final AutoPitchControllerBlockEntity controller;
+
+    private static final class MotionSession {
+        final DirectCbcMountMotion.State motion = new DirectCbcMountMotion.State();
+        long lastTick = Long.MIN_VALUE;
+    }
+
+    private final Map<BlockPos, MotionSession> motionSessions = new LinkedHashMap<>(8, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<BlockPos, MotionSession> eldest) {
+            return size() > 8;
+        }
+    };
 
     public ApiMountPitch(AutoPitchControllerBlockEntity controller) {
         this.controller = controller;
     }
 
     public void tick(RadarMountAdapter mount) {
-        if (!controller.isRunningController()) {
+        if (controller.getLevel() == null || !controller.isRunningController() || !mount.isValid() || !mount.isAssembled() || !mount.supportsPitch()) {
             return;
         }
 
-        if (!mount.isValid() || !mount.isAssembled() || !mount.supportsPitch()) {
+        BlockPos mountPos = mount.getMountPos();
+        MotionSession session = motionSessions.computeIfAbsent(mountPos.immutable(), ignored -> new MotionSession());
+
+        long tick = controller.getLevel().getGameTime();
+
+        if (session.lastTick != tick - 1) {
+            session.motion.reset();
+        }
+
+        session.lastTick = tick;
+
+        double observedPitch = mount.getPitch();
+        double requestedPitch = controller.getTargetAngle();
+
+        if (!Double.isFinite(observedPitch) || !Double.isFinite(requestedPitch)) {
+            session.motion.reset();
             return;
         }
 
-        double current = clampPitch(mount.getPitch());
-        double target = clampPitch(controller.getTargetAngle());
-
-        if (!Double.isFinite(current) || !Double.isFinite(target)) {
-            return;
-        }
-
+        double current = clampPitch(observedPitch);
+        double target = clampPitch(requestedPitch);
         double diff = target - current;
-        double tolerance = AutoPitchControllerBlockEntity.getCbcTolerance();
 
-        if (Math.abs(diff) <= tolerance) {
-            mount.setPitch(target);
+        double rpm = Math.abs(controller.getAvailableInputSpeed());
+
+        if (!Double.isFinite(rpm) || rpm <= 0.0) {
+            session.motion.reset();
             return;
         }
 
-        double step = Math.abs(controller.getSpeed()) / 24.0;
+        double move = session.motion.nextTrackingStep(diff, rpm, target, tick, false);
 
-        if (step <= 0.0) {
+        if (Math.abs(move) <= 1.0E-9) {
             return;
         }
 
-        double next = current + Math.signum(diff) * Math.min(Math.abs(diff), step);
-        mount.setPitch(clampPitch(next));
+        mount.setPitch(clampPitch(current + move));
     }
 
     public void setTarget(RadarMountAdapter mount, Vec3 targetPos) {
