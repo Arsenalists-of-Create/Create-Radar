@@ -496,7 +496,10 @@ public class JammerBlockEntity extends KineticBlockEntity {
         Vec3 normalized = localDirection.normalize();
         double dot = Mth.clamp(normalized.x * forward.x() + normalized.y * forward.y() + normalized.z * forward.z(), -1.0D, 1.0D);
         float alignmentDegrees = (float) Math.toDegrees(Math.acos(dot));
-        Vec3 jammerWorldPosition = PhysicsHandler.getWorldVec(serverLevel, getTurretPivotLocal());
+        Direction mountFacing = getMountFacing();
+
+        Vec3 localOffset = new Vec3(mountFacing.getStepX() * TURRET_PIVOT_OFFSET, mountFacing.getStepY() * TURRET_PIVOT_OFFSET, mountFacing.getStepZ() * TURRET_PIVOT_OFFSET);
+        Vec3 jammerWorldPosition = PhysicsHandler.getWorldVec(this).add(PhysicsHandler.getWorldVecDirectionTransform(localOffset, this));
 
         jammingProfile = DirectionalJammingService.heartbeat(
                 serverLevel,
