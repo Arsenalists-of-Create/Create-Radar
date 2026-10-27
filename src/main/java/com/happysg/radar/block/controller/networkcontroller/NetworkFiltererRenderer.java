@@ -35,7 +35,6 @@ public class NetworkFiltererRenderer implements BlockEntityRenderer<NetworkFilte
     private static final double OUT_OFFSET = 0.01d;
 
 
-
     @Override
     public void render(NetworkFiltererBlockEntity be, float partialTick, PoseStack ms, MultiBufferSource buffers, int packedLight, int packedOverlay) {
         if (be == null) return;
@@ -85,7 +84,7 @@ public class NetworkFiltererRenderer implements BlockEntityRenderer<NetworkFilte
             switch (face) {
                 case NORTH -> {
                     // outward = -Z
-                    ms.translate(localX, localY, OUT_OFFSET);
+                    ms.translate(localX, localY, -OUT_OFFSET);
                     // rotate so item faces outward (-Z). flip so it's upright.
                     ms.mulPose(Axis.YP.rotationDegrees(180f));
                     ms.mulPose(Axis.XP.rotationDegrees(180f));
@@ -97,7 +96,7 @@ public class NetworkFiltererRenderer implements BlockEntityRenderer<NetworkFilte
                 }
                 case WEST -> {
                     // outward = -X
-                    ms.translate(OUT_OFFSET, localY, -localX);
+                    ms.translate(-OUT_OFFSET, localY, -localX);
                     // rotate to make +Z point outward (-X originally)
                     ms.mulPose(Axis.YP.rotationDegrees(90f));
                     ms.mulPose(Axis.XP.rotationDegrees(180f));
@@ -116,7 +115,7 @@ public class NetworkFiltererRenderer implements BlockEntityRenderer<NetworkFilte
                 }
                 case DOWN -> {
                     // outward = -Y (bottom face)
-                    ms.translate(localX, OUT_OFFSET, -localY);
+                    ms.translate(localX, -OUT_OFFSET, -localY);
                     ms.mulPose(Axis.XP.rotationDegrees(90f));
                 }
             }
