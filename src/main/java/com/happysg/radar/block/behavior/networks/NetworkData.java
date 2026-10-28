@@ -256,8 +256,25 @@ public class NetworkData extends SavedData {
         }
 
         for (BlockPos p : group.radarEndpoints) {
-            notifyNodeDisconnected(level, p);
-            endpointOrigins.remove(posKey(level.dimension(), p));
+            boolean shared = false;
+
+            for (Group other : groupsByFilterer.values()) {
+                if (other.key.dim().equals(group.key.dim()) && other.radarEndpoints.contains(p)) {
+                    shared = true;
+                    break;
+                }
+            }
+
+            if (!shared) {
+                notifyNodeDisconnected(level, p);
+            }
+
+            String endpointKey = posKey(level.dimension(), p);
+
+            if (filtererKey.equals(endpointToFilterer.get(endpointKey))) {
+                endpointOrigins.remove(endpointKey);
+            }
+
             postRadarLifecycleEvent(level, group, p, null, RadarNetworkLifecycleEvent.Action.DETACHED);
         }
         //notifyNodeDisconnected(level, group.);
@@ -289,6 +306,10 @@ public class NetworkData extends SavedData {
         endpointToFilterer.values().removeIf(filtererKey::equals);
         weaponMountToFilterer.values().removeIf(filtererKey::equals);
         dataLinkToFilterer.values().removeIf(filtererKey::equals);
+
+        for (BlockPos radarPos : group.radarEndpoints) {
+            reindexRadarEndpoint(group.key.dim(), radarPos);
+        }
     }
 
     /**
@@ -385,8 +406,8 @@ public class NetworkData extends SavedData {
 
                     BlockPos radarPos = readPos(radarTag.getCompound("Pos"));
                     group.radarEndpoints.add(radarPos.immutable());
-                    data.endpointToFilterer.put(key(dim, radarPos), groupKey);
-                    data.endpointOrigins.put(key(dim, radarPos), LinkOrigin.DATALINK);
+                    data.endpointToFilterer.putIfAbsent(key(dim, radarPos), groupKey);
+                    data.endpointOrigins.putIfAbsent(key(dim, radarPos), LinkOrigin.DATALINK);
                 }
 
                 group.syncPrimaryRadar();
@@ -458,6 +479,18 @@ public class NetworkData extends SavedData {
                 String c = e.getString("C");
                 String m = e.getString("M");
                 if (!c.isEmpty() && !m.isEmpty()) data.controllerToWeaponMount.put(c, m);
+            }
+        }
+
+        Set<String> indexedRadars = new HashSet<>();
+
+        for (Group group : data.groupsByFilterer.values()) {
+            for (BlockPos radarPos : group.radarEndpoints) {
+                String radarKey = key(group.key.dim(), radarPos);
+
+                if (indexedRadars.add(radarKey)) {
+                    data.reindexRadarEndpoint(group.key.dim(), radarPos);
+                }
             }
         }
 
@@ -600,11 +633,65 @@ public class NetworkData extends SavedData {
     }
 
     public boolean canAttachRadar(Group group, BlockPos radarPos) {
+        return group != null && radarPos != null && !hasRadarDataLink(group, radarPos);
+    }
+
+    private boolean hasRadarDataLink(Group group, BlockPos radarPos) {
         if (group == null || radarPos == null) {
             return false;
         }
 
-        return canClaimEndpoint(group, radarPos, LinkOrigin.DATALINK);
+        ResourceKey<Level> dim = group.key.dim();
+        String endpointKey = key(dim, radarPos);
+        String groupKey = key(dim, group.key.filtererPos());
+
+        for (BlockPos linkPos : group.dataLinks) {
+            String linkKey = key(dim, linkPos);
+
+            if (groupKey.equals(dataLinkToFilterer.get(linkKey)) && endpointKey.equals(dataLinkToEndpoint.get(linkKey))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void reindexRadarEndpoint(ResourceKey<Level> dim, BlockPos radarPos) {
+        String endpointKey = key(dim, radarPos);
+        String currentKey = endpointToFilterer.get(endpointKey);
+        Group current = currentKey == null ? null : groupsByFilterer.get(currentKey);
+
+        if (current != null && current.key.dim().equals(dim) && current.radarEndpoints.contains(radarPos)) {
+            endpointOrigins.put(endpointKey, hasRadarDataLink(current, radarPos) ? LinkOrigin.DATALINK : LinkOrigin.CONTACT);
+            return;
+        }
+
+        if (current != null && (current.monitorEndpoints.contains(radarPos) || current.weaponEndpoints.contains(radarPos))) {
+            return;
+        }
+
+        Group replacement = null;
+
+        for (Group candidate : groupsByFilterer.values()) {
+            if (!candidate.key.dim().equals(dim) || !candidate.radarEndpoints.contains(radarPos)) {
+                continue;
+            }
+
+            if (replacement == null || (!hasRadarDataLink(replacement, radarPos) && hasRadarDataLink(candidate, radarPos))) {
+                replacement = candidate;
+            }
+        }
+
+        if (replacement == null) {
+            endpointToFilterer.remove(endpointKey);
+            endpointOrigins.remove(endpointKey);
+            return;
+        }
+
+        endpointToFilterer.put(endpointKey, key(dim, replacement.key.filtererPos()));
+
+        endpointOrigins.put(endpointKey, hasRadarDataLink(replacement, radarPos) ? LinkOrigin.DATALINK : LinkOrigin.CONTACT
+        );
     }
 
     public boolean canReserveWeaponEndpoint(Group group, BlockPos controllerPos) {
@@ -664,8 +751,16 @@ public class NetworkData extends SavedData {
             return;
         }
 
-        if (!claimEndpointForGroup(level, group, radarPos, LinkOrigin.DATALINK)) {
-            return;
+        ResourceKey<Level> dim = group.key.dim();
+        String endpointKey = key(dim, radarPos);
+        String myKey = key(dim, group.key.filtererPos());
+        String currentOwner = endpointToFilterer.get(endpointKey);
+
+        if (currentOwner == null || currentOwner.equals(myKey)) {
+            if (!claimEndpointForGroup(
+                    level, group, radarPos, LinkOrigin.DATALINK)) {
+                return;
+            }
         }
 
         boolean added = group.radarEndpoints.add(radarPos.immutable());
@@ -676,7 +771,8 @@ public class NetworkData extends SavedData {
         }
 
         setDirty();
-        NeoForge.EVENT_BUS.post(new RadarNetworkLifecycleEvent(level, group.key.filtererPos(), radarPos, null, RadarNetworkLifecycleEvent.Action.ATTACHED));
+
+        postRadarLifecycleEvent(level, group, radarPos, null, RadarNetworkLifecycleEvent.Action.ATTACHED);
     }
 
     public boolean reserveWeaponEndpoint(Group group, BlockPos controllerPos) {
@@ -913,7 +1009,11 @@ public class NetworkData extends SavedData {
         visited.add(group.key.filtererPos());
 
         for (BlockPos endpoint : allEndpoints(group)) {
-            if (endpointOrigins.get(key(group.key.dim(), endpoint)) == LinkOrigin.DATALINK) {
+            boolean explicit = group.radarEndpoints.contains(endpoint)
+                    ? hasRadarDataLink(group, endpoint)
+                    : endpointOrigins.get(key(group.key.dim(), endpoint)) == LinkOrigin.DATALINK;
+
+            if (explicit) {
                 queue.add(endpoint);
                 visited.add(endpoint);
             }
@@ -963,7 +1063,11 @@ public class NetworkData extends SavedData {
     private Collection<BlockPos> snapshotContactEndpoints(Group group) {
         List<BlockPos> endpoints = new ArrayList<>();
         for (BlockPos endpoint : allEndpoints(group)) {
-            if (endpointOrigins.get(key(group.key.dim(), endpoint)) == LinkOrigin.CONTACT) {
+            boolean contact = group.radarEndpoints.contains(endpoint)
+                    ? !hasRadarDataLink(group, endpoint)
+                    : endpointOrigins.get(key(group.key.dim(), endpoint)) == LinkOrigin.CONTACT;
+
+            if (contact) {
                 endpoints.add(endpoint);
             }
         }
@@ -1163,9 +1267,14 @@ public class NetworkData extends SavedData {
         }
 
         if (removed) {
-            endpointToFilterer.remove(endpointKey);
-            endpointOrigins.remove(endpointKey);
-            endpointOrigins.remove(key(dim, normalized));
+            if (removedRadarPos != null) {
+                reindexRadarEndpoint(dim, removedRadarPos);
+            } else {
+                endpointToFilterer.remove(endpointKey);
+                endpointOrigins.remove(endpointKey);
+                endpointOrigins.remove(key(dim, normalized));
+            }
+
             cleanupIfEmpty(key(dim, group.key.filtererPos()));
         }
     }
@@ -1836,8 +1945,7 @@ public class NetworkData extends SavedData {
                 endpointOrigins.remove(key(level.dimension(), controllerPos));
             } else if (group.radarEndpoints.remove(endpointPos)) {
                 group.syncPrimaryRadar();
-                endpointToFilterer.remove(endpointKey);
-                endpointOrigins.remove(endpointKey);
+                reindexRadarEndpoint(dim, endpointPos);
                 postRadarLifecycleEvent(level, group, endpointPos, null, RadarNetworkLifecycleEvent.Action.DETACHED);
             } else if (group.weaponEndpoints.remove(endpointPos)) {
                 notifyNodeDisconnected(level, endpointPos);
@@ -1976,6 +2084,43 @@ public class NetworkData extends SavedData {
         }
 
         String endpointKey = key(dim, endpointPos);
+
+        List<Group> sharedRadarGroups = new ArrayList<>();
+
+        for (Group candidate : groupsByFilterer.values()) {
+            if (candidate.key.dim().equals(dim) && candidate.radarEndpoints.contains(endpointPos)) {
+                sharedRadarGroups.add(candidate);
+            }
+        }
+
+        if (sharedRadarGroups.size() > 1) {
+            for (Group radarGroup : sharedRadarGroups) {
+                radarGroup.radarEndpoints.remove(endpointPos);
+                radarGroup.syncPrimaryRadar();
+
+                for (BlockPos linkPos : List.copyOf(radarGroup.dataLinks)) {
+                    String linkKey = key(dim, linkPos);
+
+                    if (!endpointKey.equals(dataLinkToEndpoint.get(linkKey))) {
+                        continue;
+                    }
+
+                    radarGroup.dataLinks.remove(linkPos);
+                    dataLinkToFilterer.remove(linkKey);
+                    dataLinkToEndpoint.remove(linkKey);
+                }
+
+                postRadarLifecycleEvent(level, radarGroup, endpointPos, null, RadarNetworkLifecycleEvent.Action.DETACHED);
+
+                cleanupIfEmpty(key(dim, radarGroup.key.filtererPos()));
+            }
+
+            endpointToFilterer.remove(endpointKey);
+            endpointOrigins.remove(endpointKey);
+            setDirty();
+            return;
+        }
+
         String filtererKey = endpointToFilterer.get(endpointKey);
         if (filtererKey == null) return;
 
@@ -2161,9 +2306,8 @@ public class NetworkData extends SavedData {
                     if (!isDefinitelyMissing(level, radarPos, onlyIfChunkLoaded, true))
                         continue;
 
-                    endpointToFilterer.remove(posKey(levelDim, radarPos));
-                    endpointOrigins.remove(posKey(levelDim, radarPos));
                     it.remove();
+                    reindexRadarEndpoint(levelDim, radarPos);
                     endpointsRemoved++;
 
                     postRadarLifecycleEvent(level, group, radarPos, null, RadarNetworkLifecycleEvent.Action.RECONCILED);
@@ -2377,7 +2521,13 @@ public class NetworkData extends SavedData {
         for (BlockPos mp : newGroup.monitorEndpoints) {
             endpointToFilterer.put(key(dim, mp), newFiltererKey);
         }
-        for (BlockPos radarPos : newGroup.radarEndpoints) endpointToFilterer.put(key(dim, radarPos), newFiltererKey);
+        for (BlockPos radarPos : newGroup.radarEndpoints) {
+            String radarKey = key(dim, radarPos);
+
+            if (oldFiltererKey.equals(endpointToFilterer.get(radarKey))) {
+                endpointToFilterer.put(radarKey, newFiltererKey);
+            }
+        }
         for (BlockPos ep : newGroup.weaponEndpoints) endpointToFilterer.put(key(dim, ep), newFiltererKey);
         endpointToFilterer.values().removeIf(v -> v.equals(oldFiltererKey));
 
@@ -2582,6 +2732,68 @@ public class NetworkData extends SavedData {
         }
 
         ResourceKey<Level> dim = level.dimension();
+        List<Group> sharedRadarGroups = new ArrayList<>();
+
+        for (Group candidate : groupsByFilterer.values()) {
+            if (candidate.key.dim().equals(dim) && candidate.radarEndpoints.contains(oldPos)) {
+                sharedRadarGroups.add(candidate);
+            }
+        }
+
+        if (sharedRadarGroups.size() > 1) {
+            String oldRadarKey = key(dim, oldPos);
+            String newRadarKey = key(dim, newPos);
+
+            if (endpointToFilterer.containsKey(newRadarKey)) {
+                return false;
+            }
+
+            for (Group candidate : groupsByFilterer.values()) {
+                if (!candidate.key.dim().equals(dim)) {
+                    continue;
+                }
+
+                if (candidate.radarEndpoints.contains(newPos) || candidate.monitorEndpoints.contains(newPos) || candidate.weaponEndpoints.contains(newPos)) {
+                    return false;
+                }
+            }
+
+            String previousPrimary = endpointToFilterer.get(oldRadarKey);
+            Group primary = sharedRadarGroups.get(0);
+
+            for (Group candidate : sharedRadarGroups) {
+                if (key(dim, candidate.key.filtererPos()).equals(previousPrimary)) {
+                    primary = candidate;
+                    break;
+                }
+            }
+
+            for (Group radarGroup : sharedRadarGroups) {
+                radarGroup.radarEndpoints.remove(oldPos);
+                radarGroup.radarEndpoints.add(newPos.immutable());
+                radarGroup.syncPrimaryRadar();
+            }
+
+            for (Map.Entry<String, String> entry : dataLinkToEndpoint.entrySet()) {
+                if (oldRadarKey.equals(entry.getValue())) {
+                    entry.setValue(newRadarKey);
+                }
+            }
+
+            endpointToFilterer.remove(oldRadarKey);
+            endpointOrigins.remove(oldRadarKey);
+
+            endpointToFilterer.put(newRadarKey, key(dim, primary.key.filtererPos()));
+            endpointOrigins.put(newRadarKey, hasRadarDataLink(primary, newPos) ? LinkOrigin.DATALINK : LinkOrigin.CONTACT);
+
+            setDirty();
+
+            for (Group radarGroup : sharedRadarGroups) {
+                postRadarLifecycleEvent(level, radarGroup, newPos, oldPos, RadarNetworkLifecycleEvent.Action.MOVED);
+            }
+
+            return true;
+        }
 
         String oldKey = key(dim, oldPos);
         String filtererKey = endpointToFilterer.get(oldKey);
