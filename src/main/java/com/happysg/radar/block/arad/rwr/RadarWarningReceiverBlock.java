@@ -2,6 +2,7 @@ package com.happysg.radar.block.arad.rwr;
 
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
@@ -50,11 +51,29 @@ public class RadarWarningReceiverBlock extends Block implements IBE<RadarWarning
     }
 
     @Override
-    protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        if (!state.is(newState.getBlock()) && level instanceof ServerLevel serverLevel) {
-            DataLinkBlock.breakAttachedEndpointLinks(serverLevel, pos);
-            ARADData.get(serverLevel).dissolveRwr(serverLevel, pos);
+    protected void onRemove(BlockState state, Level level, BlockPos pos,
+                            BlockState newState, boolean isMoving) {
+
+        if (!state.is(newState.getBlock())
+                && level instanceof ServerLevel serverLevel) {
+
+            ARADData arad = ARADData.get(serverLevel);
+
+            if (!isMoving && !SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
+                ARADData.Group group = arad.getGroup(serverLevel.dimension(), pos);
+
+                if (group != null) {
+                    for (BlockPos linkPos : java.util.List.copyOf(group.dataLinks)) {
+                        DataLinkBlock.disconnectSavedLink(serverLevel, linkPos);
+                    }
+                }
+
+                DataLinkBlock.disconnectAttachedEndpointLinks(serverLevel, pos);
+            }
+
+            arad.dissolveRwr(serverLevel, pos);
         }
+
         super.onRemove(state, level, pos, newState, isMoving);
     }
 

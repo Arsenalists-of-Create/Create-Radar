@@ -116,7 +116,9 @@ public class SkyRadarBlock extends KineticBlock implements IBE<SkyRadarBlockEnti
         }
 
         if (level instanceof ServerLevel sl) {
-            DataLinkBlock.breakAttachedEndpointLinks(sl, pos);
+            if (!isMoving) {
+                DataLinkBlock.disconnectAttachedEndpointLinks(sl, pos);
+            }
             NetworkData.get(sl).onEndpointRemoved(sl, pos);
         }
 

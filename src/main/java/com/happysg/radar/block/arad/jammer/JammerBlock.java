@@ -52,7 +52,9 @@ public class JammerBlock extends DirectionalKineticBlock
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!state.is(newState.getBlock()) && level instanceof ServerLevel serverLevel) {
-            DataLinkBlock.breakAttachedEndpointLinks(serverLevel, pos);
+            if (!isMoving) {
+                DataLinkBlock.disconnectAttachedEndpointLinks(serverLevel, pos);
+            }
             ARADData.get(serverLevel).onEndpointRemoved(serverLevel, pos);
             DirectionalJammingService.remove(serverLevel, pos);
         }

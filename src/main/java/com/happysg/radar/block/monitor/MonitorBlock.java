@@ -74,7 +74,7 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
         MonitorMultiBlockHelper.onRemove(pState, pLevel, pPos, pNewState, false);
 
         if (!pState.is(pNewState.getBlock()) && pLevel instanceof ServerLevel sl) {
-            DataLinkBlock.breakAttachedEndpointLinks(sl, pPos);
+            DataLinkBlock.disconnectAttachedEndpointLinks(sl, pPos);
 
             NetworkData.get(sl).onEndpointRemoved(sl, pPos);
             ARADData.get(sl).onEndpointRemoved(sl, pPos);

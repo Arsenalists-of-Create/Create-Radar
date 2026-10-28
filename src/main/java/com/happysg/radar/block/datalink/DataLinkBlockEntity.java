@@ -80,6 +80,34 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         updateGatheredData();
     }
 
+    public void clearSavedConnection() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        targetOffset = BlockPos.ZERO;
+        targetWorldPosFallback = null;
+        targetOffsetShip = BlockPos.ZERO;
+        linkedShipId = null;
+
+        filtererOffset = null;
+        filtererWorldPosFallback = null;
+
+        weaponEndpointType = WeaponEndpointType.NONE;
+        lastObservedWeaponCandidates = List.of();
+        lastKnownPos = worldPosition.immutable();
+
+        activeSource = null;
+        activeTarget = null;
+        sourceConfig = new CompoundTag();
+        ledState = false;
+
+        WeaponNetworkRuntime.get(serverLevel).unregister(worldPosition);
+
+        setChanged();
+        notifyUpdate();
+    }
+
     private void repairSavedDataPosition() {
         if (!(level instanceof ServerLevel serverLevel) || level.getGameTime() % 40 != 0 || lastKnownPos.equals(worldPosition))
             return;

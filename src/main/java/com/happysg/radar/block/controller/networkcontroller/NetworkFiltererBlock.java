@@ -2,6 +2,8 @@ package com.happysg.radar.block.controller.networkcontroller;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.item.RadarCompassLink;
 import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.registry.ModBlockEntityTypes;
@@ -277,7 +279,20 @@ public class NetworkFiltererBlock extends WrenchableDirectionalBlock implements 
                 if (be != null) {
 
                     // If this is the network controller, dissolve its network before the BE disappears
-                    if (level instanceof ServerLevel serverLevel && be instanceof NetworkFiltererBlockEntity controller) {
+                    if (level instanceof ServerLevel serverLevel
+                            && be instanceof NetworkFiltererBlockEntity controller) {
+
+                        if (!isMoving && !SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
+                            NetworkData network = NetworkData.get(serverLevel);
+                            NetworkData.Group group = network.getGroup(serverLevel.dimension(), pos);
+
+                            if (group != null) {
+                                for (BlockPos linkPos : java.util.List.copyOf(group.dataLinks)) {
+                                    DataLinkBlock.disconnectSavedLink(serverLevel, linkPos);
+                                }
+                            }
+                        }
+
                         controller.dissolveNetwork(serverLevel);
                     }
 

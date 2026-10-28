@@ -109,50 +109,25 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
 
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        if (!level.isClientSide && state.getBlock() != newState.getBlock() ) {
+        if (!level.isClientSide && state.getBlock() != newState.getBlock()) {
+
             if (level.getBlockEntity(pos) instanceof AutoYawControllerBlockEntity yaw) {
                 yaw.releaseKineticActuator();
             }
-            if (level instanceof net.minecraft.server.level.ServerLevel
-                    serverLevel) {
-                if (!SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
 
-                    if (!isMoving) {
-                        WeaponNetworkRuntime.get(serverLevel).rememberRelinkRequirement(pos);
-                    }
+            if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
 
-                    breakAttachedDataLinks(level, pos);
+                if (!isMoving && !SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
+                    WeaponNetworkRuntime.get(serverLevel).rememberRelinkRequirement(pos);
+                    DataLinkBlock.disconnectAttachedControllerLinks(serverLevel, pos);
                 }
+
                 WeaponNetworkRuntime.get(serverLevel).unregisterContactController(pos);
-            } else {
-                breakAttachedDataLinks(level, pos);
             }
         }
+
         super.onRemove(state, level, pos, newState, isMoving);
-
     }
-    private static void breakAttachedDataLinks(Level level, BlockPos controllerPos) {
-        for (Direction dir : Direction.values()) {
-            BlockPos linkPos = controllerPos.relative(dir);
-            BlockState linkState = level.getBlockState(linkPos);
-
-            if (!(linkState.getBlock() instanceof DataLinkBlock))
-                continue;
-
-            if (linkState.hasProperty(DataLinkBlock.LINK_STYLE)
-                    && linkState.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.CONTROLLER)
-                continue;
-
-            if (linkState.hasProperty(DataLinkBlock.FACING)) {
-                Direction facing = linkState.getValue(DataLinkBlock.FACING);
-                if (!linkPos.relative(facing.getOpposite()).equals(controllerPos))
-                    continue;
-            }
-
-            level.destroyBlock(linkPos, true);
-        }
-    }
-
     @Override
     public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
         super.onPlace(state, level, pos, oldState, isMoving);

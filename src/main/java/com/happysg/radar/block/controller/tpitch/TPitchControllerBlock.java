@@ -263,7 +263,11 @@ public class TPitchControllerBlock extends KineticBlock
             boolean assemblyMove = SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos);
             if (!assemblyMove) {
                 WeaponNetworkRuntime.get(serverLevel).rememberRelinkRequirement(pos);
-                breakAttachedDataLinks(level, pos);
+
+                if (!isMoving) {
+                    DataLinkBlock.disconnectAttachedEndpointLinks(serverLevel, pos);
+                    DataLinkBlock.disconnectAttachedControllerLinks(serverLevel, pos);
+                }
             }
             WeaponNetworkRuntime.get(serverLevel).unregisterContactController(pos);
             if (!assemblyMove) {
@@ -271,30 +275,6 @@ public class TPitchControllerBlock extends KineticBlock
             }
         }
         super.onRemove(state, level, pos, newState, isMoving);
-    }
-
-    private static void breakAttachedDataLinks(Level level,
-                                               BlockPos controllerPos) {
-        for (Direction direction : Direction.values()) {
-            BlockPos linkPos = controllerPos.relative(direction);
-            BlockState linkState = level.getBlockState(linkPos);
-            if (!(linkState.getBlock() instanceof DataLinkBlock)) {
-                continue;
-            }
-            if (linkState.hasProperty(DataLinkBlock.LINK_STYLE)
-                    && linkState.getValue(DataLinkBlock.LINK_STYLE)
-                    != DataLinkBlock.LinkStyle.CONTROLLER) {
-                continue;
-            }
-            if (linkState.hasProperty(DataLinkBlock.FACING)) {
-                Direction facing = linkState.getValue(DataLinkBlock.FACING);
-                if (!linkPos.relative(facing.getOpposite())
-                        .equals(controllerPos)) {
-                    continue;
-                }
-            }
-            level.destroyBlock(linkPos, true);
-        }
     }
 
     @Override

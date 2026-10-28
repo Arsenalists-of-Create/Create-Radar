@@ -81,38 +81,6 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
                 .setValue(LINK_STYLE, LinkStyle.RADAR);
     }
 
-    public static void breakAttachedEndpointLinks(ServerLevel level, BlockPos sourcePos) {
-        if (level == null || sourcePos == null || SableDataLinkRelocation.isRelocatingEndpoint(level, sourcePos)) {
-            return;
-        }
-
-        for (Direction direction : Direction.values()) {
-            BlockPos linkPos = sourcePos.relative(direction);
-
-            if (!level.hasChunkAt(linkPos)) {
-                continue;
-            }
-
-            BlockState linkState = level.getBlockState(linkPos);
-
-            if (!(linkState.getBlock() instanceof DataLinkBlock)) {
-                continue;
-            }
-
-            if (linkState.getValue(LINK_STYLE) != LinkStyle.RADAR) {
-                continue;
-            }
-
-            BlockPos actualSource = linkPos.relative(linkState.getValue(FACING).getOpposite());
-
-            if (!sourcePos.equals(actualSource)) {
-                continue;
-            }
-
-            level.destroyBlock(linkPos, true);
-        }
-    }
-
     @Override
     public Class<DataLinkBlockEntity> getBlockEntityClass() {
         return DataLinkBlockEntity.class;
@@ -121,6 +89,101 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
     @Override
     public BlockEntityType<? extends DataLinkBlockEntity> getBlockEntityType() {
         return ModBlockEntityTypes.RADAR_LINK.get();
+    }
+
+    public static void disconnectSavedLink(ServerLevel level, BlockPos linkPos) {
+        if (level == null || linkPos == null || !level.hasChunkAt(linkPos) || SableDataLinkRelocation.isRelocating(level, linkPos)) {
+            return;
+        }
+
+        BlockState state = level.getBlockState(linkPos);
+        if (!(state.getBlock() instanceof DataLinkBlock) || state.getValue(LINK_STYLE) != LinkStyle.RADAR) {
+            return;
+        }
+
+        if (!(level.getBlockEntity(linkPos) instanceof DataLinkBlockEntity link)) {
+            return;
+        }
+
+        if (SableDataLinkRelocation.isRelocatingEndpoint(level, link.getSourcePosition())) {
+            return;
+        }
+
+        NetworkData network = NetworkData.get(level);
+        ARADData arad = ARADData.get(level);
+
+        BlockPos targetPos = network.peekEndpointForDataLink(level.dimension(), linkPos);
+
+        if (targetPos == null) {
+            targetPos = arad.peekEndpointForDataLink(level.dimension(), linkPos);
+        }
+
+        if (targetPos == null) {
+            targetPos = link.getTargetPosition();
+        }
+
+        network.removeDataLinkAndCleanup(level.dimension(), linkPos, level, targetPos);
+        arad.removeDataLinkAndCleanup(level.dimension(), linkPos, level);
+
+        if (targetPos != null && !network.isEndpointLinked(level.dimension(), targetPos) && level.hasChunkAt(targetPos) && level.getBlockEntity(targetPos) instanceof AutoPitchControllerBlockEntity pitch) {
+            pitch.suppressFiltererContact();
+            pitch.onRadarNetworkDisconnected();
+        }
+
+        link.clearSavedConnection();
+    }
+
+    public static void disconnectAttachedEndpointLinks(ServerLevel level, BlockPos sourcePos) {
+        if (level == null || sourcePos == null || SableDataLinkRelocation.isRelocatingEndpoint(level, sourcePos)) {
+            return;
+        }
+
+        for (Direction direction : Direction.values()) {
+            BlockPos linkPos = sourcePos.relative(direction);
+            if (!level.hasChunkAt(linkPos) || SableDataLinkRelocation.isRelocating(level, linkPos)) {
+                continue;
+            }
+
+            BlockState linkState = level.getBlockState(linkPos);
+            if (!(linkState.getBlock() instanceof DataLinkBlock) || linkState.getValue(LINK_STYLE) != LinkStyle.RADAR) {
+                continue;
+            }
+
+            BlockPos actualSource = linkPos.relative(linkState.getValue(FACING).getOpposite());
+            if (!sourcePos.equals(actualSource)) {
+                continue;
+            }
+
+            disconnectSavedLink(level, linkPos);
+        }
+    }
+
+    public static void disconnectAttachedControllerLinks(ServerLevel level, BlockPos controllerPos) {
+        if (level == null || controllerPos == null || SableDataLinkRelocation.isRelocatingEndpoint(level, controllerPos)) {
+            return;
+        }
+
+        for (Direction direction : Direction.values()) {
+            BlockPos linkPos = controllerPos.relative(direction);
+
+            if (!level.hasChunkAt(linkPos) || SableDataLinkRelocation.isRelocating(level, linkPos)) {
+                continue;
+            }
+
+            BlockState state = level.getBlockState(linkPos);
+            if (!(state.getBlock() instanceof DataLinkBlock) || state.getValue(LINK_STYLE) != LinkStyle.CONTROLLER) {
+                continue;
+            }
+
+            BlockPos sourcePos = linkPos.relative(state.getValue(FACING).getOpposite());
+            if (!controllerPos.equals(sourcePos)) {
+                continue;
+            }
+
+            if (level.getBlockEntity(linkPos) instanceof DataLinkBlockEntity link) {
+                link.clearSavedConnection();
+            }
+        }
     }
 
     @Override

@@ -96,12 +96,12 @@ public class RadarBearingBlock extends BearingBlock implements IBE<RadarBearingB
         }
 
         if (level instanceof ServerLevel sl) {
-            DataLinkBlock.breakAttachedEndpointLinks(sl, pos);
+            if (!isMoving) {
+                DataLinkBlock.disconnectAttachedEndpointLinks(sl, pos);
+            }
             NetworkData.get(sl).onEndpointRemoved(sl, pos);
         }
 
         super.onRemove(state, level, pos, newState, isMoving);
     }
-
-
 }

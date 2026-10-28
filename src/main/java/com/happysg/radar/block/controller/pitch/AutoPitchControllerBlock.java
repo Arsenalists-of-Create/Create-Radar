@@ -123,7 +123,11 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
             boolean assemblyMove = SableDataLinkRelocation.isRelocatingEndpoint(sl, pos);
             if (!assemblyMove) {
                 WeaponNetworkRuntime.get(sl).rememberRelinkRequirement(pos);
-                breakAttachedDataLinks(level, pos);
+
+                if (!isMoving) {
+                    DataLinkBlock.disconnectAttachedEndpointLinks(sl, pos);
+                    DataLinkBlock.disconnectAttachedControllerLinks(sl, pos);
+                }
             }
             WeaponNetworkRuntime.get(sl).unregisterContactController(pos);
             if (!assemblyMove) {
@@ -133,27 +137,7 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
         super.onRemove(state, level, pos, newState, isMoving);
 
     }
-    private static void breakAttachedDataLinks(Level level, BlockPos controllerPos) {
-        for (Direction dir : Direction.values()) {
-            BlockPos linkPos = controllerPos.relative(dir);
-            BlockState linkState = level.getBlockState(linkPos);
 
-            if (!(linkState.getBlock() instanceof DataLinkBlock))
-                continue;
-
-            if (linkState.hasProperty(DataLinkBlock.LINK_STYLE)
-                    && linkState.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.CONTROLLER)
-                continue;
-
-            if (linkState.hasProperty(DataLinkBlock.FACING)) {
-                Direction facing = linkState.getValue(DataLinkBlock.FACING);
-                if (!linkPos.relative(facing.getOpposite()).equals(controllerPos))
-                    continue;
-            }
-
-            level.destroyBlock(linkPos, true);
-        }
-    }
     @Override
     public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
         super.onPlace(state, level, pos, oldState, isMoving);
