@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.firing;
 
 import com.happysg.radar.api.controller.RadarFireController;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
+import com.happysg.radar.block.controller.WeaponContactUnlinkState;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
@@ -17,8 +18,24 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.List;
 
-public class FireControllerBlockEntity extends SmartBlockEntity implements RadarFireController {
+public class FireControllerBlockEntity extends SmartBlockEntity implements RadarFireController, WeaponContactUnlinkState {
     boolean powered = false;
+
+    private boolean weaponContactSuppressed;
+
+    @Override
+    public boolean isWeaponContactSuppressed() {
+        return weaponContactSuppressed;
+    }
+
+    @Override
+    public void suppressWeaponContact() {
+        if (weaponContactSuppressed) return;
+
+        weaponContactSuppressed = true;
+        setPowered(false);
+        setChanged();
+    }
 
     // server-time when we last got a target update
     private long lastCommandTick = -1;
@@ -165,28 +182,42 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
     @Override
     protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(tag, registries, clientPacket);
-        tag.putBoolean("Powered", powered);
 
-        tag.putBoolean("Pulsing", pulsing);
-        tag.putLong("NextPulseTick", nextPulseTick);
-        tag.putLong("PulseOffTick", pulseOffTick);
+        tag.putBoolean("RadarWeaponContactUnlinked", weaponContactSuppressed);
+
+        if (clientPacket) {
+            tag.putBoolean("Powered", powered);
+            tag.putBoolean("Pulsing", pulsing);
+            tag.putLong("NextPulseTick", nextPulseTick);
+            tag.putLong("PulseOffTick", pulseOffTick);
+        }
     }
 
     @Override
     protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
 
-        powered = tag.getBoolean("Powered");
-        if (level != null) {
-            BlockState state = getBlockState();
-            if (state.getBlock() instanceof FireControllerBlock) {
-                powered = state.getValue(FireControllerBlock.POWERED);
-            }
-        }
+        weaponContactSuppressed = tag.getBoolean("RadarWeaponContactUnlinked");
 
-        pulsing = tag.getBoolean("Pulsing");
-        nextPulseTick = tag.contains("NextPulseTick", Tag.TAG_LONG) ? tag.getLong("NextPulseTick") : -1;
-        pulseOffTick = tag.contains("PulseOffTick", Tag.TAG_LONG) ? tag.getLong("PulseOffTick") : -1;
+        if (clientPacket) {
+            powered = tag.getBoolean("Powered");
+            if (level != null) {
+                BlockState state = getBlockState();
+                if (state.getBlock() instanceof FireControllerBlock) {
+                    powered = state.getValue(FireControllerBlock.POWERED);
+                }
+            }
+
+            pulsing = tag.getBoolean("Pulsing");
+            nextPulseTick = tag.contains("NextPulseTick", Tag.TAG_LONG) ? tag.getLong("NextPulseTick") : -1;
+            pulseOffTick = tag.contains("PulseOffTick", Tag.TAG_LONG) ? tag.getLong("PulseOffTick") : -1;
+        } else {
+            powered = false;
+            pulsing = false;
+            nextPulseTick = -1;
+            pulseOffTick = -1;
+            lastCommandTick = -1;
+        }
     }
 
     @Override

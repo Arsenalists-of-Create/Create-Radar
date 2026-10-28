@@ -1,5 +1,7 @@
 package com.happysg.radar.block.controller.kinetic;
 
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.cbcmw.CBCMWMountCompat;
 import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
@@ -65,7 +67,14 @@ public final class KineticPowerSource {
             return 0.0;
         }
 
-        double rpm = kinetic.getSpeed();
+        double rpm;
+
+        if (Mods.CBCMODERNWARFARE.isLoaded() && CBCMWMountCompat.isCompactMount(candidate)) {
+            rpm = CBCMWMountCompat.getPitchSpeed(candidate);
+        } else {
+            rpm = kinetic.getSpeed();
+        }
+
         return Double.isFinite(rpm) ? rpm : 0.0;
     }
 }

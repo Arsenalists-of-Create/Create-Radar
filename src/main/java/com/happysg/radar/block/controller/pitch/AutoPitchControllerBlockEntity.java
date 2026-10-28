@@ -5,6 +5,7 @@ import com.happysg.radar.api.weapon.RadarWeaponRegistry;
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.behavior.networks.SafeZone;
+import com.happysg.radar.block.controller.WeaponContactUnlinkState;
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.kinetic.ControllerInputShaft;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
@@ -58,7 +59,7 @@ import java.util.Set;
 import java.util.UUID;
 
 public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
-        implements ControllerLimitAccess, ControllerCollisionSource, ControllerInputShaft, RadarPitchController {
+        implements ControllerLimitAccess, ControllerCollisionSource, ControllerInputShaft, RadarPitchController, WeaponContactUnlinkState {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final double CBC_TOLERANCE = 0.1;
@@ -85,6 +86,46 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public RadarTrack track;
     private TargetingConfig radarTargetingConfig = TargetingConfig.DEFAULT;
     private List<SafeZone> safeZones = List.of();
+
+    private boolean weaponContactSuppressed;
+    private boolean filtererContactSuppressed;
+
+    @Override
+    public boolean isWeaponContactSuppressed() {
+        return weaponContactSuppressed;
+    }
+
+    @Override
+    public void suppressWeaponContact() {
+        if (weaponContactSuppressed) return;
+        weaponContactSuppressed = true;
+        setChanged();
+    }
+
+    public boolean isFiltererContactSuppressed() {
+        return filtererContactSuppressed;
+    }
+
+    public void suppressFiltererContact() {
+        if (filtererContactSuppressed) return;
+        filtererContactSuppressed = true;
+        setChanged();
+    }
+
+    public void onRadarNetworkDisconnected() {
+        boolean hadTrack = track != null;
+        track = null;
+        radarTargetingConfig = TargetingConfig.DEFAULT;
+
+        if (hadTrack && !binoMode) {
+            if (firingControl != null) {
+                firingControl.resetTarget();
+            }
+            failClosedRadarAim();
+        }
+
+        setChanged();
+    }
 
     @Nullable
     private Vec3 lastTargetPos = null;
@@ -1574,6 +1615,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(compound,registries,clientPacket);
 
+        weaponContactSuppressed = compound.getBoolean("RadarWeaponContactUnlinked");
+        filtererContactSuppressed = compound.getBoolean("RadarFiltererContactUnlinked");
+
         targetAngle = compound.getDouble("TargetAngle");
         isRunning = compound.getBoolean("IsRunning");
 
@@ -1607,6 +1651,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(compound,registries,clientPacket);
 
+        compound.putBoolean("RadarWeaponContactUnlinked", weaponContactSuppressed);
+        compound.putBoolean("RadarFiltererContactUnlinked", filtererContactSuppressed);
         double storedTarget = clientPacket ? targetAngle
                 : debugSwivelFollow.persistentTarget(targetAngle);
         boolean storedRunning = clientPacket ? isRunning

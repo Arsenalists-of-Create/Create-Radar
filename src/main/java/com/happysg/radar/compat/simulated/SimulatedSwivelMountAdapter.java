@@ -39,6 +39,7 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
 
+import javax.annotation.Nullable;
 import java.util.List;
 import java.util.UUID;
 
@@ -1008,5 +1009,90 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         private static CannonCalibration unavailable() {
             return new CannonCalibration(false, true, null);
         }
+    }
+
+    public record RotationGeometry(Vec3 pivot, Vec3 axis, @Nullable UUID parentSublevelId, @Nullable UUID assemblyId) {}
+
+    @Nullable
+    public RotationGeometry rotationGeometryWorld() {
+        return isValid() && isAssembled() ? rotationGeometryWorldForBearing(bearing) : null;
+    }
+
+    @Nullable
+    public static RotationGeometry rotationGeometryForTPitchMount(TPitchControllerBlockEntity controller, BlockPos mountPos) {
+        if (controller == null || mountPos == null || !controller.hasStructuralKineticSelectionForTargeting()) {
+            return null;
+        }
+
+        Direction side = findTPitchSwivelSide(controller, mountPos);
+
+        if (side == null) {
+            return null;
+        }
+
+        Level level = controller.getLevel();
+
+        if (level == null) {
+            return null;
+        }
+
+        BlockPos bearingPos = controller.getBlockPos().relative(side);
+
+        if (!level.hasChunkAt(bearingPos) || !(level.getBlockEntity(bearingPos)
+                instanceof SwivelBearingBlockEntity bearing)) {
+            return null;
+        }
+
+        return rotationGeometryWorldForBearing(bearing);
+    }
+
+    @Nullable
+    private static RotationGeometry rotationGeometryWorldForBearing(SwivelBearingBlockEntity bearing) {
+        if (bearing == null || bearing.isRemoved()
+                || bearing.getLevel() == null) {
+            return null;
+        }
+
+        BlockState state = bearing.getBlockState();
+
+        if (!(state.getBlock() instanceof SwivelBearingBlock)
+                || !state.hasProperty(SwivelBearingBlock.FACING)
+                || !state.hasProperty(SwivelBearingBlock.ASSEMBLED)
+                || !state.getValue(SwivelBearingBlock.ASSEMBLED)
+                || bearing.getSubLevelID() == null) {
+            return null;
+        }
+
+        Direction facing = state.getValue(SwivelBearingBlock.FACING);
+        Vec3 pivot = bearing.getBlockPos().relative(facing).getCenter();
+        Vec3 axis = Vec3.atLowerCornerOf(facing.getNormal());
+
+        SubLevel containing = Sable.HELPER.getContaining(bearing);
+        UUID parentId = null;
+
+        if (containing != null) {
+            if (containing.isRemoved()) {
+                return null;
+            }
+
+            parentId = containing.getUniqueId();
+            Vector3d p = containing.logicalPose().transformPosition(new Vector3d(pivot.x, pivot.y, pivot.z));
+            Vector3d a = containing.logicalPose().transformNormal(new Vector3d(axis.x, axis.y, axis.z));
+
+            pivot = new Vec3(p.x, p.y, p.z);
+            axis = new Vec3(a.x, a.y, a.z);
+        }
+
+        if (!Double.isFinite(pivot.x)
+                || !Double.isFinite(pivot.y)
+                || !Double.isFinite(pivot.z)
+                || !Double.isFinite(axis.x)
+                || !Double.isFinite(axis.y)
+                || !Double.isFinite(axis.z)
+                || axis.lengthSqr() < 1.0e-12) {
+            return null;
+        }
+
+        return new RotationGeometry(pivot, axis.normalize(), parentId, bearing.getSubLevelID());
     }
 }

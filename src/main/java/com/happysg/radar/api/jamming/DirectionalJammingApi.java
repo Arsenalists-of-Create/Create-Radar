@@ -206,8 +206,6 @@ public final class DirectionalJammingApi {
      * @param jammerWorldPosition jammer position in world space
      * @param targetRadarWorldPosition target radar in world space
      * @param jammerRpm current jammer RPM
-     * @param radarRollingRpm target radar rolling RPM
-     * @param radarRollingRate target radar rolling RPM rate
      * @param alignmentDegrees angular alignment error in degrees
      */
     public static void heartbeatJammer(
@@ -217,8 +215,6 @@ public final class DirectionalJammingApi {
             Vec3 jammerWorldPosition,
             Vec3 targetRadarWorldPosition,
             float jammerRpm,
-            float radarRollingRpm,
-            float radarRollingRate,
             float alignmentDegrees
     ) {
         DirectionalJammingService.heartbeat(
@@ -228,8 +224,6 @@ public final class DirectionalJammingApi {
                 jammerWorldPosition,
                 targetRadarWorldPosition,
                 jammerRpm,
-                radarRollingRpm,
-                radarRollingRate,
                 alignmentDegrees
         );
     }

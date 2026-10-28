@@ -491,7 +491,7 @@ public class SimulatedAimSolver implements AimSolver {
            InitialGuess initial,
            SolveStats stats
    ) {
-      if (snapshot.launchAngularVelocity().lengthSqr() > 1.0e-18 || snapshot.rigidBodyTargetMotion() != null) {
+      if (snapshot.swivelLaunchGeometry() != null || snapshot.launchAngularVelocity().lengthSqr() > 1.0e-18 || snapshot.rigidBodyTargetMotion() != null) {
          return null;
       }
       // Do not use analytical ballistics for drag or custom dynamics.

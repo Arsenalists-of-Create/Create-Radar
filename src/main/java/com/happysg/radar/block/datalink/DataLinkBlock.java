@@ -3,6 +3,8 @@ package com.happysg.radar.block.datalink;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.controller.WeaponContactUnlinkState;
+import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.mojang.logging.LogUtils;
@@ -18,6 +20,7 @@ import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
@@ -95,20 +98,42 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
             return;
         }
 
-        if (!level.isClientSide && level instanceof ServerLevel serverLevel) {
+        if (level instanceof ServerLevel serverLevel) {
             ResourceKey<Level> dim = serverLevel.dimension();
-            Direction supportFace = state.getValue(FACING);
+            LinkStyle style = state.getValue(LINK_STYLE);
+            boolean assemblyMove = isMoving || SableDataLinkRelocation.isRelocating(serverLevel, pos);
+            BlockPos sourcePos = pos.relative(state.getValue(FACING).getOpposite());
+            BlockEntity oldEntity = level.getBlockEntity(pos);
+            DataLinkBlockEntity oldLink = oldEntity instanceof DataLinkBlockEntity link ? link : null;
+            NetworkData data = NetworkData.get(serverLevel);
 
-            boolean assemblyMove = SableDataLinkRelocation.isRelocating(serverLevel, pos);
             if (!assemblyMove) {
-                NetworkData.get(serverLevel).removeDataLinkAndCleanup(dim, pos, serverLevel);
+                if (style == LinkStyle.CONTROLLER && serverLevel.hasChunkAt(sourcePos)) {
+                    BlockEntity controllerEntity = serverLevel.getBlockEntity(sourcePos);
+
+                    if (controllerEntity instanceof WeaponContactUnlinkState controller) {
+                        controller.suppressWeaponContact();
+                    }
+                }
+
+                if (style == LinkStyle.RADAR) {
+                    BlockPos targetPos = oldLink != null ? oldLink.getTargetPosition() : data.peekEndpointForDataLink(dim, pos);
+                    data.removeDataLinkAndCleanup(dim, pos, serverLevel, targetPos);
+
+                    if (targetPos != null && !data.isEndpointLinked(dim, targetPos) && serverLevel.hasChunkAt(targetPos)) {
+                        BlockEntity endpoint = serverLevel.getBlockEntity(targetPos);
+
+                        if (endpoint instanceof AutoPitchControllerBlockEntity pitch) {
+                            pitch.suppressFiltererContact();
+                            pitch.onRadarNetworkDisconnected();
+                        }
+                    }
+                }
+
                 ARADData.get(serverLevel).removeDataLinkAndCleanup(dim, pos, serverLevel);
             }
-            WeaponNetworkRuntime.get(serverLevel).unregister(pos);
 
-            if (!assemblyMove && state.getValue(LINK_STYLE) == LinkStyle.RADAR) {
-                NetworkData.get(serverLevel).onEndpointRemoved(serverLevel, pos.relative(supportFace.getOpposite()));
-            }
+            WeaponNetworkRuntime.get(serverLevel).unregister(pos);
         }
 
         super.onRemove(state, level, pos, newState, isMoving);

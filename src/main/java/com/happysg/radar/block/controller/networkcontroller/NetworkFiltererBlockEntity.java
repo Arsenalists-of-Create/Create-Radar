@@ -159,7 +159,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         NetworkData.Group group = data.getOrCreateGroup(sl.dimension(), pos);
         if (sl.getGameTime() % 5 == 0 && data.reconcileContactLinks(sl, group)) {
-            be.endpointCacheUntilTick = -1;
+            be.onWeaponTopologyChanged();
             be.applyFiltersToNetwork();
         }
 
@@ -267,6 +267,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         NetworkData.Group group = data.getGroup(sl.dimension(), worldPosition);
         if (group == null) return;
 
+        selectedWasAuto = group.selectedWasAuto;
         targeting = readTargetingFromSlot();
 
 
@@ -926,7 +927,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             autoUnloadedSinceTick = Long.MIN_VALUE;
         }
 
-        this.selectedWasAuto = wasAuto;
+        this.selectedWasAuto = next != null && wasAuto;
+        group.selectedWasAuto = this.selectedWasAuto;
 
         data.setSelectedTargetId(group, next);
 
@@ -947,9 +949,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             pushToEndpoints(track);
             markPushedTrack(track);
         }
-
-        data.setDirty();
-        setChanged();
     }
 
     private void markPushedTrack(@Nullable RadarTrack track) {
@@ -1327,8 +1326,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         } else {
             suppressAutoUntilTick = 0L;
         }
-
-        data.setDirty();
     }
 
     public void updateSafeZones(@Nullable List<SafeZone> safeZones) {
@@ -1365,6 +1362,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
 
         selectedWasAuto = false;
+
+        NetworkData.Group group = NetworkData.get(serverLevel).getGroup(serverLevel.dimension(), worldPosition);
+        if (group != null) {
+            group.selectedWasAuto = false;
+        }
     }
 
 
@@ -1635,7 +1637,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             zonesTag.add(zone.save());
         }
         nbt.put(NBT_SAFE_ZONES, zonesTag);
-        nbt.putBoolean("SelectedWasAuto", selectedWasAuto);
         nbt.putLong("LastKnownPos", lastKnownPos.asLong());
         if (level instanceof ServerLevel serverLevel) {
             if (Mods.SABLE.isLoaded()) {
@@ -1680,7 +1681,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         endpointRepushRequired = true;
         lastPushedSafeZonesHash = Long.MIN_VALUE;
-        selectedWasAuto = nbt.getBoolean("SelectedWasAuto");
+        selectedWasAuto = false;
         if (nbt.contains(NBT_INVENTORY, Tag.TAG_COMPOUND)) {
             inventory.deserializeNBT(registries, nbt.getCompound(NBT_INVENTORY));
         } else if (nbt.contains(LEGACY_INV, Tag.TAG_COMPOUND)) {

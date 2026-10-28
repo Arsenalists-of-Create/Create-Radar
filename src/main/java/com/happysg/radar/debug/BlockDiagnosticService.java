@@ -176,20 +176,16 @@ public final class BlockDiagnosticService {
                             emitter == null ? "none" : emitter.position())
                     .add("Directional jammer", "radar type",
                             emitter == null ? "none" : emitter.radarTypeId())
-                    .add("Directional jammer", "rolling RPM",
+                    .add("Directional jammer", "target radar RPM (telemetry only)",
                             emitter == null ? 0.0f : emitter.rollingRpm())
-                    .add("Directional jammer", "rolling rate (RPM/s)",
+                    .add("Directional jammer", "radar RPM change (telemetry only)",
                             emitter == null ? 0.0f : emitter.rollingRate())
                     .add("Directional jammer", "input RPM",
                             profile.jammerRpm())
-                    .add("Directional jammer", "RPM difference",
-                            profile.rpmDifference())
-                    .add("Directional jammer", "rate tolerance bonus",
-                            profile.rateBonus())
-                    .add("Directional jammer", "tier tolerances",
-                            profile.outerThreshold() + " / "
-                                    + profile.directionalThreshold() + " / "
-                                    + profile.severeThreshold())
+                    .add("Directional jammer", "full power RPM",
+                            profile.fullPowerRpm())
+                    .add("Directional jammer", "jammer power fraction",
+                            profile.powerFraction())
                     .add("Directional jammer", "alignment error",
                             profile.alignmentDegrees())
                     .add("Directional jammer", "alignment factor",

@@ -41,6 +41,13 @@ public final class CBCMWMountCompat {
         }
     }
 
+    public static float getPitchSpeed(BlockEntity blockEntity) {
+        if (blockEntity instanceof CompactCannonMountBlockEntity compact) {
+            return compact.getPitchSpeed();
+        }
+        return 0.0f;
+    }
+
     public static void notifyUpdate(BlockEntity blockEntity) {
         if (blockEntity instanceof CompactCannonMountBlockEntity compact) {
             compact.notifyUpdate();

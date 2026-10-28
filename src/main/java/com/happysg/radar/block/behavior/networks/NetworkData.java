@@ -11,13 +11,17 @@ import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.registry.ModBlocks;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -115,6 +119,8 @@ public class NetworkData extends SavedData {
     public static class Group {
         public final FilterKey key;
         public @Nullable String selectedTargetId;
+        public boolean selectedWasAuto;
+
         public final Set<BlockPos> monitorEndpoints = new HashSet<>();
 
         public final Set<BlockPos> radarEndpoints = new LinkedHashSet<>();
@@ -188,9 +194,9 @@ public class NetworkData extends SavedData {
                 DATA_NAME
         );
     }
+
     public void setSelectedTargetId(Group g, @Nullable String id) {
         g.selectedTargetId = id;
-        setDirty();
     }
 
     @Nullable
@@ -300,6 +306,10 @@ public class NetworkData extends SavedData {
             node.onNetworkDisconnected();
         }
 
+        if (be instanceof AutoPitchControllerBlockEntity pitch) {
+            pitch.onRadarNetworkDisconnected();
+        }
+
         if (be instanceof RadarAimController controller && !(be instanceof AutoPitchControllerBlockEntity) && !(be instanceof AutoYawControllerBlockEntity)) {
             controller.setContact(null);
         }
@@ -345,8 +355,6 @@ public class NetworkData extends SavedData {
             group.targetingTag = g.contains("Targeting", Tag.TAG_COMPOUND) ? g.getCompound("Targeting") : defaultTargetingTag();
             group.identificationTag = g.contains("Identification", Tag.TAG_COMPOUND) ? g.getCompound("Identification") : defaultIdentificationTag();
             group.detectionTag = g.contains("Detection", Tag.TAG_COMPOUND) ? g.getCompound("Detection") : defaultDetectionTag();
-            group.selectedTargetId = g.contains("SelectedTargetId", Tag.TAG_STRING) ? g.getString("SelectedTargetId") : null;
-
 
             if (g.contains("MonitorEndpoints", Tag.TAG_LIST)) {
                 ListTag list = g.getList("MonitorEndpoints", Tag.TAG_COMPOUND);
@@ -469,8 +477,6 @@ public class NetworkData extends SavedData {
             g.put("Targeting", group.targetingTag);
             g.put("Identification", group.identificationTag);
             g.put("Detection", group.detectionTag);
-            if (group.selectedTargetId != null)
-                g.putString("SelectedTargetId", group.selectedTargetId);
 
             if (!group.monitorEndpoints.isEmpty()) {
                 ListTag list = new ListTag();
@@ -715,7 +721,9 @@ public class NetworkData extends SavedData {
         String endpointKey = key(dim, controllerPos);
         String filtererKey = key(dim, group.key.filtererPos());
 
-        if (!group.weaponEndpoints.contains(controllerPos) || !filtererKey.equals(endpointToFilterer.get(endpointKey)) || endpointOrigins.get(endpointKey) != LinkOrigin.DATALINK) {
+        LinkOrigin origin = endpointOrigins.get(endpointKey);
+
+        if (!group.weaponEndpoints.contains(controllerPos) || !filtererKey.equals(endpointToFilterer.get(endpointKey)) || (origin != LinkOrigin.DATALINK && origin != LinkOrigin.CONTACT)) {
             return false;
         }
 
@@ -756,11 +764,50 @@ public class NetworkData extends SavedData {
         setDirty();
     }
 
+    private boolean repairOrphanedPitchFilterLinks(ServerLevel level, Group group) {
+        boolean changed = false;
+        ResourceKey<Level> dim = group.key.dim();
+
+        for (BlockPos endpointPos : List.copyOf(group.weaponEndpoints)) {
+            if (endpointOrigins.get(key(dim, endpointPos)) != LinkOrigin.DATALINK) {
+                continue;
+            }
+
+            if (!level.hasChunkAt(endpointPos) || SableDataLinkRelocation.isRelocatingEndpoint(level, endpointPos)) {
+                continue;
+            }
+
+            BlockEntity endpoint = level.getBlockEntity(endpointPos);
+
+            if (!(endpoint instanceof AutoPitchControllerBlockEntity pitch)) {
+                continue;
+            }
+
+            if (hasOtherRadarLinkForEndpoint(level, group, endpointPos, null)) {
+                continue;
+            }
+
+            pitch.suppressFiltererContact();
+            removeEndpointFromGroup(level, group, endpointPos, true, RadarNetworkLifecycleEvent.Action.RECONCILED);
+
+            changed = true;
+        }
+
+        return changed;
+    }
+
     public boolean reconcileContactLinks(ServerLevel level, Group group) {
-        if (level == null || group == null || !group.key.dim().equals(level.dimension())) return false;
+        if (level == null || group == null || !group.key.dim().equals(level.dimension())) {
+            return false;
+        }
+
+        boolean changed = repairOrphanedPitchFilterLinks(level, group);
+        if (!groupsByFilterer.containsKey(key(group.key.dim(), group.key.filtererPos()))) {
+            if (changed) setDirty();
+            return changed;
+        }
 
         Set<BlockPos> reachable = findReachableContactEndpoints(level, group);
-        boolean changed = false;
 
         for (BlockPos endpoint : snapshotContactEndpoints(group)) {
             if (!reachable.contains(endpoint)) {
@@ -783,7 +830,77 @@ public class NetworkData extends SavedData {
             }
         }
 
-        if (changed) setDirty();
+        if (reconcileLiveWeaponMountReferences(level, group)) {
+            changed = true;
+        }
+
+        if (pruneUnreferencedWeaponMounts(group)) {
+            changed = true;
+        }
+
+        if (changed) {
+            setDirty();
+        }
+
+        return changed;
+    }
+
+    private boolean reconcileLiveWeaponMountReferences(ServerLevel level, Group group) {
+        boolean changed = false;
+
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(level);
+
+        for (BlockPos endpointPos : List.copyOf(group.weaponEndpoints)) {
+
+            if (!level.hasChunkAt(endpointPos)) {
+                continue;
+            }
+
+            BlockEntity endpoint = level.getBlockEntity(endpointPos);
+
+            if (!(endpoint instanceof AutoPitchControllerBlockEntity)) {
+                continue;
+            }
+
+            BlockPos effectiveMount = runtime.getMountForController(endpointPos);
+            if (effectiveMount != null) {
+                WeaponNetworkRuntime.WeaponControlView view = runtime.getWeaponControlViewFromPitch(endpointPos);
+
+                if (view == null || !view.validTopology() || view.channelForMount(effectiveMount) == null) {
+                    effectiveMount = null;
+                }
+            }
+
+            if (reconcileWeaponEndpointMount(group, endpointPos, effectiveMount)) {
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private boolean pruneUnreferencedWeaponMounts(Group group) {
+        boolean changed = false;
+
+        ResourceKey<Level> dim = group.key.dim();
+        String filtererKey = key(dim, group.key.filtererPos());
+
+        for (BlockPos mountPos : List.copyOf(group.usedWeaponMounts)) {
+            String mountKey = key(dim, mountPos);
+
+            if (groupReferencesMount(group, dim, mountKey)) {
+                continue;
+            }
+
+            group.usedWeaponMounts.remove(mountPos);
+
+            if (filtererKey.equals(weaponMountToFilterer.get(mountKey))) {
+                weaponMountToFilterer.remove(mountKey);
+            }
+
+            changed = true;
+        }
+
         return changed;
     }
 
@@ -906,7 +1023,12 @@ public class NetworkData extends SavedData {
             return new ContactEndpoint(ContactKind.MONITOR, controllerPos, null);
         }
 
-        if (be instanceof AutoPitchControllerBlockEntity) {
+        if (be instanceof AutoPitchControllerBlockEntity pitch) {
+
+            if (pitch.isFiltererContactSuppressed() && getEndpointOrigin(level.dimension(), pos) != LinkOrigin.DATALINK) {
+                return null;
+            }
+
             BlockPos mountPos = WeaponNetworkRuntime.get(level).getMountForController(pos);
 
             if (mountPos != null) {
@@ -1029,9 +1151,13 @@ public class NetworkData extends SavedData {
             }
 
             String mountKey = controllerToWeaponMount.remove(endpointKey);
-            if (mountKey != null) {
+
+            if (mountKey != null && !groupReferencesMount(group, dim, mountKey)) {
                 group.usedWeaponMounts.remove(posFromKey(mountKey));
-                weaponMountToFilterer.remove(mountKey);
+                String ownerKey = key(dim, group.key.filtererPos());
+                if (ownerKey.equals(weaponMountToFilterer.get(mountKey))) {
+                    weaponMountToFilterer.remove(mountKey);
+                }
             }
             removed = true;
         }
@@ -1451,7 +1577,6 @@ public class NetworkData extends SavedData {
         CompoundTag tag = new CompoundTag();
         tag.putInt("SchemaVersion", SCHEMATIC_SNAPSHOT_VERSION);
         tag.put("FiltererPos", encoder.apply(group.key.filtererPos()));
-        tag.putString("SelectedTargetId", group.selectedTargetId == null ? "" : group.selectedTargetId);
         tag.put("TargetingTag", group.targetingTag.copy());
         tag.put("IdentificationTag", group.identificationTag.copy());
         tag.put("DetectionTag", group.detectionTag.copy());
@@ -1522,9 +1647,8 @@ public class NetworkData extends SavedData {
         }
 
         Group group = getOrCreateGroup(dim, controllerPos);
-        group.selectedTargetId = mode == RestorationMode.SCHEMATIC_COPY
-                ? null
-                : (tag.getString("SelectedTargetId").isEmpty() ? null : tag.getString("SelectedTargetId"));
+        group.selectedTargetId = null;
+        group.selectedWasAuto = false;
         if (tag.contains("TargetingTag", Tag.TAG_COMPOUND)) group.targetingTag = tag.getCompound("TargetingTag").copy();
         if (tag.contains("IdentificationTag", Tag.TAG_COMPOUND)) group.identificationTag = tag.getCompound("IdentificationTag").copy();
         if (tag.contains("DetectionTag", Tag.TAG_COMPOUND)) group.detectionTag = tag.getCompound("DetectionTag").copy();
@@ -1642,10 +1766,24 @@ public class NetworkData extends SavedData {
     }
 
     public void removeDataLinkAndCleanup(ResourceKey<Level> dim, BlockPos dataLinkPos, @Nullable ServerLevel level) {
+        removeDataLinkAndCleanup(dim, dataLinkPos, level, null);
+    }
+
+    public void removeDataLinkAndCleanup(ResourceKey<Level> dim, BlockPos dataLinkPos, @Nullable ServerLevel level, @Nullable BlockPos endpointHint) {
         String dlKey = key(dim, dataLinkPos);
 
         String filtererKey = dataLinkToFilterer.remove(dlKey);
         String endpointKey = dataLinkToEndpoint.remove(dlKey);
+
+        if (filtererKey == null) {
+            for (Map.Entry<String, Group> entry : groupsByFilterer.entrySet()) {
+                Group candidate = entry.getValue();
+                if (candidate.key.dim().equals(dim) && candidate.dataLinks.contains(dataLinkPos)) {
+                    filtererKey = entry.getKey();
+                    break;
+                }
+            }
+        }
 
         if (filtererKey == null) {
             setDirty();
@@ -1653,11 +1791,16 @@ public class NetworkData extends SavedData {
         }
 
         Group group = groupsByFilterer.get(filtererKey);
+
+        if (endpointKey == null && endpointHint != null && group != null && (group.weaponEndpoints.contains(endpointHint) || group.monitorEndpoints.contains(endpointHint) || group.radarEndpoints.contains(endpointHint))) {
+
+            endpointKey = key(dim, endpointHint);
+        }
         if (group != null) {
             group.dataLinks.remove(dataLinkPos);
         }
 
-        if (endpointKey != null && group != null && level != null) {
+        if (endpointKey != null && group != null && level != null && level.hasChunkAt(posFromKey(endpointKey)) && !hasOtherRadarLinkForEndpoint(level, group, posFromKey(endpointKey), dataLinkPos)) {
             BlockPos endpointPos = posFromKey(endpointKey);
 
             BlockEntity lifecycleBe = level.hasChunkAt(endpointPos) ? level.getBlockEntity(endpointPos) : null;
@@ -1722,6 +1865,65 @@ public class NetworkData extends SavedData {
         // autodelete empty group
         cleanupIfEmpty(filtererKey);
         setDirty();
+    }
+
+    private boolean hasOtherRadarLinkForEndpoint(ServerLevel level, Group group, BlockPos endpointPos, @Nullable BlockPos ignoredLinkPos) {
+        ResourceKey<Level> dim = group.key.dim();
+        String endpointKey = key(dim, endpointPos);
+
+        for (BlockPos linkPos : group.dataLinks) {
+            if (linkPos.equals(ignoredLinkPos)) {
+                continue;
+            }
+
+            String recordedEndpoint = dataLinkToEndpoint.get(key(dim, linkPos));
+
+            if (!level.hasChunkAt(linkPos) || SableDataLinkRelocation.isRelocating(level, linkPos)) {
+                if (recordedEndpoint == null || recordedEndpoint.equals(endpointKey)) {
+                    return true;
+                }
+                continue;
+            }
+
+            BlockState state = level.getBlockState(linkPos);
+
+            if (!(state.getBlock() instanceof DataLinkBlock) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR) {
+                continue;
+            }
+
+            BlockEntity be = level.getBlockEntity(linkPos);
+
+            if (be instanceof DataLinkBlockEntity link && endpointPos.equals(link.getTargetPosition())) {
+                return true;
+            }
+        }
+
+        BlockPos filtererPos = group.key.filtererPos();
+
+        for (Direction direction : Direction.values()) {
+            BlockPos linkPos = filtererPos.relative(direction);
+
+            if (linkPos.equals(ignoredLinkPos)) {
+                continue;
+            }
+
+            if (!level.hasChunkAt(linkPos) || SableDataLinkRelocation.isRelocating(level, linkPos)) {
+                return true;
+            }
+
+            BlockState state = level.getBlockState(linkPos);
+
+            if (!(state.getBlock() instanceof DataLinkBlock) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR) {
+                continue;
+            }
+
+            BlockEntity be = level.getBlockEntity(linkPos);
+            if (be instanceof DataLinkBlockEntity link && filtererPos.equals(link.getSourcePosition()) && endpointPos.equals(link.getTargetPosition())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
 
@@ -1826,6 +2028,10 @@ public class NetworkData extends SavedData {
                 BlockPos dlPos = posFromKey(dlKey);
                 group.dataLinks.remove(dlPos);
             }
+        }
+
+        if (level != null && group != null && level.hasChunkAt(group.key.filtererPos()) && level.getBlockEntity(group.key.filtererPos()) instanceof NetworkFiltererBlockEntity filterer) {
+            filterer.onWeaponTopologyChanged();
         }
 
         cleanupIfEmpty(filtererKey);
@@ -2148,6 +2354,7 @@ public class NetworkData extends SavedData {
 
         // copy simple fields
         newGroup.selectedTargetId = oldGroup.selectedTargetId;
+        newGroup.selectedWasAuto = oldGroup.selectedWasAuto;
         newGroup.monitorEndpoints.addAll(oldGroup.monitorEndpoints);
 
         newGroup.radarEndpoints.addAll(oldGroup.radarEndpoints);

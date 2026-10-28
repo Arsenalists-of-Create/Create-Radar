@@ -508,8 +508,6 @@ public class JammerBlockEntity extends KineticBlockEntity {
                 jammerWorldPosition,
                 targetWorldPosition,
                 Math.abs(getSpeed()),
-                selectedRollingRpm,
-                selectedRollingRate,
                 alignmentDegrees
         );
     }

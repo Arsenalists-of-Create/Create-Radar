@@ -26,6 +26,7 @@ import com.happysg.radar.compat.cbc.CannonLead;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
+import rbasamoyai.createbigcannons.config.CBCConfigs;
 import com.happysg.radar.compat.cbc.DirectCbcMountMotion;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.compat.cbc.VelocityTracker;
@@ -36,6 +37,7 @@ import com.happysg.radar.compat.cbcmoreshells.CBCMSCannonCompat;
 import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
 import com.happysg.radar.compat.cbcmw.CBCMWGuidanceCompat;
 import com.happysg.radar.compat.sable.SableLaunchMotion;
+import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
 import com.happysg.radar.compat.sable.SubLevelAimResolver;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -73,6 +75,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -471,28 +475,32 @@ public class WeaponFiringControl {
     }
 
     @Nullable
-    private Vec3 getCannonRayStart(
-            @Nullable CannonMountContext mount
-    ) {
+    private Vec3 getCannonRayStart(@Nullable CannonMountContext mount) {
         if (mount == null) {
             return null;
         } else {
             PitchOrientedContraptionEntity poce = mount.getContraption();
+
+            boolean structuralSwivel = this.level instanceof ServerLevel
+                    && (usesStructuralPitchForMount(mount.getBlockPos())
+                    || (this.yawController != null
+                    && this.yawController.hasStructuralKineticSelectionForTargeting())
+                    || (this.sharedYawController != null
+                    && this.sharedYawController.hasStructuralKineticSelectionForTargeting()));
+
+            float partialTicks = structuralSwivel ? 0.0F : 1.0F;
+
             if (Mods.SABLE.isLoaded()
                     && SableUtils.isBlockInShipyard(
                     this.level, mount.getBlockPos())) {
                 if (poce != null) {
-                    Vec3 shipyardPos = poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
+                    Vec3 shipyardPos = poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), partialTicks);
                     return SableUtils.getWorldVec(this.level, shipyardPos);
                 } else {
-                    return SableUtils.getWorldVec(
-                            this.level, mount.getBlockPos().getCenter());
+                    return SableUtils.getWorldVec(this.level, mount.getBlockPos().getCenter());
                 }
             } else {
-                return poce == null
-                        ? mount.getBlockPos().getCenter()
-                        : poce.toGlobalVector(
-                        Vec3.atCenterOf(BlockPos.ZERO), 1.0F);
+                return poce == null ? mount.getBlockPos().getCenter() : poce.toGlobalVector(Vec3.atCenterOf(BlockPos.ZERO), partialTicks);
             }
         }
     }
@@ -3531,6 +3539,7 @@ public class WeaponFiringControl {
 
         boolean movingSableMount = this.isSableMount();
         RigidBodyLaunchMath.Motion sableMotion = movingSableMount ? this.captureAsyncSableMotion(serverLevel) : null;
+        boolean inheritLaunchVelocity = inheritsCbcSableLaunchVelocity(this.cannonMount, cannonContraption);
 
         Vec3 predictedMuzzlePos = sableMotion != null
                 ? sableMotion.futurePosition(muzzleWorldPos, predictedTicks)
@@ -3595,10 +3604,11 @@ public class WeaponFiringControl {
         Double preferredPitch = this.preferredPitch(previousPitch);
         TargetingSnapshot snapshot = TargetingSnapshot.builder(serverLevel)
                 .muzzlePosition(predictedMuzzlePos)
+                .swivelLaunchGeometry(resolveSwivelLaunchGeometry(this.cannonMount, muzzleWorldPos, sableMotion, predictedTicks))
                 .launchPivotPosition(predictedPivotPos)
                 .muzzleForwardOffset(aimGeometry.muzzleForwardOffset())
-                .inheritedVelocity(predictedShooterVel)
-                .launchAngularVelocity(predictedAngularVelocity)
+                .inheritedVelocity(inheritLaunchVelocity ? predictedShooterVel : Vec3.ZERO)
+                .launchAngularVelocity(inheritLaunchVelocity ? predictedAngularVelocity : Vec3.ZERO)
                 .targetPosition(delayedTargetPos)
                 .targetVelocity(delayedTargetVel)
                 .targetAcceleration(rigidTarget != null ? Vec3.ZERO : safeTargetAccel)
@@ -4114,6 +4124,8 @@ public class WeaponFiringControl {
             sableMotion = SableLaunchMotion.capture(serverLevel, mountShip);
         }
 
+        boolean inheritLaunchVelocity = inheritsCbcSableLaunchVelocity(this.cannonMount, cannonContraption);
+
         if (this.shouldLogTargetingDebug(serverLevel)) {
             this.logTargetingCoordinateResolution(serverLevel, rawTargetPos, targetWorldPos, rawMuzzlePos, muzzleWorldPos, safeShooterVel);
             LOGGER.debug("WFC projectile state: speed={} gravity={} drag={} quadratic={} cbcPhysics={} lifetimeCap={} reason={}",
@@ -4159,10 +4171,11 @@ public class WeaponFiringControl {
             TargetingSnapshot snapshot =
                     TargetingSnapshot.builder(serverLevel)
                             .muzzlePosition(predictedMuzzlePos)
+                            .swivelLaunchGeometry(resolveSwivelLaunchGeometry(this.cannonMount, muzzleWorldPos, sableMotion, predictedTicks))
                             .launchPivotPosition(predictedPivotPos)
                             .muzzleForwardOffset(aimGeometry.muzzleForwardOffset())
-                            .inheritedVelocity(predictedShooterVel)
-                            .launchAngularVelocity(sableMotion != null && aimGeometry.coupled() ? sableMotion.angularVelocityAt(predictedTicks) : Vec3.ZERO)
+                            .inheritedVelocity(inheritLaunchVelocity ? predictedShooterVel : Vec3.ZERO)
+                            .launchAngularVelocity(inheritLaunchVelocity && sableMotion != null && aimGeometry.coupled() ? sableMotion.angularVelocityAt(predictedTicks) : Vec3.ZERO)
                             .targetPosition(delayedTargetPos)
                             .targetVelocity(delayedTargetVel)
                             .targetAcceleration(rigidTarget != null ? Vec3.ZERO : safeTargetAccel)
@@ -4229,6 +4242,175 @@ public class WeaponFiringControl {
             return anchor;
         }
         return this.getCannonRayStart(mount);
+    }
+
+    @Nullable
+    private SwivelLaunchGeometry resolveSwivelLaunchGeometry(@Nullable CannonMountContext mount, Vec3 muzzleWorld, @Nullable RigidBodyLaunchMath.Motion motion, int predictedTicks) {
+        if (!Mods.SIMULATED.isLoaded() || !(this.level instanceof ServerLevel serverLevel) || mount == null || mount.getContraption() == null || !finite(muzzleWorld)) {
+            return null;
+        }
+
+        BlockPos mountPos = mount.getBlockPos();
+        AutoYawControllerBlockEntity yaw = sharedYawController != null ? sharedYawController : yawController;
+
+        boolean structuralYaw = yaw != null && yaw.hasStructuralKineticSelectionForTargeting();
+        boolean structuralPitch = usesStructuralPitchForMount(mountPos);
+
+        if (!structuralYaw && !structuralPitch) {
+            return null;
+        }
+
+        SimulatedSwivelMountAdapter.RotationGeometry yawRotation = null;
+        if (structuralYaw) {
+            if (!SimulatedSwivelMountAdapter.isMountOnControllerSwivel(yaw, Direction.Axis.Y, mountPos)) {
+                return null;
+            }
+
+            var resolution = SimulatedSwivelMountAdapter.resolve(yaw, Direction.Axis.Y);
+            if (!(resolution.adapter() instanceof SimulatedSwivelMountAdapter swivel)) {
+                return null;
+            }
+
+            yawRotation = swivel.rotationGeometryWorld();
+
+            if (yawRotation == null) {
+                return null;
+            }
+        }
+
+        SimulatedSwivelMountAdapter.RotationGeometry pitchRotation = null;
+
+        if (structuralPitch) {
+            if (pitchController instanceof TPitchControllerBlockEntity tPitch) {
+                pitchRotation = SimulatedSwivelMountAdapter.rotationGeometryForTPitchMount(tPitch, mountPos);
+
+            } else if (pitchController != null && pitchController.getBlockState().hasProperty(HorizontalDirectionalBlock.FACING)) {
+                Direction.Axis pitchAxis = pitchController.getBlockState().getValue(HorizontalDirectionalBlock.FACING).getAxis();
+
+                if (SimulatedSwivelMountAdapter.isMountOnControllerSwivel(pitchController, pitchAxis, mountPos)) {
+                    var resolution = SimulatedSwivelMountAdapter.resolve(pitchController, pitchAxis);
+                    if (resolution.adapter() instanceof SimulatedSwivelMountAdapter swivel) {
+                        pitchRotation = swivel.rotationGeometryWorld();
+                    }
+                }
+            }
+
+            if (pitchRotation == null) {
+                return null;
+            }
+        }
+
+        if (yawRotation != null && pitchRotation != null && !isPitchBearingUnderYaw(serverLevel, yawRotation, pitchRotation)) {
+            return null;
+        }
+
+        Vec3 forward = CBCMuzzleUtil.getForwardWorld(mount.getContraption());
+        SubLevelAccess mountShip = SableCompanion.INSTANCE.getContaining(serverLevel, mountPos);
+        forward = SableUtils.getWorldVecDirectionTransform(forward, mountShip);
+
+        if (!finite(forward) || forward.lengthSqr() < 1.0e-12) {
+            return null;
+        }
+
+        if (motion != null && predictedTicks > 0) {
+            Vec3 futureMuzzle = motion.futurePosition(muzzleWorld, predictedTicks);
+            Vec3 futureForwardTip = motion.futurePosition(muzzleWorld.add(forward), predictedTicks);
+            forward = futureForwardTip.subtract(futureMuzzle);
+        }
+
+        if (!finite(forward) || forward.lengthSqr() < 1.0e-12) {
+            return null;
+        }
+
+        if (yawRotation != null) {
+            yawRotation = predictSwivelRotation(serverLevel, yawRotation, predictedTicks);
+
+            if (yawRotation == null) {
+                return null;
+            }
+        }
+
+        if (pitchRotation != null) {
+            pitchRotation = predictSwivelRotation(serverLevel, pitchRotation, predictedTicks);
+
+            if (pitchRotation == null) {
+                return null;
+            }
+        }
+
+        if (yawRotation != null && pitchRotation != null) {
+            return SwivelLaunchGeometry.nested(yawRotation.pivot(), yawRotation.axis(), pitchRotation.pivot(), pitchRotation.axis(), forward);
+        }
+
+        // Yaw only.
+        if (yawRotation != null) {
+            return new SwivelLaunchGeometry(yawRotation.pivot(), yawRotation.axis(), forward);
+        }
+
+        return new SwivelLaunchGeometry(pitchRotation.pivot(), pitchRotation.axis(), forward);
+    }
+
+    /**
+     * Verify that the pitch swivel belongs to the yaw assembly.
+     */
+    private static boolean isPitchBearingUnderYaw(ServerLevel level, SimulatedSwivelMountAdapter.RotationGeometry yaw, SimulatedSwivelMountAdapter.RotationGeometry pitch) {
+        UUID attachedId = yaw.assemblyId();
+        UUID pitchParentId = pitch.parentSublevelId();
+
+        if (attachedId == null || pitchParentId == null) {
+            return false;
+        }
+
+        if (attachedId.equals(pitchParentId)) {
+            return true;
+        }
+
+        var container = dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(level);
+
+        if (container == null) {
+            return false;
+        }
+
+        var attached = container.getSubLevel(attachedId);
+        var pitchParent = container.getSubLevel(pitchParentId);
+
+        return attached != null
+                && !attached.isRemoved()
+                && pitchParent != null
+                && !pitchParent.isRemoved()
+                && dev.ryanhcode.sable.api.SubLevelHelper
+                .getConnectedChain(attached)
+                .contains(pitchParent);
+    }
+
+    @Nullable
+    private static SimulatedSwivelMountAdapter.RotationGeometry
+    predictSwivelRotation(ServerLevel serverLevel, SimulatedSwivelMountAdapter.RotationGeometry rotation, int predictedTicks) {
+        if (rotation == null || predictedTicks <= 0 || rotation.parentSublevelId() == null) {
+            return rotation;
+        }
+
+        SubLevelAccess parent = SableWeaponFiringAccess.findSubLevel(serverLevel, rotation.parentSublevelId());
+
+        if (parent == null) {
+            return null;
+        }
+
+        RigidBodyLaunchMath.Motion parentMotion = SableLaunchMotion.capture(serverLevel, parent);
+
+        if (parentMotion == null) {
+            return null;
+        }
+
+        Vec3 pivot = rotation.pivot();
+        Vec3 futurePivot = parentMotion.futurePosition(pivot, predictedTicks);
+        Vec3 futureAxis = parentMotion.futurePosition(pivot.add(rotation.axis()), predictedTicks).subtract(futurePivot);
+
+        if (!finite(futurePivot) || !finite(futureAxis) || futureAxis.lengthSqr() < 1.0e-12) {
+            return null;
+        }
+
+        return new SimulatedSwivelMountAdapter.RotationGeometry(futurePivot, futureAxis.normalize(), rotation.parentSublevelId(), rotation.assemblyId());
     }
 
     private AimGeometry resolveAimGeometry(AbstractMountedCannonContraption cannon) {
@@ -5686,6 +5868,19 @@ public class WeaponFiringControl {
         } else {
             return null;
         }
+    }
+
+    private boolean inheritsCbcSableLaunchVelocity(@Nullable CannonMountContext mount, @Nullable AbstractMountedCannonContraption cannon) {
+        if (mount == null || cannon == null || !this.isSableMount(mount)) {
+            return true;
+        }
+
+
+        if (!CannonUtil.isBigCannon(cannon) && !CannonUtil.isAutoCannon(cannon)) {
+            return true;
+        }
+
+        return CBCConfigs.server() == null || CBCConfigs.server().compat.sableProjectilesInheritPhysicsObjectVelocity.get();
     }
 
     private boolean isSableMount() {

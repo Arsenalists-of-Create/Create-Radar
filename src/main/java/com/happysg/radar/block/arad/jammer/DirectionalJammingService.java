@@ -39,18 +39,12 @@ public final class DirectionalJammingService {
     private static final Map<ResourceKey<Level>, DimensionState> DIMENSIONS =
             new HashMap<>();
 
-    private DirectionalJammingService() {
-    }
+    private DirectionalJammingService() {}
 
     public record Profile(
             float jammerRpm,
-            float radarRpm,
-            float rollingRate,
-            float rpmDifference,
-            float rateBonus,
-            float outerThreshold,
-            float directionalThreshold,
-            float severeThreshold,
+            float powerFraction,
+            float fullPowerRpm,
             float alignmentDegrees,
             float alignmentFactor,
             int clusterSize,
@@ -62,9 +56,9 @@ public final class DirectionalJammingService {
             float severeProgress
     ) {
         public static final Profile INACTIVE = new Profile(
-                0.0F, 0.0F, 0.0F, Float.POSITIVE_INFINITY,
-                0.0F, 15.0F, 10.0F, 5.0F,
-                180.0F, 0.0F, 1, 1.0F, 1.0F,
+                0.0F, 0.0F, 0.0F,
+                180.0F, 0.0F,
+                1, 1.0F, 1.0F,
                 0.0F, 0.0F, 0.0F, 0.0F);
 
         public boolean active() {
@@ -75,27 +69,36 @@ public final class DirectionalJammingService {
             if (severeStrength > 0.0F) {
                 return "severe";
             }
+
             if (directionalStrength > 0.0F) {
                 return "directional";
             }
+
             return outerStrength > 0.0F ? "guidance" : "inactive";
         }
 
         Profile balanced(int requestedClusterSize) {
             int safeClusterSize = Math.max(1, requestedClusterSize);
             float safeStackingFactor = 1.0F / safeClusterSize;
-            return new Profile(jammerRpm, radarRpm, rollingRate, rpmDifference,
-                    rateBonus, outerThreshold, directionalThreshold,
-                    severeThreshold, alignmentDegrees, alignmentFactor,
-                    safeClusterSize, safeStackingFactor, safeStackingFactor,
+
+            return new Profile(
+                    jammerRpm,
+                    powerFraction,
+                    fullPowerRpm,
+                    alignmentDegrees,
+                    alignmentFactor,
+                    safeClusterSize,
+                    safeStackingFactor,
+                    safeStackingFactor,
                     outerStrength * safeStackingFactor,
                     directionalStrength * safeStackingFactor,
                     severeStrength * safeStackingFactor,
-                    severeProgress);
+                    severeProgress
+            );
         }
 
         float severeStateScale() {
-            return alignmentFactor * effectivenessFactor;
+            return severeStrength;
         }
     }
 
@@ -105,12 +108,9 @@ public final class DirectionalJammingService {
             float syntheticShipChance,
             float clusterRadiusBlocks,
             float spilloverRadiusBlocks,
-            float outerThreshold,
-            float directionalThreshold,
-            float severeThreshold,
-            float rollingRateScale,
-            float maxRateBonus,
-            float onsetStrength,
+            float fullPowerRpm,
+            float directionalOnsetFraction,
+            float severeOnsetFraction,
             float fullAlignmentDegrees,
             float zeroAlignmentDegrees,
             float coneHalfAngleDegrees,
@@ -136,39 +136,28 @@ public final class DirectionalJammingService {
             if (config == null) {
                 return defaults();
             }
-            float[] thresholds = {
-                    finitePositive(config.directionalJammingOuterRpmTolerance.get()),
-                    finitePositive(config.directionalJammingDirectionalRpmTolerance.get()),
-                    finitePositive(config.directionalJammingSevereRpmTolerance.get())
-            };
-            java.util.Arrays.sort(thresholds);
-            float severe = thresholds[0];
-            float directional = thresholds[1];
-            float outer = thresholds[2];
-            float fullAlignment = clamp(config.directionalJammingFullAlignment.get(),
-                    0.0F, 180.0F);
-            float zeroAlignment = clamp(config.directionalJammingZeroAlignment.get(),
-                    0.0F, 180.0F);
+
+            float fullPowerRpm = Math.max(1.0F, finitePositive(config.directionalJammingFullPowerRpm.get()));
+            float directionalOnset = clamp(config.directionalJammingDirectionalOnset.get(), 0.0F, 1.0F);
+            float severeOnset = clamp(config.directionalJammingSevereOnset.get(), directionalOnset, 1.0F);
+            float fullAlignment = clamp(config.directionalJammingFullAlignment.get(), 0.0F, 180.0F);
+            float zeroAlignment = clamp(config.directionalJammingZeroAlignment.get(), 0.0F, 180.0F);
+
             if (zeroAlignment < fullAlignment) {
                 float swap = zeroAlignment;
                 zeroAlignment = fullAlignment;
                 fullAlignment = swap;
             }
-            float minDropout = clamp(config.directionalJammingMinDropoutChance.get(),
-                    0.0F, 1.0F);
-            float maxDropout = clamp(config.directionalJammingMaxDropoutChance.get(),
-                    0.0F, 1.0F);
+
+            float minDropout = clamp(config.directionalJammingMinDropoutChance.get(), 0.0F, 1.0F);
+            float maxDropout = clamp(config.directionalJammingMaxDropoutChance.get(), 0.0F, 1.0F);
             if (maxDropout < minDropout) {
                 float swap = maxDropout;
                 maxDropout = minDropout;
                 minDropout = swap;
             }
-            float minFriendly = clamp(
-                    config.directionalJammingMinFriendlyOutageChance.get(),
-                    0.0F, 1.0F);
-            float maxFriendly = clamp(
-                    config.directionalJammingMaxFriendlyOutageChance.get(),
-                    0.0F, 1.0F);
+            float minFriendly = clamp(config.directionalJammingMinFriendlyOutageChance.get(), 0.0F, 1.0F);
+            float maxFriendly = clamp(config.directionalJammingMaxFriendlyOutageChance.get(), 0.0F, 1.0F);
             if (maxFriendly < minFriendly) {
                 float swap = maxFriendly;
                 maxFriendly = minFriendly;
@@ -181,10 +170,8 @@ public final class DirectionalJammingService {
                 maxGhosts = minGhosts;
                 minGhosts = swap;
             }
-            int minLifetime = Math.max(1,
-                    config.directionalJammingMinGhostLifetime.get());
-            int maxLifetime = Math.max(1,
-                    config.directionalJammingMaxGhostLifetime.get());
+            int minLifetime = Math.max(1, config.directionalJammingMinGhostLifetime.get());
+            int maxLifetime = Math.max(1, config.directionalJammingMaxGhostLifetime.get());
             if (maxLifetime < minLifetime) {
                 int swap = maxLifetime;
                 maxLifetime = minLifetime;
@@ -193,19 +180,14 @@ public final class DirectionalJammingService {
             return new Tuning(
                     config.directionalJammingEnabled.get(),
                     config.directionalJammingGenerateFakeHulls.get(),
-                    clamp(config.directionalJammingFakeShipChance.get(),
-                            0.0F, 1.0F),
+                    clamp(config.directionalJammingFakeShipChance.get(), 0.0F, 1.0F),
                     finitePositive(config.directionalJammingClusterRadius.get()),
                     finitePositive(config.directionalJammingSpilloverRadius.get()),
-                    outer, directional,
-                    severe,
-                    finitePositive(config.directionalJammingRollingRateScale.get()),
-                    finitePositive(config.directionalJammingMaxRateBonus.get()),
-                    clamp(config.directionalJammingTierOnsetStrength.get(),
-                            0.0F, 1.0F),
+                    fullPowerRpm,
+                    directionalOnset,
+                    severeOnset,
                     fullAlignment, zeroAlignment,
-                    clamp(config.directionalJammingConeHalfAngle.get(),
-                            0.0F, 180.0F),
+                    clamp(config.directionalJammingConeHalfAngle.get(), 0.0F, 180.0F),
                     finitePositive(config.directionalJammingOuterError.get()),
                     finitePositive(config.directionalJammingDirectionalError.get()),
                     finitePositive(config.directionalJammingSevereError.get()),
@@ -222,8 +204,8 @@ public final class DirectionalJammingService {
         private static Tuning defaults() {
             return new Tuning(true, true, 0.10F,
                     50.0F, 25.0F,
-                    15.0F, 10.0F, 5.0F,
-                    0.5F, 15.0F, 0.10F, 3.0F, 15.0F, 30.0F,
+                    256.0F, 0.20F, 0.50F,
+                    3.0F, 15.0F, 30.0F,
                     1.5F, 3.0F, 20.0F, 40, 10, 5, 20,
                     0.10F, 0.65F, 0.25F, 0.75F, 40,
                     2, 6, 40, 120);
@@ -305,53 +287,38 @@ public final class DirectionalJammingService {
         }
     }
 
-    public static Profile calculateProfile(
-            float jammerRpm,
-            float radarRollingRpm,
-            float radarRollingRate,
-            float alignmentDegrees
-    ) {
-        return calculateProfile(jammerRpm, radarRollingRpm,
-                radarRollingRate, alignmentDegrees, Tuning.current());
+    public static Profile calculateProfile(float jammerRpm, float alignmentDegrees) {
+        return calculateProfile(jammerRpm, alignmentDegrees, Tuning.current());
     }
 
-    static Profile calculateProfile(
-            float jammerRpm,
-            float radarRollingRpm,
-            float radarRollingRate,
-            float alignmentDegrees,
-            Tuning tuning
-    ) {
+    static Profile calculateProfile(float jammerRpm, float alignmentDegrees, Tuning tuning) {
         float safeJammer = finitePositive(Math.abs(jammerRpm));
-        float safeRadar = finitePositive(Math.abs(radarRollingRpm));
-        float safeRate = finitePositive(Math.abs(radarRollingRate));
-        float safeAlignment = Float.isFinite(alignmentDegrees)
-                ? clamp(Math.abs(alignmentDegrees), 0.0F, 180.0F) : 180.0F;
-        float bonus = Math.min(tuning.maxRateBonus,
-                safeRate * tuning.rollingRateScale);
-        float outer = tuning.outerThreshold + bonus;
-        float directional = tuning.directionalThreshold + bonus;
-        float severe = tuning.severeThreshold + bonus;
-        float difference = Math.abs(safeJammer - safeRadar);
-        float alignmentFactor = alignmentFactor(safeAlignment,
-                tuning.fullAlignmentDegrees, tuning.zeroAlignmentDegrees);
+        float safeAlignment = Float.isFinite(alignmentDegrees) ? clamp(Math.abs(alignmentDegrees), 0.0F, 180.0F) : 180.0F;
+        float power = tuning.enabled ? clamp(safeJammer / tuning.fullPowerRpm, 0.0F, 1.0F) : 0.0F;
+
+        float alignment = alignmentFactor(safeAlignment, tuning.fullAlignmentDegrees, tuning.zeroAlignmentDegrees);
+
         if (!tuning.enabled || safeJammer <= 1.0E-4F) {
-            alignmentFactor = 0.0F;
+            alignment = 0.0F;
         }
-        float outerRaw = tierStrength(difference, outer, directional,
-                tuning.onsetStrength);
-        float directionalRaw = tierStrength(difference, directional, severe,
-                tuning.onsetStrength);
-        float severeProgress = inverseProgress(difference, severe, 0.0F);
-        float severeRaw = difference <= severe
-                ? Mth.lerp(severeProgress, tuning.onsetStrength, 1.0F) : 0.0F;
-        return new Profile(safeJammer, safeRadar, safeRate, difference, bonus,
-                outer, directional, severe, safeAlignment, alignmentFactor,
-                1, 1.0F, 1.0F,
-                outerRaw * alignmentFactor,
-                directionalRaw * alignmentFactor,
-                severeRaw * alignmentFactor,
-                severeProgress);
+
+        float directionalPower = smoothstep(tuning.directionalOnsetFraction, 1.0F, power);
+        float severePower = smoothstep(tuning.severeOnsetFraction, 1.0F, power);
+
+        return new Profile(
+                safeJammer,
+                power,
+                tuning.fullPowerRpm,
+                safeAlignment,
+                alignment,
+                1,
+                1.0F,
+                1.0F,
+                power * alignment,
+                directionalPower * alignment,
+                severePower * alignment,
+                severePower
+        );
     }
 
     public static Profile heartbeat(
@@ -361,8 +328,6 @@ public final class DirectionalJammingService {
             Vec3 jammerWorldPosition,
             Vec3 targetRadarWorldPosition,
             float jammerRpm,
-            float radarRollingRpm,
-            float radarRollingRate,
             float alignmentDegrees
     ) {
         if (level == null || jammerPos == null || targetSourceId == null
@@ -370,8 +335,7 @@ public final class DirectionalJammingService {
                 || !finite(targetRadarWorldPosition)) {
             return Profile.INACTIVE;
         }
-        Profile baseProfile = calculateProfile(jammerRpm, radarRollingRpm,
-                radarRollingRate, alignmentDegrees);
+        Profile baseProfile = calculateProfile(jammerRpm, alignmentDegrees);
         Tuning tuning = Tuning.current();
         DimensionState state = DIMENSIONS.computeIfAbsent(level.dimension(),
                 ignored -> new DimensionState());
@@ -1089,21 +1053,13 @@ public final class DirectionalJammingService {
         return clamp((zero - angle) / (zero - full), 0.0F, 1.0F);
     }
 
-    private static float tierStrength(float difference, float outer,
-                                      float inner, float onset) {
-        if (difference > outer) {
-            return 0.0F;
+    private static float smoothstep(float start, float end, float value) {
+        if (end <= start + 1.0E-5F) {
+            return value >= end ? 1.0F : 0.0F;
         }
-        return Mth.lerp(inverseProgress(difference, outer, inner),
-                onset, 1.0F);
-    }
 
-    private static float inverseProgress(float value, float outer,
-                                         float inner) {
-        if (outer <= inner + 1.0E-5F) {
-            return value <= inner ? 1.0F : 0.0F;
-        }
-        return clamp((outer - value) / (outer - inner), 0.0F, 1.0F);
+        float t = clamp((value - start) / (end - start), 0.0F, 1.0F);
+        return t * t * (3.0F - 2.0F * t);
     }
 
     private static long seed(String first, String second, long epoch,

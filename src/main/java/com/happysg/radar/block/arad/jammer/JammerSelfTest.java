@@ -261,64 +261,38 @@ public final class JammerSelfTest {
     }
 
     private static void verifyJammingProfile() {
-        DirectionalJammingService.Profile stopped =
-                DirectionalJammingService.calculateProfile(
-                        0.0f, 0.0f, 0.0f, 0.0f);
+        DirectionalJammingService.Profile stopped = DirectionalJammingService.calculateProfile(0.0f, 0.0f);
         require(!stopped.active(), "zero jammer RPM must disable jamming");
 
-        DirectionalJammingService.Profile outerEdge =
-                DirectionalJammingService.calculateProfile(
-                        65.0f, 50.0f, 0.0f, 0.0f);
-        requireNear(outerEdge.rpmDifference(), 15.0f,
-                "outer threshold RPM difference");
-        require(outerEdge.outerStrength() > 0.0f,
-                "outer threshold must begin guidance corruption");
-        requireNear(outerEdge.directionalStrength(), 0.0f,
-                "outer threshold must not begin directional jitter");
+        DirectionalJammingService.Profile low = DirectionalJammingService.calculateProfile(64.0f, 0.0f);
+        DirectionalJammingService.Profile medium = DirectionalJammingService.calculateProfile(128.0f, 0.0f);
+        DirectionalJammingService.Profile high = DirectionalJammingService.calculateProfile(192.0f, 0.0f);
+        DirectionalJammingService.Profile full = DirectionalJammingService.calculateProfile(256.0f, 0.0f);
+        DirectionalJammingService.Profile over = DirectionalJammingService.calculateProfile(512.0f, 0.0f);
 
-        DirectionalJammingService.Profile closer =
-                DirectionalJammingService.calculateProfile(
-                        61.0f, 50.0f, 0.0f, 0.0f);
-        require(closer.outerStrength() > outerEdge.outerStrength(),
-                "guidance corruption must increase toward the inner tier");
+        requireNear(low.powerFraction(), 0.25f, "64 RPM is quarter power");
+        requireNear(medium.powerFraction(), 0.5f, "128 RPM is half power");
+        requireNear(full.powerFraction(), 1.0f, "256 RPM is full power");
+        requireNear(over.powerFraction(), 1.0f, "power must not exceed full strength");
+        require(low.outerStrength() > 0.0f, "powered jammer produces guidance interference");
+        require(medium.outerStrength() > low.outerStrength() && high.outerStrength() > medium.outerStrength(), "guidance strength increases with jammer RPM");
+        requireNear(medium.severeStrength(), 0.0f, "severe effects disabled at the onset boundary");
+        require(high.severeStrength() > medium.severeStrength() && high.severeStrength() < full.severeStrength(), "severe effects increase progressively");
 
-        DirectionalJammingService.Profile directionalEdge =
-                DirectionalJammingService.calculateProfile(
-                        60.0f, 50.0f, 0.0f, 0.0f);
-        require(directionalEdge.directionalStrength() > 0.0f,
-                "10 RPM difference must begin directional jitter");
+        requireNear(full.outerStrength(), 1.0f, "maximum guidance strength");
+        requireNear(full.directionalStrength(), 1.0f, "maximum directional strength");
+        requireNear(full.severeStrength(), 1.0f, "maximum severe strength");
+        requireNear(full.severeStateScale(), 1.0f, "maximum severe secondary effects");
+        requireNear(medium.severeStateScale(), 0.0f, "severe secondary effects disabled at onset");
+        requireNear(DirectionalJammingService.calculateProfile(-64.0f, 0.0f).outerStrength(), low.outerStrength(), "reverse RPM produces identical power");
 
-        DirectionalJammingService.Profile severeEdge =
-                DirectionalJammingService.calculateProfile(
-                        55.0f, 50.0f, 0.0f, 0.0f);
-        require(severeEdge.severeStrength() > 0.0f,
-                "5 RPM difference must begin severe deception");
-
-        DirectionalJammingService.Profile changingRadar =
-                DirectionalJammingService.calculateProfile(
-                        75.0f, 50.0f, 20.0f, 0.0f);
-        requireNear(changingRadar.rateBonus(), 10.0f,
-                "rolling-rate tolerance expansion");
-        requireNear(changingRadar.outerThreshold(), 25.0f,
-                "expanded outer threshold");
-        require(changingRadar.outerStrength() > 0.0f,
-                "expanded threshold must activate at its edge");
-
-        DirectionalJammingService.Profile fullAlignment =
-                DirectionalJammingService.calculateProfile(
-                        50.0f, 50.0f, 0.0f, 3.0f);
-        DirectionalJammingService.Profile halfAlignment =
-                DirectionalJammingService.calculateProfile(
-                        50.0f, 50.0f, 0.0f, 9.0f);
-        DirectionalJammingService.Profile missed =
-                DirectionalJammingService.calculateProfile(
-                        50.0f, 50.0f, 0.0f, 15.0f);
-        requireNear(fullAlignment.alignmentFactor(), 1.0f,
-                "full-alignment boundary");
-        requireNear(halfAlignment.alignmentFactor(), 0.5f,
-                "alignment taper midpoint");
-        require(!missed.active(),
-                "15-degree turret error must disable the contribution");
+        DirectionalJammingService.Profile fullAlignment = DirectionalJammingService.calculateProfile(256.0f, 3.0f);
+        DirectionalJammingService.Profile halfAlignment = DirectionalJammingService.calculateProfile(256.0f, 9.0f);
+        DirectionalJammingService.Profile missed = DirectionalJammingService.calculateProfile(256.0f, 15.0f);
+        requireNear(fullAlignment.alignmentFactor(), 1.0f, "full alignment");
+        requireNear(halfAlignment.alignmentFactor(), 0.5f, "half alignment");
+        requireNear(halfAlignment.severeStrength(), 0.5f, "severe strength respects alignment");
+        require(!missed.active(), "15-degree alignment error disables contribution");
     }
 
     private static void verifyNoiseInterpolation() {
@@ -429,12 +403,9 @@ public final class JammerSelfTest {
     }
 
     private static void verifyActiveJammerEligibility() {
-        DirectionalJammingService.Profile active =
-                DirectionalJammingService.calculateProfile(
-                        50.0F, 50.0F, 0.0F, 0.0F);
-        DirectionalJammingService.Profile stopped =
-                DirectionalJammingService.calculateProfile(
-                        0.0F, 50.0F, 0.0F, 0.0F);
+        DirectionalJammingService.Profile active = DirectionalJammingService.calculateProfile(256.0F, 0.0F);
+        DirectionalJammingService.Profile stopped = DirectionalJammingService.calculateProfile(0.0F, 0.0F);
+
         require(DirectionalJammingService.isActiveContribution(
                         active, 102L, 100L),
                 "an active contribution at the TTL boundary must count");
@@ -475,9 +446,7 @@ public final class JammerSelfTest {
     }
 
     private static void verifyBalancedEffectScaling() {
-        DirectionalJammingService.Profile full =
-                DirectionalJammingService.calculateProfile(
-                        50.0F, 50.0F, 0.0F, 0.0F);
+        DirectionalJammingService.Profile full = DirectionalJammingService.calculateProfile(256.0F, 0.0F);
         DirectionalJammingService.Profile half = full.balanced(2);
         require(half.clusterSize() == 2,
                 "profile cluster size");

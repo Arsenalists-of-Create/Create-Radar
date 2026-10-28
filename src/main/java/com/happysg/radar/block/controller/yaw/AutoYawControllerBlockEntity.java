@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.yaw;
 
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 
+import com.happysg.radar.block.controller.WeaponContactUnlinkState;
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
 import com.happysg.radar.block.controller.kinetic.ControllerInputShaft;
 import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
@@ -53,7 +54,7 @@ import org.slf4j.Logger;
 import java.util.List;
 
 public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
-        implements ControllerLimitAccess, ControllerCollisionSource, ControllerInputShaft, RadarYawController {
+        implements ControllerLimitAccess, ControllerCollisionSource, ControllerInputShaft, RadarYawController, WeaponContactUnlinkState {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -64,6 +65,20 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private double targetAngle = 0.0;
     private boolean isRunning = false;
+
+    private boolean weaponContactSuppressed;
+
+    @Override
+    public boolean isWeaponContactSuppressed() {
+        return weaponContactSuppressed;
+    }
+
+    @Override
+    public void suppressWeaponContact() {
+        if (weaponContactSuppressed) return;
+        weaponContactSuppressed = true;
+        setChanged();
+    }
 
     private double lastCbcYawWritten = 0.0;
     private boolean hasLastCbcYawWritten = false;
@@ -1218,8 +1233,9 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(compound, registries, clientPacket);
 
-        ControllerMovementLimits limits = ControllerMovementLimits.defaults(
-                CannonAxis.YAW);
+        weaponContactSuppressed = compound.getBoolean("RadarWeaponContactUnlinked");
+
+        ControllerMovementLimits limits = ControllerMovementLimits.defaults(CannonAxis.YAW);
         if (compound.getInt("MovementLimitsVersion") >= MOVEMENT_LIMITS_VERSION
                 && compound.contains("MinAngleDeg", Tag.TAG_DOUBLE)
                 && compound.contains("MaxAngleDeg", Tag.TAG_DOUBLE)) {
@@ -1247,6 +1263,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     @Override
     protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(compound, registries, clientPacket);
+
+        compound.putBoolean("RadarWeaponContactUnlinked", weaponContactSuppressed);
 
         compound.putDouble("MinAngleDeg", minAngleDeg);
         compound.putDouble("MaxAngleDeg", maxAngleDeg);

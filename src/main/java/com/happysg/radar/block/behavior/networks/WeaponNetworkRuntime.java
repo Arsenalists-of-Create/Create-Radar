@@ -2,6 +2,7 @@ package com.happysg.radar.block.behavior.networks;
 
 import com.happysg.radar.api.mount.RadarMountAdapter;
 import com.happysg.radar.api.mount.RadarMountRegistry;
+import com.happysg.radar.block.controller.WeaponContactUnlinkState;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
@@ -484,9 +485,13 @@ public final class WeaponNetworkRuntime {
         List<Map.Entry<BlockPos, DataLinkBlockEntity.WeaponEndpointType>> contacts = List.copyOf(contactControllers.entrySet());
         for (Map.Entry<BlockPos, DataLinkBlockEntity.WeaponEndpointType> registered : contacts) {
             BlockPos endpointPos = registered.getKey();
-            DataLinkBlockEntity.WeaponEndpointType type =
-                    registered.getValue();
+            DataLinkBlockEntity.WeaponEndpointType type = registered.getValue();
             if (explicitByEndpoint.containsKey(endpointPos)) {
+                continue;
+            }
+
+            BlockEntity endpointEntity = level.hasChunkAt(endpointPos) ? level.getBlockEntity(endpointPos) : null;
+            if (endpointEntity instanceof WeaponContactUnlinkState unlink && unlink.isWeaponContactSuppressed()) {
                 continue;
             }
 

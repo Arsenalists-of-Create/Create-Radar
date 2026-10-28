@@ -58,18 +58,15 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigInt groundRadarMaxSolidBlocks = i(16, 0, "groundRadarMaxSolidBlocks", "Maximum number of solid blocks a ground radar signal can pass through");
     public final ConfigInt skyPlaneRadarMaxSolidBlocks = i(8, 0, "skyPlaneRadarMaxSolidBlocks", "Maximum number of solid blocks a sky or plane radar signal can pass through");
 
-    public final ConfigGroup directionalJammingConfig = group(3, "directionalJammingConfig", "Directional jammer frequency matching and deception effects");
+    public final ConfigGroup directionalJammingConfig = group(3, "directionalJammingConfig", "Directional jammer power and deception effects");
     public final ConfigInt directionalJammerDischargeSeconds = i(15, 1, 600, "dischargeDurationSeconds", "Seconds a directional jammer remains active during a discharge");
     public final ConfigInt directionalJammerRechargeSeconds = i(45, 1, 600, "rechargeDurationSeconds", "Seconds of rotational power required to recharge a directional jammer");
     public final ConfigBool directionalJammingEnabled = b(true, "enabled", "Allow directional jammers to corrupt the selected radar emitter");
     public final ConfigFloat directionalJammingClusterRadius = f(50.0F, 0.0F, 4096.0F, "jammerClusterRadiusBlocks", "World-space radius connecting active directional jammers into one stacking-penalty cluster; zero disables proximity clustering");
     public final ConfigFloat directionalJammingSpilloverRadius = f(25.0F, 0.0F, 4096.0F, "nearbyRadarSpilloverRadiusBlocks", "World-space radius around a directly jammed radar that inherits its effects; zero disables spillover");
-    public final ConfigFloat directionalJammingOuterRpmTolerance = f(15.0F, 0.0F, 256.0F, "outerRpmTolerance", "RPM difference that begins cannon guidance error");
-    public final ConfigFloat directionalJammingDirectionalRpmTolerance = f(10.0F, 0.0F, 256.0F, "directionalRpmTolerance", "RPM difference that begins directional track jitter");
-    public final ConfigFloat directionalJammingSevereRpmTolerance = f(5.0F, 0.0F, 256.0F, "severeRpmTolerance", "RPM difference that begins severe deception");
-    public final ConfigFloat directionalJammingRollingRateScale = f(0.5F, 0.0F, 4.0F, "rollingRateScale", "Multiplier converting radar rolling-rate RPM/s into extra frequency tolerance");
-    public final ConfigFloat directionalJammingMaxRateBonus = f(15.0F, 0.0F, 256.0F, "maxRollingRateBonus", "Maximum RPM tolerance added by rolling rate");
-    public final ConfigFloat directionalJammingTierOnsetStrength = f(0.10F, 0.0F, 1.0F, "tierOnsetStrength", "Minimum effect strength immediately inside a jamming tier");
+    public final ConfigFloat directionalJammingFullPowerRpm = f(256.0F, 1.0F, 1024.0F, "fullPowerRpm", "Jammer shaft RPM required for maximum jamming power");
+    public final ConfigFloat directionalJammingDirectionalOnset = f(0.20F, 0.0F, 1.0F, "directionalOnsetFraction", "Normalized jammer power where directional interference begins");
+    public final ConfigFloat directionalJammingSevereOnset = f(0.50F, 0.0F, 1.0F, "severeOnsetFraction", "Normalized jammer power where severe deception begins");
     public final ConfigFloat directionalJammingFullAlignment = f(3.0F, 0.0F, 180.0F, "fullAlignmentDegrees", "Maximum turret error for full jamming strength");
     public final ConfigFloat directionalJammingZeroAlignment = f(15.0F, 0.0F, 180.0F, "zeroAlignmentDegrees", "Turret error at which jamming strength reaches zero");
     public final ConfigFloat directionalJammingConeHalfAngle = f(30.0F, 0.0F, 180.0F, "directionalConeHalfAngleDegrees", "Half-angle of the radar-to-jammer track-jitter cone");

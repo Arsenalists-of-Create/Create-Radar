@@ -859,6 +859,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
         NetworkData data = NetworkData.get(sl);
         data.setSelectedTargetId(g, track == null ? null : track.getId());
+        g.selectedWasAuto = false;
 
         if (track == null) {
             controllerBe.selectedEntity = null;
@@ -882,7 +883,6 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             //LOGGER.debug("MONITOR could NOT find NetworkFiltererBlockEntity at {}. Found={}", filterpos, level.getBlockEntity(filterpos) == null ? "null" : level.getBlockEntity(filterpos).getClass().getName());
         }
 
-        controllerBe.setChanged();
         controllerBe.sendData();
     }
 
@@ -1651,15 +1651,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             selectedRwrPos = NbtUtils.readBlockPos(tag, "SelectedRwrPos").orElse(null);
         }
 
-        selectedEntity = tag.contains("SelectedEntity", Tag.TAG_STRING)
-                ? tag.getString("SelectedEntity")
-                : null;
-
+        selectedEntity = clientPacket && tag.contains("SelectedEntity", Tag.TAG_STRING) ? tag.getString("SelectedEntity") : null;
         aradLinked = tag.getBoolean("AradLinked");
-
-        hoveredEntity = tag.contains("HoveredEntity", Tag.TAG_STRING)
-                ? tag.getString("HoveredEntity")
-                : null;
+        hoveredEntity = clientPacket && tag.contains("HoveredEntity", Tag.TAG_STRING) ? tag.getString("HoveredEntity") : null;
 
         filter = tag.contains("Filter", Tag.TAG_COMPOUND)
                 ? DetectionConfig.fromTag(tag.getCompound("Filter"))
@@ -1748,8 +1742,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         super.write(tag, registries,clientPacket);
 
         if (controller != null) tag.put("Controller", NbtUtils.writeBlockPos(controller));
-        if (selectedEntity != null) tag.putString("SelectedEntity", selectedEntity);
-        if (hoveredEntity != null) tag.putString("HoveredEntity", hoveredEntity);
+        if (clientPacket) {
+            if (selectedEntity != null) tag.putString("SelectedEntity", selectedEntity);
+            if (hoveredEntity != null) tag.putString("HoveredEntity", hoveredEntity);
+        }
         if (selectedRwrSource != null) tag.putString("SelectedRwrSource", selectedRwrSource);
         tag.putBoolean("AradLinked", aradLinked);
         tag.putInt("Size", radius);
