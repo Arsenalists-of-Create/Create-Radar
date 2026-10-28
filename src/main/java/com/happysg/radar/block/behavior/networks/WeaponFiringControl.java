@@ -4051,6 +4051,11 @@ public class WeaponFiringControl {
             }
         }
 
+
+        if (this.binoMode && !binocularTargetsSable(serverLevel)) {
+            return TargetingValidation.accepted(result);
+        }
+
         boolean cbcSweep = model.cbcPhysics() && !model.usesCustomDynamics();
         ObstructionResult obstruction = this.mainThreadObstructionChecker.check(serverLevel, trajectory, pathEndTick, segmentImpact, cbcSweep);
 
@@ -5337,7 +5342,7 @@ public class WeaponFiringControl {
         if (miss > 1.0) {
             return false;
         }
-        if (!this.targetingConfig.lineOfSight()) {
+        if (this.binoMode ? !binocularTargetsSable(serverLevel) : !this.targetingConfig.lineOfSight()) {
             return true;
         }
         HitResult hit = serverLevel.clip(new ClipContext(
@@ -5469,7 +5474,7 @@ public class WeaponFiringControl {
             }
         }
 
-        if (this.targetingConfig.lineOfSight()) {
+        if (this.binoMode ? binocularTargetsSable(serverLevel) : this.targetingConfig.lineOfSight()) {
             boolean cbcSweep = model.cbcPhysics() && !model.usesCustomDynamics();
 
             ObstructionResult obstruction = this.mainThreadObstructionChecker.check(serverLevel, trajectory, pathEndTick, segmentImpactPoint, cbcSweep);
@@ -5481,6 +5486,10 @@ public class WeaponFiringControl {
 
         double tolerance = this.directTargetHitTolerance(snapshot);
         return segmentImpactPoint != null || closest <= tolerance;
+    }
+
+    private boolean binocularTargetsSable(ServerLevel serverLevel) {
+        return this.binoMode && this.binoTargetPos != null && Mods.SABLE.isLoaded() && SableCompanion.INSTANCE.getContaining(serverLevel, this.binoTargetPos) != null;
     }
 
     private static int sideValidationTicks(TargetingSnapshot snapshot, ProjectileModel model) {
