@@ -1,6 +1,7 @@
 package com.happysg.radar.block.arad.jammer;
 
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.foundation.block.IBE;
@@ -49,9 +50,9 @@ public class JammerBlock extends DirectionalKineticBlock
     }
 
     @Override
-    public void onRemove(BlockState state, Level level, BlockPos pos,
-                         BlockState newState, boolean isMoving) {
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!state.is(newState.getBlock()) && level instanceof ServerLevel serverLevel) {
+            DataLinkBlock.breakAttachedEndpointLinks(serverLevel, pos);
             ARADData.get(serverLevel).onEndpointRemoved(serverLevel, pos);
             DirectionalJammingService.remove(serverLevel, pos);
         }
@@ -67,5 +68,4 @@ public class JammerBlock extends DirectionalKineticBlock
     public BlockEntityType<? extends JammerBlockEntity> getBlockEntityType() {
         return ModBlockEntityTypes.DIRECTIONAL_JAMMER.get();
     }
-
 }

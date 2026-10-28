@@ -1,6 +1,7 @@
 package com.happysg.radar.block.radar.sonar.bearing;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.registry.ModBlocks;
 import com.simibubi.create.AllItems;
@@ -147,7 +148,8 @@ public class SonarBearingBlock extends BearingBlock implements IBE<SonarBearingB
             return;
         }
 
-        if (!level.isClientSide && level instanceof ServerLevel sl) {
+        if (level instanceof ServerLevel sl) {
+            DataLinkBlock.breakAttachedEndpointLinks(sl, pos);
             NetworkData.get(sl).onEndpointRemoved(sl, pos);
         }
 

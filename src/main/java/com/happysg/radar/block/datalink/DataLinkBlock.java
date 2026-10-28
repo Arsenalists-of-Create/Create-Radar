@@ -81,6 +81,38 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
                 .setValue(LINK_STYLE, LinkStyle.RADAR);
     }
 
+    public static void breakAttachedEndpointLinks(ServerLevel level, BlockPos sourcePos) {
+        if (level == null || sourcePos == null || SableDataLinkRelocation.isRelocatingEndpoint(level, sourcePos)) {
+            return;
+        }
+
+        for (Direction direction : Direction.values()) {
+            BlockPos linkPos = sourcePos.relative(direction);
+
+            if (!level.hasChunkAt(linkPos)) {
+                continue;
+            }
+
+            BlockState linkState = level.getBlockState(linkPos);
+
+            if (!(linkState.getBlock() instanceof DataLinkBlock)) {
+                continue;
+            }
+
+            if (linkState.getValue(LINK_STYLE) != LinkStyle.RADAR) {
+                continue;
+            }
+
+            BlockPos actualSource = linkPos.relative(linkState.getValue(FACING).getOpposite());
+
+            if (!sourcePos.equals(actualSource)) {
+                continue;
+            }
+
+            level.destroyBlock(linkPos, true);
+        }
+    }
+
     @Override
     public Class<DataLinkBlockEntity> getBlockEntityClass() {
         return DataLinkBlockEntity.class;

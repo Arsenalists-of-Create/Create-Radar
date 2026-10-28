@@ -95,7 +95,12 @@ public final class WeaponNetworkRuntime {
 
         BlockPos position = controller.getBlockPos().immutable();
         DataLinkBlockEntity.WeaponEndpointType previous = contactControllers.put(position, type);
+
         if (previous != type) {
+            if (controller instanceof WeaponContactUnlinkState unlink && WeaponControllerRelinkData.get(level).consume(position)) {
+                unlink.suppressWeaponContact();
+            }
+
             topologyDirty = true;
         }
     }
@@ -103,6 +108,21 @@ public final class WeaponNetworkRuntime {
     public void unregisterContactController(BlockPos controllerPos) {
         if (contactControllers.remove(controllerPos) != null) {
             topologyDirty = true;
+        }
+    }
+
+    public void rememberRelinkRequirement(BlockPos controllerPos) {
+        if (controllerPos == null) {
+            return;
+        }
+
+        BlockEntity controller = level.getBlockEntity(controllerPos);
+
+        boolean previouslySuppressed = controller instanceof WeaponContactUnlinkState unlink && unlink.isWeaponContactSuppressed();
+        boolean hadExplicitDataLink = !getExplicitMountsForController(controllerPos).isEmpty();
+
+        if (previouslySuppressed || hadExplicitDataLink) {
+            WeaponControllerRelinkData.get(level).mark(controllerPos);
         }
     }
 

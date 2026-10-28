@@ -115,12 +115,15 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
             }
             if (level instanceof net.minecraft.server.level.ServerLevel
                     serverLevel) {
-                if (!SableDataLinkRelocation.isRelocatingEndpoint(
-                        serverLevel, pos)) {
+                if (!SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
+
+                    if (!isMoving) {
+                        WeaponNetworkRuntime.get(serverLevel).rememberRelinkRequirement(pos);
+                    }
+
                     breakAttachedDataLinks(level, pos);
                 }
-                WeaponNetworkRuntime.get(serverLevel)
-                        .unregisterContactController(pos);
+                WeaponNetworkRuntime.get(serverLevel).unregisterContactController(pos);
             } else {
                 breakAttachedDataLinks(level, pos);
             }

@@ -13,7 +13,6 @@ import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -66,18 +65,20 @@ public class FireControllerBlock extends Block implements EntityBlock {
         if (!level.isClientSide && state.getBlock() != newState.getBlock() ) {
             if (level instanceof net.minecraft.server.level.ServerLevel
                     serverLevel) {
-                if (!SableDataLinkRelocation.isRelocatingEndpoint(
-                        serverLevel, pos)) {
+                if (!SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
+
+                    if (!isMoving) {
+                        WeaponNetworkRuntime.get(serverLevel).rememberRelinkRequirement(pos);
+                    }
+
                     breakAttachedDataLinks(level, pos);
                 }
-                WeaponNetworkRuntime.get(serverLevel)
-                        .unregisterContactController(pos);
+                WeaponNetworkRuntime.get(serverLevel).unregisterContactController(pos);
             } else {
                 breakAttachedDataLinks(level, pos);
             }
         }
         super.onRemove(state, level, pos, newState, isMoving);
-
     }
     private static void breakAttachedDataLinks(Level level, BlockPos controllerPos) {
         for (Direction dir : Direction.values()) {

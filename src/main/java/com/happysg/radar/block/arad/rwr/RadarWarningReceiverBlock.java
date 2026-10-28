@@ -1,6 +1,7 @@
 package com.happysg.radar.block.arad.rwr;
 
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
+import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
@@ -51,6 +52,7 @@ public class RadarWarningReceiverBlock extends Block implements IBE<RadarWarning
     @Override
     protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!state.is(newState.getBlock()) && level instanceof ServerLevel serverLevel) {
+            DataLinkBlock.breakAttachedEndpointLinks(serverLevel, pos);
             ARADData.get(serverLevel).dissolveRwr(serverLevel, pos);
         }
         super.onRemove(state, level, pos, newState, isMoving);

@@ -2,6 +2,7 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.api.monitor.client.MonitorScreenRegistry;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.compat.sable.SableMonitorRelocation;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.config.RadarConfig;
@@ -73,6 +74,8 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
         MonitorMultiBlockHelper.onRemove(pState, pLevel, pPos, pNewState, false);
 
         if (!pState.is(pNewState.getBlock()) && pLevel instanceof ServerLevel sl) {
+            DataLinkBlock.breakAttachedEndpointLinks(sl, pPos);
+
             NetworkData.get(sl).onEndpointRemoved(sl, pPos);
             ARADData.get(sl).onEndpointRemoved(sl, pPos);
         }
