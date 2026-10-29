@@ -1112,10 +1112,6 @@ public class NetworkData extends SavedData {
         if (be instanceof MonitorBlockEntity monitor) {
             BlockPos controllerPos = monitor.getControllerPos();
 
-            if (monitor.getSize() == 1 && getEndpointOrigin(level.dimension(), controllerPos) == null) {
-                return null;
-            }
-
             if (controllerPos == null) {
                 controllerPos = pos;
             }

@@ -176,8 +176,7 @@ public class NetworkFiltererBlock extends WrenchableDirectionalBlock implements 
     }
 
     @Override
-    protected @NotNull ItemInteractionResult useItemOn(ItemStack held, BlockState state, Level world, BlockPos pos,
-                                                       Player player, InteractionHand hand, BlockHitResult hit) {
+    protected @NotNull ItemInteractionResult useItemOn(ItemStack held, BlockState state, Level world, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
         if (held.is(ModItems.BINOCULARS.asItem())) {
             return ItemInteractionResult.SUCCESS;
         }
