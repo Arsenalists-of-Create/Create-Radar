@@ -216,6 +216,12 @@ public class WeaponFiringControl {
     private long asyncSolveSuperseded;
     private long asyncSolveTimedOut;
     private long asyncSolveRejected;
+    // For Logging
+    private long lastAsyncDiagnosticTick = Long.MIN_VALUE;
+    private String lastAsyncRawResult = "not_completed";
+    private String lastAsyncValidationReason = "not_checked";
+    private int lastAsyncMaxFlightTicks = -1;
+    // For Logging
     @Nullable
     private UUID lastSableVelocityTargetId;
     @Nullable
@@ -420,6 +426,7 @@ public class WeaponFiringControl {
                         binoMode ? "binocular" : activetrack != null ? "radar track" : "idle")
                 .add("Weapon control", "target present", target != null)
                 .add("Weapon control", "aim stable ticks", aimStableTicks)
+                .add("Weapon control", "last async max flight ticks", lastAsyncMaxFlightTicks)
                 .add("Weapon control", "safe zones", safeZones.size())
                 .add("Weapon control", "safe zone firing veto", this.passesSafeZone())
                 .add("Weapon control", "fire controller",
@@ -432,7 +439,10 @@ public class WeaponFiringControl {
                         asyncSolveTimedOut > 0 ? DiagnosticSeverity.WARN : DiagnosticSeverity.INFO)
                 .add("Weapon control", "async rejected", asyncSolveRejected,
                         asyncSolveRejected > 0 ? DiagnosticSeverity.WARN : DiagnosticSeverity.INFO)
-                .add("Weapon control", "solution freshness", lastTargetingFreshnessReason);
+                .add("Weapon control", "solution freshness", lastTargetingFreshnessReason)
+                .add("Weapon control", "last async diagnostic tick", lastAsyncDiagnosticTick)
+                .add("Weapon control", "last async raw result", lastAsyncRawResult)
+                .add("Weapon control", "last async validation", lastAsyncValidationReason);
         if (lastFiringAlignmentTolerance != null) {
             builder.add("Weapon control", "alignment range blocks",
                             lastFiringAlignmentTolerance.distanceBlocks())
@@ -2816,11 +2826,37 @@ public class WeaponFiringControl {
 
         try {
             AsyncTargetingResult asyncResult = future.getNow(null);
+            if (asyncResult != null) {
+                this.lastAsyncMaxFlightTicks = asyncResult.request().snapshot().maxFlightTicks();
+            }
+            this.lastAsyncDiagnosticTick = serverLevel.getGameTime();
+            this.lastAsyncValidationReason = "not_checked";
+
+            if (asyncResult == null) {
+                this.lastAsyncRawResult = "empty_async_result";
+            } else if (asyncResult.alternatives() != null) {
+                this.lastAsyncRawResult = "obstruction_alternatives=" + asyncResult.alternatives().size();
+            } else if (asyncResult.result() == null) {
+                this.lastAsyncRawResult = "null_solver_result";
+            } else {
+                this.lastAsyncRawResult =
+                        "shot=" + asyncResult.result().hasShot() + " reason=" + asyncResult.result().reason() + " | " + String.join(" ",
+                                asyncResult.result().debugInfo().stream().filter(value -> value.startsWith("miss=")
+                                        || value.startsWith("confidence=")
+                                        || value.startsWith("score=")
+                                        || value.startsWith("bestTime=")
+                                        || value.startsWith("selectedArc=")
+                                        || value.startsWith("arcFallbackReason=")
+                                        || value.startsWith("pitchConstraintRejections=")
+                                        || value.startsWith("horizonExpansions=")).toList());
+            }
             //LOGGER.debug("[RADAR-TRACE][ASYNC-RECEIVED] " + "tick={} mount={} targetId={} " + "requestTick={} age={} " + "requestTarget={} currentTarget={} " + "requestMuzzle={} " + "result={} alternatives={}", serverLevel.getGameTime(), this.cannonMount.getBlockPos(), targetMotionId, asyncResult == null ? null : asyncResult.request().requestTick(), asyncResult == null ? null : serverLevel.getGameTime() - asyncResult.request().requestTick(), asyncResult == null ? null : asyncResult.request().solvePos(), solvePos, asyncResult == null ? null : asyncResult.request().snapshot().muzzlePosition(), asyncResult == null || asyncResult.result() == null ? "<none>" : asyncResult.result().debugString(), asyncResult == null || asyncResult.alternatives() == null ? 0 : asyncResult.alternatives().size());
             if (asyncResult == null
                     || !this.isAsyncResultApplicableForSteering(
                     serverLevel, cannonContraption,
                     asyncResult.request(), targetMotionId, solvePos)) {
+
+                this.lastAsyncValidationReason = asyncResult == null ? "empty_async_result" : "request_not_applicable";
                 ++this.asyncSolveRejected;
                 return null;
             }
@@ -2830,6 +2866,7 @@ public class WeaponFiringControl {
                 TargetingValidation primary = this.validateAsyncTargetingResult(serverLevel, cannonContraption, asyncResult.request(), asyncResult.result());
 
                 if (primary.obstructed() && !(asyncResult.request().projectileModel() instanceof CBCMWCannonCompat.LauncherProjectileModel)) {
+                    this.lastAsyncValidationReason = "blocked_path_fallback_requested";
                     this.clearTargetingResultCache();
                     this.submitAsyncObstructionFallback(asyncResult.request());
                     return null;
@@ -2848,6 +2885,9 @@ public class WeaponFiringControl {
             }
 
             if (validated == null) {
+                if (asyncResult.alternatives() != null && asyncResult.alternatives().isEmpty()) {
+                    this.lastAsyncValidationReason = "no_fallback_candidates";
+                }
                 ++this.asyncSolveRejected;
                 this.clearTargetingResultCache();
                 return null;
@@ -2857,8 +2897,7 @@ public class WeaponFiringControl {
                     asyncResult.request().solvePos(),
                     asyncResult.request().shotFingerprint(),
                     validated, asyncResult.request().requestTick(),
-                    asyncResult.request().snapshot()
-                            .steeringOrigin());
+                    asyncResult.request().snapshot().steeringOrigin());
             this.cachedTargetingRequest = asyncResult.request();
 
             TargetingResult rebased = this.rebaseTargetingResult(
@@ -2872,6 +2911,9 @@ public class WeaponFiringControl {
 
             return rebased;
         } catch (Throwable throwable) {
+            this.lastAsyncDiagnosticTick = serverLevel.getGameTime();
+            this.lastAsyncRawResult = "async_exception";
+            this.lastAsyncValidationReason = "async_exception:" + throwable.getClass().getSimpleName();
             ConflictTraceRecorder.mark("targeting", "async_result",
                     "FAILED", this.level, this.cannonMount.getBlockPos(), 0L,
                     Map.of("exception", throwable.getClass().getSimpleName()));
@@ -2904,13 +2946,9 @@ public class WeaponFiringControl {
             }
         }
 
-        Vec3 requestDirection = directionFromTo(
-                request.snapshot().steeringOrigin(),
-                request.solvePos());
+        Vec3 requestDirection = directionFromTo(request.snapshot().steeringOrigin(), request.solvePos());
         Vec3 currentDirection = directionFromTo(this.predictedAsyncSteeringOrigin(serverLevel, cannonContraption, request.leadTicks()), solvePos);
-        return requestDirection != null && currentDirection != null
-                && requestDirection.dot(currentDirection)
-                >= ASYNC_STEERING_MAX_DIVERGENCE_COS;
+        return requestDirection != null && currentDirection != null && requestDirection.dot(currentDirection) >= ASYNC_STEERING_MAX_DIVERGENCE_COS;
     }
 
     @Nullable
@@ -2929,8 +2967,7 @@ public class WeaponFiringControl {
             @Nullable Vec3 requestedOrigin,
             @Nullable Vec3 requestedTarget,
             @Nullable Vec3 liveTarget) {
-        if (result == null || result.aimSolution() == null
-                || result.aimSolution().aimPoint() == null) {
+        if (result == null || result.aimSolution() == null || result.aimSolution().aimPoint() == null) {
             return null;
         }
         Vec3 translatedAimPoint = rebaseAimPoint(result.aimSolution().aimPoint(), requestedTarget, liveTarget);
@@ -2974,7 +3011,6 @@ public class WeaponFiringControl {
                 result.aimSolution().aimPoint(),
                 requestedOrigin, currentOrigin,
                 translatedAimPoint);
-
         if (direction == null) {
             return null;
         }
@@ -4053,6 +4089,7 @@ public class WeaponFiringControl {
 
 
         if (this.binoMode && !binocularTargetsSable(serverLevel)) {
+            this.lastAsyncValidationReason = "accepted_world_bino";
             return TargetingValidation.accepted(result);
         }
 
@@ -4060,12 +4097,19 @@ public class WeaponFiringControl {
         ObstructionResult obstruction = this.mainThreadObstructionChecker.check(serverLevel, trajectory, pathEndTick, segmentImpact, cbcSweep);
 
         if (obstruction.clear() || this.isValidatedObstructionAtTarget(snapshot, obstruction)) {
+            this.lastAsyncValidationReason = "accepted_path_clear";
             return TargetingValidation.accepted(result);
         }
 
         //LOGGER.debug("[RADAR-TRACE][LIVE-OBSTRUCTION] " + "tick={} mount={} highRequested={} " + "pitch={} flightTicks={} " + "blockedTick={} blockedBlock={} blockedPosition={} " + "muzzle={} target={}", serverLevel.getGameTime(), this.cannonMount.getBlockPos(), snapshot.preferHighArc(), result.desiredPitchDeg(), result.predictedFlightTicks(), obstruction.blockedTick(), obstruction.blockPosition(), obstruction.blockedPosition(), snapshot.muzzlePosition(), snapshot.targetPosition());
 
+        this.lastAsyncValidationReason = "blocked_path";
         return TargetingValidation.blockedPath();
+    }
+
+    private TargetingValidation rejectAsyncValidation(String reason) {
+        this.lastAsyncValidationReason = reason;
+        return TargetingValidation.invalid();
     }
 
     private boolean isValidatedObstructionAtTarget(TargetingSnapshot snapshot, ObstructionResult obstruction) {
@@ -5413,7 +5457,17 @@ public class WeaponFiringControl {
             return false;
         }
 
-        int ticks = Math.max(1, Math.min(snapshot.maxFlightTicks(), sideValidationTicks(snapshot, model)));
+        int ticks = sideValidationTicks(snapshot, model);
+
+        TargetingResult solvedShot = side == authoritySide()
+                ? this.cachedTargetingResult : side.cachedSolution == null
+                ? null : side.cachedSolution.result();
+
+        if (solvedShot != null && solvedShot.valid() && solvedShot.hasShot()) {
+            ticks = Math.max(ticks, solvedShot.predictedFlightTicks() + 2);
+        }
+
+        ticks = Math.max(1, Math.min(snapshot.maxFlightTicks(), ticks));
 
         ProjectileSimulator.SimulationResult trajectory;
 
