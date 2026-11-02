@@ -949,7 +949,11 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         if (!connected) {
             return CannonCalibration.blockedWithMount();
         }
-        Direction initial = mount.initialOrientation();
+
+        Direction initial = controller instanceof TPitchControllerBlockEntity
+                ? mount.initialOrientationAnyAxis()
+                : mount.initialOrientation();
+
         return initial == null
                 ? CannonCalibration.blockedWithMount()
                 : CannonCalibration.ready(initial);

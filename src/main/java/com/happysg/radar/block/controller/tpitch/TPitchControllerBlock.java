@@ -7,6 +7,7 @@ import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.networking.packets.OpenControllerLimitsScreenPacket;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.compat.cbc.CannonMountContext;
@@ -84,6 +85,32 @@ public class TPitchControllerBlock extends KineticBlock
     }
 
     @Override
+    public BlockState getRotatedBlockState(BlockState state, Direction targetedFace) {
+        Orientation orientation = state.getValue(ORIENTATION);
+
+        Direction.Axis crossbarAxis = orientation.crossbarAxis();
+        Direction branch = orientation.branchDirection();
+        Direction.Axis clickedAxis = targetedFace.getAxis();
+
+        if (clickedAxis == crossbarAxis) {
+            Direction rotatedBranch = branch.getClockWise(crossbarAxis);
+
+            return state.setValue(ORIENTATION, Orientation.from(crossbarAxis, rotatedBranch));
+        }
+
+        if (clickedAxis == Direction.Axis.Y) {
+            Direction crossbarDirection = crossbarAxis == Direction.Axis.X ? Direction.EAST : Direction.SOUTH;
+
+            Direction rotatedCrossbar = crossbarDirection.getClockWise(Direction.Axis.Y);
+            Direction rotatedBranch = branch.getAxis() == Direction.Axis.Y ? branch : branch.getClockWise(Direction.Axis.Y);
+
+            return state.setValue(ORIENTATION, Orientation.from(rotatedCrossbar.getAxis(), rotatedBranch));
+        }
+
+        return state;
+    }
+
+    @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos,
                                    BlockState state, Direction face) {
         // Like the ordinary pitch controller, this block samples an adjacent
@@ -116,26 +143,56 @@ public class TPitchControllerBlock extends KineticBlock
             return defaultBlockState();
         }
 
-        Direction mountDirection = findPreferredCannonMount(context, player);
-        Direction.Axis crossbarAxis = mountDirection != null
-                ? mountDirection.getAxis()
-                : context.getHorizontalDirection().getClockWise().getAxis();
+        Vec3 placementEye = player.getEyePosition();
+        Vec3 placementLook = player.getLookAngle();
+        boolean onSable = false;
 
-        Vec3 towardPlayer = player.getEyePosition()
-                .subtract(Vec3.atCenterOf(context.getClickedPos()));
-        Direction branchDirection = closestPerpendicularDirection(crossbarAxis, towardPlayer);
+        if (Mods.SABLE.isLoaded()) {
+            BlockPos supportPos = context.getClickedPos().relative(context.getClickedFace().getOpposite());
+
+            var ship = SableUtils.getShipManagingPos(context.getLevel(), supportPos);
+            if (ship == null) {
+                ship = SableUtils.getShipManagingPos(context.getLevel(), context.getClickedPos());
+            }
+
+            if (ship != null) {
+                placementEye = SableUtils.getShipVec(placementEye, ship);
+                placementLook = SableUtils.getShipVecDirectionTransform(placementLook, ship);
+                onSable = true;
+            }
+        }
+
+        Direction mountDirection = findPreferredCannonMount(context, placementLook);
+        Direction.Axis crossbarAxis;
+
+        if (mountDirection != null) {
+            crossbarAxis = mountDirection.getAxis();
+        } else if (onSable && placementLook.x * placementLook.x + placementLook.z * placementLook.z > 1.0e-8) {
+            Direction localHorizontal = Direction.getNearest(placementLook.x, 0.0, placementLook.z);
+            crossbarAxis = localHorizontal.getClockWise().getAxis();
+        } else {
+            crossbarAxis = context.getHorizontalDirection().getClockWise().getAxis();
+        }
+
+        Direction branchDirection;
+
+        if (onSable && context.getClickedFace().getAxis() == Direction.Axis.Y) {
+            branchDirection = context.getClickedFace();
+        } else {
+            Vec3 towardPlayer = placementEye.subtract(Vec3.atCenterOf(context.getClickedPos()));
+            branchDirection = closestPerpendicularDirection(crossbarAxis, towardPlayer);
+        }
+
         if (player.isCrouching()) {
             branchDirection = branchDirection.getOpposite();
         }
 
-        return defaultBlockState()
-                .setValue(ORIENTATION, Orientation.from(crossbarAxis, branchDirection));
+        return defaultBlockState().setValue(ORIENTATION, Orientation.from(crossbarAxis, branchDirection));
     }
 
     @Nullable
-    private static Direction findPreferredCannonMount(BlockPlaceContext context, Player player) {
+    private static Direction findPreferredCannonMount(BlockPlaceContext context, Vec3 look) {
         BlockPos placementPos = context.getClickedPos();
-        Vec3 look = player.getLookAngle();
         Direction bestDirection = null;
         double bestScore = -Double.MAX_VALUE;
 

@@ -177,6 +177,17 @@ public final class CannonMountContext {
         return initial != null && initial.getAxis().isHorizontal() ? initial : null;
     }
 
+    @Nullable
+    public Direction initialOrientationAnyAxis() {
+        PitchOrientedContraptionEntity entity = getContraption();
+
+        if (entity == null || !(entity.getContraption() instanceof AbstractMountedCannonContraption cannon)) {
+            return null;
+        }
+
+        return cannon.initialOrientation();
+    }
+
     public void setPitch(float pitch) {
         if (kind == Kind.CBC) {
             ((CannonMountBlockEntity) blockEntity).setPitch(pitch);
