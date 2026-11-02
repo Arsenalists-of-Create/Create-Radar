@@ -120,8 +120,6 @@ public class WeaponFiringControl {
     @Nullable
     private WeaponNetworkRuntime.WeaponControlView controlView;
     private List<WeaponSide> weaponSides = List.of();
-    @Nullable
-    private AutoYawControllerBlockEntity sharedYawController;
     private boolean dualTopologyValid = true;
     public final Level level;
     private RadarTrack activetrack;
@@ -490,13 +488,18 @@ public class WeaponFiringControl {
             return null;
         } else {
             PitchOrientedContraptionEntity poce = mount.getContraption();
+            AutoYawControllerBlockEntity mountYaw = null;
+
+            for (WeaponSide side : weaponSides) {
+                if (side.mountPos.equals(mount.getBlockPos())) {
+                    mountYaw = side.yaw;
+                    break;
+                }
+            }
 
             boolean structuralSwivel = this.level instanceof ServerLevel
-                    && (usesStructuralPitchForMount(mount.getBlockPos())
-                    || (this.yawController != null
-                    && this.yawController.hasStructuralKineticSelectionForTargeting())
-                    || (this.sharedYawController != null
-                    && this.sharedYawController.hasStructuralKineticSelectionForTargeting()));
+                    && (usesStructuralPitchForMount(mount.getBlockPos()) || (mountYaw != null
+                    && mountYaw.hasStructuralKineticSelectionForTargeting()));
 
             float partialTicks = structuralSwivel ? 0.0F : 1.0F;
 
@@ -1002,10 +1005,8 @@ public class WeaponFiringControl {
 
     public void refreshControllers() {
         if (this.level instanceof ServerLevel serverLevel) {
-            Set<FireControllerBlockEntity> previousFires =
-                    currentFireControllers();
-            BlockPos pitchPos = this.pitchController == null
-                    ? null : this.pitchController.getBlockPos();
+            Set<FireControllerBlockEntity> previousFires = currentFireControllers();
+            BlockPos pitchPos = this.pitchController == null ? null : this.pitchController.getBlockPos();
             if (pitchPos == null) {
                 clearControllerTopology(previousFires);
                 return;
@@ -1031,7 +1032,6 @@ public class WeaponFiringControl {
 
             List<WeaponSide> resolvedSides = new ArrayList<>(2);
             List<WeaponSide> previousSides = this.weaponSides;
-            Set<AutoYawControllerBlockEntity> yawControllers = new HashSet<>();
             for (WeaponNetworkRuntime.MountChannelView channel : this.controlView.channels()) {
 
                 CannonMountContext mount = CannonMountContext.resolveEndpoint(this.level, channel.mountPos());
@@ -1039,10 +1039,6 @@ public class WeaponFiringControl {
 
                 AutoYawControllerBlockEntity yaw = channel.yawPos() != null && this.level.getBlockEntity(channel.yawPos()) instanceof AutoYawControllerBlockEntity y ? y : null;
                 FireControllerBlockEntity fire = channel.firingPos() != null && this.level.getBlockEntity(channel.firingPos()) instanceof FireControllerBlockEntity f ? f : null;
-
-                if (yaw != null) {
-                    yawControllers.add(yaw);
-                }
 
                 WeaponSide resolved = new WeaponSide(channel.mountPos(), mount, weapon, yaw, fire);
 
@@ -1069,20 +1065,8 @@ public class WeaponFiringControl {
                     previous.cancelTargeting();
                 }
             }
-            this.sharedYawController = null;
+
             this.dualTopologyValid = this.controlView.validTopology();
-            boolean dual = isDualNetwork();
-
-            if (dual) {
-                long structuralYawCount = yawControllers.stream().filter(AutoYawControllerBlockEntity::hasStructuralKineticSelectionForTargeting).count();
-                DualYawMode yawMode = selectDualYawMode(yawControllers.size(), (int) structuralYawCount);
-                if (yawMode == DualYawMode.SHARED_STRUCTURAL) {
-                    this.sharedYawController = yawControllers.iterator().next();
-                } else if (yawMode == DualYawMode.INVALID_MIXED) {
-                    this.dualTopologyValid = false;
-                }
-            }
-
             WeaponSide authority = authoritySide();
 
             if (authority == null) {
@@ -1090,7 +1074,7 @@ public class WeaponFiringControl {
                 this.yawController = null;
                 this.fireController = null;
             } else {
-                this.yawController = this.sharedYawController != null ? this.sharedYawController : authority.yaw;
+                this.yawController = authority.yaw;
                 this.fireController = authority.fire;
             }
 
@@ -1115,7 +1099,6 @@ public class WeaponFiringControl {
         this.invalidateSecondaryTargeting();
         this.controlView = null;
         this.weaponSides = List.of();
-        this.sharedYawController = null;
         this.dualTopologyValid = false;
         this.yawController = null;
         this.fireController = null;
@@ -4300,7 +4283,14 @@ public class WeaponFiringControl {
         }
 
         BlockPos mountPos = mount.getBlockPos();
-        AutoYawControllerBlockEntity yaw = sharedYawController != null ? sharedYawController : yawController;
+        AutoYawControllerBlockEntity yaw = null;
+
+        for (WeaponSide side : weaponSides) {
+            if (side.mountPos.equals(mountPos)) {
+                yaw = side.yaw;
+                break;
+            }
+        }
 
         boolean structuralYaw = yaw != null && yaw.hasStructuralKineticSelectionForTargeting();
         boolean structuralPitch = usesStructuralPitchForMount(mountPos);
@@ -4543,7 +4533,7 @@ public class WeaponFiringControl {
             return resolveMountAimFrame(
                     side.mount,
                     shot.cannon,
-                    this.sharedYawController != null ? this.sharedYawController : side.yaw
+                    side.yaw
             );
         }
 
@@ -4572,7 +4562,7 @@ public class WeaponFiringControl {
                         new Vec3(0.0, 0.0, 1.0)
                 );
 
-        AutoYawControllerBlockEntity yawController = this.sharedYawController != null ? this.sharedYawController : side.yaw;
+        AutoYawControllerBlockEntity yawController = side.yaw;
         ControllerMovementLimits yawLimits = yawController == null ? ControllerMovementLimits.defaults(CannonAxis.YAW) : yawController.getMovementLimits();
 
         double yawNeutral = yawController == null ? 0.0 : yawController.getLimitNeutralAngleDeg();
@@ -5096,7 +5086,7 @@ public class WeaponFiringControl {
                 continue;
             }
 
-            double firingYaw = this.sharedYawController == null ? side.desiredYaw : authorityYaw == null ? Double.NaN : authorityYaw;
+            double firingYaw = side.desiredYaw;
             Vec3 firingDirection = frame.worldDirection(sharedPitch, firingYaw);
 
             if (!finite(firingDirection) || firingDirection.lengthSqr() < 1.0E-12) {
@@ -5593,22 +5583,17 @@ public class WeaponFiringControl {
         }
 
         authority.desiredYaw = authorityYaw;
-        if (this.sharedYawController != null) {
-            for (WeaponSide side : this.weaponSides) {
-                side.desiredYaw = authorityYaw;
-            }
-            return true;
-        }
 
-        for (WeaponSide side : this.weaponSides) {
-            if (side == authority) {
+        for (WeaponSide side : weaponSides) {
+            if (side == authority || side.yaw == null) {
                 continue;
             }
 
-            if (side.yaw != null && side.desiredYaw != null) {
+            if (side.desiredYaw != null && Double.isFinite(side.desiredYaw)) {
                 side.yaw.setTargetAngle(side.desiredYaw.floatValue());
             }
         }
+
         return true;
     }
 
@@ -6538,21 +6523,40 @@ public class WeaponFiringControl {
 
         for (WeaponSide side : this.weaponSides) {
             SideShot shot = side == authority ? authorityShot : resolveSideShot(side, serverLevel);
-
             double tolerance = Math.max(authorityMinimumTolerance, shot == null ? 0.0 : shot.minimumTolerance);
             boolean pitchAligned = isWeaponPitchAligned(side, lag, tolerance, maximumTolerance);
-            boolean yawCommandValid = this.sharedYawController != null || side.desiredYaw != null;
-            boolean yawAligned;
+            AutoYawControllerBlockEntity sideYaw = side.yaw;
+            boolean yawCommandValid = side.desiredYaw != null && Double.isFinite(side.desiredYaw);
+            boolean yawAligned = false;
 
-            if (this.sharedYawController != null) {
-                yawAligned = this.sharedYawController.isAlignedForFiring(lag, tolerance, maximumTolerance);
-            } else {
-                yawAligned = side.yaw != null && side.yaw.isAlignedForFiring(lag, tolerance, maximumTolerance);
+            if (yawCommandValid) {
+                if (side.yaw != null) {
+                    yawAligned = side.yaw.isAlignedForFiring(lag, tolerance, maximumTolerance);
+
+                } else if (side.mount != null && side.mount.isFixed()) {
+                    PitchOrientedContraptionEntity mounted = side.mount.getContraption();
+
+                    if (mounted != null && mounted.isAlive()) {
+                        double allowedTolerance = AutoYawControllerBlockEntity.getToleranceDeg();
+
+                        if (!lag) {
+                            allowedTolerance += RadarConfig.server().targetLoosenAmount.get();
+                        }
+
+                        if (Double.isFinite(tolerance)) {
+                            allowedTolerance = Math.max(allowedTolerance, Math.max(0.0, tolerance));
+                        }
+
+                        if (Double.isFinite(maximumTolerance)) {
+                            allowedTolerance = Math.min(allowedTolerance, Math.max(0.0, maximumTolerance));
+                        }
+
+                        yawAligned = Math.abs(shortestDelta(wrap360(mounted.yaw), wrap360(side.desiredYaw))) < allowedTolerance;
+                    }
+                }
             }
 
-            boolean profileMatches = side == authority || authorityFingerprint != null
-                    && shot != null
-                    && authorityFingerprint.equals(shot.fingerprint);
+            boolean profileMatches = side == authority || authorityFingerprint != null && shot != null && authorityFingerprint.equals(shot.fingerprint);
 
             boolean shouldFire = dualSideFireEligible(
                     sharedFireGates,
@@ -6680,22 +6684,6 @@ public class WeaponFiringControl {
                 && cannonReady && fireControllerPresent
                 && profileMatches && compensatedAimValid
                 && trajectoryClear;
-    }
-
-    static DualYawMode selectDualYawMode(
-            int yawControllerCount,
-            int structuralYawCount
-    ) {
-        int controllers = Math.max(0, yawControllerCount);
-        int structural = Math.max(
-                0, Math.min(controllers, structuralYawCount));
-        if (controllers == 1 && structural == 1) {
-            return DualYawMode.SHARED_STRUCTURAL;
-        }
-        if (controllers > 1 && structural > 0) {
-            return DualYawMode.INVALID_MIXED;
-        }
-        return DualYawMode.PER_MOUNT;
     }
 
     @Nullable
@@ -7540,12 +7528,6 @@ public class WeaponFiringControl {
         SOLVED,
         HOLD,
         DIRECT
-    }
-
-    enum DualYawMode {
-        PER_MOUNT,
-        SHARED_STRUCTURAL,
-        INVALID_MIXED
     }
 
     private enum SolverKind {

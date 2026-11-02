@@ -483,7 +483,7 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
                 CannonMountContext direct = CannonMountContext.of(level.getBlockEntity(endpointPos));
 
                 if (direct != null && direct.isCurrent() && direct.getBlockPos().equals(endpointPos) && direct.sameMount(selected)) {
-                    return false;
+                    return true;
                 }
             }
 

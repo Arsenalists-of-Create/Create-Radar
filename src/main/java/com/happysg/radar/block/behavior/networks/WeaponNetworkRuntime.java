@@ -418,12 +418,59 @@ public final class WeaponNetworkRuntime {
     }
 
     private Set<BlockPos> pitchClaims(BlockPos endpointPos, BlockPos mountPos, Set<BlockPos> acceptedTargets) {
-        LinkedHashSet<BlockPos> claims = new LinkedHashSet<>();
-        claims.add(mountPos.immutable());
-        if (level.getBlockEntity(endpointPos) instanceof TPitchControllerBlockEntity) {
-            claims.addAll(eligibleTPitchMounts(endpointPos, acceptedTargets));
+        return Set.of(mountPos.immutable());
+    }
+
+    private Map<BlockPos, BlockPos> resolveTPitchOwners(List<LinkEntry> explicitLinks, Set<BlockPos> targetedMounts) {
+        Map<BlockPos, Set<BlockPos>> candidates = new HashMap<>();
+        Map<BlockPos, Set<BlockPos>> explicitOwners = new HashMap<>();
+        Set<BlockPos> controllers = new HashSet<>();
+
+        for (BlockPos pos : contactControllers.keySet()) {
+            if (level.getBlockEntity(pos) instanceof TPitchControllerBlockEntity) {
+                controllers.add(pos);
+            }
         }
-        return claims;
+
+        for (LinkEntry link : explicitLinks) {
+            if (link.type() == DataLinkBlockEntity.WeaponEndpointType.PITCH) {
+                explicitOwners.computeIfAbsent(link.mountPos(), ignored -> new HashSet<>()).add(link.endpointPos());
+
+                if (level.getBlockEntity(link.endpointPos()) instanceof TPitchControllerBlockEntity) {
+                    controllers.add(link.endpointPos());
+                }
+            }
+        }
+
+        for (BlockPos controllerPos : controllers) {
+            for (BlockPos mountPos : eligibleTPitchMounts(controllerPos, targetedMounts)) {
+                candidates.computeIfAbsent(mountPos, ignored -> new HashSet<>()).add(controllerPos);
+            }
+        }
+
+        Map<BlockPos, BlockPos> owners = new HashMap<>();
+        for (Map.Entry<BlockPos, Set<BlockPos>> entry : candidates.entrySet()) {
+            BlockPos mountPos = entry.getKey();
+            Set<BlockPos> possible = entry.getValue();
+            Set<BlockPos> explicit = explicitOwners.getOrDefault(mountPos, Set.of());
+
+            if (!explicit.isEmpty()) {
+                if (explicit.size() == 1) {
+                    BlockPos selected = explicit.iterator().next();
+
+                    if (possible.contains(selected)) {
+                        owners.put(mountPos, selected);
+                    }
+                }
+                continue;
+            }
+
+            if (!possible.isEmpty()) {
+                owners.put(mountPos, stableFirst(possible));
+            }
+        }
+
+        return owners;
     }
 
     /**
@@ -484,6 +531,7 @@ public final class WeaponNetworkRuntime {
         Map<Slot, LinkedHashSet<BlockPos>> explicitClaims = new HashMap<>();
         Map<Slot, LinkedHashSet<BlockPos>> contactClaims = new HashMap<>();
         Map<BlockPos, ContactCandidate> contactCandidates = new HashMap<>();
+        Map<BlockPos, BlockPos> tPitchOwners = resolveTPitchOwners(explicitLinks, targetedMounts);
 
         for (LinkEntry link : explicitLinks) {
             Set<BlockPos> mounts;
@@ -498,6 +546,11 @@ public final class WeaponNetworkRuntime {
                 mounts = Set.of(link.mountPos());
             }
             for (BlockPos mount : mounts) {
+                boolean tPitchLink = link.type() == DataLinkBlockEntity.WeaponEndpointType.PITCH && level.getBlockEntity(link.endpointPos()) instanceof TPitchControllerBlockEntity;
+                if (tPitchLink && !mount.equals(link.mountPos()) && !link.endpointPos().equals(tPitchOwners.get(mount))) {
+                    continue;
+                }
+
                 addClaim(explicitClaims, groups, mount, link.type(), link.endpointPos());
             }
         }
@@ -540,6 +593,10 @@ public final class WeaponNetworkRuntime {
             }
 
             for (BlockPos mount : available) {
+                if (type == DataLinkBlockEntity.WeaponEndpointType.PITCH && endpointEntity instanceof TPitchControllerBlockEntity && !endpointPos.equals(tPitchOwners.get(mount))) {
+                    continue;
+                }
+
                 addClaim(contactClaims, groups, mount, type, endpointPos);
             }
         }
@@ -618,6 +675,7 @@ public final class WeaponNetworkRuntime {
                         pitchPos,
                         explicitByEndpoint.getOrDefault(pitchPos, List.of()),
                         targetedMounts,
+                        tPitchOwners,
                         explicitClaims,
                         immutableGroups,
                         controllerToMount,
@@ -644,6 +702,7 @@ public final class WeaponNetworkRuntime {
                         link.endpointPos(),
                         explicitByEndpoint.getOrDefault(link.endpointPos(), List.of()),
                         targetedMounts,
+                        tPitchOwners,
                         explicitClaims,
                         immutableGroups,
                         controllerToMount,
@@ -691,6 +750,7 @@ public final class WeaponNetworkRuntime {
             BlockPos pitchPos,
             List<LinkEntry> explicitLinks,
             Set<BlockPos> targetedMounts,
+            Map<BlockPos, BlockPos> tPitchOwners,
             Map<Slot, LinkedHashSet<BlockPos>> explicitClaims,
             Map<BlockPos, Group> groups,
             Map<BlockPos, BlockPos> controllerToMount,
@@ -702,9 +762,11 @@ public final class WeaponNetworkRuntime {
         List<BlockPos> retained = new ArrayList<>(2);
 
         for (BlockPos mount : eligible) {
-            Set<BlockPos> explicitPitch = explicitClaims.getOrDefault(
-                    new Slot(mount, DataLinkBlockEntity.WeaponEndpointType.PITCH),
-                    new LinkedHashSet<>());
+            if (!pitchPos.equals(tPitchOwners.get(mount))) {
+                continue;
+            }
+
+            Set<BlockPos> explicitPitch = explicitClaims.getOrDefault(new Slot(mount, DataLinkBlockEntity.WeaponEndpointType.PITCH), new LinkedHashSet<>());
 
             if (explicitPitch.isEmpty() || explicitPitch.contains(pitchPos)) {
                 retained.add(mount);

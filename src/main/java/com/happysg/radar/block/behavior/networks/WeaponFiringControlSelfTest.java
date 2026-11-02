@@ -52,7 +52,6 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkPerSideSafeZoneGeometry());
         results.add(checkDualAimingSourceRecovery());
         results.add(checkSecondarySolutionIdentity());
-        results.add(checkDualYawTopologyPolicy());
         results.add(checkRangeAwareFiringTolerance());
         return List.copyOf(results);
     }
@@ -935,29 +934,6 @@ public final class WeaponFiringControlSelfTest {
                         + " mount=" + baseline.equals(changedMount)
                         + " source=" + baseline.equals(changedSource)
                         + " target=" + baseline.equals(changedTarget));
-    }
-
-    private static TargetingSolverSelfTest.Result
-    checkDualYawTopologyPolicy() {
-        boolean oneDirect =
-                WeaponFiringControl.selectDualYawMode(1, 0)
-                == WeaponFiringControl.DualYawMode.PER_MOUNT;
-        boolean twoDirect =
-                WeaponFiringControl.selectDualYawMode(2, 0)
-                == WeaponFiringControl.DualYawMode.PER_MOUNT;
-        boolean oneSwivel =
-                WeaponFiringControl.selectDualYawMode(1, 1)
-                == WeaponFiringControl.DualYawMode.SHARED_STRUCTURAL;
-        boolean mixedRejected =
-                WeaponFiringControl.selectDualYawMode(2, 1)
-                == WeaponFiringControl.DualYawMode.INVALID_MIXED;
-        boolean passed = oneDirect && twoDirect
-                && oneSwivel && mixedRejected;
-        return result("t_pitch_shared_swivel_yaw_policy", passed,
-                "oneDirect=" + oneDirect
-                        + " twoDirect=" + twoDirect
-                        + " oneSwivel=" + oneSwivel
-                        + " mixedRejected=" + mixedRejected);
     }
 
     private static double shortestDelta(double from, double to) {
