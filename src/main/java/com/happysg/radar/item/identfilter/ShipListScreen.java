@@ -64,7 +64,7 @@ public class ShipListScreen extends AbstractSimiScreen {
         shipEntry.setTooltip(Tooltip.create(Component.translatable(MODID + ".ship_list.enter_code")));
         shipEntry.setAllowedCharacters(c -> "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_".indexOf(c) != -1);
         shipEntry.setTextColor(0);
-        shipEntry.setMaxLength(8);
+        shipEntry.setMaxLength(10);
 
         // 2) load the string correctly
         String idCode = ListNBTHandler.loadStringFromHeldItem(minecraft.player);
