@@ -1106,14 +1106,39 @@ public class WeaponFiringControl {
 
     private Set<FireControllerBlockEntity> currentFireControllers() {
         Set<FireControllerBlockEntity> controllers = new HashSet<>();
+
         if (this.fireController != null) {
             controllers.add(this.fireController);
         }
+
         for (WeaponSide side : this.weaponSides) {
             if (side.fire != null) {
                 controllers.add(side.fire);
             }
         }
+
+        if (this.level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(serverLevel);
+
+            Set<BlockPos> mounts = new HashSet<>();
+            BlockPos primaryMount = getWeaponMountPos();
+            if (primaryMount != null) {
+                mounts.add(primaryMount);
+            }
+
+            for (WeaponSide side : this.weaponSides) {
+                mounts.add(side.mountPos);
+            }
+
+            for (BlockPos mountPos : mounts) {
+                for (BlockPos firePos : runtime.getFiringControllersForMount(mountPos)) {
+                    if (serverLevel.getBlockEntity(firePos) instanceof FireControllerBlockEntity fire) {
+                        controllers.add(fire);
+                    }
+                }
+            }
+        }
+
         return controllers;
     }
 
@@ -6590,9 +6615,7 @@ public class WeaponFiringControl {
             if (shouldFire) {
                 tryFireCannon(side);
             } else {
-                if (side.fire != null) {
-                    side.fire.setPowered(false);
-                }
+                setMountFireControllersPowered(side.mountPos, false);
 
                 if (side.weapon != null) {
                     side.weapon.setFiring(false);
@@ -6613,12 +6636,7 @@ public class WeaponFiringControl {
         return side.mount != null && isMountStateOk(side.mount);
     }
 
-    private boolean isWeaponPitchAligned(
-            WeaponSide side,
-            boolean lag,
-            double minimumToleranceDegrees,
-            double maximumToleranceDegrees
-    ) {
+    private boolean isWeaponPitchAligned(WeaponSide side, boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
         if (side == null || this.pitchController == null) {
             return false;
         }
@@ -6861,25 +6879,37 @@ public class WeaponFiringControl {
         }
 
         BlockPos mountPos = getWeaponMountPos();
-        if (this.fireController != null && mountPos != null) {
-            if (this.level instanceof ServerLevel serverLevel) {
-                AdvancedProximityFuze.pushLaunchContext(serverLevel, mountPos);
-
-                try {
-                    this.fireController.setPowered(true);
-                } finally {
-                    AdvancedProximityFuze.popLaunchContext();
-                }
-            } else {
-                this.fireController.setPowered(true);
-            }
-        }
+        setMountFireControllersPowered(mountPos, true);
 
         if (this.weapon != null && this.weapon.isValid() && this.weapon.isAssembled()) {
             this.weapon.setFiring(true);
         }
 
         //LOGGER.debug("firing!");
+    }
+
+    private void setMountFireControllersPowered(BlockPos mountPos, boolean powered) {
+        if (!(this.level instanceof ServerLevel serverLevel) || mountPos == null) {
+            return;
+        }
+
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(serverLevel);
+        for (BlockPos firePos : runtime.getFiringControllersForMount(mountPos)) {
+            if (!(serverLevel.getBlockEntity(firePos) instanceof FireControllerBlockEntity fire)) {
+                continue;
+            }
+
+            if (powered) {
+                AdvancedProximityFuze.pushLaunchContext(serverLevel, mountPos);
+                try {
+                    fire.setPowered(true);
+                } finally {
+                    AdvancedProximityFuze.popLaunchContext();
+                }
+            } else {
+                fire.setPowered(false);
+            }
+        }
     }
 
     private boolean isMountStateOk() {
@@ -6911,19 +6941,7 @@ public class WeaponFiringControl {
             return;
         }
 
-        if (side.fire != null) {
-            if (this.level instanceof ServerLevel serverLevel) {
-                AdvancedProximityFuze.pushLaunchContext(serverLevel, side.mountPos);
-
-                try {
-                    side.fire.setPowered(true);
-                } finally {
-                    AdvancedProximityFuze.popLaunchContext();
-                }
-            } else {
-                side.fire.setPowered(true);
-            }
-        }
+        setMountFireControllersPowered(side.mountPos, true);
 
         if (side.weapon != null && side.weapon.isValid() && side.weapon.isAssembled()) {
             side.weapon.setFiring(true);

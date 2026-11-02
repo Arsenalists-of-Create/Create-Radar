@@ -205,7 +205,8 @@ public final class WeaponNetworkRuntime {
             if (existing.equals(previous)) {
                 continue;
             }
-            if (existing.type() == entry.type()
+            if (entry.type() != DataLinkBlockEntity.WeaponEndpointType.FIRING
+                    && existing.type() == entry.type()
                     && existing.mountPos().equals(entry.mountPos())
                     && !existing.endpointPos().equals(entry.endpointPos())) {
                 return false;
@@ -322,6 +323,21 @@ public final class WeaponNetworkRuntime {
         return null;
     }
 
+    public List<BlockPos> getFiringControllersForMount(BlockPos mountPos) {
+        reconcileIfDirty();
+
+        Group group = snapshot.groupsByMount().get(mountPos);
+        if (group == null || !group.validTopology()) {
+            return List.of();
+        }
+
+        return group.associatedFiring().stream()
+                .filter(pos -> mountPos.equals(snapshot.controllerToMount().get(pos)))
+                .filter(pos -> level.hasChunkAt(pos) && level.getBlockEntity(pos) instanceof FireControllerBlockEntity)
+                .sorted(STABLE_POSITION)
+                .toList();
+    }
+
     public Collection<WeaponGroupView> getGroups() {
         reconcileIfDirty();
         return snapshot.groupsByMount().values().stream().map(Group::view).toList();
@@ -343,11 +359,13 @@ public final class WeaponNetworkRuntime {
             return false;
         }
 
-        for (LinkEntry existing : linksByDataLink.values()) {
-            if (existing.type() == type
-                    && existing.mountPos().equals(mountPos)
-                    && !existing.endpointPos().equals(endpointPos)) {
-                return false;
+        if (type != DataLinkBlockEntity.WeaponEndpointType.FIRING) {
+            for (LinkEntry existing : linksByDataLink.values()) {
+                if (existing.type() == type
+                        && existing.mountPos().equals(mountPos)
+                        && !existing.endpointPos().equals(endpointPos)) {
+                    return false;
+                }
             }
         }
 
@@ -618,12 +636,16 @@ public final class WeaponNetworkRuntime {
 
             BlockPos selected = null;
             if (explicit.size() > 1) {
-                builder.validTopology = false;
+                if (slot.type() != DataLinkBlockEntity.WeaponEndpointType.FIRING) {
+                    builder.validTopology = false;
+                }
                 selected = stableFirst(explicit);
             } else if (explicit.size() == 1) {
                 selected = explicit.iterator().next();
             } else if (contact.size() > 1) {
-                builder.validTopology = false;
+                if (slot.type() != DataLinkBlockEntity.WeaponEndpointType.FIRING) {
+                    builder.validTopology = false;
+                }
                 selected = stableFirst(contact);
             } else if (contact.size() == 1) {
                 selected = contact.iterator().next();
