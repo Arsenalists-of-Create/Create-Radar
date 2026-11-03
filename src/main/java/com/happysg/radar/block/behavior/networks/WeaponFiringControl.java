@@ -163,7 +163,7 @@ public class WeaponFiringControl {
     private FiringAlignmentTolerance lastFiringAlignmentTolerance;
     private static final int TARGETING_EXECUTOR_THREADS = Math.max(1, Math.min(2, Runtime.getRuntime().availableProcessors() - 1));
     private static final int TARGETING_EXECUTOR_QUEUE_CAPACITY = 16;
-    private static final ExecutorService TARGETING_EXECUTOR = createTargetingExecutor();
+    private static final ThreadPoolExecutor TARGETING_EXECUTOR = createTargetingExecutor();
     private final TargetingComputer targetingComputer;
     private final TargetingComputer asyncTargetingComputer;
     private final TargetingComputer cbcAtRocketTargetingComputer;
@@ -1493,8 +1493,16 @@ public class WeaponFiringControl {
             }
         }
 
+        boolean yawAimAccepted = true;
+
         if (this.yawController != null) {
-            this.yawController.setTargetAngle((float) desiredYaw);
+            if (tPitchStructural) {
+                yawAimAccepted = commandYawForWorldDirection(this.yawController, aimDirection, firingTolerance.maximumDegrees());
+            } else if (this.yawController.hasStructuralKineticSelectionForTargeting()) {
+                yawAimAccepted = this.yawController.setRadarAimDirection(aimDirection, firingTolerance.maximumDegrees());
+            } else {
+                this.yawController.setTargetAngle((float) desiredYaw);
+            }
         }
 
         if (pitchController != null && (structuralPitchAccepted || pitchController.isTargetLimitConstrained())) {
@@ -1529,9 +1537,9 @@ public class WeaponFiringControl {
                     authorityShot
             );
 
-            boolean yawAccepted = this.commandDualYawControllers(true, desiredYaw);
+            boolean yawAccepted = this.commandDualYawControllers(true, desiredYaw, firingTolerance.maximumDegrees());
             double minimumTolerance = shot.minimumFiringToleranceDegrees();
-            boolean sharedFireGates = this.targetingConfig.autoFire() && shot.canTriggerFire() && yawAccepted && structuralPitchAccepted && !this.passesSafeZone();
+            boolean sharedFireGates = this.targetingConfig.autoFire() && shot.canTriggerFire() && yawAccepted && yawAimAccepted && structuralPitchAccepted && !this.passesSafeZone();
 
             this.updateDualFireControllers(
                     serverLevel,
@@ -1546,9 +1554,9 @@ public class WeaponFiringControl {
         }
 
         double minimumTolerance = shot.minimumFiringToleranceDegrees();
-        boolean aligned = hasCorrectGenericYawPitch(false, minimumTolerance, firingTolerance.maximumDegrees());
+        boolean aligned = hasCorrectGenericYawPitch(false, minimumTolerance, firingTolerance.maximumDegrees(), aimDirection);
         boolean safe = !this.passesSafeZone();
-        boolean shouldFire = this.targetingConfig.autoFire() && shot.canTriggerFire() && structuralPitchAccepted && aligned && safe;
+        boolean shouldFire = this.targetingConfig.autoFire() && shot.canTriggerFire() && structuralPitchAccepted && yawAimAccepted && aligned && safe;
 
         if (shouldFire && !prepareAdapterShotForFire(shot, shotContext)) {
             shouldFire = false;
@@ -1561,7 +1569,7 @@ public class WeaponFiringControl {
         }
     }
 
-    private boolean hasCorrectGenericYawPitch(boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
+    private boolean hasCorrectGenericYawPitch(boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees, @Nullable Vec3 requestedWorldDirection) {
         if (this.pitchController == null) {
             return false;
         }
@@ -1575,17 +1583,17 @@ public class WeaponFiringControl {
                 side = new WeaponSide(this.weapon.getMountPos(), null, this.weapon, this.yawController, this.fireController);
             }
 
-            pitch = isWeaponPitchAligned(side, lag, minimumToleranceDegrees, maximumToleranceDegrees);
+            pitch = isWeaponPitchAligned(side, lag, minimumToleranceDegrees, maximumToleranceDegrees, requestedWorldDirection);
         } else {
             pitch = this.pitchController.isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
         }
 
-        boolean yaw = true;
-
         RadarMountAdapter mount = this.weapon == null ? null : this.weapon.getMount();
-
-        if (mount != null && mount.supportsYaw()) {
-            yaw = this.yawController != null && this.yawController.isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
+        boolean yaw;
+        if (this.yawController != null) {
+            yaw = this.yawController.isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
+        } else {
+            yaw = mount == null || !mount.supportsYaw();
         }
 
         return pitch && yaw;
@@ -1964,11 +1972,7 @@ public class WeaponFiringControl {
                                                         targetMotionId, solvePos,
                                                         currentProjectile.fingerprint());
 
-                                        if (targetingResult == null
-                                                || this.shouldRefreshAsyncTargeting(
-                                                serverLevel,
-                                                solveEveryTick,
-                                                completedAsyncResult)) {
+                                        if (this.shouldRefreshAsyncTargeting(serverLevel, solveEveryTick, completedAsyncResult)) {
                                             this.submitAsyncTargetingSolve(
                                                     serverLevel, cannon, rawTargetPos,
                                                     solvePos, guidance.positionOffset(), targetVel, targetAccel,
@@ -2256,6 +2260,8 @@ public class WeaponFiringControl {
                                                                 worldAimDirection,
                                                                 firingTolerance.maximumDegrees());
                                             }
+                                        } else if (structuralPitch && this.pitchController instanceof TPitchControllerBlockEntity && this.yawController != null) {
+                                            structuralAimAccepted &= commandYawForWorldDirection(this.yawController, worldAimDirection, firingTolerance.maximumDegrees());
                                         } else if (desiredYaw != null && this.yawController != null) {
                                             this.yawController.setTargetAngle(desiredYaw.floatValue());
                                         }
@@ -2291,7 +2297,7 @@ public class WeaponFiringControl {
                                                 dualAuthorityShot
                                         );
 
-                                        structuralAimAccepted &= this.commandDualYawControllers(issueAimCommand, desiredYaw);
+                                        structuralAimAccepted &= this.commandDualYawControllers(issueAimCommand, desiredYaw, firingTolerance.maximumDegrees());
                                     }
 
                                     if (issueAimCommand && desiredPitch != null && desiredYaw != null && Double.isFinite(desiredPitch) && Double.isFinite(desiredYaw)) {
@@ -2308,7 +2314,7 @@ public class WeaponFiringControl {
 
                                     double minimumFiringTolerance = adapterShot == null ? 0.0 : adapterShot.minimumFiringToleranceDegrees();
                                     boolean auto = this.targetingConfig.autoFire();
-                                    boolean yawPitchOk = this.hasCorrectYawPitch(lag, minimumFiringTolerance, firingTolerance.maximumDegrees());
+                                    boolean yawPitchOk = this.hasCorrectYawPitch(lag, minimumFiringTolerance, firingTolerance.maximumDegrees(), worldAimDirection);
                                     boolean safeOk = !this.passesSafeZone();
                                     boolean cannonReady = adapterShot == null
                                             ? CannonUtil.isCannonReadyToFire(this.cannonMount)
@@ -3215,10 +3221,15 @@ public class WeaponFiringControl {
     private boolean shouldRefreshAsyncTargeting(
             ServerLevel serverLevel, boolean solveEveryTick,
             boolean completedAsyncResult) {
-        if (this.pendingTargetingFuture != null
-                && !this.pendingTargetingFuture.isDone()) {
-            return false;
+        if (this.pendingTargetingFuture != null && !this.pendingTargetingFuture.isDone()) {
+            if (this.pendingTargetingRequest == null) {
+                return true;
+            }
+
+            long pendingAge = serverLevel.getGameTime() - this.pendingTargetingRequest.requestTick();
+            return pendingAge < 0L || pendingAge > ASYNC_TARGETING_TASK_TIMEOUT_TICKS;
         }
+
         if (this.cachedTargetingResult == null
                 || this.cachedTargetingRequestTick == Long.MIN_VALUE) {
             return true;
@@ -3288,7 +3299,7 @@ public class WeaponFiringControl {
 
             TargetingComputer computer = this.targetingComputerFor(request.solverKind(), true);
             TargetingSnapshot workerSnapshot = request.snapshot().withoutLiveLevel();
-            this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, computer.solve(workerSnapshot, request.projectileModel()), null), TARGETING_EXECUTOR);
+            this.pendingTargetingFuture = submitTargetingTask(() -> new AsyncTargetingResult(request, computer.solve(workerSnapshot, request.projectileModel()), null));
             ++this.asyncSolveSubmitted;
         } catch (RejectedExecutionException rejected) {
             this.pendingTargetingRequest = null;
@@ -3307,7 +3318,7 @@ public class WeaponFiringControl {
             TargetingComputer computer = this.targetingComputerFor(request.solverKind(), true);
             TargetingSnapshot workerSnapshot = request.snapshot().withoutLiveLevel();
             this.pendingTargetingRequest = request;
-            this.pendingTargetingFuture = CompletableFuture.supplyAsync(() -> new AsyncTargetingResult(request, null, computer.solveObstructionAlternatives(workerSnapshot, request.projectileModel())), TARGETING_EXECUTOR);
+            this.pendingTargetingFuture = submitTargetingTask(() -> new AsyncTargetingResult(request, null, computer.solveObstructionAlternatives(workerSnapshot, request.projectileModel())));
             ++this.asyncSolveSubmitted;
         } catch (RejectedExecutionException rejected) {
             this.pendingTargetingRequest = null;
@@ -4959,6 +4970,7 @@ public class WeaponFiringControl {
         for (WeaponSide side : this.weaponSides) {
             side.aimValid = false;
             side.trajectoryClear = false;
+            side.firingWorldDirection = null;
             side.firingSnapshot = null;
             side.projectile = null;
             side.cannon = null;
@@ -5112,13 +5124,16 @@ public class WeaponFiringControl {
             }
 
             double firingYaw = side.desiredYaw;
-            Vec3 firingDirection = frame.worldDirection(sharedPitch, firingYaw);
 
+            boolean onPitchSwivel = this.pitchController instanceof TPitchControllerBlockEntity && usesStructuralPitchForMount(side.mountPos);
+            Vec3 firingDirection = onPitchSwivel ? compensatedDirection : frame.worldDirection(sharedPitch, firingYaw);
             if (!finite(firingDirection) || firingDirection.lengthSqr() < 1.0E-12) {
                 side.aimValid = false;
                 continue;
             }
 
+            firingDirection = firingDirection.normalize();
+            side.firingWorldDirection = firingDirection;
             ProjectileModel firingModel = shot.projectileModel();
 
             side.trajectoryClear = shot.directAim ? this.directSidePathClear(
@@ -5229,6 +5244,7 @@ public class WeaponFiringControl {
         return TargetingSnapshot
                 .builder(serverLevel)
                 .muzzlePosition(predictedMuzzle)
+                .swivelLaunchGeometry(side.mount == null ? null : resolveSwivelLaunchGeometry(side.mount, geometry.muzzlePosition(), shooterMotion, predictedTicks))
                 .launchPivotPosition(predictedPivot)
                 .muzzleForwardOffset(geometry.muzzleForwardOffset())
                 .inheritedVelocity(inheritedVelocity)
@@ -5268,13 +5284,15 @@ public class WeaponFiringControl {
         }
 
         try {
+            long requestTick = this.level.getGameTime();
+
             TargetingSnapshot workerSnapshot = snapshot.withoutLiveLevel();
             TargetingComputer computer = this.targetingComputerFor(solverKind, true);
 
-            side.pendingSolution = CompletableFuture.supplyAsync(() -> {
+            side.pendingSolution = submitTargetingTask(() -> {
                 TargetingResult result = computer.solve(workerSnapshot, model);
-                return new SecondaryTargetingResult(key, snapshot, solvePos, snapshot.gameTime(), result);
-            }, TARGETING_EXECUTOR);
+                return new SecondaryTargetingResult(key, snapshot, solvePos, requestTick, result);
+            });
         } catch (RejectedExecutionException ignored) {
             side.pendingSolution = null;
         }
@@ -5593,7 +5611,31 @@ public class WeaponFiringControl {
         return false;
     }
 
-    private boolean commandDualYawControllers(boolean issueAimCommand, @Nullable Double authorityYaw) {
+    private boolean commandYawForWorldDirection(AutoYawControllerBlockEntity yaw, @Nullable Vec3 worldDirection, double maximumToleranceDegrees) {
+        if (yaw == null || !finite(worldDirection) || worldDirection.lengthSqr() < 1.0e-12) {
+            return false;
+        }
+
+        if (yaw.hasStructuralKineticSelectionForTargeting()) {
+            return yaw.setRadarAimDirection(worldDirection, maximumToleranceDegrees);
+        }
+
+        Vec3 origin = PhysicsHandler.getWorldVec(yaw);
+
+        if (!finite(origin)) {
+            return false;
+        }
+
+        double localYaw = yaw.computeYawToTargetDeg(origin, origin.add(worldDirection.normalize())) + 180.0;
+        if (!Double.isFinite(localYaw)) {
+            return false;
+        }
+
+        yaw.setTargetAngle((float) wrap360(localYaw));
+        return !yaw.isTargetLimitConstrained();
+    }
+
+    private boolean commandDualYawControllers(boolean issueAimCommand, @Nullable Double authorityYaw, double maximumToleranceDegrees) {
         if (!isDualNetwork() || !this.dualTopologyValid) {
             return false;
         }
@@ -5614,7 +5656,17 @@ public class WeaponFiringControl {
                 continue;
             }
 
-            if (side.desiredYaw != null && Double.isFinite(side.desiredYaw)) {
+            boolean structuralYaw = side.yaw.hasStructuralKineticSelectionForTargeting();
+            boolean structuralPitch = this.pitchController instanceof TPitchControllerBlockEntity && usesStructuralPitchForMount(side.mountPos);
+
+            if (structuralYaw || structuralPitch) {
+                boolean accepted = commandYawForWorldDirection(side.yaw, side.firingWorldDirection, maximumToleranceDegrees);
+
+                if (!accepted) {
+                    side.aimValid = false;
+                    side.trajectoryClear = false;
+                }
+            } else if (side.desiredYaw != null && Double.isFinite(side.desiredYaw)) {
                 side.yaw.setTargetAngle(side.desiredYaw.floatValue());
             }
         }
@@ -6407,36 +6459,84 @@ public class WeaponFiringControl {
         return false;
     }
 
+    private boolean isPhysicalCbcBarrelAligned(@Nullable CannonMountContext mount, @Nullable Vec3 requestedWorldDirection, double maximumToleranceDegrees) {
+        if (mount == null || !finite(requestedWorldDirection) || requestedWorldDirection.lengthSqr() < 1.0E-12) {
+            return false;
+        }
+
+        PitchOrientedContraptionEntity mounted = mount.getContraption();
+        if (mounted == null || !mounted.isAlive()) {
+            return false;
+        }
+
+        Vec3 actualDirection = CBCMuzzleUtil.getForwardWorld(mounted);
+
+        if (Mods.SABLE.isLoaded()) {
+            SubLevelAccess containing = SableCompanion.INSTANCE.getContaining(this.level, mount.getBlockPos());
+            actualDirection = SableUtils.getWorldVecDirectionTransform(actualDirection, containing);
+        }
+
+        if (!finite(actualDirection) || actualDirection.lengthSqr() < 1.0E-12) {
+            return false;
+        }
+
+        double tolerance = Double.isFinite(maximumToleranceDegrees) ? Math.max(0.0, Math.min(1.0, maximumToleranceDegrees)) : 1.0;
+        double dot = actualDirection.normalize().dot(requestedWorldDirection.normalize());
+
+        return Double.isFinite(dot) && dot >= Math.cos(Math.toRadians(tolerance));
+    }
+
     private boolean hasCorrectYawPitch(boolean lag) {
         return this.hasCorrectYawPitch(lag, 0.0);
     }
 
     private boolean hasCorrectYawPitch(boolean lag, double minimumToleranceDegrees) {
-        return this.hasCorrectYawPitch(
-                lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
+        return this.hasCorrectYawPitch(lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY, null);
     }
 
-    private boolean hasCorrectYawPitch(boolean lag,
-                                       double minimumToleranceDegrees,
-                                       double maximumToleranceDegrees) {
+    private boolean hasCorrectYawPitch(boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees, @Nullable Vec3 requestedWorldDirection) {
         if (this.yawController == null && this.pitchController == null) {
             return false;
-        } else {
-            boolean yaw;
-            if (this.yawController != null) {
-                yaw = this.yawController.isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
-            } else {
-                yaw = !this.cannonMount.supportsDirectYawControl()
-                        && this.isFixedMountYawAligned(
-                        this.fixedMountDesiredYaw,
-                        lag,
-                        minimumToleranceDegrees,
-                        maximumToleranceDegrees);
-            }
-
-            boolean pitch = this.pitchController != null && this.pitchController.isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
-            return yaw && pitch;
         }
+
+        boolean yaw;
+        if (this.yawController != null) {
+            yaw = this.yawController.isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
+        } else {
+            yaw = !this.cannonMount.supportsDirectYawControl()
+                    && this.isFixedMountYawAligned(
+                    this.fixedMountDesiredYaw,
+                    lag,
+                    minimumToleranceDegrees,
+                    maximumToleranceDegrees);
+        }
+
+        boolean pitch = this.pitchController != null && this.pitchController.isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
+
+        if (this.pitchController instanceof TPitchControllerBlockEntity tPitch && this.cannonMount != null) {
+
+            Boolean swivelAligned = tPitch.swivelPitchAlignmentForFiring(
+                    this.cannonMount.getBlockPos(),
+                    lag,
+                    minimumToleranceDegrees,
+                    maximumToleranceDegrees,
+                    requestedWorldDirection
+            );
+
+            if (swivelAligned != null) {
+                pitch = swivelAligned;
+            }
+        }
+
+        if (!yaw || !pitch) {
+            return false;
+        }
+
+        if (this.pitchController instanceof TPitchControllerBlockEntity) {
+            return isPhysicalCbcBarrelAligned(this.cannonMount, requestedWorldDirection, maximumToleranceDegrees);
+        }
+
+        return true;
     }
 
     public boolean canAimAtFixedYaw(@Nullable Vec3 aimPoint) {
@@ -6462,8 +6562,7 @@ public class WeaponFiringControl {
             boolean lag,
             double minimumToleranceDegrees
     ) {
-        return this.isFixedMountYawAligned(
-                desiredYaw, lag, minimumToleranceDegrees,
+        return this.isFixedMountYawAligned(desiredYaw, lag, minimumToleranceDegrees,
                 Double.POSITIVE_INFINITY);
     }
 
@@ -6549,7 +6648,10 @@ public class WeaponFiringControl {
         for (WeaponSide side : this.weaponSides) {
             SideShot shot = side == authority ? authorityShot : resolveSideShot(side, serverLevel);
             double tolerance = Math.max(authorityMinimumTolerance, shot == null ? 0.0 : shot.minimumTolerance);
-            boolean pitchAligned = isWeaponPitchAligned(side, lag, tolerance, maximumTolerance);
+
+            Vec3 requestedWorldDirection = this.pitchController instanceof TPitchControllerBlockEntity ? side.firingWorldDirection : null;
+
+            boolean pitchAligned = isWeaponPitchAligned(side, lag, tolerance, maximumTolerance, requestedWorldDirection);
             AutoYawControllerBlockEntity sideYaw = side.yaw;
             boolean yawCommandValid = side.desiredYaw != null && Double.isFinite(side.desiredYaw);
             boolean yawAligned = false;
@@ -6594,6 +6696,10 @@ public class WeaponFiringControl {
                     side.trajectoryClear
             ) && isWeaponStateOk(side);
 
+//            if (shouldFire && this.pitchController instanceof TPitchControllerBlockEntity && side.mount != null) {
+//                shouldFire = isPhysicalCbcBarrelAligned(side.mount, side.firingWorldDirection, maximumTolerance);
+//            }
+
             if (shouldFire && shot.adapter != null && !prepareAdapterShotForFire(shot.adapter, shot.context, side.mountPos)) {
                 shouldFire = false;
             }
@@ -6636,13 +6742,13 @@ public class WeaponFiringControl {
         return side.mount != null && isMountStateOk(side.mount);
     }
 
-    private boolean isWeaponPitchAligned(WeaponSide side, boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
+    private boolean isWeaponPitchAligned(WeaponSide side, boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees, @Nullable Vec3 requestedWorldDirection) {
         if (side == null || this.pitchController == null) {
             return false;
         }
 
         if (this.pitchController instanceof TPitchControllerBlockEntity tPitch) {
-            Boolean swivelAligned = tPitch.swivelPitchAlignmentForFiring(side.mountPos, lag, minimumToleranceDegrees, maximumToleranceDegrees);
+            Boolean swivelAligned = tPitch.swivelPitchAlignmentForFiring(side.mountPos, lag, minimumToleranceDegrees, maximumToleranceDegrees, requestedWorldDirection);
 
             if (swivelAligned != null) {
                 return swivelAligned;
@@ -6974,6 +7080,8 @@ public class WeaponFiringControl {
         @Nullable
         private Double desiredYaw;
         @Nullable
+        private Vec3 firingWorldDirection;
+        @Nullable
         private SideSolutionKey solutionKey;
         @Nullable
         private CompletableFuture<SecondaryTargetingResult> pendingSolution;
@@ -7045,6 +7153,7 @@ public class WeaponFiringControl {
             this.trajectoryClear = false;
             this.firingSnapshot = null;
             this.desiredYaw = null;
+            this.firingWorldDirection = null;
         }
     }
 
@@ -7598,7 +7707,32 @@ public class WeaponFiringControl {
         }
     }
 
-    private static ExecutorService createTargetingExecutor() {
+    private static <T> CompletableFuture<T> submitTargetingTask(java.util.function.Supplier<T> supplier) {
+        CompletableFuture<T> future = new CompletableFuture<>();
+
+        Runnable queuedTask = () -> {
+            if (future.isDone()) {
+                return;
+            }
+
+            try {
+                future.complete(supplier.get());
+            } catch (Throwable failure) {
+                future.completeExceptionally(failure);
+            }
+        };
+
+        future.whenComplete((result, failure) -> {
+            if (future.isCancelled()) {
+                TARGETING_EXECUTOR.remove(queuedTask);
+            }
+        });
+
+        TARGETING_EXECUTOR.execute(queuedTask);
+        return future;
+    }
+
+    private static ThreadPoolExecutor createTargetingExecutor() {
         ThreadPoolExecutor executor = new ThreadPoolExecutor(
                 TARGETING_EXECUTOR_THREADS,
                 TARGETING_EXECUTOR_THREADS,

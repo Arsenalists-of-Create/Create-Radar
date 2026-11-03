@@ -44,7 +44,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar, RadarDetectionConfigurable {
-    private BlockPos lastKnownPos = BlockPos.ZERO;
+    private BlockPos lastKnownPos;
     private int dishCount;
     private boolean creative;
     private Direction receiverFacing = Direction.NORTH;
@@ -56,6 +56,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     public RadarBearingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
+        lastKnownPos = pos.immutable();
     }
 
     @Override
@@ -108,6 +109,12 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
                 ResourceKey<Level> dim = serverLevel.dimension();
                 NetworkData data = NetworkData.get(serverLevel);
                 if (data.isEndpointLinked(dim, worldPosition)) {
+                    lastKnownPos = worldPosition;
+                    setChanged();
+                    return;
+                }
+
+                if (serverLevel.hasChunkAt(lastKnownPos) && serverLevel.getBlockEntity(lastKnownPos) instanceof com.happysg.radar.block.radar.behavior.IRadar) {
                     lastKnownPos = worldPosition;
                     setChanged();
                     return;
@@ -242,6 +249,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(compound, registries, clientPacket);
+        lastKnownPos = compound.contains("LastKnownPos") ? BlockPos.of(compound.getLong("LastKnownPos")) : worldPosition;
         if (compound.hasUUID("EmitterId")) {
             emitterId = compound.getUUID("EmitterId");
         }
@@ -254,6 +262,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     public void write(CompoundTag compound,HolderLookup.Provider registries, boolean clientPacket) {
         super.write(compound,registries, clientPacket);
+        compound.putLong("LastKnownPos", lastKnownPos.asLong());
         compound.putUUID("EmitterId", emitterId);
         compound.putInt("dishCount", dishCount);
         compound.putBoolean("creative", creative);

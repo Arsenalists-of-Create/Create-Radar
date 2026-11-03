@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.id;
 
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.compat.vs2.SableUtils;
 import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
@@ -51,7 +52,12 @@ public class VS2IDHandler {
         if (pLevel.isClientSide || pMovedByPiston || pState.is(pNewState.getBlock())) {
             return;
         }
+
         if (!(pLevel instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        if (SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pPos)) {
             return;
         }
 

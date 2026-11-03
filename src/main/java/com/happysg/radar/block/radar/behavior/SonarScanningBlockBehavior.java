@@ -98,6 +98,12 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
 
         expireOldTracks(gameTime);
 
+        for (ServerPlayer player : serverLevel.players()) {
+            if (player.isSpectator() || Mods.VMOD.isLoaded() && VanishUtil.isVanished(player)) {
+                radarTracks.remove(player.getUUID().toString());
+            }
+        }
+
         if (!running || range <= 0) {
             clearCandidateCache();
             return;

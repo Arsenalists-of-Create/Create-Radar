@@ -1,6 +1,7 @@
 package com.happysg.radar.block.radar.skyradar;
 
 import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.simibubi.create.foundation.block.IBE;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.registry.ModBlockEntityTypes;
@@ -116,10 +117,12 @@ public class SkyRadarBlock extends KineticBlock implements IBE<SkyRadarBlockEnti
         }
 
         if (level instanceof ServerLevel sl) {
-            if (!isMoving) {
+            boolean relocating = isMoving || SableDataLinkRelocation.isRelocatingEndpoint(sl, pos);
+
+            if (!relocating) {
                 DataLinkBlock.disconnectAttachedEndpointLinks(sl, pos);
+                NetworkData.get(sl).onEndpointRemoved(sl, pos);
             }
-            NetworkData.get(sl).onEndpointRemoved(sl, pos);
         }
 
         super.onRemove(state, level, pos, newState, isMoving);

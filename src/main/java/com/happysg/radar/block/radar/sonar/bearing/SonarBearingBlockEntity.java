@@ -36,7 +36,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     private UUID emitterId = UUID.randomUUID();
     private final Set<BlockPos> savedSensorPositions = new HashSet<>();
     private Set<BlockPos> sensorPositionsSnapshot = Set.of();
-    private BlockPos lastKnownPos = BlockPos.ZERO;
+    private BlockPos lastKnownPos;
     private static final double REFERENCE_SONAR_RPM = 196.0;
     private static final int SWEEP_SYNC_INTERVAL_TICKS = 100;
     private double sweepAngleDegrees;
@@ -44,6 +44,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     public SonarBearingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
+        lastKnownPos = pos.immutable();
     }
 
     @Override
@@ -295,6 +296,12 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
             return;
         }
 
+        if (serverLevel.hasChunkAt(lastKnownPos) && serverLevel.getBlockEntity(lastKnownPos) instanceof com.happysg.radar.block.radar.behavior.IRadar) {
+            lastKnownPos = worldPosition;
+            setChanged();
+            return;
+        }
+
         if (data.updateRadarPosition(serverLevel, lastKnownPos, worldPosition)) {
             lastKnownPos = worldPosition;
             setChanged();
@@ -442,6 +449,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(tag, registries, clientPacket);
+        lastKnownPos = tag.contains("LastKnownPos") ? BlockPos.of(tag.getLong("LastKnownPos")) : worldPosition;
         panelCount = tag.getInt("PanelCount");
         structureValid = tag.getBoolean("StructureValid");
         savedSensorPositions.clear();
@@ -471,6 +479,7 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     public void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(tag, registries, clientPacket);
+        tag.putLong("LastKnownPos", lastKnownPos.asLong());
         tag.putInt("PanelCount", panelCount);
         tag.putBoolean("StructureValid", structureValid);
         tag.putLongArray("SensorPositions", savedSensorPositions.stream().mapToLong(BlockPos::asLong).toArray());

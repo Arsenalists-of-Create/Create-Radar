@@ -220,10 +220,6 @@ public class ARADData extends SavedData {
                 BlockPos monitorPos = normalizeMonitor(level, next);
                 if (monitorPos == null) continue;
 
-                if (level.getBlockEntity(next) instanceof MonitorBlockEntity monitor && monitor.getSize() == 1 && getEndpointOrigin(group.key.dim(), monitorPos) == null) {
-                    continue;
-                }
-
                 if (radarData.getEndpointOrigin(group.key.dim(), monitorPos) != null) {
                     continue;
                 }
@@ -348,6 +344,46 @@ public class ARADData extends SavedData {
             dataLinkToEndpoint.remove(key(level.dimension(), dataLink));
         }
         setDirty();
+    }
+
+    public boolean updateRwrPosition(ResourceKey<Level> dim, BlockPos oldPos, BlockPos newPos) {
+        if (dim == null || oldPos == null || newPos == null) {
+            return false;
+        }
+        if (oldPos.equals(newPos)) {
+            return true;
+        }
+
+        String oldKey = key(dim, oldPos);
+        String newKey = key(dim, newPos);
+
+        Group original = groupsByRwr.get(oldKey);
+        if (original == null) {
+            return false;
+        }
+
+        Group destination = groupsByRwr.get(newKey);
+        if (destination != null) {
+            if (!destination.monitorEndpoints.isEmpty() || !destination.jammerEndpoints.isEmpty() || !destination.dataLinks.isEmpty()) {
+                return false;
+            }
+        }
+
+        Group moved = new Group(new RwrKey(dim, newPos));
+        moved.monitorEndpoints.addAll(original.monitorEndpoints);
+        moved.jammerEndpoints.addAll(original.jammerEndpoints);
+        moved.dataLinks.addAll(original.dataLinks);
+
+        groupsByRwr.remove(oldKey);
+        groupsByRwr.put(newKey, moved);
+
+        monitorToRwr.replaceAll((endpoint, owner) -> oldKey.equals(owner) ? newKey : owner);
+        jammerToRwr.replaceAll((endpoint, owner) -> oldKey.equals(owner) ? newKey : owner);
+        dataLinkToRwr.replaceAll((link, owner) -> oldKey.equals(owner) ? newKey : owner);
+        dataLinkToEndpoint.replaceAll((link, endpoint) -> oldKey.equals(endpoint) ? newKey : endpoint);
+
+        setDirty();
+        return true;
     }
 
     public boolean updateMonitorPosition(ResourceKey<Level> dim, BlockPos oldPos, BlockPos newPos) {

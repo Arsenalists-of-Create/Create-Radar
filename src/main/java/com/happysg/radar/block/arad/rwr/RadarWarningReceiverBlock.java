@@ -51,15 +51,12 @@ public class RadarWarningReceiverBlock extends Block implements IBE<RadarWarning
     }
 
     @Override
-    protected void onRemove(BlockState state, Level level, BlockPos pos,
-                            BlockState newState, boolean isMoving) {
+    protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (!state.is(newState.getBlock()) && level instanceof ServerLevel serverLevel) {
+            boolean relocating = isMoving || SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos);
 
-        if (!state.is(newState.getBlock())
-                && level instanceof ServerLevel serverLevel) {
-
-            ARADData arad = ARADData.get(serverLevel);
-
-            if (!isMoving && !SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
+            if (!relocating) {
+                ARADData arad = ARADData.get(serverLevel);
                 ARADData.Group group = arad.getGroup(serverLevel.dimension(), pos);
 
                 if (group != null) {
@@ -69,9 +66,8 @@ public class RadarWarningReceiverBlock extends Block implements IBE<RadarWarning
                 }
 
                 DataLinkBlock.disconnectAttachedEndpointLinks(serverLevel, pos);
+                arad.dissolveRwr(serverLevel, pos);
             }
-
-            arad.dissolveRwr(serverLevel, pos);
         }
 
         super.onRemove(state, level, pos, newState, isMoving);

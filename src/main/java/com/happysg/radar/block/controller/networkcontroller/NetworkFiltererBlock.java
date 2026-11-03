@@ -5,9 +5,7 @@ import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.item.RadarCompassLink;
-import com.happysg.radar.item.binos.Binoculars;
 import com.happysg.radar.registry.ModBlockEntityTypes;
-import com.happysg.radar.registry.ModBlocks;
 import com.happysg.radar.registry.ModItems;
 import com.simibubi.create.AllShapes;
 import com.simibubi.create.foundation.block.IBE;
@@ -37,7 +35,6 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
@@ -269,48 +266,34 @@ public class NetworkFiltererBlock extends WrenchableDirectionalBlock implements 
 
         return ItemInteractionResult.FAIL;
     }
+
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        // Only run when the block is actually being removed/replaced with a different block
-        if (state.getBlock() != newState.getBlock()) {
-            if (!level.isClientSide) {
-                BlockEntity be = level.getBlockEntity(pos);
-                if (be != null) {
+        if (state.getBlock() != newState.getBlock() && level instanceof ServerLevel serverLevel) {
+            boolean relocating = isMoving || SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos);
+            if (!relocating && level.getBlockEntity(pos) instanceof NetworkFiltererBlockEntity controller) {
+                NetworkData network = NetworkData.get(serverLevel);
+                NetworkData.Group group = network.getGroup(serverLevel.dimension(), pos);
 
-                    // If this is the network controller, dissolve its network before the BE disappears
-                    if (level instanceof ServerLevel serverLevel
-                            && be instanceof NetworkFiltererBlockEntity controller) {
-
-                        if (!isMoving && !SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
-                            NetworkData network = NetworkData.get(serverLevel);
-                            NetworkData.Group group = network.getGroup(serverLevel.dimension(), pos);
-
-                            if (group != null) {
-                                for (BlockPos linkPos : java.util.List.copyOf(group.dataLinks)) {
-                                    DataLinkBlock.disconnectSavedLink(serverLevel, linkPos);
-                                }
-                            }
-                        }
-
-                        controller.dissolveNetwork(serverLevel);
+                if (group != null) {
+                    for (BlockPos linkPos : java.util.List.copyOf(group.dataLinks)) {
+                        DataLinkBlock.disconnectSavedLink(serverLevel, linkPos);
                     }
+                }
 
-                    // Drop any inventory contents (if present)
-                    if (be instanceof NetworkFiltererBlockEntity filterer) {
-                        IItemHandler handler = filterer.getItemHandler();
+                controller.dissolveNetwork(serverLevel);
+                IItemHandler handler = controller.getItemHandler();
 
-                        for (int i = 0; i < handler.getSlots(); i++) {
-                            ItemStack stack = handler.getStackInSlot(i);
-                            if (!stack.isEmpty()) {
-                                Containers.dropItemStack(level, pos.getX(), pos.getY(), pos.getZ(), stack.copy());
-                            }
-                        }
+                for (int i = 0; i < handler.getSlots(); i++) {
+                    ItemStack stack = handler.getStackInSlot(i);
+
+                    if (!stack.isEmpty()) {
+                        Containers.dropItemStack(level, pos.getX(), pos.getY(), pos.getZ(), stack.copy());
                     }
                 }
             }
         }
 
-        // call super last so vanilla can do its cleanup
         super.onRemove(state, level, pos, newState, isMoving);
     }
 

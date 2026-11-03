@@ -315,6 +315,14 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
     }
 
     private void removeDeadTracks() {
+        if (blockEntity.getLevel() instanceof ServerLevel serverLevel) {
+            for (ServerPlayer player : serverLevel.players()) {
+                if (!shouldRadarSee(player)) {
+                    radarTracks.remove(player.getUUID().toString());
+                }
+            }
+        }
+
         for (Entity entity : scannedEntities) {
             if (!entity.isAlive() || entity instanceof ServerPlayer && !shouldRadarSee(entity))
                 radarTracks.remove(entity.getUUID().toString());

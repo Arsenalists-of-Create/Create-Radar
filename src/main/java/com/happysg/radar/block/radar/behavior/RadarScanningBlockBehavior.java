@@ -171,6 +171,11 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
 
         for (Entity entity : scannedEntities) {
+            if (entity instanceof Player && !shouldRadarSee(entity)) {
+                radarTracks.remove(entity.getUUID().toString());
+                continue;
+            }
+
             if (!entity.isAlive() || !isInFovAndRange(entity.position())) {
                 continue;
             }
@@ -447,6 +452,16 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     private void removeDeadTracks() {
+        if (blockEntity.getLevel() instanceof ServerLevel serverLevel) {
+            for (ServerPlayer player : serverLevel.getServer()
+                    .getPlayerList().getPlayers()) {
+
+                if (!shouldRadarSee(player)) {
+                    radarTracks.remove(player.getUUID().toString());
+                }
+            }
+        }
+
         // entities
         for (Entity entity : scannedEntities) {
             if (!entity.isAlive() || entity instanceof ServerPlayer && !shouldRadarSee(entity))
@@ -487,6 +502,10 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     private boolean shouldCollectEntity(Entity entity) {
+        if (entity instanceof Player) {
+            return scanPlayers && shouldRadarSee(entity);
+        }
+
         if (isMissile(entity)) {
             return true;
         }

@@ -2,6 +2,7 @@ package com.happysg.radar.block.radar.sonar.bearing;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.registry.ModBlocks;
 import com.simibubi.create.AllItems;
@@ -149,10 +150,12 @@ public class SonarBearingBlock extends BearingBlock implements IBE<SonarBearingB
         }
 
         if (level instanceof ServerLevel sl) {
-            if (!isMoving) {
+            boolean relocating = isMoving || SableDataLinkRelocation.isRelocatingEndpoint(sl, pos);
+
+            if (!relocating) {
                 DataLinkBlock.disconnectAttachedEndpointLinks(sl, pos);
+                NetworkData.get(sl).onEndpointRemoved(sl, pos);
             }
-            NetworkData.get(sl).onEndpointRemoved(sl, pos);
         }
 
         super.onRemove(state, level, pos, newState, isMoving);

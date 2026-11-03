@@ -66,9 +66,11 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     private boolean autoDisassembledForAltitude;
     private UUID emitterId = UUID.randomUUID();
     private boolean orientationMigrated = true;
+    private BlockPos lastKnownPos;
 
     public SkyRadarBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
+        lastKnownPos = pos.immutable();
     }
 
     @Override
@@ -80,6 +82,18 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     @Override
     public void tick() {
         super.tick();
+
+        if (level instanceof ServerLevel serverLevel && serverLevel.getGameTime() % 40 == 0 && !lastKnownPos.equals(worldPosition)) {
+            NetworkData data = NetworkData.get(serverLevel);
+
+            if (serverLevel.hasChunkAt(lastKnownPos) && serverLevel.getBlockEntity(lastKnownPos) instanceof SkyRadarBlockEntity) {
+                lastKnownPos = worldPosition;
+                setChanged();
+            } else if (data.isEndpointLinked(serverLevel.dimension(), worldPosition) || data.updateRadarPosition(serverLevel, lastKnownPos, worldPosition)) {
+                lastKnownPos = worldPosition;
+                setChanged();
+            }
+        }
 
         migrateLegacyOrientation();
 
@@ -559,6 +573,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     @Override
     protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(compound, registries, clientPacket);
+        lastKnownPos = compound.contains("LastKnownPos") ? BlockPos.of(compound.getLong("LastKnownPos")) : worldPosition;
         if (compound.hasUUID("EmitterId")) {
             emitterId = compound.getUUID("EmitterId");
         }
@@ -586,6 +601,7 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     @Override
     protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(compound, registries, clientPacket);
+        compound.putLong("LastKnownPos", lastKnownPos.asLong());
         compound.putUUID("EmitterId", emitterId);
         compound.putFloat("YawDeg", wrap360(yawDeg));
         compound.putBoolean("ManualYawOverride", manualYawOverride);

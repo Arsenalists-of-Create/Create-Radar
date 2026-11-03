@@ -287,15 +287,14 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
     }
 
     @Nullable
-    public Boolean swivelPitchAlignmentForFiring(BlockPos mountPos, boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
+    public Boolean swivelPitchAlignmentForFiring(BlockPos mountPos, boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees, @Nullable Vec3 requestedWorldDirection) {
         if (level == null || mountPos == null || !Mods.SIMULATED.isLoaded()) {
             return null;
         }
 
         Direction side = SimulatedSwivelMountAdapter.findTPitchSwivelSide(this, mountPos);
-
         if (side == null) {
-            return null;
+            return SimulatedSwivelMountAdapter.findTPitchLinkSide(this, mountPos) != null ? false : null;
         }
 
         if (!isControllerRunning() || !hasStructuralKineticSelectionForTargeting()) {
@@ -313,15 +312,25 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
 
         var adapter = resolution.adapter();
         var aimFrame = adapter.aimFrame();
+
         Vec3 actualDirection = adapter.getPhysicalWorldDirection();
 
-        if (aimFrame == null || actualDirection == null || actualDirection.lengthSqr() < 1.0e-12) {
+        if (aimFrame == null || actualDirection == null || actualDirection.lengthSqr() < 1.0e-12 || requestedWorldDirection == null || requestedWorldDirection.lengthSqr() < 1.0e-12) {
             return false;
         }
 
         double actualPitch = aimFrame.controllerTargetDegrees(CannonAxis.PITCH, actualDirection);
+        double requestedPitch = aimFrame.controllerTargetDegrees(CannonAxis.PITCH, requestedWorldDirection);
+
         double allowedError = Double.isFinite(maximumToleranceDegrees) ? Math.min(1.0, Math.max(0.0, maximumToleranceDegrees)) : 1.0;
-        return Double.isFinite(actualPitch) && Math.abs(actualPitch - getTargetAngle()) <= allowedError;
+
+        if (!Double.isFinite(actualPitch) || !Double.isFinite(requestedPitch) || !Double.isFinite(getTargetAngle()) || Math.abs(actualPitch - getTargetAngle()) > allowedError || Math.abs(requestedPitch - getTargetAngle()) > allowedError) {
+            return false;
+        }
+
+        double directionDot = actualDirection.normalize().dot(requestedWorldDirection.normalize());
+
+        return Double.isFinite(directionDot) && directionDot >= Math.cos(Math.toRadians(allowedError));
     }
 
     /**

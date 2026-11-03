@@ -21,6 +21,8 @@ import com.happysg.radar.registry.ModSounds;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -64,6 +66,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
     private boolean engagedSoundActive = false;
     private boolean engagedRedstoneActive = false;
     private boolean engagedPulseHigh = true;
+    private BlockPos lastKnownPos;
 
     private boolean wasInRange = false;
     private final Set<String> knownInRangeSources = new HashSet<>();
@@ -141,11 +144,41 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
 
     public RadarWarningReceiverBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
+        lastKnownPos = pos.immutable();
     }
 
 
     @Override
-    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
+    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {}
+
+    @Override
+    protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
+        super.read(tag, registries, clientPacket);
+        lastKnownPos = tag.contains("LastKnownPos") ? BlockPos.of(tag.getLong("LastKnownPos")) : worldPosition;
+    }
+
+    @Override
+    protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
+        super.write(tag, registries, clientPacket);
+        tag.putLong("LastKnownPos", lastKnownPos.asLong());
+    }
+
+    private void relocateAradNetworkIfNeeded(ServerLevel level) {
+        if (lastKnownPos.equals(worldPosition)) {
+            return;
+        }
+
+        if (level.hasChunkAt(lastKnownPos) && level.getBlockEntity(lastKnownPos) instanceof RadarWarningReceiverBlockEntity) {
+            lastKnownPos = worldPosition;
+            setChanged();
+            return;
+        }
+
+        ARADData data = ARADData.get(level);
+        if (data.updateRwrPosition(level.dimension(), lastKnownPos, worldPosition)) {
+            lastKnownPos = worldPosition;
+            setChanged();
+        }
     }
 
     @Override
@@ -154,7 +187,6 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
             stopLockSound(sl);
             stopEngagedSound(sl);
             setRedstoneSignal(0);
-            ARADData.get(sl).dissolveRwr(sl, worldPosition);
         }
         super.remove();
     }
@@ -167,6 +199,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
 
         if (!(level instanceof ServerLevel sl)) return;
         if (level.getGameTime() % 5 == 0) {
+            relocateAradNetworkIfNeeded(sl);
             reconcileAradContacts(sl);
         }
 

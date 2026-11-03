@@ -120,15 +120,13 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
                 pitch.releaseKineticActuator();
             }
 
-            boolean assemblyMove = SableDataLinkRelocation.isRelocatingEndpoint(sl, pos);
+            boolean assemblyMove = isMoving || SableDataLinkRelocation.isRelocatingEndpoint(sl, pos);
             if (!assemblyMove) {
                 WeaponNetworkRuntime.get(sl).rememberRelinkRequirement(pos);
-
-                if (!isMoving) {
-                    DataLinkBlock.disconnectAttachedEndpointLinks(sl, pos);
-                    DataLinkBlock.disconnectAttachedControllerLinks(sl, pos);
-                }
+                DataLinkBlock.disconnectAttachedEndpointLinks(sl, pos);
+                DataLinkBlock.disconnectAttachedControllerLinks(sl, pos);
             }
+
             WeaponNetworkRuntime.get(sl).unregisterContactController(pos);
             if (!assemblyMove) {
                 NetworkData.get(sl).onEndpointRemoved(sl, pos);

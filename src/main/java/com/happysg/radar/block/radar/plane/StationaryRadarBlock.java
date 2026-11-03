@@ -2,6 +2,7 @@ package com.happysg.radar.block.radar.plane;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.mojang.serialization.MapCodec;
 import com.simibubi.create.foundation.block.IBE;
@@ -57,11 +58,12 @@ public class StationaryRadarBlock extends HorizontalDirectionalBlock implements 
         }
 
         if (level instanceof ServerLevel sl) {
-            if (!isMoving) {
-                DataLinkBlock.disconnectAttachedEndpointLinks(sl, pos);
-            }
+            boolean relocating = isMoving || SableDataLinkRelocation.isRelocatingEndpoint(sl, pos);
 
-            NetworkData.get(sl).onEndpointRemoved(sl, pos);
+            if (!relocating) {
+                DataLinkBlock.disconnectAttachedEndpointLinks(sl, pos);
+                NetworkData.get(sl).onEndpointRemoved(sl, pos);
+            }
         }
 
         super.onRemove(state, level, pos, newState, isMoving);

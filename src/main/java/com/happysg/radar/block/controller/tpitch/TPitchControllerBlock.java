@@ -317,7 +317,7 @@ public class TPitchControllerBlock extends KineticBlock
                 pitch.releaseKineticActuator();
             }
 
-            boolean assemblyMove = SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos);
+            boolean assemblyMove = isMoving || SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos);
             if (!assemblyMove) {
                 WeaponNetworkRuntime.get(serverLevel).rememberRelinkRequirement(pos);
 

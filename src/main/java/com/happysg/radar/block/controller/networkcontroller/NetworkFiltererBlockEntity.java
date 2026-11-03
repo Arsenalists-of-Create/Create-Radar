@@ -82,6 +82,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     @Nullable
     private String autoUnloadedTargetId = null;
 
+    @Nullable
+    private String autoUnengageableTargetId = null;
+    private long autoUnengageableSinceTick = Long.MIN_VALUE;
+
     private long autoUnloadedSinceTick = Long.MIN_VALUE;
 
     @Nullable
@@ -398,6 +402,53 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 } else {
                     autoUnloadedTargetId = null;
                     autoUnloadedSinceTick = Long.MIN_VALUE;
+                }
+
+                if (hasLoadedWeapon && sl.getGameTime() % 20L == 0L) {
+                    List<AutoPitchControllerBlockEntity> availableWeapons = new ArrayList<>();
+                    for (AutoPitchControllerBlockEntity pitch : endpoints) {
+                        if (hasResolvableAutoShot(sl, pitch)) {
+                            availableWeapons.add(pitch);
+                        }
+                    }
+
+                    if (!availableWeapons.isEmpty()) {
+                        boolean canEngage = anyCannonCanEngage(availableWeapons, selected, cfg.lineOfSight());
+
+                        if (canEngage) {
+                            autoUnengageableTargetId = null;
+                            autoUnengageableSinceTick = Long.MIN_VALUE;
+
+                        } else {
+                            long now = sl.getGameTime();
+                            String selectedId = selected.getId();
+
+                            if (!Objects.equals(autoUnengageableTargetId, selectedId)) {
+                                autoUnengageableTargetId = selectedId;
+                                autoUnengageableSinceTick = now;
+                            }
+
+                            long dropDelayTicks = RadarConfig.server().autoTargetDropDelaySeconds.get() * 20L;
+                            if (now - autoUnengageableSinceTick >= dropDelayTicks) {
+
+                                autoLimitRejectedTargetId = selectedId;
+                                autoLimitRejectedUntilTick = now + 40L;
+
+                                List<RadarTrack> alternatives = cachedTracks.stream()
+                                        .filter(track -> track != null && !Objects.equals(track.getId(), selectedId))
+                                        .toList();
+
+                                RadarTrack replacement = pickAutoTarget_PerCannon(sl, alternatives, safeZones);
+
+                                applySelectedTarget(sl, data, group, replacement, replacement != null);
+                                return;
+                            }
+                        }
+                    }
+
+                } else if (!hasLoadedWeapon) {
+                    autoUnengageableTargetId = null;
+                    autoUnengageableSinceTick = Long.MIN_VALUE;
                 }
 
                 Vec3 selectedPos = selected.position();
@@ -925,6 +976,9 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
             autoUnloadedTargetId = null;
             autoUnloadedSinceTick = Long.MIN_VALUE;
+
+            autoUnengageableTargetId = null;
+            autoUnengageableSinceTick = Long.MIN_VALUE;
         }
 
         this.selectedWasAuto = next != null && wasAuto;

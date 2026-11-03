@@ -2,6 +2,7 @@ package com.happysg.radar.block.radar.plane;
 
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.api.arad.ARADTargeting;
+import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.behavior.RadarScanningBlockBehavior;
 import com.happysg.radar.block.arad.rwr.RadarType;
@@ -31,10 +32,12 @@ import java.util.UUID;
 public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRadar {
     private RadarScanningBlockBehavior scanningBehavior;
     private UUID emitterId = UUID.randomUUID();
+    private BlockPos lastKnownPos;
 
 
     public StationaryRadarBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
+        lastKnownPos = pos.immutable();
     }
 
     @Override
@@ -54,6 +57,18 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     public void tick() {
         super.tick();
+        if (level instanceof ServerLevel serverLevel && serverLevel.getGameTime() % 40 == 0 && !lastKnownPos.equals(worldPosition)) {
+            NetworkData data = NetworkData.get(serverLevel);
+
+            if (serverLevel.hasChunkAt(lastKnownPos) && serverLevel.getBlockEntity(lastKnownPos) instanceof StationaryRadarBlockEntity) {
+                lastKnownPos = worldPosition;
+                setChanged();
+            } else if (data.isEndpointLinked(serverLevel.dimension(), worldPosition) || data.updateRadarPosition(serverLevel, lastKnownPos, worldPosition)) {
+                lastKnownPos = worldPosition;
+                setChanged();
+            }
+        }
+
         if (level == null) {
             return;
         }
@@ -149,6 +164,7 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.read(compound, registries, clientPacket);
+        lastKnownPos = compound.contains("LastKnownPos") ? BlockPos.of(compound.getLong("LastKnownPos")) : worldPosition;
         if (compound.hasUUID("EmitterId")) {
             emitterId = compound.getUUID("EmitterId");
         }
@@ -157,6 +173,7 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     @Override
     protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(compound, registries, clientPacket);
+        compound.putLong("LastKnownPos", lastKnownPos.asLong());
         compound.putUUID("EmitterId", emitterId);
     }
 
