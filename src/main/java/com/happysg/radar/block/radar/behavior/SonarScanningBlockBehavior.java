@@ -56,6 +56,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     private final Map<String, RadarTrack> radarTracks = new HashMap<>();
     private final Set<Entity> entityCandidates = new HashSet<>();
     private final Set<SubLevelAccess> shipCandidates = new HashSet<>();
+    private Set<UUID> excludedSublevelIds = Set.of();
     private long lastCandidateRefreshTick = Long.MIN_VALUE;
 
     private double range;
@@ -138,10 +139,14 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
         entityCandidates.clear();
         shipCandidates.clear();
 
+        excludedSublevelIds = Mods.SABLE.isLoaded() ? RadarPhysics.connectedFrameIds(level, sonar.getBlockPos()) : Set.of();
+        for (UUID id : excludedSublevelIds) {
+            radarTracks.remove(id.toString());
+        }
+
         if (sensors.isEmpty()) return;
 
         AABB scanBounds = createScanBounds(sensors);
-
         for (Entity entity : level.getEntitiesOfClass(Entity.class, scanBounds, this::shouldScanEntity)) {
             if (entity instanceof AbstractContraptionEntity contraption && sonar.isAttachedTo(contraption)) {
                 continue;
@@ -154,7 +159,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             SubLevelAccess ownShip = SableUtils.getShipManagingPos(sonar);
 
             for (SubLevelAccess ship : SableUtils.getLoadedShips(level, scanBounds)) {
-                if (ship == null || (ownShip != null && ownShip.getUniqueId().equals(ship.getUniqueId()))) {
+                if (ship == null || excludedSublevelIds.contains(ship.getUniqueId())) {
                     continue;
                 }
 
@@ -205,7 +210,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
 
         Vec3 sweepCenter = RadarPhysics.worldPosition(sonar);
         double sweepStep = sonar.getSweepAngularSpeedDegreesPerTick();
-        double sweepAngle = Mth.positiveModulo(180.0 - sonar.getGlobalAngle() + sweepStep * 0.5, 360.0);
+        double sweepAngle = Mth.positiveModulo(180.0 - sonar.getLocalSweepAngleDegrees() + sweepStep * 0.5, 360.0);
         double sweepFov = Math.min(360.0, Math.max(RadarConfig.server().sonarFOV.get(), Math.abs(sweepStep)));
 
         List<SweepCandidate> inSector = new ArrayList<>();
@@ -218,8 +223,8 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
                 continue;
 
             Vec3 target = entity.position();
-
-            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(sweepCenter, target, sweepAngle, sweepFov))
+            Vec3 relative = RadarPhysics.localDirection(target.subtract(sweepCenter), sonar);
+            if (!RadarScanningBlockBehavior.isWithinHorizontalFov(Vec3.ZERO, relative, sweepAngle, sweepFov))
                 continue;
 
             int nearestIndex = nearestSensorIndex(target, sensors);

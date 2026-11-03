@@ -55,6 +55,11 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
     }
 
     @Override
+    public float getDisplayLocalAngleDegrees() {
+        return getAngleForDirection(getScanFacing());
+    }
+
+    @Override
     public void tick() {
         super.tick();
         if (level instanceof ServerLevel serverLevel && serverLevel.getGameTime() % 40 == 0 && !lastKnownPos.equals(worldPosition)) {
@@ -78,12 +83,7 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
 
         scanningBehavior.setRunning(true);
         scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
-
-        Direction facing = getScanFacing();
-        Vec3 facingVec = new Vec3(facing.getStepX(), facing.getStepY(), facing.getStepZ());
-        Vec3 shipVec = PhysicsHandler.getWorldVecDirectionTransform(facingVec, this);
-        double angle = Math.toDegrees(Math.atan2(shipVec.x, shipVec.z));
-        scanningBehavior.setAngle((angle + 360) % 360);
+        scanningBehavior.setAngle(getAngleForDirection(getScanFacing()));
     }
 
 
@@ -92,7 +92,7 @@ public class StationaryRadarBlockEntity extends SmartBlockEntity implements IRad
         scanningBehavior = new RadarScanningBlockBehavior(this, RadarType.AIRBORNE);
         scanningBehavior.setRunning(true);
         scanningBehavior.setRange(RadarConfig.server().planeRadarRange.get());
-        scanningBehavior.setAngle((getScanFacing().toYRot() + 360) % 360);
+        scanningBehavior.setAngle(getAngleForDirection(getScanFacing()));
         scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
         scanningBehavior.setTrackExpiration(1);
         behaviours.add(scanningBehavior);

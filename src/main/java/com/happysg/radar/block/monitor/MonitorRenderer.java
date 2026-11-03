@@ -18,6 +18,7 @@ import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.*;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.networking.packets.SableSilhouetteRequestPacket;
 import com.happysg.radar.registry.ModRenderTypes;
@@ -151,13 +152,13 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
      */
     private void renderRadarDisplay(MonitorBlockEntity blockEntity, PoseStack ms, MultiBufferSource bufferSource, float partialTicks) {
         // Render in order from back to front to prevent z-fighting
-        MonitorProjection projection = MonitorProjection.create(blockEntity);
+        MonitorProjection projection = MonitorProjection.create(blockEntity, partialTicks);
 
         renderGrid(projection, blockEntity, ms, bufferSource);
         renderSafeZones(projection, blockEntity, ms, bufferSource);
 
         for (MonitorRadarSnapshot radarInfo : blockEntity.getRunningRadarSnapshots()) {
-            MonitorProjection.DisplayPoint radarCenter = projection.project(radarInfo.center());
+            MonitorProjection.DisplayPoint radarCenter = projection.project(projection.radarWorldCenter(radarInfo));
             float scale = projection.displayScale(radarInfo.range());
             RadarDisplayProfile profile = radarInfo.displayProfile();
             MonitorRadarRenderer customRenderer = MonitorRadarRenderRegistry.get(radarInfo).orElse(null);
@@ -1071,57 +1072,8 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         Matrix3f n = ms.last().normal();
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
 
-        float monitorAngle = 0;
-        boolean renderRelative = profile.renderRelativeToMonitor();
-        float globalAngle = getRenderGlobalAngle(radar, partialTicks);
-        boolean spinningLike = sweepStyle == RadarSweepStyle.ROTATING;
-        boolean monitorOnShip = Mods.SABLE.isLoaded() && SableMonitorRendererAccess.isMonitorOnShip(controller);
-
-        if (monitorOnShip && spinningLike) { // spinning radar on a ship
-            // Calculate the current angle
-            Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
-            Vec3 facingVec = new Vec3(monitorFacing.getStepX(), monitorFacing.getStepY(), monitorFacing.getStepZ());
-            Vec3 angleVec = PhysicsHandler.getWorldVecDirectionTransform(facingVec, controller);
-            monitorAngle = (float) Math.toDegrees(Math.atan2(angleVec.x, angleVec.z));
-
-            if (monitorFacing == Direction.NORTH || monitorFacing == Direction.SOUTH) {
-                monitorAngle = (monitorAngle + 180) % 360;
-            }
-
-            // Normalize to positive angles
-            monitorAngle = (monitorAngle + 360 + 180) % 360;
-        }
-        float currentAngle;
-        if (renderRelative && monitorOnShip && !spinningLike) {  // plane radar on a ship
-            Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
-            currentAngle = alignGlobalAngleToMonitor(monitorFacing, globalAngle);
-
-        }else{ // ground based spinning radar
-            Direction monitorFacing = controller.getBlockState().getValue(MonitorBlock.FACING);
-            // Global angle is already in world space; only align world-north to monitor.
-            Direction radarFacing   = Direction.NORTH;
-            ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, radarFacing);
-            switch (cone){
-                case NORTH -> currentAngle = 0 + globalAngle;
-                case DOWN -> currentAngle = 180 + globalAngle;
-                case LEFT -> currentAngle = 90 + globalAngle;
-                case RIGHT -> currentAngle = 270 + globalAngle;
-                default -> currentAngle = 30;
-            }
-
-        }
-
-        // Make sure we're working with normalized angles
-        currentAngle = (currentAngle + 360) % 360;
-
-
-        float angleDiff = monitorAngle + currentAngle;
-        // Normalize to -180 to 180 for rotation calculation
-        if (angleDiff > 180) angleDiff -= 360;
-        if (angleDiff < -180) angleDiff += 360;
-
-        // Convert to radians for sin/cos
-        float angleRad = angleDiff * (float) Math.PI / 180.0f;
+        float screenAngle = MonitorSweepFrame.screenAngle(radar, projection, partialTicks);
+        float angleRad = (float) Math.toRadians(screenAngle);
         float cos = (float) Math.cos(angleRad);
         float sin = (float) Math.sin(angleRad);
 
@@ -1151,17 +1103,6 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         addSweepVertex(buffer, m, quad.minX(), DEPTH_SWEEP, quad.maxZ(), r, g, b, ALPHA_SWEEP, u3, v3);
     }
 
-    private float getRenderGlobalAngle(MonitorRadarSnapshot info, float partialTicks) {
-        float angle = info.globalAngleDegrees();
-
-        if (info.angularSpeedDegreesPerTick() != 0.0f && Minecraft.getInstance().level != null) {
-            long elapsed = Minecraft.getInstance().level.getGameTime() - info.angleSnapshotGameTime();
-            angle += info.angularSpeedDegreesPerTick() * (elapsed + partialTicks);
-        }
-
-        return (angle + 360.0f) % 360.0f;
-    }
-
     private float alignGlobalAngleToMonitor(Direction monitorFacing, float globalAngle) {
         ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, Direction.NORTH);
         return switch (cone) {
@@ -1182,7 +1123,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
             return;
         }
 
-        MonitorProjection.DisplayPoint start = projection.project(radar.center());
+        MonitorProjection.DisplayPoint start = projection.project(projection.radarWorldCenter(radar));
         MonitorProjection.DisplayPoint end = projection.project(radar.ownedLockedTargetPosition());
         int size = monitor.getSize();
         float x1 = 1f - size / 2f + start.xOffset() * size;
@@ -1350,8 +1291,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
     }
 
     private float getPlaneScreenAngle(MonitorRadarSnapshot radar, MonitorProjection projection, float partialTicks) {
-        float globalAngle = getRenderGlobalAngle(radar, partialTicks);
-        return projection.projectWorldAngle(globalAngle);
+        return MonitorSweepFrame.screenAngle(radar, projection, partialTicks);
     }
 
     private float getRadarFov(MonitorRadarSnapshot radar) {

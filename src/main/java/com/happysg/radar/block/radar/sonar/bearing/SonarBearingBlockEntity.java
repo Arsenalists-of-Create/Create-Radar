@@ -1,5 +1,6 @@
 package com.happysg.radar.block.radar.sonar.bearing;
 
+import com.happysg.radar.api.physics.RadarPhysics;
 import com.happysg.radar.api.radar.*;
 import com.happysg.radar.block.arad.rwr.RadarType;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
@@ -391,9 +392,15 @@ public class SonarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         return getSweepAngularSpeedDegreesPerTick();
     }
 
+    public float getLocalSweepAngleDegrees() {
+        return (float) sweepAngleDegrees;
+    }
+
     @Override
     public float getGlobalAngle() {
-        return (float) sweepAngleDegrees;
+        double localAzimuth = Mth.positiveModulo(180.0 - sweepAngleDegrees, 360.0);
+        float worldAzimuth = RadarPhysics.worldAzimuth(this, localAzimuth);
+        return (float) Mth.positiveModulo(180.0 - worldAzimuth, 360.0);
     }
 
     @Override

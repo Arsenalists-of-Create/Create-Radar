@@ -42,4 +42,11 @@ public interface RadarDisplaySource {
     default Direction getDisplayDirection() {
         return null;
     }
+
+    /**
+     * Sweep angle in the radar block's own coordinate frame.
+     */
+    default float getDisplayLocalAngleDegrees() {
+        return Float.NaN;
+    }
 }

@@ -1,5 +1,6 @@
 package com.happysg.radar.block.radar.behavior;
 
+import com.happysg.radar.api.physics.RadarPhysics;
 import com.happysg.radar.api.radar.RadarDetectionSettings;
 import com.happysg.radar.api.radar.scan.RadarScanPolicy;
 import com.happysg.radar.api.radar.scan.RadarScanPolicyProvider;
@@ -36,17 +37,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import redstonedubstep.mods.vanishmod.VanishUtil;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.function.BooleanSupplier;
 
 public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
-
     public static final BehaviourType<SkyRadarScanningBehavior> TYPE = new BehaviourType<>();
     private static final double SKY_SCAN_MAX_Y = 300000.0;
     private static final double RWR_PASSIVE_RANGE_MULTIPLIER = 1.5;
@@ -511,13 +505,22 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
     }
 
     private void scanForSableTracks() {
-        if (blockEntity.getLevel() == null || !Mods.SABLE.isLoaded()) return;
-        double passiveRange = range * RWR_PASSIVE_RANGE_MULTIPLIER;
-        for (SubLevelAccess ship : SableUtils.getLoadedShips(blockEntity.getLevel(), getRadarAABB(passiveRange))) {
-            scannedShips.add(ship);
+        Level level = blockEntity.getLevel();
+        if (level == null || !Mods.SABLE.isLoaded()) {
+            return;
         }
 
-        scannedShips.remove(SableUtils.getShipManagingPos(blockEntity));
+        Set<UUID> excluded = RadarPhysics.connectedFrameIds(level, blockEntity.getBlockPos());
+        for (UUID id : excluded) {
+            radarTracks.remove(id.toString());
+        }
+
+        double passiveRange = range * RWR_PASSIVE_RANGE_MULTIPLIER;
+        for (SubLevelAccess ship : SableUtils.getLoadedShips(level, getRadarAABB(passiveRange))) {
+            if (ship != null && !excluded.contains(ship.getUniqueId())) {
+                scannedShips.add(ship);
+            }
+        }
     }
 
     private AABB getRadarAABB(double horizontalRange) {

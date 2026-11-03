@@ -2,6 +2,7 @@ package com.happysg.radar.block.radar.bearing;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.api.arad.ARADTargeting;
+import com.happysg.radar.api.physics.RadarPhysics;
 import com.happysg.radar.api.radar.RadarDetectionConfigurable;
 import com.happysg.radar.api.radar.RadarDetectionSettings;
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
@@ -75,6 +76,13 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     @Override
+    public float getDisplayLocalAngleDegrees() {
+        Vec3 facing = new Vec3(receiverFacing.getStepX(), receiverFacing.getStepY(), receiverFacing.getStepZ());
+        float receiverAngle = (float) Math.toDegrees(Math.atan2(facing.x, facing.z));
+        return (receiverAngle + angle + 540.0f) % 360.0f;
+    }
+
+    @Override
     public BlockPos getWorldPos() {
         return getBlockPos();
     }
@@ -88,7 +96,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
         if (running) {
             scanningBehavior.setRange(getRange());
-            scanningBehavior.setAngle(getGlobalAngle());
+            scanningBehavior.setAngle(getLocalScanAngle());
         }
 
         // Server-only: recompute at scan cadence (lazyTickRate = 5)
@@ -132,10 +140,15 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
 
-    public float getGlobalAngle() {
+    private float getLocalScanAngle() {
         Vec3 receiverVector = new Vec3(receiverFacing.getStepX(), receiverFacing.getStepY(), receiverFacing.getStepZ());
         float receiverAngle = (float) Math.toDegrees(Math.atan2(receiverVector.x, receiverVector.z));
-        return ((receiverAngle + angle + 360)+180) % 360;
+        return ((receiverAngle + angle + 360) + 180) % 360;
+    }
+
+    @Override
+    public float getGlobalAngle() {
+        return RadarPhysics.worldAzimuth(this, getLocalScanAngle());
     }
 
     public float getAngularSpeed() {
@@ -234,7 +247,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
         scanningBehavior.setRange(getRange());
         scanningBehavior.setScanPos(PhysicsHandler.getWorldVec(this));
         scanningBehavior.setRunning(running);
-        scanningBehavior.setAngle(getGlobalAngle());
+        scanningBehavior.setAngle(getLocalScanAngle());
         notifyUpdate();
     }
 

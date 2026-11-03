@@ -36,6 +36,14 @@ public class PhysicsHandler {
         return SableUtils.getWorldVecDirectionTransform(vec3, be);
     }
 
+    public static Vec3 getShipVecDirectionTransform(Vec3 worldDirection, BlockEntity blockEntity) {
+        if (!Mods.SABLE.isLoaded()) {
+            return worldDirection;
+        }
+
+        return SableUtils.getShipVecDirectionTransform(worldDirection, SableUtils.getShipManagingPos(blockEntity));
+    }
+
     public static BlockPos getWorldPos(BlockEntity blockEntity) {
         return getWorldPos(blockEntity.getLevel(), blockEntity.getBlockPos());
     }

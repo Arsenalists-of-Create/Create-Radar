@@ -107,6 +107,7 @@ public class SableUtils {
             return access == null ? Set.of() : Set.of(access.getUniqueId());
         }
         java.util.HashSet<UUID> ids = new java.util.HashSet<>();
+        ids.add(subLevel.getUniqueId());
         for (SubLevel connected : SubLevelHelper.getConnectedChain(subLevel)) {
             ids.add(connected.getUniqueId());
         }

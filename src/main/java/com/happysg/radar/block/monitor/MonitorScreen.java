@@ -207,7 +207,7 @@ public class MonitorScreen extends Screen {
             return;
         }
 
-        MonitorProjection projection = currentProjection(monitor);
+        MonitorProjection projection = currentProjection(monitor, partialTicks);
         updateHoverFromMouse(monitor, projection, mouseX, mouseY);
 
         int clipMargin = Math.round(GRID_MARGIN_PX * uiScale);
@@ -216,7 +216,7 @@ public class MonitorScreen extends Screen {
             renderGrid(gg, projection);
 
             for (MonitorRadarSnapshot radarInfo : monitor.getRunningRadarSnapshots()) {
-                MonitorProjection.DisplayPoint radarCenter = projection.project(radarInfo.center());
+                MonitorProjection.DisplayPoint radarCenter = projection.project(projection.radarWorldCenter(radarInfo));
                 float scale = projection.displayScale(radarInfo.range());
                 RadarDisplayProfile profile = radarInfo.displayProfile();
                 MonitorRadarRenderer customRenderer = MonitorRadarRenderRegistry.get(radarInfo).orElse(null);
@@ -504,6 +504,11 @@ public class MonitorScreen extends Screen {
         return MonitorProjection.create(monitor, manualView);
     }
 
+    private MonitorProjection currentProjection(MonitorBlockEntity monitor, float partialTicks) {
+        ensureManualViewLoaded();
+        return MonitorProjection.create(monitor, manualView, partialTicks);
+    }
+
     private void ensureManualViewLoaded() {
         if (loadedManualView)
             return;
@@ -621,55 +626,7 @@ public class MonitorScreen extends Screen {
         }
 
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
-        float a = getRenderGlobalAngle(radar, partialTicks);
-        Direction monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
-        Direction radarFacing = Direction.NORTH;
-        if (radarFacing == null) return;
-        float facingOffset = radarFacingOffsetDeg(monitorFacing, radarFacing);
-        float screenAngle = (a + facingOffset) % 360f;
-        boolean renderRelative = profile.renderRelativeToMonitor();
-        boolean spinningLike = sweepStyle == RadarSweepStyle.ROTATING;
-        boolean monitorOnShip = Mods.SABLE.isLoaded() && SableMonitorRendererAccess.isMonitorOnShip(monitor.getController());
-
-        if (!monitorOnShip && spinningLike) {
-            monitorFacing = monitor.getBlockState().getValue(MonitorBlock.FACING);
-            radarFacing = Direction.NORTH;
-            if (radarFacing == null) return;
-            MonitorRenderer.ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, radarFacing);
-            switch (cone) {
-                case NORTH -> screenAngle = 0 + a;
-                case DOWN -> screenAngle = 180 + a;
-                case LEFT -> screenAngle = 90 + a;
-                case RIGHT -> screenAngle = 270 + a;
-                default -> screenAngle = 30;
-            }
-
-        } else if (monitorOnShip && spinningLike) { // spinning radar on a ship
-            // Calculate the current angle
-            monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
-            Vec3 facingVec = new Vec3(monitorFacing.getStepX(), monitorFacing.getStepY(), monitorFacing.getStepZ());
-            Vec3 angleVec = PhysicsHandler.getWorldVecDirectionTransform(facingVec, monitor.getController());
-            screenAngle = (float) Math.toDegrees(Math.atan2(angleVec.x, angleVec.z));
-                screenAngle = screenAngle + a;
-            if (monitorFacing == Direction.NORTH || monitorFacing == Direction.SOUTH) {
-                screenAngle = (screenAngle + 180) % 360;
-            }
-
-            // Normalize to positive angles
-            screenAngle = (screenAngle + 360 + 180) % 360;
-        }
-
-        if (renderRelative && monitorOnShip && !spinningLike) {  // plane radar on a ship
-            monitorFacing = monitor.getController().getBlockState().getValue(MonitorBlock.FACING);
-            screenAngle = alignGlobalAngleToMonitor(monitorFacing, a);
-        }
-
-        if (renderRelative && monitorOnShip
-                && spinningLike) {
-            float shipYawDeg = (float) Math.toDegrees(SableMonitorRendererAccess.getMonitorShipYawRad(monitor.getController()));
-            screenAngle += -(shipYawDeg + 180f);
-        }
-        screenAngle = normalizeDegrees(screenAngle - projection.rotationDeg());
+        float screenAngle = MonitorSweepFrame.screenAngle(radar, projection, partialTicks);
 
         int drawSize = Math.max(1, Math.round(uiSize * scale));
         int cx = left + Math.round((0.5f + center.xOffset()) * uiSize);
@@ -703,7 +660,7 @@ public class MonitorScreen extends Screen {
             return;
         }
 
-        MonitorProjection.DisplayPoint start = projection.project(radar.center());
+        MonitorProjection.DisplayPoint start = projection.project(projection.radarWorldCenter(radar));
         MonitorProjection.DisplayPoint end = projection.project(radar.ownedLockedTargetPosition());
         int x1 = left + Math.round((0.5f + start.xOffset()) * uiSize);
         int y1 = top + Math.round((0.5f + start.zOffset()) * uiSize);
@@ -878,8 +835,7 @@ public class MonitorScreen extends Screen {
     }
 
     private float getPlaneScreenAngle(MonitorRadarSnapshot radar, MonitorProjection projection, float partialTicks) {
-        float globalAngle = getRenderGlobalAngle(radar, partialTicks);
-        return projection.projectWorldAngle(globalAngle);
+        return MonitorSweepFrame.screenAngle(radar, projection, partialTicks);
     }
 
     private float getRadarFov(MonitorRadarSnapshot radar) {
@@ -903,17 +859,6 @@ public class MonitorScreen extends Screen {
         return (float)-Math.cos(Math.toRadians(degrees));
     }
 
-
-    private float getRenderGlobalAngle(MonitorRadarSnapshot info, float partialTicks) {
-        float angle = info.globalAngleDegrees();
-
-        if (info.angularSpeedDegreesPerTick() != 0.0f && Minecraft.getInstance().level != null) {
-            long elapsed = Minecraft.getInstance().level.getGameTime() - info.angleSnapshotGameTime();
-            angle += info.angularSpeedDegreesPerTick() * (elapsed + partialTicks);
-        }
-
-        return (angle + 360.0f) % 360.0f;
-    }
 
     private float alignGlobalAngleToMonitor(Direction monitorFacing, float globalAngle) {
         MonitorRenderer.ConeDir2D cone = getConeDirectionOnMonitor(monitorFacing, Direction.NORTH);

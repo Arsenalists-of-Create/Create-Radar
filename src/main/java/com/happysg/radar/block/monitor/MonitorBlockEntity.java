@@ -167,7 +167,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             @Nullable String ownedLockedTargetId,
             @Nullable Vec3 ownedLockedTargetPos,
             MonitorRadarData data,
-            MonitorExtensionState extensionState
+            MonitorExtensionState extensionState,
+            float localAngleDegrees,
+            @Nullable UUID sourceSublevelId
     ) {
         public RadarDisplayInfo {
             if (displayProfile == null) {
@@ -181,6 +183,43 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             if (extensionState == null) {
                 extensionState = MonitorExtensionState.empty();
             }
+        }
+
+        // Compatibility constructor for existing display callers.
+        public RadarDisplayInfo(
+                BlockPos pos,
+                Vec3 center,
+                float range,
+                boolean running,
+                RadarDisplayProfile displayProfile,
+                float globalAngle,
+                float angularSpeed,
+                long angleSnapshotTime,
+                float fovDegrees,
+                @Nullable Direction direction,
+                @Nullable String ownedLockedTargetId,
+                @Nullable Vec3 ownedLockedTargetPos,
+                MonitorRadarData data,
+                MonitorExtensionState extensionState
+        ) {
+            this(
+                    pos,
+                    center,
+                    range,
+                    running,
+                    displayProfile,
+                    globalAngle,
+                    angularSpeed,
+                    angleSnapshotTime,
+                    fovDegrees,
+                    direction,
+                    ownedLockedTargetId,
+                    ownedLockedTargetPos,
+                    data,
+                    extensionState,
+                    Float.NaN,
+                    null
+            );
         }
 
         public MonitorRadarSnapshot toApiSnapshot() {
@@ -198,7 +237,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                     ownedLockedTargetId,
                     ownedLockedTargetPos,
                     data,
-                    extensionState
+                    extensionState,
+                    localAngleDegrees,
+                    sourceSublevelId
             );
         }
     }
@@ -703,6 +744,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
             MonitorRadarData monitorData = extensionState.data();
 
+            var sourceFrame = Mods.SABLE.isLoaded() ? SableUtils.getShipManagingPos(sl, radarPosition) : null;
+            UUID sourceSublevelId = sourceFrame == null ? null : sourceFrame.getUniqueId();
+
             infos.add(new RadarDisplayInfo(
                     endpoint.pos(),
                     PhysicsHandler.getWorldVec(sl, radarPosition),
@@ -721,7 +765,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                             ? ownedLock.targetPos()
                             : null,
                     monitorData,
-                    extensionState
+                    extensionState,
+                    displayRadar.getDisplayLocalAngleDegrees(),
+                    sourceSublevelId
             ));
         }
 
@@ -1797,6 +1843,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             tag.putFloat("AngularSpeed", info.angularSpeed());
             tag.putLong("AngleSnapshotTime", info.angleSnapshotTime());
             tag.putFloat("FovDegrees", info.fovDegrees());
+            tag.putFloat("LocalAngleDegrees", info.localAngleDegrees());
+            if (info.sourceSublevelId() != null) {
+                tag.putUUID("SourceSublevelId", info.sourceSublevelId());
+            }
             if (info.direction() != null) tag.putString("Direction", info.direction().getName());
             if (info.ownedLockedTargetId() != null && info.ownedLockedTargetPos() != null) {
                 tag.putString("OwnedLockedTargetId", info.ownedLockedTargetId());
@@ -1919,7 +1969,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                             tag.getDouble("OwnedTargetZ")
                     ) : null,
                     monitorData,
-                    extensionState
+                    extensionState,
+                    tag.contains("LocalAngleDegrees", Tag.TAG_FLOAT) ? tag.getFloat("LocalAngleDegrees") : Float.NaN,
+                    tag.hasUUID("SourceSublevelId") ? tag.getUUID("SourceSublevelId") : null
             ));
         }
         return List.copyOf(infos);

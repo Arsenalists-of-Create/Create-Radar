@@ -13,7 +13,6 @@ import java.util.UUID;
  * Moving-frame-safe coordinate API.
  */
 public final class RadarPhysics {
-
     private RadarPhysics() {}
 
     public static BlockPos worldBlockPos(Level level, BlockPos pos) {
@@ -46,5 +45,30 @@ public final class RadarPhysics {
 
     public static Set<UUID> connectedFrameIds(Level level, BlockPos pos) {
         return PhysicsHandler.getConnectedSublevelIds(level, pos);
+    }
+
+    public static Vec3 localDirection(
+            Vec3 worldDirection,
+            BlockEntity sensor
+    ) {
+        return PhysicsHandler.getShipVecDirectionTransform(
+                worldDirection, sensor
+        );
+    }
+
+    public static float worldAzimuth(BlockEntity sensor, double localAngleDegrees) {
+        if (!Double.isFinite(localAngleDegrees)) {
+            return 0.0f;
+        }
+
+        double radians = Math.toRadians(localAngleDegrees);
+
+        Vec3 localForward = new Vec3(Math.sin(radians), 0.0, Math.cos(radians));
+        Vec3 worldForward = worldDirection(localForward, sensor);
+
+        double horizontalLengthSqr = worldForward.x * worldForward.x + worldForward.z * worldForward.z;
+        double angle = Double.isFinite(horizontalLengthSqr) && horizontalLengthSqr > 1.0E-12 ? Math.toDegrees(Math.atan2(worldForward.x, worldForward.z)) : localAngleDegrees;
+
+        return (float) ((angle % 360.0 + 360.0) % 360.0);
     }
 }

@@ -1,5 +1,6 @@
 package com.happysg.radar.block.radar.behavior;
 
+import com.happysg.radar.api.physics.RadarPhysics;
 import com.happysg.radar.api.radar.RadarDetectionSettings;
 import com.happysg.radar.api.radar.scan.RadarScanPolicy;
 import com.happysg.radar.api.radar.scan.RadarScanPolicyProvider;
@@ -204,7 +205,15 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             }
         }
 
+        Set<UUID> connectedSublevels = Mods.SABLE.isLoaded() ? RadarPhysics.connectedFrameIds(level, blockEntity.getBlockPos()) : Set.of();
         for (SubLevelAccess ship : scannedShips) {
+            if (ship == null || connectedSublevels.contains(ship.getUniqueId())) {
+                if (ship != null) {
+                    radarTracks.remove(ship.getUniqueId().toString());
+                }
+                continue;
+            }
+
             Vec3 pos = RadarTrackUtil.getPosition(ship);
             boolean inPassiveCoverage = isInPassiveRwrCoverage(pos);
             boolean inActiveCoverage = isInFovAndRange(pos);
@@ -248,9 +257,9 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return 1;
         }
 
-        double dx = target.x() - radarPos.x();
-        double dz = target.z() - radarPos.z();
-        double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
+        Vec3 relative = RadarPhysics.localDirection(target.subtract(radarPos), bearingEntity);
+
+        double horizontalDistance = Math.hypot(relative.x, relative.z);
         double normalized = Math.max(0.0, Math.min(1.0, horizontalDistance / range));
         return Math.max(1, Math.min(14, (int) Math.ceil((1.0 - normalized) * 14.0)));
     }
@@ -260,8 +269,10 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     private boolean isInRadarCoverage(Vec3 target, Vec3 radarPos) {
-        double horizontalDistance = Math.sqrt(Math.pow(target.x() - radarPos.x(), 2) + Math.pow(target.z() - radarPos.z(), 2));
-        double verticalDistance = Math.abs(target.y() - radarPos.y());
+        Vec3 relative = RadarPhysics.localDirection(target.subtract(radarPos), bearingEntity);
+
+        double horizontalDistance = Math.hypot(relative.x, relative.z);
+        double verticalDistance = Math.abs(relative.y);
         double yScanRange = RadarConfig.server().radarYScanRange.get();
 
         return horizontalDistance <= range && verticalDistance <= yScanRange;
@@ -292,8 +303,10 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     private boolean isInPassiveRwrCoverage(Vec3 target, Vec3 radarPos) {
-        double horizontalDistance = Math.sqrt(Math.pow(target.x() - radarPos.x(), 2) + Math.pow(target.z() - radarPos.z(), 2));
-        double verticalDistance = Math.abs(target.y() - radarPos.y());
+        Vec3 relative = RadarPhysics.localDirection(target.subtract(radarPos), bearingEntity);
+
+        double horizontalDistance = Math.hypot(relative.x, relative.z);
+        double verticalDistance = Math.abs(relative.y);
         double yScanRange = RadarConfig.server().radarYScanRange.get();
 
         return horizontalDistance <= range * RWR_PASSIVE_RANGE_MULTIPLIER && verticalDistance <= yScanRange;
@@ -304,10 +317,13 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     private boolean isInFovAndRange(Vec3 target, Vec3 radarPos) {
-        if (!isInRadarCoverage(target, radarPos))
+        if (!isInRadarCoverage(target, radarPos)) {
             return false;
+        }
 
-        return isWithinHorizontalFov(radarPos, target, angle, fov);
+        Vec3 relative = RadarPhysics.localDirection(target.subtract(radarPos), bearingEntity);
+
+        return isWithinHorizontalFov(Vec3.ZERO, relative, angle, fov);
     }
 
     public static boolean isWithinHorizontalFov(Vec3 radarPos, Vec3 target, double angle, double fov) {
@@ -556,13 +572,22 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
 
     private void scanForSableTracks() {
-        if (blockEntity.getLevel() == null || !Mods.SABLE.isLoaded()) return;
-        double passiveRange = range * RWR_PASSIVE_RANGE_MULTIPLIER;
-        for (SubLevelAccess ship : SableUtils.getLoadedShips(blockEntity.getLevel(), getRadarAABB(passiveRange))) {
-            scannedShips.add(ship);
+        Level level = blockEntity.getLevel();
+        if (level == null || !Mods.SABLE.isLoaded()) {
+            return;
         }
 
-        scannedShips.remove(SableUtils.getShipManagingPos(blockEntity));
+        Set<UUID> excluded = RadarPhysics.connectedFrameIds(level, blockEntity.getBlockPos());
+        for (UUID id : excluded) {
+            radarTracks.remove(id.toString());
+        }
+
+        double passiveRange = range * RWR_PASSIVE_RANGE_MULTIPLIER;
+        for (SubLevelAccess ship : SableUtils.getLoadedShips(level, getRadarAABB(passiveRange))) {
+            if (ship != null && !excluded.contains(ship.getUniqueId())) {
+                scannedShips.add(ship);
+            }
+        }
     }
 
 
@@ -574,6 +599,11 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
         double yScan = RadarConfig.server().radarYScanRange.get();
         Level level = blockEntity.getLevel();
+        if (level != null && RadarPhysics.isInMovingFrame(level, blockEntity.getBlockPos())) {
+            double reach = Math.hypot(horizontalRange, yScan);
+            return new AABB(x - reach, Math.max(y - reach, level.getMinBuildHeight()), z - reach, x + reach, Math.min(y + reach, level.getMaxBuildHeight()), z + reach);
+        }
+
         double minY = level != null ? Math.max(y - yScan, level.getMinBuildHeight()) : y - yScan;
         double maxY = level != null ? Math.min(y + yScan, level.getMaxBuildHeight()) : y + yScan;
 

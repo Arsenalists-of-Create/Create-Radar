@@ -3,6 +3,7 @@ package com.happysg.radar.block.monitor;
 import com.happysg.radar.api.monitor.MonitorRadarSnapshot;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.compat.vs2.SableUtils;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
@@ -23,9 +24,10 @@ public class MonitorProjection {
     private final SubLevelAccess ship;
     private final boolean lockedToSublevel;
     private final UUID lockedSublevelId;
+    private final float partialTicks;
 
     private MonitorProjection(MonitorBlockEntity monitor, Direction monitorFacing, Vec3 center, float halfSpan, float rotationDeg,
-                              SubLevelAccess ship, boolean lockedToSublevel, UUID lockedSublevelId) {
+                              SubLevelAccess ship, boolean lockedToSublevel, UUID lockedSublevelId, float partialTicks) {
         this.monitor = monitor;
         this.monitorFacing = monitorFacing;
         this.center = center;
@@ -33,15 +35,24 @@ public class MonitorProjection {
         this.ship = ship;
         this.lockedToSublevel = lockedToSublevel;
         this.lockedSublevelId = lockedSublevelId;
+        this.partialTicks = partialTicks;
         this.storedRotationDeg = normalizeDegrees(rotationDeg);
-        this.rotationDeg = normalizeDegrees(lockedToSublevel && ship != null ? shipYawDeg(ship) : this.storedRotationDeg);
+        this.rotationDeg = this.storedRotationDeg;
     }
 
     public static MonitorProjection create(MonitorBlockEntity monitor) {
-        return create(monitor, null);
+        return create(monitor, null, 0.0f);
     }
 
     public static MonitorProjection create(MonitorBlockEntity monitor, View view) {
+        return create(monitor, view, 0.0f);
+    }
+
+    public static MonitorProjection create(MonitorBlockEntity monitor, float partialTicks) {
+        return create(monitor, null, partialTicks);
+    }
+
+    public static MonitorProjection create(MonitorBlockEntity monitor, View view, float partialTicks) {
         List<MonitorRadarSnapshot> radars = monitor.getRunningRadarSnapshots();
         Direction facing = monitor.getBlockState().getValue(MonitorBlock.FACING);
         boolean renderRelative = radars.stream().anyMatch(info -> info.displayProfile().renderRelativeToMonitor());
@@ -57,15 +68,17 @@ public class MonitorProjection {
         SubLevelAccess ship = (renderRelative || locked) ? monitorShip : null;
 
         if (view != null) {
-            return new MonitorProjection(monitor, facing, new Vec3(view.centerX(), 0, view.centerZ()), view.halfSpan(),
-                    view.rotationDeg(), ship, locked, locked ? view.lockedSublevelId() : null);
+            return new MonitorProjection(monitor, facing, new Vec3(view.centerX(), 0, view.centerZ()), view.halfSpan(), view.rotationDeg(), ship, locked, locked ? view.lockedSublevelId() : null, partialTicks);
         }
 
         if (radars.isEmpty()) {
             Vec3 fallback = monitor.getRadarCenterPos();
-            if (fallback == null) fallback = Vec3.atCenterOf(monitor.getControllerPos());
-            Vec3 center = framePosition(monitor, ship, fallback);
-            return new MonitorProjection(monitor, facing, center, Math.max(1f, monitor.getRange()), 0f, ship, false, null);
+            if (fallback == null) {
+                fallback = Vec3.atCenterOf(monitor.getControllerPos());
+            }
+
+            Vec3 center = framePosition(ship, fallback, partialTicks);
+            return new MonitorProjection(monitor, facing, center, Math.max(1f, monitor.getRange()), 0f, ship, false, null, partialTicks);
         }
 
         double minX = Double.POSITIVE_INFINITY;
@@ -74,8 +87,7 @@ public class MonitorProjection {
         double maxZ = Double.NEGATIVE_INFINITY;
 
         for (MonitorRadarSnapshot radar : radars) {
-            Vec3 p = framePosition(monitor, ship, radar.center());
-
+            Vec3 p = framePosition(ship, MonitorSweepFrame.worldCenter(radar, partialTicks), partialTicks);
             double r = Math.max(1f, radar.range());
 
             minX = Math.min(minX, p.x - r);
@@ -86,11 +98,15 @@ public class MonitorProjection {
 
         Vec3 center = new Vec3((minX + maxX) * 0.5, 0, (minZ + maxZ) * 0.5);
         float halfSpan = (float) Math.max(maxX - minX, maxZ - minZ) * 0.5f;
-        return new MonitorProjection(monitor, facing, center, halfSpan, 0f, ship, false, null);
+        return new MonitorProjection(monitor, facing, center, halfSpan, 0f, ship, false, null, partialTicks);
+    }
+
+    public Vec3 radarWorldCenter(MonitorRadarSnapshot radar) {
+        return MonitorSweepFrame.worldCenter(radar, partialTicks);
     }
 
     public DisplayPoint project(Vec3 worldPos) {
-        Vec3 p = framePosition(monitor, ship, worldPos);
+        Vec3 p = framePosition(ship, worldPos, partialTicks);
         return projectFramePosition(p.x, p.z);
     }
 
@@ -130,10 +146,12 @@ public class MonitorProjection {
 
     public DisplayPoint projectWorldVector(Vec3 worldVector) {
         Vec3 frameVector = worldVector;
+
         if (ship != null) {
-            org.joml.Vector3d frame = ship.logicalPose().transformNormalInverse(new org.joml.Vector3d(worldVector.x, worldVector.y, worldVector.z));
+            org.joml.Vector3d frame = MonitorSweepFrame.renderPose(ship, partialTicks).transformNormalInverse(new org.joml.Vector3d(worldVector.x, worldVector.y, worldVector.z));
             frameVector = new Vec3(frame.x(), frame.y(), frame.z());
         }
+
         return projectFrameVector(frameVector.x, frameVector.z);
     }
 
@@ -148,7 +166,7 @@ public class MonitorProjection {
     }
 
     public View viewCenteredOn(Vec3 worldPos, float newHalfSpan) {
-        Vec3 frameCenter = framePosition(monitor, ship, worldPos);
+        Vec3 frameCenter = framePosition(ship, worldPos, partialTicks);
         return new View(frameCenter.x, frameCenter.z, Math.max(1f, newHalfSpan), storedRotationDeg, lockedToSublevel, lockedSublevelId);
     }
 
@@ -250,11 +268,13 @@ public class MonitorProjection {
         return (float) (coordinate / halfSpan) / 2f;
     }
 
-    private static Vec3 framePosition(MonitorBlockEntity monitor, SubLevelAccess ship, Vec3 worldPos) {
-        if (ship != null) {
-            return PhysicsHandler.getShipVec(worldPos, monitor);
+    private static Vec3 framePosition(SubLevelAccess ship, Vec3 worldPos, float partialTicks) {
+        if (ship == null) {
+            return worldPos;
         }
-        return worldPos;
+
+        org.joml.Vector3d local = MonitorSweepFrame.renderPose(ship, partialTicks).transformPositionInverse(new org.joml.Vector3d(worldPos.x, worldPos.y, worldPos.z));
+        return new Vec3(local.x(), local.y(), local.z());
     }
 
     public record DisplayPoint(float xOffset, float zOffset) {

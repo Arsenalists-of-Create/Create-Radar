@@ -3,6 +3,7 @@ package com.happysg.radar.block.radar.skyradar;
 import com.happysg.radar.api.arad.ARADTargeting;
 
 import com.happysg.radar.CreateRadar;
+import com.happysg.radar.api.physics.RadarPhysics;
 import com.happysg.radar.api.radar.NetworkRadarSource;
 import com.happysg.radar.api.radar.RadarDetectionConfigurable;
 import com.happysg.radar.api.radar.RadarDetectionSettings;
@@ -77,6 +78,11 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
     public void initialize() {
         super.initialize();
         updateScanningBehavior();
+    }
+
+    @Override
+    public float getDisplayLocalAngleDegrees() {
+        return wrap360(getReceiverYawOffset() + yawDeg);
     }
 
     @Override
@@ -201,9 +207,8 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
 
     @Override
     public float getGlobalAngle() {
-        return wrap360(getReceiverYawOffset() + yawDeg);
+        return RadarPhysics.worldAzimuth(this, wrap360(getReceiverYawOffset() + yawDeg));
     }
-
 
     public void assemble() {
         tryAssemble();
@@ -338,11 +343,12 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
         }
 
         Vec3 radarPos = PhysicsHandler.getWorldVec(this);
-        Vec3 diff = ownedTarget.targetPos().subtract(radarPos);
-        double horizontal = Math.sqrt(diff.x * diff.x + diff.z * diff.z);
-        float targetGlobalYaw = wrap360((float) Math.toDegrees(Math.atan2(diff.x, diff.z)));
-        float targetYaw = wrap360(targetGlobalYaw - getReceiverYawOffset());
-        float targetPitch = (float) Math.toDegrees(Math.atan2(diff.y, horizontal));
+        Vec3 localDiff = RadarPhysics.localDirection(ownedTarget.targetPos().subtract(radarPos), this);
+
+        double horizontal = Math.hypot(localDiff.x, localDiff.z);
+        float targetLocalYaw = wrap360((float) Math.toDegrees(Math.atan2(localDiff.x, localDiff.z)));
+        float targetYaw = wrap360(targetLocalYaw - getReceiverYawOffset());
+        float targetPitch = (float) Math.toDegrees(Math.atan2(localDiff.y, horizontal));
         float maxStep = Math.abs(getEffectiveAngularSpeed());
         float newYaw = moveTowardWrapped(yawDeg, targetYaw, maxStep);
         float newPitch = moveToward(targetPitchDeg, targetPitch, maxStep);
@@ -553,6 +559,15 @@ public class SkyRadarBlockEntity extends KineticBlockEntity implements IRadar, I
 
     @Override
     public float getSweepAngularSpeedDegreesPerTick() {
+        return getEffectiveAngularSpeed();
+    }
+
+    @Override
+    public float getDisplayAngularSpeedDegreesPerTick() {
+        if (!isRunning() || manualYawOverride || hasOwnedTarget) {
+            return 0.0f;
+        }
+
         return getEffectiveAngularSpeed();
     }
 
