@@ -114,7 +114,11 @@ public class DataLinkBlockItem extends BlockItem {
                     BlockPos adjacent = pos.relative(direction);
                     if (!level.hasChunkAt(adjacent)) continue;
                     var adjacentEntity = level.getBlockEntity(adjacent);
-                    if (adjacentEntity instanceof NetworkFiltererBlockEntity || adjacentEntity instanceof RadarWarningReceiverBlockEntity) {
+                    if (adjacentEntity instanceof NetworkFiltererBlockEntity && level.getBlockState(adjacent).getBlock() instanceof NetworkFiltererBlock && level.getBlockState(adjacent).getValue(NetworkFiltererBlock.FACING) == direction) {
+                        return true;
+                    }
+
+                    if (adjacentEntity instanceof RadarWarningReceiverBlockEntity) {
                         return true;
                     }
 

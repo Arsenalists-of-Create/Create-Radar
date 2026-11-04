@@ -12,6 +12,7 @@ import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
+import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
@@ -1005,6 +1006,11 @@ public class NetworkData extends SavedData {
         Set<BlockPos> visited = new HashSet<>();
         ArrayDeque<BlockPos> queue = new ArrayDeque<>();
 
+        BlockPos filtererPos = group.key.filtererPos();
+        BlockState filtererState = level.getBlockState(filtererPos);
+
+        Direction contactDirection = filtererState.getBlock() instanceof NetworkFiltererBlock ? filtererState.getValue(NetworkFiltererBlock.FACING).getOpposite() : null;
+
         queue.add(group.key.filtererPos());
         visited.add(group.key.filtererPos());
 
@@ -1024,7 +1030,11 @@ public class NetworkData extends SavedData {
             BlockPos current = queue.removeFirst();
 
             boolean fromMonitor = level.hasChunkAt(current) && level.getBlockEntity(current) instanceof MonitorBlockEntity;
-            for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+            for (Direction dir : Direction.values()) {
+                if (current.equals(filtererPos) && dir != contactDirection) {
+                    continue;
+                }
+
                 BlockPos next = current.relative(dir);
 
                 if (fromMonitor && level.hasChunkAt(next) && level.getBlockEntity(next) instanceof MonitorBlockEntity neighbor && !current.equals(neighbor.getControllerPos())) {
@@ -1035,6 +1045,7 @@ public class NetworkData extends SavedData {
 
                 ContactEndpoint contact = classifyContactEndpoint(level, next);
                 if (contact == null) continue;
+
                 if (contact.kind() == ContactKind.MONITOR && ARADData.get(level).getEndpointOrigin(group.key.dim(), contact.endpointPos()) != null) {
                     continue;
                 }

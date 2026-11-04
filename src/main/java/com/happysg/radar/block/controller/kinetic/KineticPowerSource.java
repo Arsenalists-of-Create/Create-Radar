@@ -11,6 +11,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlock;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 
 /** Samples input shafts without kinetically joining the controller generator to them. */
 public final class KineticPowerSource {
@@ -71,6 +73,10 @@ public final class KineticPowerSource {
 
         if (Mods.CBCMODERNWARFARE.isLoaded() && CBCMWMountCompat.isCompactMount(candidate)) {
             rpm = CBCMWMountCompat.getPitchSpeed(candidate);
+        } else if (candidate instanceof CannonMountBlockEntity mount
+                && sourceState.getBlock() instanceof CannonMountBlock mountBlock
+                && direction.getAxis() == mountBlock.getRotationAxis(sourceState)) {
+            rpm = mount.getPitchInterface().getSpeed();
         } else {
             rpm = kinetic.getSpeed();
         }

@@ -1033,9 +1033,7 @@ public class WeaponFiringControl {
             return false;
         }
         PitchOrientedContraptionEntity entity = mount.getContraption();
-        if (entity == null || !entity.isAlive()
-                || !(entity.getContraption()
-                instanceof AbstractMountedCannonContraption cannon)) {
+        if (entity == null || !entity.isAlive() || !(entity.getContraption() instanceof AbstractMountedCannonContraption cannon)) {
             return false;
         }
         WeaponShotProfile adapter = WeaponShotAdapterRegistry.resolve(createNativeShotContext(level, mount));
