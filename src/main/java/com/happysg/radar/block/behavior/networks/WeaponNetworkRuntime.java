@@ -516,7 +516,7 @@ public final class WeaponNetworkRuntime {
                 continue;
             }
 
-            List<BlockPos> available = discovered.stream().filter(mount -> !explicitClaims.containsKey(new Slot(mount, type))).toList();
+            List<BlockPos> available = discovered.stream().filter(mount -> type == DataLinkBlockEntity.WeaponEndpointType.FIRING || !explicitClaims.containsKey(new Slot(mount, type))).toList();
             ContactCandidate candidate = new ContactCandidate(type, List.copyOf(discovered), List.copyOf(available));
             contactCandidates.put(endpointPos, candidate);
 

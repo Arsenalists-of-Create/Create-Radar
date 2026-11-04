@@ -3,6 +3,8 @@ package com.happysg.radar.block.controller.firing;
 import com.happysg.radar.api.controller.RadarFireController;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.WeaponContactUnlinkState;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
@@ -15,6 +17,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlock;
+import rbasamoyai.createbigcannons.cannon_control.fixed_cannon_mount.FixedCannonMountBlock;
 
 import java.util.List;
 
@@ -40,6 +44,8 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
     // server-time when we last got a target update
     private long lastCommandTick = -1;
     private static final long FAILSAFE_TICKS = 10;
+    private boolean startupReconcilePending = false;
+    private long nextStartupReconcileCheckTick = 0;
 
     // i use these to run a pulse train when a repeater is on top
     private boolean pulsing = false;
@@ -65,10 +71,55 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
         if (level == null || level.isClientSide) return;
 
         if (level instanceof ServerLevel serverLevel) {
-            WeaponNetworkRuntime.get(serverLevel)
-                    .advertiseContactController(this);
+            WeaponNetworkRuntime.get(serverLevel).advertiseContactController(this);
         }
         long now = level.getGameTime();
+        if (startupReconcilePending && now >= nextStartupReconcileCheckTick && level instanceof ServerLevel serverLevel) {
+            nextStartupReconcileCheckTick = now + 5;
+
+            boolean foundFiringMount = false;
+            boolean unloadedNeighbor = false;
+
+            for (Direction direction : Direction.values()) {
+                BlockPos mountPos = worldPosition.relative(direction);
+
+                if (!serverLevel.hasChunkAt(mountPos)) {
+                    unloadedNeighbor = true;
+                    continue;
+                }
+
+                BlockState mountState = serverLevel.getBlockState(mountPos);
+                Direction firingFace;
+
+                if (mountState.getBlock() instanceof CannonMountBlock) {
+                    firingFace = mountState.getValue(CannonMountBlock.HORIZONTAL_FACING);
+                } else if (mountState.getBlock() instanceof FixedCannonMountBlock fixed) {
+                    firingFace = fixed.getFiringFace(mountState);
+                } else {
+                    continue;
+                }
+
+                if (firingFace != direction.getOpposite()) {
+                    continue;
+                }
+
+                foundFiringMount = true;
+
+                CannonMountContext mount = CannonMountContext.resolveEndpoint(serverLevel, mountPos);
+                if (mount == null || !mount.hasAssembledCannon()) {
+                    continue;
+                }
+
+                serverLevel.scheduleTick(mountPos, mountState.getBlock(), 1);
+
+                startupReconcilePending = false;
+                break;
+            }
+
+            if (!foundFiringMount && !unloadedNeighbor) {
+                startupReconcilePending = false;
+            }
+        }
 
         // i hard fail-safe: if nobody has told me to keep firing recently, i turn off
         if ((isPowered() || pulsing) && (lastCommandTick < 0 || now < lastCommandTick || now - lastCommandTick > FAILSAFE_TICKS)) {
@@ -89,7 +140,6 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
                 startPulseNow(now);
             }
         }
-
     }
 
     public boolean isPowered() {
@@ -99,6 +149,10 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
     public void setPowered(boolean powered) {
         if (level == null || level.isClientSide)
             return;
+
+        if (powered) {
+            startupReconcilePending = false;
+        }
 
         // i treat every call as a command input, and remember when it happened
         lastCommandTick = level.getGameTime();
@@ -231,10 +285,11 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
 
         if (level != null && !level.isClientSide) {
             if (level instanceof ServerLevel serverLevel) {
-                WeaponNetworkRuntime.get(serverLevel)
-                        .advertiseContactController(this);
+                WeaponNetworkRuntime.get(serverLevel).advertiseContactController(this);
             }
             setPoweredInternal(false);
+            startupReconcilePending = Mods.CREATEBIGCANNONS.isLoaded();
+            nextStartupReconcileCheckTick = 0;
         }
     }
 

@@ -1268,17 +1268,24 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         minAngleDeg = limits.minDegrees();
         maxAngleDeg = limits.maxDegrees();
 
-        targetAngle = wrap360(compound.getDouble("TargetAngle"));
-        requestedTargetAngle = compound.contains("RequestedTargetAngle", Tag.TAG_DOUBLE)
-                ? wrap360(compound.getDouble("RequestedTargetAngle")) : targetAngle;
-        targetLimitConstrained = compound.getBoolean("TargetLimitConstrained");
-        isRunning = compound.getBoolean("IsRunning");
+        if (clientPacket) {
+            targetAngle = wrap360(compound.getDouble("TargetAngle"));
+            requestedTargetAngle = compound.contains("RequestedTargetAngle", Tag.TAG_DOUBLE) ? wrap360(compound.getDouble("RequestedTargetAngle")) : targetAngle;
+            targetLimitConstrained = compound.getBoolean("TargetLimitConstrained");
+            isRunning = compound.getBoolean("IsRunning");
+        } else {
+            targetAngle = 0.0;
+            requestedTargetAngle = 0.0;
+            targetLimitConstrained = false;
+            isRunning = false;
+        }
+
         lastLimitNeutralDeg = Double.NaN;
 
         hasLastCbcYawWritten = false;
         physHandler.read(compound);
         kineticControllerState.read(compound, wasMoved, clientPacket);
-        generatedSpeed = compound.getFloat("GeneratedSpeed");
+        generatedSpeed = clientPacket ? compound.getFloat("GeneratedSpeed") : 0.0f;
         isolatedGeneratorInitialized = false;
     }
 

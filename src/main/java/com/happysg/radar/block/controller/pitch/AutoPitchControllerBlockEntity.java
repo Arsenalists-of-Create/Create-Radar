@@ -336,9 +336,6 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     @Override
     public void onLoad() {
         super.onLoad();
-
-        // Binocular ownership is deliberately session-only. Keep it across a
-        // firing-control replacement, but never across a world/chunk reload.
         this.binoMode = false;
         this.binoTargetPos = null;
         this.binocularTargetingConfig = TargetingConfig.DEFAULT;
@@ -349,6 +346,14 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         if (level == null || level.isClientSide) {
             return;
+        }
+
+        track = null;
+        radarTargetingConfig = TargetingConfig.DEFAULT;
+
+        if (firingControl != null) {
+            firingControl.resetTarget();
+            firingControl = null;
         }
 
         if (level instanceof ServerLevel serverLevel) {
@@ -1567,8 +1572,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         weaponContactSuppressed = compound.getBoolean("RadarWeaponContactUnlinked");
         filtererContactSuppressed = compound.getBoolean("RadarFiltererContactUnlinked");
 
-        targetAngle = compound.getDouble("TargetAngle");
-        isRunning = compound.getBoolean("IsRunning");
+        targetAngle = clientPacket ? compound.getDouble("TargetAngle") : 0.0;
+        isRunning = clientPacket && compound.getBoolean("IsRunning");
 
         double storedMin = compound.contains("MinAngleDeg", Tag.TAG_DOUBLE) ? compound.getDouble("MinAngleDeg") : -90.0;
         double storedMax = compound.contains("MaxAngleDeg", Tag.TAG_DOUBLE) ? compound.getDouble("MaxAngleDeg") : 90.0;
@@ -1576,15 +1581,15 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         minAngleDeg = limits.minDegrees();
         maxAngleDeg = limits.maxDegrees();
         targetingTag = compound.contains("Targeting", Tag.TAG_COMPOUND) ? compound.getCompound("Targeting").copy() : defaultTargetingTag();
-        requestedTargetAngle = compound.contains("RequestedTargetAngle", Tag.TAG_DOUBLE) ? compound.getDouble("RequestedTargetAngle") : targetAngle;
+        requestedTargetAngle = clientPacket && compound.contains("RequestedTargetAngle", Tag.TAG_DOUBLE) ? compound.getDouble("RequestedTargetAngle") : targetAngle;
         double constrainedTarget = limits.clampControllerTarget(requestedTargetAngle, 0.0);
-        targetLimitConstrained = !limits.allowsControllerTarget(requestedTargetAngle, 0.0);
-        targetAngle = constrainedTarget;
+        targetLimitConstrained = clientPacket && !limits.allowsControllerTarget(requestedTargetAngle, 0.0);
+        targetAngle = clientPacket ? constrainedTarget : 0.0;
 
         lastTargetPos = null;
         physHandler.read(compound);
         kineticControllerState.read(compound, wasMoved, clientPacket);
-        generatedSpeed = compound.getFloat("GeneratedSpeed");
+        generatedSpeed = clientPacket ? compound.getFloat("GeneratedSpeed") : 0.0f;
         isolatedGeneratorInitialized = false;
         lastKineticAxis = null;
     }
@@ -1595,10 +1600,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         compound.putBoolean("RadarWeaponContactUnlinked", weaponContactSuppressed);
         compound.putBoolean("RadarFiltererContactUnlinked", filtererContactSuppressed);
-        double storedTarget = clientPacket ? targetAngle : debugSwivelFollow.persistentTarget(targetAngle);
-        boolean storedRunning = clientPacket ? isRunning : debugSwivelFollow.persistentRunning(isRunning);
-        compound.putDouble("TargetAngle", storedTarget);
-        compound.putBoolean("IsRunning", storedRunning);
+        if (clientPacket) {
+            compound.putDouble("TargetAngle", targetAngle);
+            compound.putBoolean("IsRunning", isRunning);
+        }
         compound.putInt("MovementLimitsVersion", MOVEMENT_LIMITS_VERSION);
         compound.putDouble("MinAngleDeg", minAngleDeg);
         compound.putDouble("MaxAngleDeg", maxAngleDeg);
