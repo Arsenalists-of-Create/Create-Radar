@@ -13,7 +13,6 @@ import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
-import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.compat.Mods;
@@ -82,9 +81,6 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String DATA_LINK_ONLY_PITCH_ALLOWED = CreateRadar.MODID + ".data_link.only_pitch_allowed";
     private static final String DATA_LINK_PLACE_FAILED = CreateRadar.MODID + ".data_link.place_failed";
     private static final String DATA_LINK_SELECT_FIRST = CreateRadar.MODID + ".data_link.select_mount_or_filterer_first";
-    private static final String DATA_LINK_T_PITCH_INVALID_MOUNT = CreateRadar.MODID + ".data_link.t_pitch_invalid_mount";
-    private static final String DATA_LINK_T_PITCH_MOUNT_RESERVED = CreateRadar.MODID + ".data_link.t_pitch_mount_reserved";
-    private static final String DATA_LINK_PITCH_REQUIRES_GEARBOX = CreateRadar.MODID + ".data_link.pitch_requires_gearbox";
 
     public DataLinkBlockItem(Block pBlock, Properties pProperties) {
         super(pBlock, pProperties);
@@ -175,17 +171,6 @@ public class DataLinkBlockItem extends BlockItem {
         ControllerType controllerType = ControllerType.from(use.be(), use.clickedState());
 
         if (controllerType != null && use.tag().contains(SELECTED_MOUNT_POS)) {
-
-            if (controllerType == ControllerType.PITCH && !(use.be() instanceof TPitchControllerBlockEntity)) {
-
-                if (!level.isClientSide) {
-                    sendError(player, DATA_LINK_PITCH_REQUIRES_GEARBOX);
-                    clearLinkTag(stack);
-                }
-
-                return InteractionResult.FAIL;
-            }
-
             return completeWeaponLink(use, controllerType);
         }
 
@@ -319,19 +304,10 @@ public class DataLinkBlockItem extends BlockItem {
             mountPos = apiMount.getMountPos().immutable();
         }
 
-        if (use.be() instanceof TPitchControllerBlockEntity tPitch && !tPitch.canLinkMount(mountPos)) {
-            sendError(use.player(), DATA_LINK_T_PITCH_INVALID_MOUNT);
-            clearLinkTag(use.stack());
-            return InteractionResult.FAIL;
-        }
-
         WeaponNetworkRuntime weaponRuntime = WeaponNetworkRuntime.get(serverLevel);
         List<BlockPos> existingMounts = weaponRuntime.getExplicitMountsForController(use.clickedPos());
-        boolean secondTPitchLink = use.be()
-                instanceof TPitchControllerBlockEntity
-                && existingMounts.size() == 1
-                && !existingMounts.contains(mountPos);
-        if (!existingMounts.isEmpty() && !secondTPitchLink) {
+
+        if (!existingMounts.isEmpty()) {
             sendError(use.player(), DATA_LINK_CONTROLLER_ALREADY_LINKED);
             clearLinkTag(use.stack());
             return InteractionResult.FAIL;
@@ -339,12 +315,6 @@ public class DataLinkBlockItem extends BlockItem {
 
         BlockPos placedPos = getPlacementPos(use);
         DataLinkBlockEntity.WeaponEndpointType endpointType = controllerType.endpointType();
-        if (endpointType == DataLinkBlockEntity.WeaponEndpointType.PITCH && weaponRuntime.hasPitchReservationConflict(use.clickedPos(), mountPos)) {
-            sendError(use.player(), DATA_LINK_T_PITCH_MOUNT_RESERVED);
-            clearLinkTag(use.stack());
-            return InteractionResult.FAIL;
-        }
-
         if (!weaponRuntime.canAttachEndpoint(endpointType, use.clickedPos(), mountPos)) {
             sendError(use.player(), DATA_LINK_DUPLICATE_CONTROLLER_TYPE);
             clearLinkTag(use.stack());

@@ -6,8 +6,6 @@ import com.happysg.radar.block.controller.WeaponContactUnlinkState;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
-import com.happysg.radar.block.controller.tpitch.TPitchControllerBlock;
-import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
@@ -233,7 +231,7 @@ public final class WeaponNetworkRuntime {
             return List.of();
         }
 
-        return discoverContactMounts(controllerPos, DataLinkBlockEntity.WeaponEndpointType.PITCH, acceptedDataLinkTargets(null));
+        return discoverContactMounts(controllerPos, DataLinkBlockEntity.WeaponEndpointType.PITCH);
     }
 
     /**
@@ -439,58 +437,6 @@ public final class WeaponNetworkRuntime {
         return Set.of(mountPos.immutable());
     }
 
-    private Map<BlockPos, BlockPos> resolveTPitchOwners(List<LinkEntry> explicitLinks, Set<BlockPos> targetedMounts) {
-        Map<BlockPos, Set<BlockPos>> candidates = new HashMap<>();
-        Map<BlockPos, Set<BlockPos>> explicitOwners = new HashMap<>();
-        Set<BlockPos> controllers = new HashSet<>();
-
-        for (BlockPos pos : contactControllers.keySet()) {
-            if (level.getBlockEntity(pos) instanceof TPitchControllerBlockEntity) {
-                controllers.add(pos);
-            }
-        }
-
-        for (LinkEntry link : explicitLinks) {
-            if (link.type() == DataLinkBlockEntity.WeaponEndpointType.PITCH) {
-                explicitOwners.computeIfAbsent(link.mountPos(), ignored -> new HashSet<>()).add(link.endpointPos());
-
-                if (level.getBlockEntity(link.endpointPos()) instanceof TPitchControllerBlockEntity) {
-                    controllers.add(link.endpointPos());
-                }
-            }
-        }
-
-        for (BlockPos controllerPos : controllers) {
-            for (BlockPos mountPos : eligibleTPitchMounts(controllerPos, targetedMounts)) {
-                candidates.computeIfAbsent(mountPos, ignored -> new HashSet<>()).add(controllerPos);
-            }
-        }
-
-        Map<BlockPos, BlockPos> owners = new HashMap<>();
-        for (Map.Entry<BlockPos, Set<BlockPos>> entry : candidates.entrySet()) {
-            BlockPos mountPos = entry.getKey();
-            Set<BlockPos> possible = entry.getValue();
-            Set<BlockPos> explicit = explicitOwners.getOrDefault(mountPos, Set.of());
-
-            if (!explicit.isEmpty()) {
-                if (explicit.size() == 1) {
-                    BlockPos selected = explicit.iterator().next();
-
-                    if (possible.contains(selected)) {
-                        owners.put(mountPos, selected);
-                    }
-                }
-                continue;
-            }
-
-            if (!possible.isEmpty()) {
-                owners.put(mountPos, stableFirst(possible));
-            }
-        }
-
-        return owners;
-    }
-
     /**
      * Rebuilds all contact-derived topology atomically. The coordinator calls
      * this once after endpoint ticks and Sable relocation processing.
@@ -522,7 +468,6 @@ public final class WeaponNetworkRuntime {
 
     private RuntimeSnapshot buildSnapshot() {
         Map<BlockPos, List<LinkEntry>> explicitByEndpoint = new HashMap<>();
-        Set<BlockPos> targetedMounts = new HashSet<>();
         Map<BlockPos, GroupBuilder> groups = new HashMap<>();
         Map<BlockPos, Boolean> mountAvailability = new HashMap<>();
         Set<LinkEntry> availableExplicitLinks = new HashSet<>();
@@ -530,7 +475,6 @@ public final class WeaponNetworkRuntime {
         List<LinkEntry> explicitLinks = List.copyOf(linksByDataLink.values());
         for (LinkEntry link : explicitLinks) {
             explicitByEndpoint.computeIfAbsent(link.endpointPos(), ignored -> new ArrayList<>()).add(link);
-            targetedMounts.add(link.mountPos());
             GroupBuilder builder = group(groups, link.mountPos());
             builder.dataLinks.add(link.dataLinkPos());
             builder.associatedEndpoints.add(link.endpointPos());
@@ -549,28 +493,9 @@ public final class WeaponNetworkRuntime {
         Map<Slot, LinkedHashSet<BlockPos>> explicitClaims = new HashMap<>();
         Map<Slot, LinkedHashSet<BlockPos>> contactClaims = new HashMap<>();
         Map<BlockPos, ContactCandidate> contactCandidates = new HashMap<>();
-        Map<BlockPos, BlockPos> tPitchOwners = resolveTPitchOwners(explicitLinks, targetedMounts);
 
         for (LinkEntry link : explicitLinks) {
-            Set<BlockPos> mounts;
-            if (link.type()
-                    == DataLinkBlockEntity.WeaponEndpointType.PITCH
-                    && level.getBlockEntity(link.endpointPos()) instanceof TPitchControllerBlockEntity) {
-                mounts = new LinkedHashSet<>(eligibleTPitchMounts(link.endpointPos(), targetedMounts));
-                // Retain the explicit reservation while its physical mount is
-                // temporarily absent; no control channel is created for it.
-                mounts.add(link.mountPos());
-            } else {
-                mounts = Set.of(link.mountPos());
-            }
-            for (BlockPos mount : mounts) {
-                boolean tPitchLink = link.type() == DataLinkBlockEntity.WeaponEndpointType.PITCH && level.getBlockEntity(link.endpointPos()) instanceof TPitchControllerBlockEntity;
-                if (tPitchLink && !mount.equals(link.mountPos()) && !link.endpointPos().equals(tPitchOwners.get(mount))) {
-                    continue;
-                }
-
-                addClaim(explicitClaims, groups, mount, link.type(), link.endpointPos());
-            }
+            addClaim(explicitClaims, groups, link.mountPos(), link.type(), link.endpointPos());
         }
 
         List<Map.Entry<BlockPos, DataLinkBlockEntity.WeaponEndpointType>> contacts = List.copyOf(contactControllers.entrySet());
@@ -586,7 +511,7 @@ public final class WeaponNetworkRuntime {
                 continue;
             }
 
-            List<BlockPos> discovered = discoverContactMounts(endpointPos, type, targetedMounts);
+            List<BlockPos> discovered = discoverContactMounts(endpointPos, type);
             if (discovered.isEmpty()) {
                 continue;
             }
@@ -595,26 +520,20 @@ public final class WeaponNetworkRuntime {
             ContactCandidate candidate = new ContactCandidate(type, List.copyOf(discovered), List.copyOf(available));
             contactCandidates.put(endpointPos, candidate);
 
-            if (type != DataLinkBlockEntity.WeaponEndpointType.PITCH
-                    || !(level.getBlockEntity(endpointPos) instanceof TPitchControllerBlockEntity)) {
-                if (available.size() > 1) {
-                    for (BlockPos mount : available) {
-                        GroupBuilder builder = group(groups, mount);
-                        builder.validTopology = false;
-                        builder.associatedEndpoints.add(endpointPos);
-                        if (type == DataLinkBlockEntity.WeaponEndpointType.FIRING) {
-                            builder.associatedFiring.add(endpointPos);
-                        }
+            if (available.size() > 1) {
+                for (BlockPos mount : available) {
+                    GroupBuilder builder = group(groups, mount);
+                    builder.validTopology = false;
+                    builder.associatedEndpoints.add(endpointPos);
+
+                    if (type == DataLinkBlockEntity.WeaponEndpointType.FIRING) {
+                        builder.associatedFiring.add(endpointPos);
                     }
-                    continue;
                 }
+                continue;
             }
 
             for (BlockPos mount : available) {
-                if (type == DataLinkBlockEntity.WeaponEndpointType.PITCH && endpointEntity instanceof TPitchControllerBlockEntity && !endpointPos.equals(tPitchOwners.get(mount))) {
-                    continue;
-                }
-
                 addClaim(contactClaims, groups, mount, type, endpointPos);
             }
         }
@@ -660,7 +579,7 @@ public final class WeaponNetworkRuntime {
         Map<BlockPos, EndpointOrigin> endpointOrigins = new HashMap<>();
 
         for (LinkEntry link : explicitLinks) {
-            if (!(level.getBlockEntity(link.endpointPos()) instanceof TPitchControllerBlockEntity) && availableExplicitLinks.contains(link)) {
+            if (availableExplicitLinks.contains(link)) {
                 controllerToMount.put(link.endpointPos(), link.mountPos());
                 endpointToMount.put(link.endpointPos(), link.mountPos());
                 endpointOrigins.put(link.endpointPos(), EndpointOrigin.DATALINK);
@@ -670,7 +589,7 @@ public final class WeaponNetworkRuntime {
         for (Map.Entry<BlockPos, ContactCandidate> entry : contactCandidates.entrySet()) {
             BlockPos endpoint = entry.getKey();
             ContactCandidate candidate = entry.getValue();
-            if (candidate.availableMounts().size() == 1 && !(level.getBlockEntity(endpoint) instanceof TPitchControllerBlockEntity)) {
+            if (candidate.availableMounts().size() == 1) {
                 BlockPos mount = candidate.availableMounts().getFirst();
                 controllerToMount.put(endpoint, mount);
                 endpointToMount.put(endpoint, mount);
@@ -692,25 +611,7 @@ public final class WeaponNetworkRuntime {
                 continue;
             }
             BlockPos pitchPos = registered.getKey();
-            if (level.getBlockEntity(pitchPos) instanceof TPitchControllerBlockEntity) {
-                buildTPitchControlView(
-                        pitchPos,
-                        explicitByEndpoint.getOrDefault(pitchPos, List.of()),
-                        targetedMounts,
-                        tPitchOwners,
-                        explicitClaims,
-                        immutableGroups,
-                        controllerToMount,
-                        endpointToMount,
-                        endpointOrigins,
-                        controlViews);
-            } else {
-                buildSingleControlView(
-                        pitchPos,
-                        controllerToMount,
-                        immutableGroups,
-                        controlViews);
-            }
+            buildSingleControlView(pitchPos, controllerToMount, immutableGroups, controlViews);
         }
 
         // A Data Link can register before the endpoint's first block-entity
@@ -719,25 +620,7 @@ public final class WeaponNetworkRuntime {
             if (link.type() != DataLinkBlockEntity.WeaponEndpointType.PITCH || controlViews.containsKey(link.endpointPos())) {
                 continue;
             }
-            if (level.getBlockEntity(link.endpointPos()) instanceof TPitchControllerBlockEntity) {
-                buildTPitchControlView(
-                        link.endpointPos(),
-                        explicitByEndpoint.getOrDefault(link.endpointPos(), List.of()),
-                        targetedMounts,
-                        tPitchOwners,
-                        explicitClaims,
-                        immutableGroups,
-                        controllerToMount,
-                        endpointToMount,
-                        endpointOrigins,
-                        controlViews);
-            } else {
-                buildSingleControlView(
-                        link.endpointPos(),
-                        controllerToMount,
-                        immutableGroups,
-                        controlViews);
-            }
+            buildSingleControlView(link.endpointPos(), controllerToMount, immutableGroups, controlViews);
         }
 
         return new RuntimeSnapshot(
@@ -768,104 +651,10 @@ public final class WeaponNetworkRuntime {
                 group.validTopology()));
     }
 
-    private void buildTPitchControlView(
-            BlockPos pitchPos,
-            List<LinkEntry> explicitLinks,
-            Set<BlockPos> targetedMounts,
-            Map<BlockPos, BlockPos> tPitchOwners,
-            Map<Slot, LinkedHashSet<BlockPos>> explicitClaims,
-            Map<BlockPos, Group> groups,
-            Map<BlockPos, BlockPos> controllerToMount,
-            Map<BlockPos, BlockPos> endpointToMount,
-            Map<BlockPos, EndpointOrigin> endpointOrigins,
-            Map<BlockPos, WeaponControlView> controlViews
-    ) {
-        List<BlockPos> eligible = eligibleTPitchMounts(pitchPos, targetedMounts);
-        List<BlockPos> retained = new ArrayList<>(2);
-
-        for (BlockPos mount : eligible) {
-            if (!pitchPos.equals(tPitchOwners.get(mount))) {
-                continue;
-            }
-
-            Set<BlockPos> explicitPitch = explicitClaims.getOrDefault(new Slot(mount, DataLinkBlockEntity.WeaponEndpointType.PITCH), new LinkedHashSet<>());
-
-            if (explicitPitch.isEmpty() || explicitPitch.contains(pitchPos)) {
-                retained.add(mount);
-            }
-        }
-        if (retained.isEmpty()) {
-            return;
-        }
-
-        Set<BlockPos> explicitMounts = new HashSet<>();
-        for (LinkEntry link : explicitLinks) {
-            explicitMounts.add(link.mountPos());
-        }
-        BlockPos dominant = selectDominantMount(retained, targetedMounts, explicitMounts);
-        retained.sort((first, second) -> {
-            if (first.equals(dominant)) {
-                return second.equals(dominant) ? 0 : -1;
-            }
-            if (second.equals(dominant)) {
-                return 1;
-            }
-            return STABLE_POSITION.compare(first, second);
-        });
-
-        List<MountChannelView> channels = new ArrayList<>(retained.size());
-        Set<BlockPos> dataLinks = new HashSet<>();
-        boolean valid = true;
-        for (BlockPos mount : retained) {
-            Group group = groups.get(mount);
-            if (group == null) {
-                channels.add(new MountChannelView(mount.immutable(), null, null));
-                valid = false;
-                continue;
-            }
-            channels.add(channel(group));
-            dataLinks.addAll(group.dataLinks());
-            valid &= group.validTopology();
-        }
-
-        controllerToMount.put(pitchPos, dominant);
-        endpointToMount.put(pitchPos, dominant);
-        endpointOrigins.put(pitchPos, explicitLinks.isEmpty() ? EndpointOrigin.CONTACT : EndpointOrigin.DATALINK);
-        controlViews.put(pitchPos, new WeaponControlView(
-                WeaponNetworkMode.T_PITCH_DUAL,
-                pitchPos.immutable(),
-                dominant.immutable(),
-                List.copyOf(channels),
-                Collections.unmodifiableSet(dataLinks),
-                valid));
-    }
-
-    private BlockPos selectDominantMount(List<BlockPos> mounts, Set<BlockPos> targetedMounts, Set<BlockPos> tPitchDataLinkMounts) {
-        List<BlockPos> explicitlyLinked = mounts.stream().filter(tPitchDataLinkMounts::contains).sorted(STABLE_POSITION).toList();
-        if (!explicitlyLinked.isEmpty()) {
-            return explicitlyLinked.getFirst();
-        }
-
-        List<BlockPos> targeted = mounts.stream().filter(targetedMounts::contains).toList();
-        if (targeted.size() == 1) {
-            return targeted.getFirst();
-        }
-
-        return mounts.stream().min(STABLE_POSITION).orElseThrow();
-    }
-
-    private List<BlockPos> discoverContactMounts(
-            BlockPos endpointPos,
-            DataLinkBlockEntity.WeaponEndpointType type,
-            Set<BlockPos> targetedMounts
-    ) {
+    private List<BlockPos> discoverContactMounts(BlockPos endpointPos, DataLinkBlockEntity.WeaponEndpointType type) {
         BlockEntity endpoint = level.getBlockEntity(endpointPos);
         if (endpoint == null) {
             return List.of();
-        }
-
-        if (endpoint instanceof TPitchControllerBlockEntity && type == DataLinkBlockEntity.WeaponEndpointType.PITCH) {
-            return eligibleTPitchMounts(endpointPos, targetedMounts);
         }
 
         LinkedHashSet<BlockPos> mounts = new LinkedHashSet<>();
@@ -912,91 +701,12 @@ public final class WeaponNetworkRuntime {
         return mounts.stream().sorted(STABLE_POSITION).toList();
     }
 
-    private List<BlockPos> eligibleTPitchMounts(BlockPos controllerPos, Set<BlockPos> targetedMounts) {
-        BlockEntity endpoint = level.getBlockEntity(controllerPos);
-        if (!(endpoint instanceof TPitchControllerBlockEntity tPitch)) {
-            return List.of();
-        }
-        BlockState state = endpoint.getBlockState();
-        if (!state.hasProperty(TPitchControllerBlock.ORIENTATION)) {
-            return List.of();
-        }
-
-        Direction.Axis axis = state.getValue(TPitchControllerBlock.ORIENTATION).crossbarAxis();
-        Direction positive = axis == Direction.Axis.X ? Direction.EAST : Direction.SOUTH;
-        LinkedHashSet<BlockPos> mounts = new LinkedHashSet<>();
-        addTPitchSide(mounts, tPitch, positive, targetedMounts);
-        addTPitchSide(mounts, tPitch, positive.getOpposite(), targetedMounts);
-        return mounts.stream().sorted(STABLE_POSITION).toList();
-    }
-
-    private void addTPitchSide(Set<BlockPos> mounts, TPitchControllerBlockEntity controller, Direction side, Set<BlockPos> targetedMounts) {
-        BlockPos endpointPos = controller.getBlockPos().relative(side);
-        CannonMountContext direct = directMount(endpointPos);
-
-        if (direct != null) {
-            mounts.add(direct.getBlockPos().immutable());
-            return;
-        }
-
-        RadarMountAdapter api = RadarMountRegistry.find(level, endpointPos);
-        if (api != null && api.isValid()) {
-            BlockPos mountPos = api.getMountPos();
-
-            if (mountPos != null) {
-                mounts.add(mountPos.immutable());
-                return;
-            }
-        }
-
-        CannonMountContext extended = CannonMountContext.resolveEndpoint(level, endpointPos);
-        if (extended != null && targetedMounts.contains(extended.getBlockPos())) {
-            mounts.add(extended.getBlockPos().immutable());
-        }
-
-        if (!Mods.SIMULATED.isLoaded()) {
-            return;
-        }
-
-        BlockPos selected = null;
-
-        for (LinkEntry link : linksByDataLink.values()) {
-            if (link.type() != DataLinkBlockEntity.WeaponEndpointType.PITCH || !link.endpointPos().equals(controller.getBlockPos())) {
-                continue;
-            }
-
-            Direction linkedSide = SimulatedSwivelMountAdapter.findTPitchSwivelSide(controller, link.mountPos());
-            if (linkedSide != side) {
-                continue;
-            }
-
-            if (selected != null && !selected.equals(link.mountPos())) {
-                return;
-            }
-
-            selected = link.mountPos();
-        }
-
-        if (selected != null) {
-            mounts.add(selected.immutable());
-        }
-    }
-
     private void addDirectMount(Set<BlockPos> mounts, BlockPos endpointPos) {
         BlockPos mountPos = resolveAvailableMount(endpointPos);
 
         if (mountPos != null) {
             mounts.add(mountPos);
         }
-    }
-
-    @Nullable
-    private CannonMountContext directMount(BlockPos endpointPos) {
-        if (!level.hasChunkAt(endpointPos)) {
-            return null;
-        }
-        CannonMountContext mount = CannonMountContext.of(level.getBlockEntity(endpointPos));
-        return mount != null && mount.isCurrent() && mount.getBlockPos().equals(endpointPos) ? mount : null;
     }
 
     private static void addClaim(
@@ -1033,32 +743,7 @@ public final class WeaponNetworkRuntime {
     }
 
     private boolean canShareExplicitEndpoint(LinkEntry candidate, List<LinkEntry> existing) {
-        if (existing.isEmpty()) {
-            return true;
-        }
-
-        if (candidate.type() != DataLinkBlockEntity.WeaponEndpointType.PITCH
-                || !(level.getBlockEntity(candidate.endpointPos()) instanceof TPitchControllerBlockEntity tPitch)
-                || existing.size() >= 2
-                || !tPitch.canLinkMount(candidate.mountPos())) {
-            return false;
-        }
-
-        Direction candidateSwivelSide = Mods.SIMULATED.isLoaded()
-                ? SimulatedSwivelMountAdapter.findTPitchLinkSide(tPitch, candidate.mountPos())
-                : null;
-        for (LinkEntry link : existing) {
-            if (link.type()
-                    != DataLinkBlockEntity.WeaponEndpointType.PITCH
-                    || link.mountPos().equals(candidate.mountPos())) {
-                return false;
-            }
-
-            if (candidateSwivelSide != null && candidateSwivelSide == SimulatedSwivelMountAdapter.findTPitchLinkSide(tPitch, link.mountPos())) {
-                return false;
-            }
-        }
-        return true;
+        return existing.isEmpty();
     }
 
     private Set<BlockPos> acceptedDataLinkTargets(@Nullable LinkEntry ignored) {
@@ -1247,13 +932,10 @@ public final class WeaponNetworkRuntime {
             if (existing != null && !existing.equals(endpoint)) {
                 return false;
             }
-            boolean sharedTPitch = type
-                    == DataLinkBlockEntity.WeaponEndpointType.PITCH
-                    && level.getBlockEntity(endpoint) instanceof TPitchControllerBlockEntity;
             boolean mappedElsewhere = getExplicitMountsForController(endpoint)
                     .stream()
                     .anyMatch(mappedMount -> !mappedMount.equals(oldMount) && !mappedMount.equals(newMount));
-            if (mappedElsewhere && !sharedTPitch) {
+            if (mappedElsewhere) {
                 return false;
             }
         }
@@ -1391,7 +1073,7 @@ public final class WeaponNetworkRuntime {
         }
     }
 
-    public enum WeaponNetworkMode { SINGLE, T_PITCH_DUAL }
+    public enum WeaponNetworkMode { SINGLE }
     public record MountChannelView(BlockPos mountPos, @Nullable BlockPos yawPos, @Nullable BlockPos firingPos) {}
     public record WeaponControlView(
             WeaponNetworkMode mode,

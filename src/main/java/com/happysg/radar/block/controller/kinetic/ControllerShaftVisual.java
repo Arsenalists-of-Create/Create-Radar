@@ -1,9 +1,7 @@
 package com.happysg.radar.block.controller.kinetic;
 
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlock;
-import com.happysg.radar.block.controller.tpitch.TPitchControllerBlock;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
-import com.happysg.radar.registry.ModPartials;
 import com.simibubi.create.AllPartialModels;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntityVisual;
@@ -27,7 +25,6 @@ public class ControllerShaftVisual<
     private RotatingInstance shaft;
     private RotatingInstance innerShaft;
     private RotatingInstance cog;
-    private RotatingInstance secondOutputShaft;
 
     private final Model normalShaftModel;
     private final boolean directionalHalfShaft;
@@ -50,17 +47,8 @@ public class ControllerShaftVisual<
                 .instancer(AllInstanceTypes.ROTATING, directionalHalfShaft ? model : Models.partial(AllPartialModels.SHAFT_HALF))
                 .createInstance();
 
-        boolean tPitch = blockEntity.getBlockState().getBlock() instanceof TPitchControllerBlock;
-        if (!directionalHalfShaft || tPitch) {
-            innerShaft = instancerProvider()
-                    .instancer(AllInstanceTypes.ROTATING, Models.partial(AllPartialModels.SHAFT_HALF))
-                    .createInstance();
-        }
-
-        if (tPitch) {
-            secondOutputShaft = instancerProvider()
-                    .instancer(AllInstanceTypes.ROTATING, Models.partial(AllPartialModels.SHAFT_HALF))
-                    .createInstance();
+        if (!directionalHalfShaft) {
+            innerShaft = instancerProvider().instancer(AllInstanceTypes.ROTATING, Models.partial(AllPartialModels.SHAFT_HALF)).createInstance();
         }
 
         refreshShaft();
@@ -84,36 +72,6 @@ public class ControllerShaftVisual<
                         || (state.getBlock() instanceof AutoPitchControllerBlock
                         && state.getValue(AutoPitchControllerBlock.SWIVEL_MODE));
 
-        if (state.getBlock() instanceof TPitchControllerBlock) {
-            Direction.Axis inputAxis = inputDirection.getAxis();
-            Direction.Axis crossbarAxis = state.getValue(TPitchControllerBlock.ORIENTATION).crossbarAxis();
-            Direction positive = Direction.get(Direction.AxisDirection.POSITIVE, crossbarAxis);
-
-            float outputRpm = blockEntity.getSpeed();
-
-            shaft.rotation.identity();
-            shaft.rotateToFace(Direction.SOUTH, inputDirection);
-
-            shaft.setup(blockEntity, inputAxis, inputRpm)
-                    .setPosition(getVisualPosition())
-                    .setChanged();
-
-            innerShaft.rotation.identity();
-            innerShaft.rotateToFace(Direction.SOUTH, positive);
-
-            innerShaft.setup(blockEntity, crossbarAxis, outputRpm)
-                    .setPosition(getVisualPosition())
-                    .setChanged();
-
-            secondOutputShaft.rotation.identity();
-            secondOutputShaft.rotateToFace(Direction.SOUTH, positive.getOpposite());
-
-            secondOutputShaft.setup(blockEntity, crossbarAxis, outputRpm)
-                    .setPosition(getVisualPosition())
-                    .setChanged();
-
-            return;
-        }
         // Recreate geometry only when switching between normal and Swivel mode.
         if (swivelMode != showingSwivel) {
             shaft.delete();
@@ -181,9 +139,7 @@ public class ControllerShaftVisual<
     public void tick(Context context) {
         refreshShaft();
 
-        if (secondOutputShaft != null) {
-            applyOverstressEffect(blockEntity, shaft, innerShaft, secondOutputShaft);
-        } else if (showingSwivel) {
+        if (showingSwivel) {
             applyOverstressEffect(blockEntity, shaft, innerShaft, cog);
         } else if (innerShaft != null) {
             applyOverstressEffect(blockEntity, shaft, innerShaft);
@@ -194,9 +150,7 @@ public class ControllerShaftVisual<
 
     @Override
     public void updateLight(float partialTick) {
-        if (secondOutputShaft != null) {
-            relight(shaft, innerShaft, secondOutputShaft);
-        } else if (showingSwivel) {
+        if (showingSwivel) {
             relight(shaft, innerShaft, cog);
         } else if (innerShaft != null) {
             relight(shaft, innerShaft);
@@ -216,10 +170,6 @@ public class ControllerShaftVisual<
         if (cog != null) {
             cog.delete();
         }
-
-        if (secondOutputShaft != null) {
-            secondOutputShaft.delete();
-        }
     }
 
     @Override
@@ -232,10 +182,6 @@ public class ControllerShaftVisual<
 
         if (cog != null) {
             consumer.accept(cog);
-        }
-
-        if (secondOutputShaft != null) {
-            consumer.accept(secondOutputShaft);
         }
     }
 }

@@ -1,15 +1,6 @@
 package com.happysg.radar.gametest;
 
-import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlock;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
-import com.happysg.radar.block.behavior.networks.SafeZone;
-import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
-import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
-import com.happysg.radar.block.radar.track.RadarTrack;
-import com.happysg.radar.block.radar.track.TrackCategory;
-import com.happysg.radar.block.controller.tpitch.TPitchControllerBlock;
-import com.happysg.radar.block.controller.tpitch.TPitchControllerBlockEntity;
-import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.NetworkData;
@@ -39,28 +30,20 @@ import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlock;
-import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountExtensionBlock;
-import rbasamoyai.createbigcannons.cannons.big_cannons.BigCannonBlock;
 import rbasamoyai.createbigcannons.index.CBCBlocks;
 
-import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * Integration coverage for the CBC endpoint contract used by pitch, yaw,
@@ -75,8 +58,7 @@ public final class CbcMountExtensionGameTests {
     }
 
     @PrefixGameTestTemplate(false)
-    @GameTest(templateNamespace = "simulated",
-            template = "extrakineticstest.swivelbearing")
+    @GameTest(templateNamespace = "simulated", template = "extrakineticstest.swivelbearing")
     public static void resolvesOneExtensionToCanonicalMount(GameTestHelper helper) {
         BlockPos mountPos = new BlockPos(256, FIXTURE_Y, 8);
         TestSite site = new TestSite(helper.getLevel(), mountPos, 3);
@@ -339,21 +321,6 @@ public final class CbcMountExtensionGameTests {
                             && yawMotor.getValue(
                             DirectionalKineticBlock.FACING) == Direction.DOWN,
                     "Creative Motor did not face into the yaw input");
-
-            BlockPos tPitchPos = center.offset(7, 0, 0);
-            level.setBlockAndUpdate(tPitchPos,
-                    ModBlocks.T_PITCH.getDefaultState()
-                            .setValue(TPitchControllerBlock.ORIENTATION,
-                                    TPitchControllerBlock.Orientation.X_UP));
-            BlockPos tPitchInputPos = tPitchPos.above();
-            BlockState tPitchMotor = AllBlocks.CREATIVE_MOTOR.get()
-                    .getStateForPlacement(placementContext(
-                            level, player, tPitchInputPos,
-                            AllBlocks.CREATIVE_MOTOR.asStack()));
-            require(tPitchMotor != null
-                            && tPitchMotor.getValue(
-                            DirectionalKineticBlock.FACING) == Direction.DOWN,
-                    "Creative Motor did not face into the T-Pitch branch input");
         } finally {
             site.close();
         }
@@ -361,470 +328,26 @@ public final class CbcMountExtensionGameTests {
     }
 
     @PrefixGameTestTemplate(false)
-    @GameTest(templateNamespace = "simulated",
-            template = "extrakineticstest.swivelbearing")
-    public static void tPitchAcceptsMixedDirectAndExtendedMounts(
-            GameTestHelper helper) {
-        BlockPos controllerPos = new BlockPos(320, FIXTURE_Y, 8);
-        TestSite site = new TestSite(helper.getLevel(), controllerPos, 4);
-        try {
-            site.prepare();
-            ServerLevel level = helper.getLevel();
-            BlockPos directMountPos = controllerPos.west();
-            BlockPos extensionPos = controllerPos.east();
-            BlockPos extendedMountPos = extensionPos.east();
-            BlockPos unrelatedMountPos = controllerPos.north(3);
-
-            placeMount(level, directMountPos);
-            placeExtension(level, extensionPos, Direction.EAST);
-            placeMount(level, extendedMountPos);
-            placeMount(level, unrelatedMountPos);
-            level.setBlockAndUpdate(controllerPos,
-                    ModBlocks.T_PITCH.getDefaultState()
-                            .setValue(TPitchControllerBlock.ORIENTATION,
-                                    TPitchControllerBlock.Orientation.X_SOUTH));
-
-            if (!(level.getBlockEntity(controllerPos)
-                    instanceof TPitchControllerBlockEntity controller)) {
-                throw new GameTestAssertException(
-                        "T-Pitch controller block entity was not created");
-            }
-
-            require(controller.canLinkMount(directMountPos),
-                    "T-Pitch rejected its direct crossbar mount");
-            require(controller.canLinkMount(extensionPos),
-                    "T-Pitch rejected its extension endpoint");
-            require(controller.canLinkMount(extendedMountPos),
-                    "T-Pitch rejected the canonical mount behind its extension");
-            require(!controller.canLinkMount(unrelatedMountPos),
-                    "T-Pitch accepted a mount outside its crossbar endpoints");
-
-            level.setBlockAndUpdate(extensionPos,
-                    extensionState(Direction.WEST));
-            controller.markMountDirtyExternal();
-            require(!controller.canLinkMount(extendedMountPos),
-                    "T-Pitch retained a mount behind an invalid extension");
-
-            placeExtension(level, extensionPos, Direction.EAST);
-            controller.markMountDirtyExternal();
-            require(controller.canLinkMount(extendedMountPos),
-                    "T-Pitch did not recover its valid extension endpoint");
-            level.setBlockAndUpdate(extendedMountPos,
-                    Blocks.AIR.defaultBlockState());
-            placeMount(level, extendedMountPos);
-            require(controller.canLinkMount(extendedMountPos),
-                    "T-Pitch retained a stale canonical mount after replacement");
-        } finally {
-            site.close();
-        }
-        helper.succeed();
-    }
-
-    @PrefixGameTestTemplate(false)
-    @GameTest(templateNamespace = "simulated",
-            template = "extrakineticstest.swivelbearing")
-    public static void tPitchAcceptsTwoExplicitExtensionLinks(
-            GameTestHelper helper) {
-        BlockPos controllerPos = new BlockPos(768, FIXTURE_Y, 8);
-        TestSite site = new TestSite(helper.getLevel(), controllerPos, 5);
-        try {
-            site.prepare();
-            ServerLevel level = helper.getLevel();
-            BlockPos westExtension = controllerPos.west();
-            BlockPos westMount = westExtension.west();
-            BlockPos eastExtension = controllerPos.east();
-            BlockPos eastMount = eastExtension.east();
-
-            placeExtension(level, westExtension, Direction.WEST);
-            placeMount(level, westMount);
-            placeExtension(level, eastExtension, Direction.EAST);
-            placeMount(level, eastMount);
-            level.setBlockAndUpdate(controllerPos,
-                    ModBlocks.T_PITCH.getDefaultState()
-                            .setValue(TPitchControllerBlock.ORIENTATION,
-                                    TPitchControllerBlock
-                                            .Orientation.X_SOUTH));
-
-            Player player = helper.makeMockPlayer(GameType.CREATIVE);
-            ItemStack westLink = ModBlocks.RADAR_LINK.asStack();
-            require(useItemOn(player, westLink, westMount, Direction.UP)
-                            .consumesAction(),
-                    "First T-Pitch mount selection failed");
-            require(useItemOn(player, westLink, controllerPos,
-                            Direction.DOWN).consumesAction(),
-                    "First T-Pitch Data Link placement failed");
-
-            WeaponNetworkRuntime runtime =
-                    WeaponNetworkRuntime.get(level);
-            require(runtime.canAttachEndpoint(
-                            DataLinkBlockEntity.WeaponEndpointType.PITCH,
-                            controllerPos, eastMount),
-                    "T-Pitch rejected a second distinct crossbar mount");
-
-            ItemStack eastLink = ModBlocks.RADAR_LINK.asStack();
-            require(useItemOn(player, eastLink, eastMount, Direction.UP)
-                            .consumesAction(),
-                    "Second T-Pitch mount selection failed");
-            require(useItemOn(player, eastLink, controllerPos,
-                            Direction.UP).consumesAction(),
-                    "Second T-Pitch Data Link placement failed");
-
-            runtime.reconcile();
-            require(runtime.getExplicitMountsForController(controllerPos)
-                            .equals(List.of(westMount, eastMount)),
-                    "T-Pitch did not retain both explicit mount links");
-            WeaponNetworkRuntime.WeaponControlView dual =
-                    runtime.getWeaponControlViewFromPitch(controllerPos);
-            require(dual != null && dual.validTopology()
-                            && dual.channels().size() == 2
-                            && dual.channelForMount(westMount) != null
-                            && dual.channelForMount(eastMount) != null
-                            && westMount.equals(dual.preferredMountPos()),
-                    "Two explicit T-Pitch links did not build a stable dual view");
-
-            ItemStack duplicate = ModBlocks.RADAR_LINK.asStack();
-            require(useItemOn(player, duplicate, eastMount, Direction.UP)
-                            .consumesAction(),
-                    "Duplicate-link mount selection failed");
-            require(useItemOn(player, duplicate, controllerPos,
-                            Direction.NORTH) == InteractionResult.FAIL,
-                    "T-Pitch accepted a duplicate link to the same mount");
-
-            BlockPos ordinaryPitchPos = controllerPos.north(3);
-            BlockPos ordinaryFirstMount = ordinaryPitchPos.west();
-            BlockPos ordinarySecondMount = ordinaryPitchPos.east();
-            placeMount(level, ordinaryFirstMount);
-            placeMount(level, ordinarySecondMount);
-            level.setBlockAndUpdate(ordinaryPitchPos,
-                    ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK
-                            .getDefaultState());
-            linkController(level, ordinaryPitchPos, ordinaryFirstMount,
-                    DataLinkBlockEntity.WeaponEndpointType.PITCH);
-            require(!runtime.canAttachEndpoint(
-                            DataLinkBlockEntity.WeaponEndpointType.PITCH,
-                            ordinaryPitchPos, ordinarySecondMount),
-                    "Ordinary pitch controller accepted a second explicit link");
-
-            level.destroyBlock(controllerPos.below(), false);
-            runtime.reconcile();
-            WeaponNetworkRuntime.WeaponControlView remaining =
-                    runtime.getWeaponControlViewFromPitch(controllerPos);
-            require(remaining != null
-                            && remaining.channels().size() == 1
-                            && remaining.channelForMount(eastMount) != null
-                            && runtime.getExplicitMountsForController(
-                            controllerPos).equals(List.of(eastMount)),
-                    "Removing one T-Pitch link removed or retained the wrong channel");
-
-            level.destroyBlock(controllerPos.above(), false);
-            runtime.reconcile();
-            require(runtime.getWeaponControlViewFromPitch(controllerPos)
-                            == null
-                            && runtime.getExplicitMountsForController(
-                            controllerPos).isEmpty(),
-                    "Removing both T-Pitch links left an extension channel active");
-        } finally {
-            site.close();
-        }
-        helper.succeed();
-    }
-
-    @PrefixGameTestTemplate(false)
-    @GameTest(templateNamespace = "simulated",
-            template = "extrakineticstest.swivelbearing")
-    public static void tPitchBuildsDualWeaponControlView(
-            GameTestHelper helper) {
-        BlockPos controllerPos = new BlockPos(384, FIXTURE_Y, 8);
-        TestSite site = new TestSite(helper.getLevel(), controllerPos, 7);
-        try {
-            site.prepare();
-            ServerLevel level = helper.getLevel();
-            BlockPos primaryMount = controllerPos.west();
-            BlockPos secondaryMount = controllerPos.east();
-            BlockPos primaryYaw = controllerPos.north(3);
-            BlockPos primaryFire = controllerPos.north(5);
-            BlockPos secondaryYaw = controllerPos.south(3);
-            BlockPos secondaryFire = controllerPos.south(5);
-
-            placeMount(level, primaryMount);
-            placeMount(level, secondaryMount);
-            level.setBlockAndUpdate(controllerPos,
-                    ModBlocks.T_PITCH.getDefaultState()
-                            .setValue(TPitchControllerBlock.ORIENTATION,
-                                    TPitchControllerBlock.Orientation.X_SOUTH));
-            level.setBlockAndUpdate(primaryYaw,
-                    ModBlocks.AUTO_YAW_CONTROLLER_BLOCK
-                            .getDefaultState());
-            level.setBlockAndUpdate(secondaryYaw,
-                    ModBlocks.AUTO_YAW_CONTROLLER_BLOCK
-                            .getDefaultState());
-            level.setBlockAndUpdate(primaryFire,
-                    ModBlocks.FIRE_CONTROLLER_BLOCK
-                            .getDefaultState());
-            level.setBlockAndUpdate(secondaryFire,
-                    ModBlocks.FIRE_CONTROLLER_BLOCK
-                            .getDefaultState());
-
-            // Link the per-mount endpoints first to prove that the T-Pitch
-            // overlay is independent of placement order.
-            linkController(level, primaryYaw, primaryMount,
-                    DataLinkBlockEntity.WeaponEndpointType.YAW);
-            linkController(level, primaryFire, primaryMount,
-                    DataLinkBlockEntity.WeaponEndpointType.FIRING);
-            linkController(level, secondaryYaw, secondaryMount,
-                    DataLinkBlockEntity.WeaponEndpointType.YAW);
-            linkController(level, secondaryFire, secondaryMount,
-                    DataLinkBlockEntity.WeaponEndpointType.FIRING);
-            linkController(level, controllerPos, primaryMount,
-                    DataLinkBlockEntity.WeaponEndpointType.PITCH);
-
-            WeaponNetworkRuntime runtime =
-                    WeaponNetworkRuntime.get(level);
-            WeaponNetworkRuntime.WeaponControlView view =
-                    runtime.getWeaponControlViewFromPitch(controllerPos);
-            require(view != null, "T-Pitch dual control view was absent");
-            require(view.mode()
-                            == WeaponNetworkRuntime.WeaponNetworkMode
-                            .T_PITCH_DUAL,
-                    "T-Pitch retained the ordinary single-mount mode");
-            require(view.validTopology(),
-                    "Valid two-mount T-Pitch topology was rejected");
-            require(view.channels().size() == 2,
-                    "Dual view did not expose exactly two mount channels");
-
-            WeaponNetworkRuntime.MountChannelView first =
-                    view.channels().get(0);
-            WeaponNetworkRuntime.MountChannelView second =
-                    view.channels().get(1);
-            require(first.mountPos().equals(primaryMount)
-                            && primaryYaw.equals(first.yawPos())
-                            && primaryFire.equals(first.firingPos()),
-                    "Selected primary mount did not retain its yaw/fire endpoints");
-            require(second.mountPos().equals(secondaryMount)
-                            && secondaryYaw.equals(second.yawPos())
-                            && secondaryFire.equals(second.firingPos()),
-                    "Companion mount did not expose its yaw/fire endpoints");
-
-            if (!(level.getBlockEntity(controllerPos)
-                    instanceof TPitchControllerBlockEntity controller)
-                    || !(level.getBlockEntity(primaryYaw)
-                    instanceof AutoYawControllerBlockEntity primaryYawController)
-                    || !(level.getBlockEntity(secondaryYaw)
-                    instanceof AutoYawControllerBlockEntity secondaryYawController)) {
-                throw new GameTestAssertException(
-                        "T-Pitch dual-yaw controllers were not created");
-            }
-            primaryYawController.setTargetAngle(35.0F);
-            secondaryYawController.setTargetAngle(70.0F);
-            controller.setAndAcquireTrack(null, TargetingConfig.DEFAULT);
-            require(Math.abs(primaryYawController.getTargetAngle()) < 1.0e-6,
-                    "T-Pitch did not home its preferred yaw channel");
-            require(Math.abs(secondaryYawController.getTargetAngle()) < 1.0e-6,
-                    "T-Pitch did not home its companion yaw channel");
-
-            require(!runtime.canAttachEndpoint(
-                            DataLinkBlockEntity.WeaponEndpointType.PITCH,
-                            controllerPos.above(4), secondaryMount),
-                    "Companion mount accepted a competing pitch endpoint");
-
-            level.setBlockAndUpdate(primaryMount,
-                    Blocks.AIR.defaultBlockState());
-            ((TPitchControllerBlockEntity)
-                    level.getBlockEntity(controllerPos))
-                    .markMountDirtyExternal();
-            WeaponNetworkRuntime.WeaponControlView fallback =
-                    runtime.getWeaponControlViewFromPitch(controllerPos);
-            require(fallback != null
-                            && fallback.channels().stream().anyMatch(
-                            channel -> channel.mountPos()
-                                    .equals(secondaryMount)),
-                    "Remaining mount disappeared when the preferred mount was removed");
-        } finally {
-            site.close();
-        }
-        helper.succeed();
-    }
-
-    @PrefixGameTestTemplate(false)
-    @GameTest(templateNamespace = "simulated",
-            template = "extrakineticstest.swivelbearing")
-    public static void tPitchReplaysTargetStateAcrossActiveMountChanges(
-            GameTestHelper helper) {
-        BlockPos controllerPos = new BlockPos(704, FIXTURE_Y, 8);
-        TestSite site = new TestSite(helper.getLevel(), controllerPos, 9);
-        CannonMountBlockEntity primary = null;
-        CannonMountBlockEntity secondary = null;
-        try {
-            site.prepare();
-            ServerLevel level = helper.getLevel();
-            BlockPos primaryMountPos = controllerPos.west();
-            BlockPos secondaryMountPos = controllerPos.east();
-
-            placeMount(level, primaryMountPos);
-            placeMount(level, secondaryMountPos);
-            level.setBlockAndUpdate(controllerPos,
-                    ModBlocks.T_PITCH.getDefaultState()
-                            .setValue(TPitchControllerBlock.ORIENTATION,
-                                    TPitchControllerBlock.Orientation.X_SOUTH));
-            linkController(level, controllerPos, primaryMountPos,
-                    DataLinkBlockEntity.WeaponEndpointType.PITCH);
-
-            if (!(level.getBlockEntity(controllerPos)
-                    instanceof TPitchControllerBlockEntity controller)) {
-                throw new GameTestAssertException(
-                        "T-Pitch controller block entity was not created");
-            }
-
-            TargetingConfig targeting = new TargetingConfig(
-                    true, false, false, false, true,
-                    true, false, true, true);
-            RadarTrack track = new RadarTrack(
-                    UUID.randomUUID().toString(),
-                    Vec3.atCenterOf(controllerPos.north(32)),
-                    new Vec3(0.25D, 0.0D, -0.5D),
-                    level.getGameTime(), TrackCategory.PROJECTILE,
-                    "create_radar:gametest_target", 1.0F);
-            SafeZone safeZone = new SafeZone(
-                    new AABB(controllerPos.getX() - 2,
-                            controllerPos.getY() + 1,
-                            controllerPos.getZ() - 2,
-                            controllerPos.getX() + 3,
-                            controllerPos.getY() + 4,
-                            controllerPos.getZ() + 3), null);
-            List<SafeZone> suppliedSafeZones = new ArrayList<>();
-            suppliedSafeZones.add(safeZone);
-
-            controller.setAndAcquireTrack(track, targeting);
-            controller.setSafeZones(suppliedSafeZones);
-            suppliedSafeZones.clear();
-            controller.getFiringControl();
-            require(controller.firingControl == null,
-                    "T-Pitch created firing control before a cannon was active");
-
-            primary = assembleTestCannon(level, primaryMountPos);
-            controller.markMountDirtyExternal();
-            controller.getFiringControl();
-            WeaponFiringControl initial = controller.firingControl;
-            require(initial != null,
-                    "T-Pitch did not create firing control for its first active cannon");
-            require(initial.cannonMount.getBlockPos().equals(primaryMountPos),
-                    "T-Pitch did not select its preferred active cannon");
-            require(activeRadarTrack(initial) == track,
-                    "Target selected before cannon assembly was not replayed");
-            require(initial.targetingConfig.equals(targeting),
-                    "Targeting configuration was not replayed after cannon assembly");
-            require(initial.safeZones.equals(List.of(safeZone)),
-                    "Safe zones were not replayed from an immutable snapshot");
-
-            secondary = assembleTestCannon(level, secondaryMountPos);
-            disassembleTestCannon(primary);
-            controller.markMountDirtyExternal();
-            controller.getFiringControl();
-            WeaponFiringControl fallback = controller.firingControl;
-            require(fallback != null && fallback != initial,
-                    "T-Pitch did not replace firing control after its active side changed");
-            require(fallback.cannonMount.getBlockPos().equals(secondaryMountPos),
-                    "T-Pitch did not fall back to the remaining active cannon");
-            require(activeRadarTrack(fallback) == track,
-                    "Radar target was lost when firing control changed active sides");
-            require(fallback.targetingConfig.equals(targeting),
-                    "Targeting configuration was lost during firing-control replacement");
-            require(fallback.safeZones.equals(List.of(safeZone)),
-                    "Safe zones were lost during firing-control replacement");
-
-            controller.setAndAcquireTrack(null, TargetingConfig.DEFAULT);
-            primary = assembleTestCannon(level, primaryMountPos);
-            controller.markMountDirtyExternal();
-            controller.getFiringControl();
-            WeaponFiringControl afterClear = controller.firingControl;
-            require(afterClear == fallback,
-                    "Both empty sides did not retain the current aiming source");
-            require(afterClear.cannonMount.getBlockPos()
-                            .equals(secondaryMountPos),
-                    "Both empty sides unexpectedly switched to the preferred mount");
-            require(activeRadarTrack(afterClear) == null,
-                    "Explicitly cleared radar target was resurrected after replacement");
-
-            controller.setAndAcquireTrack(track, targeting);
-            require(activeRadarTrack(afterClear) == track,
-                    "Radar target was not restored before binocular takeover");
-            controller.setAndAcquirePos(controllerPos.north(12),
-                    TargetingConfig.DEFAULT, false);
-            require(activeRadarTrack(afterClear) == null,
-                    "Binocular targeting did not take ownership from radar targeting");
-
-            disassembleTestCannon(secondary);
-            controller.markMountDirtyExternal();
-            controller.getFiringControl();
-            WeaponFiringControl duringBinocular = controller.firingControl;
-            require(duringBinocular != null && duringBinocular != afterClear,
-                    "T-Pitch did not replace firing control during binocular targeting");
-            require(duringBinocular.cannonMount.getBlockPos()
-                            .equals(primaryMountPos),
-                    "T-Pitch did not select the active fallback in binocular mode");
-            require(activeRadarTrack(duringBinocular) == null,
-                    "Radar target replay overrode binocular targeting ownership");
-            controller.setAndAcquirePos(null, TargetingConfig.DEFAULT, true);
-            require(activeRadarTrack(duringBinocular) == track,
-                    "Leaving binocular mode did not restore the retained radar target");
-
-            controller.setAndAcquirePos(controllerPos.north(14),
-                    TargetingConfig.DEFAULT, false);
-            controller.setAndAcquireTrack(null, TargetingConfig.DEFAULT);
-            controller.setAndAcquirePos(null, TargetingConfig.DEFAULT, true);
-            require(activeRadarTrack(duringBinocular) == null,
-                    "Explicitly cleared radar target was restored after binocular mode");
-        } finally {
-            disassembleTestCannon(primary);
-            disassembleTestCannon(secondary);
-            site.close();
-        }
-        helper.succeed();
-    }
-
-    @PrefixGameTestTemplate(false)
-    @GameTest(templateNamespace = "simulated",
-            template = "extrakineticstest.swivelbearing")
-    public static void controllerLimitGuiUsesExactInputFaces(
-            GameTestHelper helper) {
+    @GameTest(templateNamespace = "simulated", template = "extrakineticstest.swivelbearing")
+    public static void controllerLimitGuiUsesExactInputFaces(GameTestHelper helper) {
         BlockPos controllerPos = new BlockPos(736, FIXTURE_Y, 8);
         TestSite site = new TestSite(helper.getLevel(), controllerPos, 3);
         try {
             site.prepare();
             ServerLevel level = helper.getLevel();
             Player player = helper.makeMockPlayer(GameType.CREATIVE);
-            BlockState state = ModBlocks.T_PITCH.getDefaultState()
-                    .setValue(TPitchControllerBlock.ORIENTATION,
-                            TPitchControllerBlock.Orientation.X_SOUTH);
+            BlockState state = ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK.getDefaultState().setValue(HorizontalKineticBlock.HORIZONTAL_FACING, Direction.EAST);
             level.setBlockAndUpdate(controllerPos, state);
-            BlockHitResult bodyHit = new BlockHitResult(
-                    Vec3.atCenterOf(controllerPos), Direction.UP,
-                    controllerPos, false);
+            BlockHitResult bodyHit = new BlockHitResult(Vec3.atCenterOf(controllerPos), Direction.UP, controllerPos, false);
 
-            player.setItemInHand(InteractionHand.MAIN_HAND,
-                    new ItemStack(Blocks.STONE));
-            require(state.useWithoutItem(level, player, bodyHit)
-                            == InteractionResult.PASS,
-                    "T-Pitch consumed a main-hand block placement interaction");
+            player.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Blocks.STONE));
+            require(state.useWithoutItem(level, player, bodyHit) == InteractionResult.PASS, "Auto Pitch consumed a main-hand block placement interaction");
 
             player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
-            player.setItemInHand(InteractionHand.OFF_HAND,
-                    new ItemStack(Blocks.STONE));
-            require(state.useWithoutItem(level, player, bodyHit)
-                            == InteractionResult.PASS,
-                    "T-Pitch consumed an off-hand block placement interaction");
+            player.setItemInHand(InteractionHand.OFF_HAND, new ItemStack(Blocks.STONE));
+            require(state.useWithoutItem(level, player, bodyHit) == InteractionResult.PASS, "Auto Pitch consumed an off-hand block placement interaction");
 
             player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
-
-            for (TPitchControllerBlock.Orientation orientation
-                    : TPitchControllerBlock.Orientation.values()) {
-                requireExactControllerInputFace(level, player, controllerPos,
-                        ModBlocks.T_PITCH.getDefaultState()
-                                .setValue(TPitchControllerBlock.ORIENTATION,
-                                        orientation),
-                        orientation.branchDirection(),
-                        "T-Pitch " + orientation.getSerializedName());
-            }
 
             for (Direction facing : Direction.Plane.HORIZONTAL) {
                 requireExactControllerInputFace(level, player, controllerPos,
@@ -841,10 +364,8 @@ public final class CbcMountExtensionGameTests {
                 requireExactControllerInputFace(level, player, controllerPos,
                         ModBlocks.AUTO_YAW_CONTROLLER_BLOCK
                                 .getDefaultState()
-                                .setValue(DirectionalKineticBlock.FACING,
-                                        facing),
-                        facing,
-                        "Yaw " + facing.getSerializedName());
+                                .setValue(DirectionalKineticBlock.FACING, facing),
+                        facing, "Yaw " + facing.getSerializedName());
             }
         } finally {
             site.close();
@@ -853,8 +374,7 @@ public final class CbcMountExtensionGameTests {
     }
 
     @PrefixGameTestTemplate(false)
-    @GameTest(templateNamespace = "simulated",
-            template = "extrakineticstest.swivelbearing")
+    @GameTest(templateNamespace = "simulated", template = "extrakineticstest.swivelbearing")
     public static void directContactBuildsOrdinaryWeaponGroup(
             GameTestHelper helper) {
         BlockPos mountPos = new BlockPos(512, FIXTURE_Y, 8);
@@ -1107,103 +627,13 @@ public final class CbcMountExtensionGameTests {
     @PrefixGameTestTemplate(false)
     @GameTest(templateNamespace = "simulated",
             template = "extrakineticstest.swivelbearing")
-    public static void tPitchContactDominanceAndExtensionQualification(
-            GameTestHelper helper) {
-        BlockPos controllerPos = new BlockPos(640, FIXTURE_Y, 8);
-        TestSite site = new TestSite(
-                helper.getLevel(), controllerPos, 10);
-        try {
-            site.prepare();
-            ServerLevel level = helper.getLevel();
-            BlockPos westMount = controllerPos.west();
-            BlockPos eastExtension = controllerPos.east();
-            BlockPos eastMount = eastExtension.east();
-            BlockPos sideFire = controllerPos.south(4);
-
-            placeMount(level, westMount);
-            placeExtension(level, eastExtension, Direction.EAST);
-            placeMount(level, eastMount);
-            level.setBlockAndUpdate(controllerPos,
-                    ModBlocks.T_PITCH.getDefaultState()
-                            .setValue(
-                                    TPitchControllerBlock.ORIENTATION,
-                                    TPitchControllerBlock.Orientation
-                                            .X_SOUTH));
-            level.setBlockAndUpdate(sideFire,
-                    ModBlocks.FIRE_CONTROLLER_BLOCK
-                            .getDefaultState());
-
-            WeaponNetworkRuntime runtime =
-                    WeaponNetworkRuntime.get(level);
-            advertise(level, runtime, controllerPos, sideFire);
-            runtime.reconcile();
-            WeaponNetworkRuntime.WeaponControlView directOnly =
-                    runtime.getWeaponControlViewFromPitch(controllerPos);
-            require(directOnly != null
-                            && directOnly.channels().size() == 1
-                            && westMount.equals(
-                            directOnly.preferredMountPos()),
-                    "Unlinked extension side joined T-Pitch contact");
-
-            linkController(level, sideFire, eastMount,
-                    DataLinkBlockEntity.WeaponEndpointType.FIRING);
-            runtime.reconcile();
-            WeaponNetworkRuntime.WeaponControlView sideTargeted =
-                    runtime.getWeaponControlViewFromPitch(controllerPos);
-            require(sideTargeted != null
-                            && sideTargeted.channels().size() == 2
-                            && eastMount.equals(
-                            sideTargeted.preferredMountPos()),
-                    "Side Data Link did not qualify and dominate extension mount");
-
-            linkController(level, controllerPos, westMount,
-                    DataLinkBlockEntity.WeaponEndpointType.PITCH);
-            runtime.reconcile();
-            WeaponNetworkRuntime.WeaponControlView ownLinkTie =
-                    runtime.getWeaponControlViewFromPitch(controllerPos);
-            require(ownLinkTie != null
-                            && westMount.equals(
-                            ownLinkTie.preferredMountPos())
-                            && westMount.equals(
-                            ownLinkTie.channels().getFirst()
-                                    .mountPos()),
-                    "T-Pitch's own Data Link did not win a two-sided tie");
-
-            level.destroyBlock(sideFire.below(), false);
-            runtime.reconcile();
-            WeaponNetworkRuntime.WeaponControlView extensionRemoved =
-                    runtime.getWeaponControlViewFromPitch(controllerPos);
-            require(extensionRemoved != null
-                            && extensionRemoved.channels().size() == 1,
-                    "Extension side survived removal of its qualifying Data Link");
-        } finally {
-            site.close();
-        }
-        helper.succeed();
-    }
-
-    @PrefixGameTestTemplate(false)
-    @GameTest(templateNamespace = "simulated",
-            template = "extrakineticstest.swivelbearing")
-    public static void contactTPitchIsStableAndMultiMountFireFailsClosed(
+    public static void multiMountFireContactFailsClosed(
             GameTestHelper helper) {
         BlockPos center = new BlockPos(672, FIXTURE_Y, 8);
         TestSite site = new TestSite(helper.getLevel(), center, 10);
         try {
             site.prepare();
             ServerLevel level = helper.getLevel();
-            BlockPos tPitchPos = center.west(5);
-            BlockPos stableWest = tPitchPos.west();
-            BlockPos stableEast = tPitchPos.east();
-            placeMount(level, stableWest);
-            placeMount(level, stableEast);
-            level.setBlockAndUpdate(tPitchPos,
-                    ModBlocks.T_PITCH.getDefaultState()
-                            .setValue(
-                                    TPitchControllerBlock.ORIENTATION,
-                                    TPitchControllerBlock.Orientation
-                                            .X_SOUTH));
-
             BlockPos firstMount = center.east(3);
             BlockPos ambiguousFire = firstMount.east();
             BlockPos secondMount = ambiguousFire.east();
@@ -1213,33 +643,14 @@ public final class CbcMountExtensionGameTests {
             level.setBlockAndUpdate(pitchPos,
                     ModBlocks.AUTO_PITCH_CONTROLLER_BLOCK
                             .getDefaultState()
-                            .setValue(
-                                    HorizontalKineticBlock
-                                            .HORIZONTAL_FACING,
-                                    Direction.EAST));
-            level.setBlockAndUpdate(ambiguousFire,
-                    ModBlocks.FIRE_CONTROLLER_BLOCK
-                            .getDefaultState());
+                            .setValue(HorizontalKineticBlock.HORIZONTAL_FACING, Direction.EAST));
+            level.setBlockAndUpdate(ambiguousFire, ModBlocks.FIRE_CONTROLLER_BLOCK.getDefaultState());
 
-            WeaponNetworkRuntime runtime =
-                    WeaponNetworkRuntime.get(level);
-            advertise(level, runtime, tPitchPos, pitchPos,
-                    ambiguousFire);
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(level);
+            advertise(level, runtime, pitchPos, ambiguousFire);
             runtime.reconcile();
 
-            WeaponNetworkRuntime.WeaponControlView tPitchView =
-                    runtime.getWeaponControlViewFromPitch(tPitchPos);
-            require(tPitchView != null
-                            && tPitchView.channels().size() == 2
-                            && stableWest.equals(
-                            tPitchView.preferredMountPos())
-                            && stableWest.equals(
-                            tPitchView.channels().getFirst()
-                                    .mountPos()),
-                    "Contact-only T-Pitch dominance was not stable (x,y,z)");
-
-            WeaponNetworkRuntime.WeaponControlView invalid =
-                    runtime.getWeaponControlViewFromPitch(pitchPos);
+            WeaponNetworkRuntime.WeaponControlView invalid = runtime.getWeaponControlViewFromPitch(pitchPos);
             require(invalid != null && !invalid.validTopology()
                             && runtime.getMountForController(
                             ambiguousFire) == null,
@@ -1374,34 +785,6 @@ public final class CbcMountExtensionGameTests {
                 .setValue(CannonMountBlock.HORIZONTAL_FACING, Direction.NORTH));
     }
 
-    private static CannonMountBlockEntity assembleTestCannon(
-            ServerLevel level, BlockPos mountPos) {
-        BlockPos barrelPos = mountPos.above(2);
-        level.setBlockAndUpdate(barrelPos.south(),
-                CBCBlocks.CAST_IRON_CANNON_END.getDefaultState()
-                        .setValue(BlockStateProperties.FACING,
-                                Direction.SOUTH));
-        level.setBlockAndUpdate(barrelPos,
-                CBCBlocks.CAST_IRON_CANNON_BARREL.getDefaultState()
-                        .setValue(BlockStateProperties.FACING,
-                                Direction.NORTH));
-        BigCannonBlock.onPlace(level, barrelPos.south());
-        BigCannonBlock.onPlace(level, barrelPos);
-        if (!(level.getBlockEntity(mountPos)
-                instanceof CannonMountBlockEntity mount)) {
-            throw new GameTestAssertException(
-                    "CBC cannon mount block entity was not created");
-        }
-        mount.onRedstoneUpdate(true, false, false, false, 0);
-        require(mount.getContraption() != null
-                        && mount.getContraption().isAlive(),
-                "CBC test cannon did not assemble: "
-                        + (mount.getLastAssemblyException() == null
-                        ? "no assembly exception"
-                        : mount.getLastAssemblyException().component.getString()));
-        return mount;
-    }
-
     private static void requireExactControllerInputFace(
             ServerLevel level, Player player, BlockPos controllerPos,
             BlockState state, Direction inputFace, String description) {
@@ -1422,29 +805,7 @@ public final class CbcMountExtensionGameTests {
         }
     }
 
-    private static void disassembleTestCannon(
-            CannonMountBlockEntity mount) {
-        if (mount != null && !mount.isRemoved() && mount.isRunning()) {
-            mount.onRedstoneUpdate(false, true, false, false, 0);
-        }
-    }
-
-    private static RadarTrack activeRadarTrack(
-            WeaponFiringControl firingControl) {
-        try {
-            var field = WeaponFiringControl.class
-                    .getDeclaredField("activetrack");
-            field.setAccessible(true);
-            return (RadarTrack) field.get(firingControl);
-        } catch (ReflectiveOperationException exception) {
-            throw new GameTestAssertException(
-                    "Could not inspect firing-control radar target: "
-                            + exception.getMessage());
-        }
-    }
-
-    private static void placeExtension(ServerLevel level, BlockPos pos,
-                                       Direction facing) {
+    private static void placeExtension(ServerLevel level, BlockPos pos, Direction facing) {
         level.setBlockAndUpdate(pos, extensionState(facing));
     }
 
@@ -1467,21 +828,6 @@ public final class CbcMountExtensionGameTests {
                         Direction.UP,
                         placementPos,
                         false));
-    }
-
-    private static InteractionResult useItemOn(
-            Player player,
-            ItemStack stack,
-            BlockPos position,
-            Direction face
-    ) {
-        player.setItemInHand(InteractionHand.MAIN_HAND, stack);
-        Vec3 location = Vec3.atCenterOf(position)
-                .add(Vec3.atLowerCornerOf(face.getNormal()).scale(0.5));
-        return stack.useOn(new UseOnContext(
-                player,
-                InteractionHand.MAIN_HAND,
-                new BlockHitResult(location, face, position, false)));
     }
 
     private static void linkController(

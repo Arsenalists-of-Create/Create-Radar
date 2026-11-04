@@ -47,11 +47,7 @@ public final class WeaponFiringControlSelfTest {
         results.add(checkLimitBoundaryTrackingFailsClosed());
         results.add(checkUnavailableSourceFrameFailsClosed());
         results.add(checkSmoothAimKeepsStability());
-        results.add(checkDualMountYawConvergence());
-        results.add(checkDualFirePolicy());
-        results.add(checkPerSideSafeZoneGeometry());
-        results.add(checkDualAimingSourceRecovery());
-        results.add(checkSecondarySolutionIdentity());
+        results.add(checkSafeZonePathGeometry());
         results.add(checkRangeAwareFiringTolerance());
         return List.copyOf(results);
     }
@@ -768,78 +764,7 @@ public final class WeaponFiringControlSelfTest {
     }
 
     private static TargetingSolverSelfTest.Result
-    checkDualMountYawConvergence() {
-        Vec3 leftOrigin = new Vec3(-2.0, 0.0, 0.0);
-        Vec3 rightOrigin = new Vec3(2.0, 0.0, 0.0);
-        Vec3 aimPoint = new Vec3(0.0, 0.0, 100.0);
-        Vec3 rightAxis = new Vec3(1.0, 0.0, 0.0);
-        Vec3 upAxis = new Vec3(0.0, 1.0, 0.0);
-        Vec3 forwardAxis = new Vec3(0.0, 0.0, 1.0);
-
-        Double leftYaw =
-                WeaponFiringControl.calculateControllerYawForFrame(
-                        leftOrigin, aimPoint,
-                        rightAxis, upAxis, forwardAxis);
-        Double rightYaw =
-                WeaponFiringControl.calculateControllerYawForFrame(
-                        rightOrigin, aimPoint,
-                        rightAxis, upAxis, forwardAxis);
-        boolean finite = leftYaw != null && rightYaw != null
-                && Double.isFinite(leftYaw)
-                && Double.isFinite(rightYaw);
-        double separation = finite
-                ? Math.abs(shortestDelta(leftYaw, rightYaw))
-                : 0.0;
-        boolean oppositeCorrections = finite
-                && Math.abs(shortestDelta(0.0, leftYaw)
-                + shortestDelta(0.0, rightYaw)) < 1.0e-6;
-        boolean passed = finite && separation > 2.0
-                && oppositeCorrections;
-        return result("t_pitch_per_mount_yaw_convergence", passed,
-                "left=" + leftYaw + " right=" + rightYaw
-                        + " separation=" + separation);
-    }
-
-    private static TargetingSolverSelfTest.Result
-    checkDualFirePolicy() {
-        boolean allReady =
-                WeaponFiringControl.dualSideFireEligible(
-                        true, true, true,
-                        true, true, true, true, true);
-        boolean yawBlocksOnlySide =
-                !WeaponFiringControl.dualSideFireEligible(
-                        true, true, false,
-                        true, true, true, true, true);
-        boolean profileBlocksOnlySide =
-                !WeaponFiringControl.dualSideFireEligible(
-                        true, true, true,
-                        true, true, false, true, true);
-        boolean sharedGateStops =
-                !WeaponFiringControl.dualSideFireEligible(
-                        false, true, true,
-                        true, true, true, true, true);
-        boolean unsafeSideStops =
-                !WeaponFiringControl.dualSideFireEligible(
-                        true, true, true,
-                        true, true, true, true, false);
-        boolean staleAimStops =
-                !WeaponFiringControl.dualSideFireEligible(
-                        true, true, true,
-                        true, true, true, false, true);
-        boolean passed = allReady && yawBlocksOnlySide
-                && profileBlocksOnlySide && sharedGateStops
-                && unsafeSideStops && staleAimStops;
-        return result("t_pitch_independent_fire_gates", passed,
-                "ready=" + allReady
-                        + " yawBlocked=" + yawBlocksOnlySide
-                        + " profileBlocked=" + profileBlocksOnlySide
-                        + " sharedBlocked=" + sharedGateStops
-                        + " unsafeBlocked=" + unsafeSideStops
-                        + " staleBlocked=" + staleAimStops);
-    }
-
-    private static TargetingSolverSelfTest.Result
-    checkPerSideSafeZoneGeometry() {
+    checkSafeZonePathGeometry() {
         Vec3 leftStart = new Vec3(-2.0, 0.0, 0.0);
         Vec3 rightStart = new Vec3(2.0, 0.0, 0.0);
         Vec3 leftEnd = new Vec3(-2.0, 0.0, 100.0);
@@ -858,82 +783,9 @@ public final class WeaponFiringControlSelfTest {
                 List.of(rightZone), null, rightStart, rightEnd)
                 && !WeaponFiringControl.pathTouchesSafeZone(
                 List.of(rightZone), null, leftStart, leftEnd);
-        return result("t_pitch_per_side_safe_zone_geometry",
+        return result("safe_zone_path_geometry",
                 leftOnly && reversed,
                 "leftOnly=" + leftOnly + " reversed=" + reversed);
-    }
-
-    private static TargetingSolverSelfTest.Result
-    checkDualAimingSourceRecovery() {
-        int initial = WeaponFiringControl.selectDualAimingSourceIndex(
-                -1, 0, List.of(true, true));
-        int primaryRetained =
-                WeaponFiringControl.selectDualAimingSourceIndex(
-                        0, 0, List.of(true, true));
-        int fallback = WeaponFiringControl.selectDualAimingSourceIndex(
-                0, 0, List.of(false, true));
-        int fallbackRetainedAfterPrimaryReload =
-                WeaponFiringControl.selectDualAimingSourceIndex(
-                        1, 0, List.of(true, true));
-        int primaryRecovery =
-                WeaponFiringControl.selectDualAimingSourceIndex(
-                        1, 0, List.of(true, false));
-        int bothEmptyPrimary =
-                WeaponFiringControl.selectDualAimingSourceIndex(
-                        0, 0, List.of(false, false));
-        int bothEmptyFallback =
-                WeaponFiringControl.selectDualAimingSourceIndex(
-                        1, 0, List.of(false, false));
-        boolean passed = initial == 0 && primaryRetained == 0
-                && fallback == 1
-                && fallbackRetainedAfterPrimaryReload == 1
-                && primaryRecovery == 0
-                && bothEmptyPrimary == 0 && bothEmptyFallback == 1;
-        return result("t_pitch_loaded_source_reload_recovery", passed,
-                "sequence=" + initial + "," + primaryRetained + ","
-                        + fallback + ","
-                        + fallbackRetainedAfterPrimaryReload + ","
-                        + primaryRecovery + "," + bothEmptyPrimary
-                        + "," + bothEmptyFallback);
-    }
-
-    private static TargetingSolverSelfTest.Result
-    checkSecondarySolutionIdentity() {
-        WeaponFiringControl.SideSolutionKey baseline =
-                new WeaponFiringControl.SideSolutionKey(
-                        BlockPos.ZERO, 11, BlockPos.ZERO.above(),
-                        "hostile:target", "ammo-a", false);
-        WeaponFiringControl.SideSolutionKey same =
-                new WeaponFiringControl.SideSolutionKey(
-                        BlockPos.ZERO, 11, BlockPos.ZERO.above(),
-                        "hostile:target", "ammo-a", false);
-        WeaponFiringControl.SideSolutionKey changedAmmo =
-                new WeaponFiringControl.SideSolutionKey(
-                        BlockPos.ZERO, 11, BlockPos.ZERO.above(),
-                        "hostile:target", "ammo-b", false);
-        WeaponFiringControl.SideSolutionKey changedMount =
-                new WeaponFiringControl.SideSolutionKey(
-                        BlockPos.ZERO, 12, BlockPos.ZERO.above(),
-                        "hostile:target", "ammo-a", false);
-        WeaponFiringControl.SideSolutionKey changedSource =
-                new WeaponFiringControl.SideSolutionKey(
-                        BlockPos.ZERO, 11, BlockPos.ZERO.below(),
-                        "hostile:target", "ammo-a", false);
-        WeaponFiringControl.SideSolutionKey changedTarget =
-                new WeaponFiringControl.SideSolutionKey(
-                        BlockPos.ZERO, 11, BlockPos.ZERO.above(),
-                        "hostile:other", "ammo-a", false);
-        boolean passed = baseline.equals(same)
-                && !baseline.equals(changedAmmo)
-                && !baseline.equals(changedMount)
-                && !baseline.equals(changedSource)
-                && !baseline.equals(changedTarget);
-        return result("t_pitch_secondary_solution_identity", passed,
-                "same=" + baseline.equals(same)
-                        + " ammo=" + baseline.equals(changedAmmo)
-                        + " mount=" + baseline.equals(changedMount)
-                        + " source=" + baseline.equals(changedSource)
-                        + " target=" + baseline.equals(changedTarget));
     }
 
     private static double shortestDelta(double from, double to) {

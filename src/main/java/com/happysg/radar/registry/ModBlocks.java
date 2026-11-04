@@ -2,7 +2,6 @@ package com.happysg.radar.registry;
 
 import com.happysg.radar.CreateRadar;
 
-
 import com.happysg.radar.block.arad.rwr.RadarWarningReceiverBlock;
 import com.happysg.radar.block.arad.jammer.JammerBlock;
 import com.happysg.radar.block.controller.id.IdentificationTransponder;
@@ -10,7 +9,6 @@ import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock
 import com.happysg.radar.block.controller.firing.FireControllerBlock;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlock;
 
-import com.happysg.radar.block.controller.tpitch.TPitchControllerBlock;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
@@ -26,7 +24,6 @@ import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarSublevelConnectorBlock;
 
 import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.sable.SableAwareDataLinkBlock;
 import com.happysg.radar.compat.sable.SableMonitorFactory;
 import com.happysg.radar.compat.sable.SableDataLinkFactory;
 import com.simibubi.create.foundation.data.AssetLookup;
@@ -380,30 +377,6 @@ public class ModBlocks {
                     .blockstate((c, p) -> p.simpleBlock(c.getEntry(), p.models().getExistingFile(CreateRadar.asResource("block/sonar_sensor"))))
                     .item()
                     .model((c, p) -> p.withExistingParent(c.getName(), CreateRadar.asResource("block/sonar_sensor")))
-                    .build()
-                    .register();
-
-    public static final BlockEntry<TPitchControllerBlock> T_PITCH =
-            REGISTRATE.block("t_pitch", TPitchControllerBlock::new)
-                    .lang("T-Pitch Controller")
-                    .initialProperties(SharedProperties::softMetal)
-                    .properties(p -> p.noOcclusion())
-                    .properties(p -> p.strength(0.8f))
-                    .blockstate((c, p) -> p.getVariantBuilder(c.get())
-                            .forAllStates(state -> {
-                                TPitchControllerBlock.Orientation orientation =
-                                        state.getValue(TPitchControllerBlock.ORIENTATION);
-                                return ConfiguredModel.builder()
-                                        .modelFile(p.models().getExistingFile(
-                                                CreateRadar.asResource("block/t_pitch")))
-                                        .rotationX(orientation.modelRotationX())
-                                        .rotationY(orientation.modelRotationY())
-                                        .build();
-                            }))
-                    .transform(axeOrPickaxe())
-                    .item()
-                    .model((c, p) -> p.withExistingParent(c.getName(),
-                            CreateRadar.asResource("block/track_controller")))
                     .build()
                     .register();
 

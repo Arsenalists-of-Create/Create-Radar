@@ -247,13 +247,6 @@ tasks.register('kineticControllerSelfTest', JavaExec) {
     mainClass = 'com.happysg.radar.block.controller.kinetic.KineticControllerSelfTest'
 }
 
-tasks.register('tPitchPlacementSelfTest', JavaExec) {
-    group = 'verification'
-    description = 'Runs deterministic T-Pitch placement and model-orientation checks.'
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.happysg.radar.block.controller.tpitch.TPitchPlacementSelfTest'
-}
-
 tasks.register('directionalJammerSelfTest', JavaExec) {
     group = 'verification'
     description = 'Runs deterministic directional jammer placement and aiming checks.'
@@ -410,7 +403,6 @@ tasks.register('optionalCbcIsolationCheck') {
 
 tasks.named('check') {
     dependsOn tasks.named('kineticControllerSelfTest')
-    dependsOn tasks.named('tPitchPlacementSelfTest')
     dependsOn tasks.named('directionalJammerSelfTest')
     dependsOn tasks.named('controllerCollisionSelfTest')
     dependsOn tasks.named('targetingSolverSelfTest')
