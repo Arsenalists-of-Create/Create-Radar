@@ -1132,9 +1132,9 @@ public final class WeaponNetworkRuntime {
         for (BlockPos endpoint : invalidEndpoints) {
             BlockEntity blockEntity = level.getBlockEntity(endpoint);
             if (blockEntity instanceof AutoPitchControllerBlockEntity pitch) {
-                pitch.failClosedRadarAim();
+                pitch.onWeaponTopologyChanged();
             } else if (blockEntity instanceof AutoYawControllerBlockEntity yaw) {
-                yaw.failClosedRadarAim();
+                yaw.onWeaponTopologyChanged();
             }
         }
         for (BlockPos firing : invalidFiring) {
@@ -1157,11 +1157,11 @@ public final class WeaponNetworkRuntime {
             BlockEntity blockEntity = level.getBlockEntity(endpoint);
             if (blockEntity instanceof AutoPitchControllerBlockEntity pitch) {
                 pitch.markMountDirtyExternal();
-                pitch.failClosedRadarAim();
+                pitch.onWeaponTopologyChanged();
                 if (pitch.firingControl != null) pitch.firingControl.refreshControllers();
             } else if (blockEntity instanceof AutoYawControllerBlockEntity yaw) {
                 yaw.markMountDirtyExternal();
-                yaw.failClosedRadarAim();
+                yaw.onWeaponTopologyChanged();
             } else if (blockEntity instanceof FireControllerBlockEntity fire) {
                 fire.setPowered(false);
             }

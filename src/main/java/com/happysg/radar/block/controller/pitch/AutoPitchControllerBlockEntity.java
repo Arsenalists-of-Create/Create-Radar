@@ -6,16 +6,7 @@ import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.controller.WeaponContactUnlinkState;
-import com.happysg.radar.block.controller.kinetic.CannonAxis;
-import com.happysg.radar.block.controller.kinetic.ControllerInputShaft;
-import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
-import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
-import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
-import com.happysg.radar.block.controller.kinetic.KineticMountAdapter;
-import com.happysg.radar.block.controller.kinetic.KineticControllerState;
-import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
-import com.happysg.radar.block.controller.kinetic.KineticMountFrame;
-import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
+import com.happysg.radar.block.controller.kinetic.*;
 import com.happysg.radar.block.controller.limits.ControllerLimitAccess;
 import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import com.happysg.radar.block.controller.limits.collision.ControllerCollisionSource;
@@ -142,8 +133,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     @Nullable
     private BlockPos cachedMountEndpointPos;
 
-    private final KineticControllerState kineticControllerState =
-            new KineticControllerState(CannonAxis.PITCH);
+    private final KineticControllerState kineticControllerState = new KineticControllerState(CannonAxis.PITCH);
+    private final SwivelReorientationState swivelReorientation = new SwivelReorientationState();
+    protected final CbcShaftDrive cbcShaftDrive = new CbcShaftDrive(CannonAxis.PITCH);
     private final DebugSwivelSweep debugSwivelSweep = new DebugSwivelSweep();
     private final DebugSwivelFollow debugSwivelFollow = new DebugSwivelFollow();
 
@@ -182,8 +174,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         if (level instanceof ServerLevel serverLevel) {
-            WeaponNetworkRuntime.get(serverLevel)
-                    .advertiseContactController(this);
+            WeaponNetworkRuntime.get(serverLevel).advertiseContactController(this);
         }
         getFiringControl();
 
@@ -192,6 +183,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         boolean kineticSelected = tickKineticActuator();
         tickDebugSwivelSweep(kineticSelected);
         if (kineticSelected) {
+            cbcShaftDrive.clear();
             tickSpecializedPitchMounts();
             return;
         }
@@ -201,12 +193,22 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         List<CannonMountContext> cbcMounts = resolveControlledCbcMounts();
+
         if (Mods.CREATEBIGCANNONS.isLoaded() && !cbcMounts.isEmpty()) {
+            if (getClass() == AutoPitchControllerBlockEntity.class && cbcMounts.size() == 1 && !cbcMounts.get(0).isFixed() && !cbcMounts.get(0).isCompact()) {
+                cbcShaftDrive.tick(this, cbcMounts.get(0), isRunning, targetAngle, getAvailableInputSpeed(), getBlockState().getValue(HorizontalDirectionalBlock.FACING), null, this::commandGeneratedSpeed);
+                return;
+            }
+
+            cbcShaftDrive.reset(this::commandGeneratedSpeed);
             for (CannonMountContext mount : cbcMounts) {
                 cannonHandler.tick(mount);
             }
+
             return;
         }
+
+        cbcShaftDrive.reset(this::commandGeneratedSpeed);
 
         Mount mount = resolveMount();
         if (mount != null && mount.kind == MountKind.PHYS && supportsPhysBearingMounts() && Mods.VS_CLOCKWORK.isLoaded()) {
@@ -219,7 +221,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        isRunning = false;
+        if (!swivelReorientation.shouldPreserve(level, worldPosition)) {
+            isRunning = false;
+        }
     }
 
     protected boolean tickSpecializedPitchMounts() {
@@ -261,7 +265,6 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             clearFiringControl();
             return;
         }
-
 
         boolean selectedDifferentCbcMount = validCbcMount && !mountPos.equals(cbcMount.getBlockPos());
 
@@ -306,12 +309,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         LOGGER.debug("made new Weapon Config! mount={} weaponApi={} cbc={}", mountPos, validWeapon, validCbcMount);
     }
 
-    protected boolean isFiringControlMount(
-            WeaponNetworkRuntime.WeaponGroupView view,
-            CannonMountContext mount
-    ) {
-        return view != null && mount != null
-                && mount.getBlockPos().equals(view.mountPos());
+    protected boolean isFiringControlMount(WeaponNetworkRuntime.WeaponGroupView view, CannonMountContext mount) {
+        return view != null && mount != null && mount.getBlockPos().equals(view.mountPos());
     }
 
     private void clearFiringControl() {
@@ -353,8 +352,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         if (level instanceof ServerLevel serverLevel) {
-            WeaponNetworkRuntime.get(serverLevel)
-                    .advertiseContactController(this);
+            WeaponNetworkRuntime.get(serverLevel).advertiseContactController(this);
         }
         setChanged();
     }
@@ -372,19 +370,16 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         return requestedTargetAngle;
     }
 
-    private void applyTargetRequest(double requestedAngle, boolean running,
-                                    boolean resetPhysicalTracking) {
+    private void applyTargetRequest(double requestedAngle, boolean running, boolean resetPhysicalTracking) {
         if (!Double.isFinite(requestedAngle)) {
             return;
         }
         requestedTargetAngle = requestedAngle;
-        ControllerMovementLimits effective = getMovementLimits()
-                .intersection(getSupportedMovementLimits()).orElse(null);
+        ControllerMovementLimits effective = getMovementLimits().intersection(getSupportedMovementLimits()).orElse(null);
         if (effective == null) {
             targetLimitConstrained = true;
             isRunning = false;
-            kineticControllerState.onTargetChanged(
-                    false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
+            kineticControllerState.onTargetChanged(false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
             if (resetPhysicalTracking) {
                 physHandler.reset();
             }
@@ -401,8 +396,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         targetAngle = applied;
         isRunning = running;
-        kineticControllerState.onTargetChanged(
-                running, applied, KINETIC_TRACKING_TOLERANCE_DEG);
+        kineticControllerState.onTargetChanged(running, applied, KINETIC_TRACKING_TOLERANCE_DEG);
         if (resetPhysicalTracking) {
             physHandler.reset();
         }
@@ -413,8 +407,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public void stopController() {
         kineticControllerState.endContinuousTracking();
         isRunning = false;
-        kineticControllerState.onTargetChanged(
-                false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
+        kineticControllerState.onTargetChanged(false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         notifyUpdate();
         setChanged();
     }
@@ -444,8 +437,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         double capturedTarget = frame.controllerTargetFor(physical);
         double step = adapter.effectiveDegreesPerTick(KineticControllerState.matchingDirectCbcDriveRpm(adapter, getAvailableInputSpeed()));
-        debugSwivelSweep.start(degrees, capturedTarget, targetAngle, isRunning,
-                step, this::applyDebugSwivelCommand);
+        debugSwivelSweep.start(degrees, capturedTarget, targetAngle, isRunning, step, this::applyDebugSwivelCommand);
         return DebugSwivelSweep.StartResult.started(adapter.relativeDirection());
     }
 
@@ -462,11 +454,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (!resolution.hasAdapter() || resolution.adapter() == null) {
             return DebugSwivelFollow.ToggleResult.failed(resolution.reason());
         }
+
         KineticMountAdapter adapter = resolution.adapter();
         String unavailableReason = debugSwivelFollowUnavailableReason(adapter);
         if (unavailableReason != null) {
             return DebugSwivelFollow.ToggleResult.failed(unavailableReason);
         }
+
         KineticMountFrame frame = adapter.frameIdentity();
         if (frame == null) {
             return DebugSwivelFollow.ToggleResult.failed("frame_unavailable");
@@ -481,8 +475,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         kineticControllerState.release();
         commandGeneratedSpeed(0.0);
         kineticControllerState.beginContinuousTracking();
-        debugSwivelFollow.start(player.getUUID(), frame, adapter.relativeDirection(),
-                targetAngle, isRunning);
+        debugSwivelFollow.start(player.getUUID(), frame, adapter.relativeDirection(), targetAngle, isRunning);
         debugSwivelFollow.update(target, this::applyDebugSwivelCommand);
         return DebugSwivelFollow.ToggleResult.started(adapter.relativeDirection());
     }
@@ -546,8 +539,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         String unavailableReason = debugSwivelFollowUnavailableReason(adapter);
         if (unavailableReason != null || kineticControllerState.isBlocked()) {
-            stopDebugSwivelFollow(unavailableReason != null
-                    ? unavailableReason : "controller_blocked", true);
+            stopDebugSwivelFollow(unavailableReason != null ? unavailableReason : "controller_blocked", true);
             return;
         }
         KineticMountFrame frame = adapter.frameIdentity();
@@ -555,13 +547,11 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             stopDebugSwivelFollow("swivel_frame_changed", true);
             return;
         }
-        if (!(level instanceof ServerLevel serverLevel)
-                || debugSwivelFollow.playerId() == null) {
+        if (!(level instanceof ServerLevel serverLevel) || debugSwivelFollow.playerId() == null) {
             stopDebugSwivelFollow("server_level_unavailable", true);
             return;
         }
-        ServerPlayer player = serverLevel.getServer().getPlayerList()
-                .getPlayer(debugSwivelFollow.playerId());
+        ServerPlayer player = serverLevel.getServer().getPlayerList().getPlayer(debugSwivelFollow.playerId());
         if (player == null || player.serverLevel() != serverLevel || !player.isAlive()) {
             stopDebugSwivelFollow("player_unavailable", true);
             return;
@@ -584,8 +574,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         commandGeneratedSpeed(0.0);
         debugSwivelFollow.stop(reason, this::applyDebugSwivelCommand);
         if (logCancellation) {
-            LOGGER.warn("Cancelled pitch Swivel player follow controller={} reason={}",
-                    worldPosition, reason);
+            LOGGER.warn("Cancelled pitch Swivel player follow controller={} reason={}", worldPosition, reason);
         }
     }
 
@@ -601,8 +590,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                 && (adapter.isEndpointFree() || adapter.isDrivenBy(worldPosition));
         double step = adapter == null ? 0.0
                 : adapter.effectiveDegreesPerTick(KineticControllerState.matchingDirectCbcDriveRpm(adapter, getAvailableInputSpeed()));
-        String outcome = debugSwivelSweep.tick(valid, kineticControllerState.isAtDestination(),
-                step, this::applyDebugSwivelCommand);
+        String outcome = debugSwivelSweep.tick(valid, kineticControllerState.isAtDestination(), step, this::applyDebugSwivelCommand);
         if (outcome != null && !"completed".equals(outcome)) {
             kineticControllerState.release();
             commandGeneratedSpeed(0.0);
@@ -678,8 +666,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public boolean atTargetPitch(boolean lag, double minimumToleranceDegrees) {
-        return atTargetPitch(lag, minimumToleranceDegrees,
-                Double.POSITIVE_INFINITY);
+        return atTargetPitch(lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
     }
 
     public boolean atTargetPitch(boolean lag, double minimumToleranceDegrees,
@@ -700,9 +687,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         List<CannonMountContext> cbcMounts = resolveControlledCbcMounts();
         if (Mods.CREATEBIGCANNONS.isLoaded() && !cbcMounts.isEmpty()) {
             for (CannonMountContext mount : cbcMounts) {
-                if (!cannonHandler.atTargetPitch(
-                        mount, lag, minimumToleranceDegrees,
-                        maximumToleranceDegrees)) {
+                if (!cannonHandler.atTargetPitch(mount, lag, minimumToleranceDegrees, maximumToleranceDegrees)) {
                     return false;
                 }
             }
@@ -727,20 +712,15 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public boolean isAlignedForFiring(boolean lag, double minimumToleranceDegrees) {
-        return isAlignedForFiring(lag, minimumToleranceDegrees,
-                Double.POSITIVE_INFINITY);
+        return isAlignedForFiring(lag, minimumToleranceDegrees, Double.POSITIVE_INFINITY);
     }
 
-    public boolean isAlignedForFiring(boolean lag,
-                                      double minimumToleranceDegrees,
-                                      double maximumToleranceDegrees) {
-        if (level == null || targetLimitConstrained
-                || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
+    public boolean isAlignedForFiring(boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
+        if (level == null || targetLimitConstrained || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
         if (!hasStructuralKineticSelection()) {
-            return atTargetPitch(
-                    lag, minimumToleranceDegrees, maximumToleranceDegrees);
+            return atTargetPitch(lag, minimumToleranceDegrees, maximumToleranceDegrees);
         }
 
         double tolerance = DEADBAND_DEG;
@@ -751,11 +731,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             tolerance = Math.max(tolerance, Math.max(0.0, minimumToleranceDegrees));
         }
         if (Double.isFinite(maximumToleranceDegrees)) {
-            tolerance = Math.min(tolerance,
-                    Math.max(0.0, maximumToleranceDegrees));
+            tolerance = Math.min(tolerance, Math.max(0.0, maximumToleranceDegrees));
         }
-        return kineticControllerState.isAlignedForFiring(
-                resolveKineticMount(), worldPosition, isRunning, targetAngle, tolerance);
+        return kineticControllerState.isAlignedForFiring(resolveKineticMount(), worldPosition, isRunning, targetAngle, tolerance);
     }
 
     /**
@@ -786,9 +764,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         for (CannonMountContext controlled : resolveControlledCbcMounts()) {
             if (controlled.sameMount(mount)) {
-                return cannonHandler.atTargetPitch(
-                        controlled, lag, minimumToleranceDegrees,
-                        maximumToleranceDegrees);
+                return cannonHandler.atTargetPitch(controlled, lag, minimumToleranceDegrees, maximumToleranceDegrees);
             }
         }
         return false;
@@ -800,8 +776,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         track = tTrack;
-        radarTargetingConfig = config == null
-                ? TargetingConfig.DEFAULT : config;
+        radarTargetingConfig = config == null ? TargetingConfig.DEFAULT : config;
         if (binoMode) {
             return;
         }
@@ -834,25 +809,20 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        firingControl.setTarget(track.getPosition(), radarTargetingConfig,
-                track, view);
+        firingControl.setTarget(track.getPosition(), radarTargetingConfig, track, view);
     }
 
     private void returnControlledYawToInitialOrientation() {
         if (level instanceof ServerLevel serverLevel) {
-            WeaponNetworkRuntime.WeaponControlView controlView =
-                    WeaponNetworkRuntime.get(serverLevel)
-                            .getWeaponControlViewFromPitch(worldPosition);
+            WeaponNetworkRuntime.WeaponControlView controlView = WeaponNetworkRuntime.get(serverLevel).getWeaponControlViewFromPitch(worldPosition);
             if (controlView != null) {
                 Set<BlockPos> visitedYawPositions = new HashSet<>();
-                for (WeaponNetworkRuntime.MountChannelView channel
-                        : controlView.channels()) {
+                for (WeaponNetworkRuntime.MountChannelView channel : controlView.channels()) {
                     BlockPos yawPos = channel.yawPos();
                     if (yawPos == null || !visitedYawPositions.add(yawPos)) {
                         continue;
                     }
-                    if (level.getBlockEntity(yawPos)
-                            instanceof AutoYawControllerBlockEntity yaw) {
+                    if (level.getBlockEntity(yawPos) instanceof AutoYawControllerBlockEntity yaw) {
                         yaw.returnToInitialOrientation();
                     }
                 }
@@ -880,8 +850,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
                 if (track != null && level instanceof ServerLevel) {
                     var view = getWeaponGroup();
                     if (view != null) {
-                        firingControl.setTarget(track.getPosition(),
-                                radarTargetingConfig, track, view);
+                        firingControl.setTarget(track.getPosition(), radarTargetingConfig, track, view);
                     }
                 }
             }
@@ -890,8 +859,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         this.binoMode = true;
         this.binoTargetPos = binoTargetPos.immutable();
-        this.binocularTargetingConfig = config == null
-                ? TargetingConfig.DEFAULT : config;
+        this.binocularTargetingConfig = config == null ? TargetingConfig.DEFAULT : config;
 
         if (firingControl == null) {
             getFiringControl();
@@ -908,8 +876,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        firingControl.setBinoTarget(this.binoTargetPos,
-                this.binocularTargetingConfig, view, false);
+        firingControl.setBinoTarget(this.binoTargetPos, this.binocularTargetingConfig, view, false);
     }
 
     public void setTrack(RadarTrack track) {
@@ -942,8 +909,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public void setSafeZones(List<SafeZone> safeZones) {
-        this.safeZones = safeZones == null || safeZones.isEmpty()
-                ? List.of() : List.copyOf(safeZones);
+        this.safeZones = safeZones == null || safeZones.isEmpty() ? List.of() : List.copyOf(safeZones);
         if (firingControl == null) {
             return;
         }
@@ -1013,6 +979,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public void onRelevantNeighborChanged(BlockPos fromPos) {
+        swivelReorientation.onNeighborChanged(level, worldPosition, fromPos);
+
         if (isPerpendicularNeighbor(fromPos)) {
             invalidateKineticActuator();
         }
@@ -1030,8 +998,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public void markMountDirtyExternal() {
         mountDirty = true;
         if (level instanceof ServerLevel serverLevel) {
-            WeaponNetworkRuntime.get(serverLevel)
-                    .markContactTopologyDirty();
+            WeaponNetworkRuntime.get(serverLevel).markContactTopologyDirty();
         }
     }
 
@@ -1071,12 +1038,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public List<UUID> resolveCollisionSublevelIds() {
         KineticMountAdapterResolution resolution = resolveKineticMount();
         KineticMountAdapter adapter = resolution.adapter();
-        KineticMountFrame frame = adapter == null ? null
-                : adapter.frameIdentity();
-        return resolution.hasAdapter() && adapter.isValid()
-                && adapter.isAssembled() && frame != null
-                && frame.assemblyId() != null
-                ? List.of(frame.assemblyId()) : List.of();
+        KineticMountFrame frame = adapter == null ? null : adapter.frameIdentity();
+        return resolution.hasAdapter() && adapter.isValid() && adapter.isAssembled() && frame != null && frame.assemblyId() != null ? List.of(frame.assemblyId()) : List.of();
     }
 
     @Override
@@ -1088,21 +1051,17 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public Vec3 resolveCollisionViewOrigin() {
         KineticMountAdapterResolution resolution = resolveKineticMount();
         KineticMountAdapter adapter = resolution.adapter();
-        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
-                || level == null) {
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid() || level == null) {
             return null;
         }
-        return PhysicsHandler.getWorldVec(level,
-                worldPosition.relative(adapter.relativeDirection())
-                        .getCenter());
+        return PhysicsHandler.getWorldVec(level, worldPosition.relative(adapter.relativeDirection()).getCenter());
     }
 
     @Override
     public Vec3 resolveCollisionNeutralForward() {
         KineticMountAdapterResolution resolution = resolveKineticMount();
         KineticMountAdapter adapter = resolution.adapter();
-        if (!resolution.hasAdapter() || adapter == null
-                || !adapter.isValid()) {
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()) {
             return null;
         }
         KineticAimFrame aim = adapter.aimFrame();
@@ -1110,8 +1069,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return null;
         }
         KineticMountFrame identity = adapter.frameIdentity();
-        Direction initial = identity == null
-                ? Direction.SOUTH : identity.cannonInitialOrientation();
+        Direction initial = identity == null ? Direction.SOUTH : identity.cannonInitialOrientation();
         double yaw = switch (initial == null ? Direction.SOUTH : initial) {
             case SOUTH -> 0.0;
             case WEST -> 90.0;
@@ -1140,9 +1098,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (mountDirty || mountResolutionTick != gameTime
                 || !java.util.Objects.equals(cachedMountEndpointPos, mountPos)
                 || (cachedMount != null
-                    && cachedMount.kind == MountKind.CBC
-                    && (cachedMount.cbc == null
-                        || !cachedMount.cbc.isCurrent()))) {
+                && cachedMount.kind == MountKind.CBC
+                && (cachedMount.cbc == null
+                || !cachedMount.cbc.isCurrent()))) {
             refreshMountCache(mountPos);
         }
 
@@ -1158,13 +1116,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         Mount newMount = null;
 
         if (mountPos != null) {
-            BlockEntity be = level.hasChunkAt(mountPos)
-                    ? level.getBlockEntity(mountPos)
-                    : null;
+            BlockEntity be = level.hasChunkAt(mountPos) ? level.getBlockEntity(mountPos) : null;
+            CannonMountContext cbc = Mods.CREATEBIGCANNONS.isLoaded() ? CannonMountContext.resolveEndpoint(level, mountPos) : null;
 
-            CannonMountContext cbc = Mods.CREATEBIGCANNONS.isLoaded()
-                    ? CannonMountContext.resolveEndpoint(level, mountPos)
-                    : null;
             if (cbc != null) {
                 newMount = Mount.cbc(cbc);
             } else if (supportsPhysBearingMounts() && Mods.VS_CLOCKWORK.isLoaded() && be instanceof PhysBearingBlockEntity phys) {
@@ -1183,13 +1137,15 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         mountResolutionTick = level.getGameTime();
         mountDirty = false;
 
-        if (oldMount != null && !sameMount(oldMount, newMount)) {
+        boolean preserveSwivelTracking = isRunning && swivelReorientation.shouldPreserve(level, worldPosition);
+
+        if (oldMount != null && !sameMount(oldMount, newMount) && !preserveSwivelTracking) {
             clearFiringControl();
             isRunning = false;
             lastTargetPos = null;
         }
 
-        if (newMount == null && !hasStructuralKineticSelection()) {
+        if (newMount == null && !hasStructuralKineticSelection() && !preserveSwivelTracking) {
             isRunning = false;
             lastTargetPos = null;
             physHandler.reset();
@@ -1234,20 +1190,17 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     /** Input power is sampled, never connected to this isolated generator. */
     @Override
     public double getAvailableInputSpeed() {
-        return KineticPowerSource.strongestAdjacentShaftRpm(this, getControllerAxis());
+        return KineticPowerSource.adjacentShaftRpm(this, getInputShaftDirection());
     }
 
     @Override
     public Direction getInputShaftDirection() {
         BlockState state = getBlockState();
-        return state.hasProperty(HorizontalDirectionalBlock.FACING)
-                ? state.getValue(HorizontalDirectionalBlock.FACING).getOpposite()
-                : Direction.SOUTH;
+        return state.hasProperty(HorizontalDirectionalBlock.FACING) ? state.getValue(HorizontalDirectionalBlock.FACING).getOpposite() : Direction.SOUTH;
     }
 
     @Override
-    public boolean addToGoggleTooltip(List<Component> tooltip,
-                                      boolean isPlayerSneaking) {
+    public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
         return false;
     }
 
@@ -1266,7 +1219,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         isolatedGeneratorInitialized = true;
     }
 
-    private void commandGeneratedSpeed(double rpm) {
+    protected void commandGeneratedSpeed(double rpm) {
         sequenceContext = null;
         if (hasSource()) {
             generatedSpeed = 0.0f;
@@ -1291,18 +1244,26 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private boolean tickKineticActuator() {
         KineticMountAdapterResolution resolution = resolveKineticMount();
-        KineticMountAdapter adapter = resolution.adapter();
-        boolean swivelMode = resolution.hasAdapter() && adapter != null && adapter.isValid();
+        swivelReorientation.observe(resolution, isRunning);
+
+        boolean swivelMode = resolution.isStructuralSelection();
         BlockState state = getBlockState();
 
         if (state.hasProperty(AutoPitchControllerBlock.SWIVEL_MODE) && state.getValue(AutoPitchControllerBlock.SWIVEL_MODE) != swivelMode) {
             level.setBlock(worldPosition, state.setValue(AutoPitchControllerBlock.SWIVEL_MODE, swivelMode), 2);
         }
 
-        boolean consumed = kineticControllerState.tick(
-                this, resolution, isRunning, targetAngle,
-                KINETIC_TRACKING_TOLERANCE_DEG,
-                getAvailableInputSpeed(), this::commandGeneratedSpeed);
+        if (resolution.selection() == KineticMountAdapterResolution.Selection.ABSENT) {
+            if (kineticControllerState.isStructuralMode()) {
+                kineticControllerState.release();
+                commandGeneratedSpeed(0.0);
+            }
+
+            flushKineticStateSync();
+            return false;
+        }
+
+        boolean consumed = kineticControllerState.tick(this, resolution, isRunning, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG, getAvailableInputSpeed(), this::commandGeneratedSpeed);
 
         flushKineticStateSync();
         return consumed;
@@ -1320,9 +1281,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public KineticAimFrame getStructuralAimFrame() {
         KineticMountAdapterResolution resolution = resolveKineticMount();
         KineticMountAdapter adapter = resolution.adapter();
-        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
-                || !adapter.isAssembled() || !adapter.isLocked()
-                || adapter.frameIdentity() == null) {
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid() || !adapter.isAssembled() || !adapter.isLocked() || adapter.frameIdentity() == null) {
             return null;
         }
         return adapter.aimFrame();
@@ -1364,10 +1323,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         return setStructuralAimDirection(worldAimDirection, true);
     }
 
-    public boolean setRadarAimDirection(@Nullable Vec3 worldAimDirection,
-                                       double maximumFiringToleranceDegrees) {
-        return setStructuralAimDirection(worldAimDirection, true,
-                maximumFiringToleranceDegrees);
+    public boolean setRadarAimDirection(@Nullable Vec3 worldAimDirection, double maximumFiringToleranceDegrees) {
+        return setStructuralAimDirection(worldAimDirection, true, maximumFiringToleranceDegrees);
     }
 
     public void endRadarTracking() {
@@ -1377,28 +1334,34 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public void failClosedRadarAim() {
         kineticControllerState.endContinuousTracking();
         isRunning = false;
-        kineticControllerState.onTargetChanged(
-                false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
+        kineticControllerState.onTargetChanged(false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         commandGeneratedSpeed(0.0);
         flushKineticStateSync();
         notifyUpdate();
         setChanged();
     }
 
-    private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection,
-                                              boolean continuous) {
-        return setStructuralAimDirection(worldAimDirection, continuous,
-                Double.POSITIVE_INFINITY);
+    public void onWeaponTopologyChanged() {
+        if (isRunning
+                && swivelReorientation.shouldPreserve(level, worldPosition)) {
+            invalidateKineticActuator();
+            flushKineticStateSync();
+            return;
+        }
+
+        failClosedRadarAim();
     }
 
-    private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection,
-                                              boolean continuous,
-                                              double maximumFiringToleranceDegrees) {
+    private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection, boolean continuous) {
+        return setStructuralAimDirection(worldAimDirection, continuous, Double.POSITIVE_INFINITY);
+    }
+
+    private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection, boolean continuous, double maximumFiringToleranceDegrees) {
         if (debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
-        if (level == null || level.isClientSide() || worldAimDirection == null
-                || worldAimDirection.lengthSqr() < 1.0e-12) {
+
+        if (level == null || level.isClientSide() || worldAimDirection == null || worldAimDirection.lengthSqr() < 1.0e-12) {
             if (continuous && level != null && !level.isClientSide()) {
                 failClosedRadarAim();
             }
@@ -1406,11 +1369,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         KineticMountAdapterResolution resolution = resolveKineticMount();
         KineticMountAdapter adapter = resolution.adapter();
-        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
-                || !adapter.isAssembled() || !adapter.isLocked()
-                || adapter.frameIdentity() == null || adapter.aimFrame() == null) {
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid() || !adapter.isAssembled() || !adapter.isLocked() || adapter.frameIdentity() == null || adapter.aimFrame() == null) {
             if (continuous) {
-                failClosedRadarAim();
+                invalidateKineticActuator();
+                flushKineticStateSync();
             }
             return false;
         }
@@ -1423,8 +1385,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         if (continuous) {
-            kineticControllerState.beginContinuousTracking(
-                    maximumFiringToleranceDegrees);
+            kineticControllerState.beginContinuousTracking(maximumFiringToleranceDegrees);
         } else {
             kineticControllerState.endContinuousTracking();
         }
@@ -1458,15 +1419,12 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     private boolean isSelectedKineticMountEndpoint(KineticBlockEntity candidate) {
         KineticMountAdapterResolution resolution = resolveKineticMount();
         KineticMountAdapter adapter = resolution.adapter();
-        return resolution.hasAdapter() && adapter != null && adapter.isValid()
-                && adapter.isKineticEndpoint(candidate);
+        return resolution.hasAdapter() && adapter != null && adapter.isValid() && adapter.isKineticEndpoint(candidate);
     }
 
     private Direction.Axis getControllerAxis() {
         BlockState state = getBlockState();
-        return state.hasProperty(HorizontalDirectionalBlock.FACING)
-                ? state.getValue(HorizontalDirectionalBlock.FACING).getAxis()
-                : Direction.Axis.X;
+        return state.hasProperty(HorizontalDirectionalBlock.FACING) ? state.getValue(HorizontalDirectionalBlock.FACING).getAxis() : Direction.Axis.X;
     }
 
     private boolean isPerpendicularNeighbor(BlockPos pos) {
@@ -1477,8 +1435,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return false;
         }
 
-        Direction.Axis neighborAxis = dx != 0 ? Direction.Axis.X
-                : dy != 0 ? Direction.Axis.Y : Direction.Axis.Z;
+        Direction.Axis neighborAxis = dx != 0 ? Direction.Axis.X : dy != 0 ? Direction.Axis.Y : Direction.Axis.Z;
         return neighborAxis != getControllerAxis();
     }
 
@@ -1516,17 +1473,13 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     @Override
     public ControllerMovementLimits getMovementLimits() {
-        ControllerMovementLimits configured =
-                new ControllerMovementLimits(CannonAxis.PITCH,
-                        minAngleDeg, maxAngleDeg);
-        return configured.intersection(getSupportedMovementLimits())
-                .orElse(configured);
+        ControllerMovementLimits configured = new ControllerMovementLimits(CannonAxis.PITCH, minAngleDeg, maxAngleDeg);
+        return configured.intersection(getSupportedMovementLimits()).orElse(configured);
     }
 
     @Override
     public ControllerMovementLimits getSupportedMovementLimits() {
-        ControllerMovementLimits defaults =
-                ControllerMovementLimits.defaults(CannonAxis.PITCH);
+        ControllerMovementLimits defaults = ControllerMovementLimits.defaults(CannonAxis.PITCH);
         KineticMountAdapterResolution kinetic = resolveKineticMount();
         if (kinetic.isStructuralSelection()) {
             return defaults;
@@ -1547,8 +1500,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (!foundCannonLimits) {
             return defaults;
         }
-        return ControllerMovementLimits.validated(
-                CannonAxis.PITCH, minimum, maximum).orElse(defaults);
+        return ControllerMovementLimits.validated(CannonAxis.PITCH, minimum, maximum).orElse(defaults);
     }
 
     @Override
@@ -1556,11 +1508,9 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         KineticMountAdapterResolution kinetic = resolveKineticMount();
         if (kinetic.isStructuralSelection()) {
             KineticMountAdapter adapter = kinetic.adapter();
-            return kinetic.hasAdapter() && adapter != null
-                    && adapter.isValid() && adapter.isAssembled();
+            return kinetic.hasAdapter() && adapter != null && adapter.isValid() && adapter.isAssembled();
         }
-        if (resolveControlledCbcMounts().stream()
-                .anyMatch(CannonMountContext::hasAssembledCannon)) {
+        if (resolveControlledCbcMounts().stream().anyMatch(CannonMountContext::hasAssembledCannon)) {
             return true;
         }
         Mount mount = resolveMount();
@@ -1586,8 +1536,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     @Override
     public boolean setMovementLimits(double minDegrees, double maxDegrees) {
-        var validated = ControllerMovementLimits.validated(
-                CannonAxis.PITCH, minDegrees, maxDegrees);
+        var validated = ControllerMovementLimits.validated(CannonAxis.PITCH, minDegrees, maxDegrees);
         if (validated.isEmpty()) {
             return false;
         }
@@ -1621,22 +1570,15 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         targetAngle = compound.getDouble("TargetAngle");
         isRunning = compound.getBoolean("IsRunning");
 
-        double storedMin = compound.contains("MinAngleDeg", Tag.TAG_DOUBLE)
-                ? compound.getDouble("MinAngleDeg") : -90.0;
-        double storedMax = compound.contains("MaxAngleDeg", Tag.TAG_DOUBLE)
-                ? compound.getDouble("MaxAngleDeg") : 90.0;
-        ControllerMovementLimits limits = ControllerMovementLimits.validated(
-                CannonAxis.PITCH, storedMin, storedMax)
-                .orElse(ControllerMovementLimits.defaults(CannonAxis.PITCH));
+        double storedMin = compound.contains("MinAngleDeg", Tag.TAG_DOUBLE) ? compound.getDouble("MinAngleDeg") : -90.0;
+        double storedMax = compound.contains("MaxAngleDeg", Tag.TAG_DOUBLE) ? compound.getDouble("MaxAngleDeg") : 90.0;
+        ControllerMovementLimits limits = ControllerMovementLimits.validated(CannonAxis.PITCH, storedMin, storedMax).orElse(ControllerMovementLimits.defaults(CannonAxis.PITCH));
         minAngleDeg = limits.minDegrees();
         maxAngleDeg = limits.maxDegrees();
         targetingTag = compound.contains("Targeting", Tag.TAG_COMPOUND) ? compound.getCompound("Targeting").copy() : defaultTargetingTag();
-        requestedTargetAngle = compound.contains("RequestedTargetAngle", Tag.TAG_DOUBLE)
-                ? compound.getDouble("RequestedTargetAngle") : targetAngle;
-        double constrainedTarget = limits.clampControllerTarget(
-                requestedTargetAngle, 0.0);
-        targetLimitConstrained = !limits.allowsControllerTarget(
-                requestedTargetAngle, 0.0);
+        requestedTargetAngle = compound.contains("RequestedTargetAngle", Tag.TAG_DOUBLE) ? compound.getDouble("RequestedTargetAngle") : targetAngle;
+        double constrainedTarget = limits.clampControllerTarget(requestedTargetAngle, 0.0);
+        targetLimitConstrained = !limits.allowsControllerTarget(requestedTargetAngle, 0.0);
         targetAngle = constrainedTarget;
 
         lastTargetPos = null;
@@ -1653,10 +1595,8 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         compound.putBoolean("RadarWeaponContactUnlinked", weaponContactSuppressed);
         compound.putBoolean("RadarFiltererContactUnlinked", filtererContactSuppressed);
-        double storedTarget = clientPacket ? targetAngle
-                : debugSwivelFollow.persistentTarget(targetAngle);
-        boolean storedRunning = clientPacket ? isRunning
-                : debugSwivelFollow.persistentRunning(isRunning);
+        double storedTarget = clientPacket ? targetAngle : debugSwivelFollow.persistentTarget(targetAngle);
+        boolean storedRunning = clientPacket ? isRunning : debugSwivelFollow.persistentRunning(isRunning);
         compound.putDouble("TargetAngle", storedTarget);
         compound.putBoolean("IsRunning", storedRunning);
         compound.putInt("MovementLimitsVersion", MOVEMENT_LIMITS_VERSION);
@@ -1685,16 +1625,12 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         if (isSelectedKineticMountEndpoint(target)) {
             return -1.0f;
         }
-        return super.propagateRotationTo(target, stateFrom, stateTo, diff,
-                connectedViaAxes, connectedViaCogs);
+        return super.propagateRotationTo(target, stateFrom, stateTo, diff, connectedViaAxes, connectedViaCogs);
     }
 
     @Override
-    public boolean isCustomConnection(
-            KineticBlockEntity other, BlockState state, BlockState otherState
-    ) {
-        return isSelectedKineticMountEndpoint(other)
-                || super.isCustomConnection(other, state, otherState);
+    public boolean isCustomConnection(KineticBlockEntity other, BlockState state, BlockState otherState) {
+        return isSelectedKineticMountEndpoint(other) || super.isCustomConnection(other, state, otherState);
     }
 
     @Override
@@ -1727,8 +1663,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     void setRunning(boolean running) {
         this.isRunning = running;
-        kineticControllerState.onTargetChanged(
-                running, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
+        kineticControllerState.onTargetChanged(running, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
     }
 
     @Override

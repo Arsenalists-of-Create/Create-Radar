@@ -29,7 +29,8 @@
     "MountedBigCannonContraptionMixin",
     "RotatedPillarKineticBlockPlacementMixin",
     "SimulatedCompassNavigationTargetMixin",
-    "SimulatedSwivelCogwheelBlockEntityMixin"
+    "SimulatedSwivelCogwheelBlockEntityMixin",
+    "TPitchKineticRecursionGuardMixin"
   ],
   "injectors": {
     "defaultRequire": 1

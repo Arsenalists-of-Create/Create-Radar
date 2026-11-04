@@ -81,7 +81,7 @@ public class TPitchControllerBlock extends KineticBlock
 
     @Override
     public Direction.Axis getRotationAxis(BlockState state) {
-        return state.getValue(ORIENTATION).branchDirection().getAxis();
+        return state.getValue(ORIENTATION).crossbarAxis();
     }
 
     @Override
@@ -111,11 +111,8 @@ public class TPitchControllerBlock extends KineticBlock
     }
 
     @Override
-    public boolean hasShaftTowards(LevelReader world, BlockPos pos,
-                                   BlockState state, Direction face) {
-        // Like the ordinary pitch controller, this block samples an adjacent
-        // source while keeping its generated control output kinetically isolated.
-        return false;
+    public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
+        return face.getAxis() == state.getValue(ORIENTATION).crossbarAxis();
     }
 
     @Override

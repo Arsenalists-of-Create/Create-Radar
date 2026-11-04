@@ -1,5 +1,6 @@
 package com.happysg.radar.compat.cbc;
 
+import com.happysg.radar.block.controller.kinetic.ControllerMotionProfile;
 import com.happysg.radar.targeting.TargetingSolverSelfTest;
 import net.minecraft.world.phys.Vec3;
 
@@ -22,7 +23,7 @@ public final class CbcMotionSelfTest {
     }
 
     private static TargetingSolverSelfTest.Result checkDirectMountMotion() {
-        DirectCbcMountMotion.State state = new DirectCbcMountMotion.State();
+        ControllerMotionProfile.State state = new ControllerMotionProfile.State();
         double position = 0.0;
         double maximumStep = 0.0;
         boolean overshot = false;
@@ -35,10 +36,10 @@ public final class CbcMotionSelfTest {
             ticks++;
         }
 
-        double estimate = DirectCbcMountMotion.estimateTicks(90.0, 120.0);
+        double estimate = ControllerMotionProfile.estimateTicks(90.0, 120.0);
         boolean passed = !overshot
                 && Math.abs(position - 90.0) <= EPSILON
-                && maximumStep <= DirectCbcMountMotion.MAX_DEGREES_PER_TICK
+                && maximumStep <= ControllerMotionProfile.MAX_DEGREES_PER_TICK
                 + EPSILON
                 && estimate > 0.0
                 && estimate <= 40.0;

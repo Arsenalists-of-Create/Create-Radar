@@ -1,10 +1,10 @@
-package com.happysg.radar.compat.cbc;
+package com.happysg.radar.block.controller.kinetic;
 
 /**
  * Motion profile used by direct CBC mount control. Values are expressed in
  * controller degrees and ticks so aiming and slew prediction share one model.
  */
-public final class DirectCbcMountMotion {
+public final class ControllerMotionProfile {
     public static final double MAX_DEGREES_PER_TICK = 5.0;
     public static final double MAX_ACCELERATION_DEGREES_PER_TICK2 = 0.5;
     private static final double RPM_TO_DEGREES_PER_TICK = 1.0 / 12.0;
@@ -15,7 +15,7 @@ public final class DirectCbcMountMotion {
     private static final double TRACKING_MIN_RATE = 0.15;
     private static final double TRACKING_MAX_SETPOINT_JUMP = MAX_DEGREES_PER_TICK * 1.5;
 
-    private DirectCbcMountMotion() {}
+    private ControllerMotionProfile() {}
 
     public static double maxSpeedForRpm(double rpm) {
         if (!Double.isFinite(rpm) || rpm <= 0.0) {
@@ -37,6 +37,33 @@ public final class DirectCbcMountMotion {
             return 2.0 * Math.sqrt(distance / acceleration);
         }
         return 2.0 * maxSpeed / acceleration + (distance - accelerationDistance) / maxSpeed;
+    }
+
+    public static final int REVERSAL_HOLD_TICKS = 5;
+    public static final int REVERSAL_MIN_HOLD_TICKS = 2;
+    public static final double REVERSAL_RELEASE_SPEED_DEG_PER_TICK = 0.20;
+
+    public static final double PHYSICAL_VELOCITY_SAMPLE_WEIGHT = 0.75;
+    public static final double TARGET_VELOCITY_SAMPLE_WEIGHT = 0.50;
+
+    public static final double MAX_PHYSICAL_SAMPLE_STEP_DEGREES = 90.0;
+    public static final double MAX_TARGET_SAMPLE_STEP_DEGREES = 5.0;
+
+    public static double filteredRate(double previousRate, double measuredRate, double sampleWeight) {
+        if (!Double.isFinite(previousRate) || !Double.isFinite(measuredRate)) {
+            return 0.0;
+        }
+
+        double weight = Math.max(0.0, Math.min(1.0, sampleWeight));
+        return previousRate * (1.0 - weight) + measuredRate * weight;
+    }
+
+    public static double projectedRemaining(double remainingDegrees, double closingVelocity, double lookaheadTicks) {
+        if (!Double.isFinite(remainingDegrees) || !Double.isFinite(closingVelocity) || !Double.isFinite(lookaheadTicks)) {
+            return 0.0;
+        }
+
+        return Math.max(0.0, Math.max(0.0, remainingDegrees) - Math.max(0.0, closingVelocity) * Math.max(0.0, lookaheadTicks));
     }
 
     public static final class State {
@@ -136,6 +163,18 @@ public final class DirectCbcMountMotion {
             double step = direction * Math.min(distance, Math.max(0.0, velocityDegreesPerTick * direction));
             velocityDegreesPerTick = step;
             return step;
+        }
+
+        public double traceVelocityDegPerTick() {
+            return velocityDegreesPerTick;
+        }
+
+        public double traceTargetRateDegPerTick() {
+            return filteredTargetRate;
+        }
+
+        public long traceTargetTick() {
+            return lastTargetTick;
         }
 
         public void recordAppliedStep(double appliedStep) {

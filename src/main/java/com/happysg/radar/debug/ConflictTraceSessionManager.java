@@ -18,16 +18,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @EventBusSubscriber(modid = CreateRadar.MODID)
 public final class ConflictTraceSessionManager {
-    private static final Set<UUID> TRACED_CLIENTS =
-            ConcurrentHashMap.newKeySet();
+    private static final Set<UUID> TRACED_CLIENTS = ConcurrentHashMap.newKeySet();
 
-    private ConflictTraceSessionManager() {
-    }
+    private ConflictTraceSessionManager() {}
 
-    public static ConflictTraceRecorder.State enable(MinecraftServer server,
-                                                     ServerPlayer player) {
-        ConflictTraceRecorder.State state = ConflictTraceRecorder.setEnabled(
-                true, player == null ? null : player.level());
+    public static ConflictTraceRecorder.State enable(MinecraftServer server, ServerPlayer player) {
+        ConflictTraceRecorder.State state = ConflictTraceRecorder.setEnabled(true, player == null ? null : player.level());
         if (player != null) {
             TRACED_CLIENTS.add(player.getUUID());
             ConflictTraceStatePacket.send(player, true, state.sessionId());
@@ -36,13 +32,11 @@ public final class ConflictTraceSessionManager {
     }
 
     public static ConflictTraceRecorder.State disable(MinecraftServer server) {
-        ConflictTraceRecorder.State state = ConflictTraceRecorder.setEnabled(
-                false, null);
+        ConflictTraceRecorder.State state = ConflictTraceRecorder.setEnabled(false, null);
         for (UUID playerId : Set.copyOf(TRACED_CLIENTS)) {
             ServerPlayer player = server.getPlayerList().getPlayer(playerId);
             if (player != null) {
-                ConflictTraceStatePacket.send(player, false,
-                        state.sessionId());
+                ConflictTraceStatePacket.send(player, false, state.sessionId());
             }
         }
         TRACED_CLIENTS.clear();
@@ -61,6 +55,7 @@ public final class ConflictTraceSessionManager {
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
+        MotionTraceRecorder.stop();
         disable(event.getServer());
         EarlyDiagnosticJournal.gracefulShutdown("server");
     }

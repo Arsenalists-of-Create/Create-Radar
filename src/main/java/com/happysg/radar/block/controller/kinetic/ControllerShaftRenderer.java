@@ -4,7 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlock;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlock;
-import com.happysg.radar.registry.ModPartials;
+import com.happysg.radar.block.controller.tpitch.TPitchControllerBlock;
 import com.simibubi.create.AllPartialModels;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
@@ -54,6 +54,22 @@ public class ControllerShaftRenderer<
         float renderTime = AnimationTickHolder.getRenderTime(blockEntity.getLevel());
         float offset = KineticBlockEntityRenderer.getRotationOffsetForPosition(blockEntity, blockEntity.getBlockPos(), axis);
 
+        if (state.getBlock() instanceof TPitchControllerBlock) {
+            Direction.Axis inputAxis = inputDirection.getAxis();
+            Direction.Axis crossbarAxis = state.getValue(TPitchControllerBlock.ORIENTATION).crossbarAxis();
+            Direction positive = Direction.get(Direction.AxisDirection.POSITIVE, crossbarAxis);
+
+            float inputOffset = KineticBlockEntityRenderer.getRotationOffsetForPosition(blockEntity, blockEntity.getBlockPos(), inputAxis);
+            float outputOffset = KineticBlockEntityRenderer.getRotationOffsetForPosition(blockEntity, blockEntity.getBlockPos(), crossbarAxis);
+            float outputRpm = blockEntity.getSpeed();
+
+            renderRotatingPart(poseStack, buffer, CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state), light, inputAxis, inputRpm, renderTime, inputOffset, Direction.SOUTH, inputDirection);
+            renderRotatingPart(poseStack, buffer, CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state), light, crossbarAxis, outputRpm, renderTime, outputOffset, Direction.SOUTH, positive);
+            renderRotatingPart(poseStack, buffer, CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state), light, crossbarAxis, outputRpm, renderTime, outputOffset, Direction.SOUTH, positive.getOpposite());
+
+            return;
+        }
+
         boolean swivelMode =
                 (state.getBlock() instanceof AutoYawControllerBlock
                         && state.getValue(AutoYawControllerBlock.SWIVEL_MODE))
@@ -61,8 +77,14 @@ public class ControllerShaftRenderer<
                         && state.getValue(AutoPitchControllerBlock.SWIVEL_MODE));
 
         if (!swivelMode) {
-            SuperByteBuffer shaft = directionalHalfShaft ? CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state) : CachedBuffers.block(KineticBlockEntityRenderer.shaft(axis));
-            renderRotatingPart(poseStack, buffer, shaft, light, axis, inputRpm, renderTime, offset, directionalHalfShaft ? Direction.SOUTH : null, directionalHalfShaft ? inputDirection : null);
+            if (directionalHalfShaft) {
+                renderRotatingPart(poseStack, buffer, CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state), light, axis, inputRpm, renderTime, offset, Direction.SOUTH, inputDirection);
+                return;
+            }
+
+            renderRotatingPart(poseStack, buffer, CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state), light, axis, inputRpm, renderTime, offset, Direction.SOUTH, inputDirection);
+            renderRotatingPart(poseStack, buffer, CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state), light, axis, blockEntity.getSpeed(), renderTime, offset, Direction.SOUTH, inputDirection.getOpposite());
+
             return;
         }
 
@@ -77,7 +99,7 @@ public class ControllerShaftRenderer<
         renderRotatingPart(
                 poseStack, buffer,
                 CachedBuffers.partial(AllPartialModels.SHAFT_HALF, state),
-                light, axis, swivelRpm, renderTime, offset,
+                light, axis, blockEntity.getSpeed(), renderTime, offset,
                 Direction.SOUTH, inputDirection.getOpposite());
 
 

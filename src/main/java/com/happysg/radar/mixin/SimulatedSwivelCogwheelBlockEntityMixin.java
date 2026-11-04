@@ -20,8 +20,7 @@ import org.spongepowered.asm.mixin.Pseudo;
         + "SwivelBearingBlockEntity$SwivelBearingCogwheelBlockEntity", remap = false)
 public abstract class SimulatedSwivelCogwheelBlockEntityMixin
         extends KineticBlockEntity {
-    protected SimulatedSwivelCogwheelBlockEntityMixin(
-            BlockEntityType<?> type, BlockPos pos, BlockState state) {
+    protected SimulatedSwivelCogwheelBlockEntityMixin(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
     }
 

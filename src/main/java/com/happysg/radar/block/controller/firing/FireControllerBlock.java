@@ -45,7 +45,11 @@ public class FireControllerBlock extends Block implements EntityBlock {
 
     @Override
     public int getSignal(BlockState pBlockState, BlockGetter pBlockAccess, BlockPos pPos, Direction pSide) {
-        return pBlockState.getValue(POWERED) ? 15 : 0;
+        if (pBlockAccess.getBlockEntity(pPos) instanceof FireControllerBlockEntity fireController) {
+            return fireController.isPowered() ? 15 : 0;
+        }
+
+        return 0;
     }
     @Override
     public int getDirectSignal(BlockState pBlockState, BlockGetter pBlockAccess, BlockPos pPos, Direction pSide) {

@@ -1,8 +1,9 @@
 package com.happysg.radar.block.controller.kinetic;
 
-import com.happysg.radar.compat.cbc.DirectCbcMountMotion;
+import com.happysg.radar.debug.MotionTraceRecorder;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -21,24 +22,21 @@ public final class KineticControllerState {
     private static final String NBT_KEY = "KineticController";
     private static final double SPEED_EPSILON = 1.0e-5;
     private static final double STOP_RPM = 0.05;
-    private static final int REVERSAL_HOLD_TICKS = 5;
-    private static final int REVERSAL_MIN_HOLD_TICKS = 2;
-    private static final double REVERSAL_RELEASE_SPEED_DEG_PER_TICK = 0.20;
     private static final int VERIFY_TIMEOUT_TICKS = 40;
     private static final int SETTLE_TICKS = 3;
     private static final double MAX_PHYSICAL_SETPOINT_LEAD_DEGREES = 8.0;
     private static final double PROFILE_RPM_PER_DEGREE_PER_TICK = 12.0;
     private static final double PHYSICAL_BRAKE_LOOKAHEAD_TICKS = 2.0;
-    private static final double PHYSICAL_VELOCITY_SAMPLE_WEIGHT = 0.75;
-    private static final double TARGET_VELOCITY_SAMPLE_WEIGHT = 0.5;
     private static final double MOVING_TARGET_RATE_THRESHOLD = 0.15;
     private static final double SWIVEL_TRACKING_ERROR_GAIN = 0.75;
     private static final double SWIVEL_TRACKING_RATE_CHANGE = 1.0;
-    private static final double MAX_TARGET_SAMPLE_STEP_DEGREES = 5.0;
-    private static final double MAX_PHYSICAL_SAMPLE_STEP_DEGREES = 90.0;
 
     private final CannonAxis axis;
-    private final DirectCbcMountMotion.State swivelMotion = new DirectCbcMountMotion.State();
+    @Nullable
+    private Level motionTraceLevel;
+    @Nullable
+    private BlockPos motionTraceControllerPos;
+    private final ControllerMotionProfile.State swivelMotion = new ControllerMotionProfile.State();
     private long swivelMotionTick;
     private double lastSampledPhysicalAngle = Double.NaN;
     private double physicalAngularVelocityDegPerTick;
@@ -52,6 +50,10 @@ public final class KineticControllerState {
     private boolean structuralMode;
     private boolean lockedLastTick;
     private boolean hardBlocked;
+    private static final int KINETIC_RECOVERY_STABLE_TICKS = 3;
+
+    private boolean kineticRecoveryPending;
+    private int kineticRecoveryStableTicks;
     private int verificationTicks;
     private int reversalTicks;
 
@@ -118,6 +120,7 @@ public final class KineticControllerState {
                         double availableInputRpm,
                         ControllerAngleDelta angleDelta,
                         DoubleConsumer commandGenerator) {
+        motionTraceLevel = controller.getLevel();
         return tick(controller.getBlockPos(), resolution, running, controllerTargetDegrees,
                 toleranceDegrees, availableInputRpm, !controller.hasSource(),
                 angleDelta, commandGenerator);
@@ -145,12 +148,35 @@ public final class KineticControllerState {
                  boolean generatorIsolated,
                  ControllerAngleDelta angleDelta,
                  DoubleConsumer commandGenerator) {
+
+        motionTraceControllerPos = controllerPos;
+
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record(
+                    "swivel.tick",
+                    motionTraceLevel,
+                    controllerPos,
+                    "axis", axis,
+                    "running", running,
+                    "target", controllerTargetDegrees,
+                    "inputRpm", availableInputRpm,
+                    "tolerance", toleranceDegrees,
+                    "generatorIsolated", generatorIsolated,
+                    "lifecycle", lifecycle,
+                    "continuousTracking", continuousTracking,
+                    "hardBlocked", hardBlocked,
+                    "resolution", resolution == null ? null : resolution.selection()
+            );
+        }
+
         controllerAngleDelta = angleDelta == null ? ControllerAngleDelta.SHORTEST : angleDelta;
         double tolerance = effectiveTolerance(toleranceDegrees);
         stopRpm = Math.max(SPEED_EPSILON, Math.min(STOP_RPM, tolerance * 0.5));
         onTargetChanged(running, controllerTargetDegrees, tolerance);
 
         if (resolution == null || resolution.selection() == KineticMountAdapterResolution.Selection.ABSENT) {
+            kineticRecoveryPending = false;
+            kineticRecoveryStableTicks = 0;
             stopGenerator(commandGenerator);
             setStructuralMode(false);
             activeAdapter = null;
@@ -195,8 +221,23 @@ public final class KineticControllerState {
             failClosed(commandGenerator, false, "adapter_invalid");
             return true;
         }
+
+        if (!adapter.isEndpointFree() && !adapter.isDrivenBy(controllerPos)) {
+            if (!hardBlocked) {
+                kineticRecoveryPending = true;
+            }
+
+            kineticRecoveryStableTicks = 0;
+            failClosed(commandGenerator, false, "endpoint_owned_by_other_source");
+            return true;
+        }
+
         if (!generatorIsolated) {
-            failClosed(commandGenerator, true, "generator_not_isolated");
+            if (!hardBlocked) {
+                kineticRecoveryPending = true;
+            }
+            kineticRecoveryStableTicks = 0;
+            failClosed(commandGenerator, false, "generator_not_isolated");
             return true;
         }
         if (adapter.isEndpointFree() && adapter.hasSequenceContext()
@@ -206,6 +247,8 @@ public final class KineticControllerState {
         }
 
         if (!running || !Double.isFinite(controllerTargetDegrees)) {
+            kineticRecoveryPending = false;
+            kineticRecoveryStableTicks = 0;
             stopGenerator(commandGenerator);
             resetEndpointSession(false);
             hardBlocked = false;
@@ -233,6 +276,24 @@ public final class KineticControllerState {
             stopGenerator(commandGenerator);
             setAtDestination(false);
             setLifecycle(KineticControllerLifecycle.WAITING_FOR_LOCK);
+            return true;
+        }
+
+        if (kineticRecoveryPending && !hardBlocked) {
+            stopGenerator(commandGenerator);
+
+            if (++kineticRecoveryStableTicks < KINETIC_RECOVERY_STABLE_TICKS) {
+                blockedReason = "kinetic_source_recovering";
+                setAtDestination(false);
+                setLifecycle(KineticControllerLifecycle.BLOCKED);
+                return true;
+            }
+
+            kineticRecoveryPending = false;
+            kineticRecoveryStableTicks = 0;
+
+            resetEndpointSession(false);
+            setLifecycle(KineticControllerLifecycle.ARMING);
             return true;
         }
 
@@ -277,6 +338,28 @@ public final class KineticControllerState {
         physicalBearingDegrees = physicalAngle;
         remainingDegrees = plannedBearingDelta(physicalAngle, desiredBearingTarget);
         double setpointRemaining = plannedBearingDelta(bearingTarget, desiredBearingTarget);
+
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record(
+                    "swivel.feedback",
+                    motionTraceLevel,
+                    controllerPos,
+                    "axis", axis,
+                    "bearingTarget", bearingTarget,
+                    "physicalAngle", physicalAngle,
+                    "desiredBearing", desiredBearingTarget,
+                    "remainingDegrees", remainingDegrees,
+                    "setpointRemaining", setpointRemaining,
+                    "physicalRate", physicalAngularVelocityDegPerTick,
+                    "targetRate", targetAngularVelocityDegPerTick,
+                    "physicalSampleValid", physicalVelocitySampleValid,
+                    "driveSign", driveSign,
+                    "generatorRpm", commandedGeneratorRpm,
+                    "watchdogActive", watchdogActive,
+                    "watchdogPhysicalTravel", watchdogPhysicalTravel,
+                    "watchdogBearingTravel", watchdogBearingTravel
+            );
+        }
 
         setpointCompensationDegrees = 0.0;
         observeDriveSign(bearingTarget, tolerance);
@@ -324,11 +407,6 @@ public final class KineticControllerState {
             failClosed(commandGenerator, true, "sequence_context_present");
             return true;
         }
-        if (!adapter.isEndpointFree() && !adapter.isDrivenBy(controllerPos)) {
-            failClosed(commandGenerator, true, "endpoint_owned_by_other_source");
-            return true;
-        }
-
 
         double maximumStep = adapter.effectiveDegreesPerTick(maximumRpm);
         if (!Double.isFinite(maximumStep) || maximumStep <= SPEED_EPSILON) {
@@ -377,7 +455,7 @@ public final class KineticControllerState {
             double closingVelocity = Math.max(0.0, (physicalAngularVelocityDegPerTick - targetRate) * direction);
 
             double lookaheadTicks = continuousTracking ? 1.0 : PHYSICAL_BRAKE_LOOKAHEAD_TICKS;
-            double projectedRemaining = physicalRemaining - closingVelocity * lookaheadTicks;
+            double projectedRemaining = ControllerMotionProfile.projectedRemaining(physicalRemaining, closingVelocity, lookaheadTicks);
             boolean targetAdvancing = continuousTracking && targetRate * direction > MOVING_TARGET_RATE_THRESHOLD;
             double maximumLead = MAX_PHYSICAL_SETPOINT_LEAD_DEGREES;
 
@@ -405,12 +483,39 @@ public final class KineticControllerState {
 
         double rawRpm = clamp(plannedStep / maximumStep * maximumRpm, -maximumRpm, maximumRpm) * driveSign;
 
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record(
+                    "swivel.plan",
+                    motionTraceLevel,
+                    controllerPos,
+                    "axis", axis,
+                    "desiredBearing", desiredBearingTarget,
+                    "physicalAngle", physicalBearingDegrees,
+                    "bearingSetpoint", bearingSetpointDegrees,
+                    "error", remainingDegrees,
+                    "setpointError", setpointRemaining,
+                    "plannedStep", plannedStep,
+                    "maximumStep", maximumStep,
+                    "physicalSetpointLead", physicalSetpointLead,
+                    "leadLimited", leadLimited,
+                    "physicalRate", physicalAngularVelocityDegPerTick,
+                    "targetRate", targetAngularVelocityDegPerTick,
+                    "maximumRpm", maximumRpm,
+                    "requestedRpm", rawRpm,
+                    "previousRpm", commandedGeneratorRpm,
+                    "reversalTicks", reversalTicks,
+                    "continuousTracking", continuousTracking,
+                    "profileVelocity", swivelMotion.traceVelocityDegPerTick(),
+                    "profileTargetRate", swivelMotion.traceTargetRateDegPerTick(),
+                    "profileTargetTick", swivelMotion.traceTargetTick()
+            );
+        }
+
         if (!watchdogActive) {
             beginWatchdog(adapter, bearingTarget, physicalAngle, desiredBearingTarget, maximumRpm);
         }
 
         if (Math.abs(rawRpm) <= stopRpm) {
-
             if (continuousTracking || leadLimited) {
                 swivelMotion.recordAppliedStep(0.0);
                 holdGenerator(commandGenerator);
@@ -428,9 +533,25 @@ public final class KineticControllerState {
         }
 
         if (reversalTicks > 0) {
-            int completedHoldTicks = REVERSAL_HOLD_TICKS - reversalTicks;
-            boolean physicallySlowed = physicalVelocitySampleValid && Double.isFinite(physicalAngularVelocityDegPerTick) && Math.abs(physicalAngularVelocityDegPerTick) <= REVERSAL_RELEASE_SPEED_DEG_PER_TICK;
-            boolean canReleaseEarly = continuousTracking && completedHoldTicks >= REVERSAL_MIN_HOLD_TICKS && physicallySlowed;
+            int completedHoldTicks = ControllerMotionProfile.REVERSAL_HOLD_TICKS - reversalTicks;
+            boolean physicallySlowed = physicalVelocitySampleValid && Double.isFinite(physicalAngularVelocityDegPerTick) && Math.abs(physicalAngularVelocityDegPerTick) <= ControllerMotionProfile.REVERSAL_RELEASE_SPEED_DEG_PER_TICK;
+            boolean canReleaseEarly = continuousTracking && completedHoldTicks >= ControllerMotionProfile.REVERSAL_MIN_HOLD_TICKS && physicallySlowed;
+
+            if (MotionTraceRecorder.isEnabled()) {
+                MotionTraceRecorder.record(
+                        "swivel.reversal",
+                        motionTraceLevel,
+                        controllerPos,
+                        "axis", axis,
+                        "phase", canReleaseEarly ? "EARLY_RELEASE" : "HOLD",
+                        "completedHoldTicks", completedHoldTicks,
+                        "remainingHoldTicks", reversalTicks,
+                        "physicalRate", physicalAngularVelocityDegPerTick,
+                        "physicallySlowed", physicallySlowed,
+                        "requestedRpm", rawRpm,
+                        "previousRpm", commandedGeneratorRpm
+                );
+            }
 
             if (canReleaseEarly) {
                 reversalTicks = 0;
@@ -442,7 +563,21 @@ public final class KineticControllerState {
         }
 
         if (Math.abs(commandedGeneratorRpm) > stopRpm && Math.signum(commandedGeneratorRpm) != Math.signum(rawRpm)) {
-            reversalTicks = REVERSAL_HOLD_TICKS;
+            if (MotionTraceRecorder.isEnabled()) {
+                MotionTraceRecorder.record(
+                        "swivel.reversal_start",
+                        motionTraceLevel,
+                        controllerPos,
+                        "axis", axis,
+                        "previousRpm", commandedGeneratorRpm,
+                        "requestedRpm", rawRpm,
+                        "physicalRate", physicalAngularVelocityDegPerTick,
+                        "error", remainingDegrees,
+                        "holdTicks", ControllerMotionProfile.REVERSAL_HOLD_TICKS
+                );
+            }
+
+            reversalTicks = ControllerMotionProfile.REVERSAL_HOLD_TICKS;
             holdForReversal(commandGenerator);
             return true;
         }
@@ -480,7 +615,7 @@ public final class KineticControllerState {
             return 0.0;
         }
 
-        double directSpeedLimit = DirectCbcMountMotion.maxSpeedForRpm(Math.abs(availableInputRpm));
+        double directSpeedLimit = ControllerMotionProfile.maxSpeedForRpm(Math.abs(availableInputRpm));
         return Math.min(permittedRpm, directSpeedLimit / degreesPerRpm);
     }
 
@@ -711,7 +846,7 @@ public final class KineticControllerState {
             driveSign = observedSign;
             driveSignVotes = 0;
             swivelMotion.reset();
-            reversalTicks = REVERSAL_HOLD_TICKS;
+            reversalTicks = ControllerMotionProfile.REVERSAL_HOLD_TICKS;
             syncRequested = true;
         }
     }
@@ -784,11 +919,11 @@ public final class KineticControllerState {
         } else {
             double step = KineticAngleMath.shortestDelta(lastSampledPhysicalAngle, physicalAngle);
 
-            if (!Double.isFinite(step) || Math.abs(step) > MAX_PHYSICAL_SAMPLE_STEP_DEGREES) {
+            if (!Double.isFinite(step) || Math.abs(step) > ControllerMotionProfile.MAX_PHYSICAL_SAMPLE_STEP_DEGREES) {
                 physicalAngularVelocityDegPerTick = 0.0;
                 physicalVelocitySampleValid = false;
             } else {
-                physicalAngularVelocityDegPerTick = physicalAngularVelocityDegPerTick * (1.0 - PHYSICAL_VELOCITY_SAMPLE_WEIGHT) + step * PHYSICAL_VELOCITY_SAMPLE_WEIGHT;
+                physicalAngularVelocityDegPerTick = ControllerMotionProfile.filteredRate(physicalAngularVelocityDegPerTick, step, ControllerMotionProfile.PHYSICAL_VELOCITY_SAMPLE_WEIGHT);
                 physicalVelocitySampleValid = true;
             }
         }
@@ -813,10 +948,10 @@ public final class KineticControllerState {
         } else {
             double step = KineticAngleMath.shortestDelta(lastSampledDesiredBearingTarget, targetAngle);
 
-            if (!Double.isFinite(step) || Math.abs(step) > MAX_TARGET_SAMPLE_STEP_DEGREES) {
+            if (!Double.isFinite(step) || Math.abs(step) > ControllerMotionProfile.MAX_TARGET_SAMPLE_STEP_DEGREES) {
                 targetAngularVelocityDegPerTick = 0.0;
             } else {
-                targetAngularVelocityDegPerTick = targetAngularVelocityDegPerTick * (1.0 - TARGET_VELOCITY_SAMPLE_WEIGHT) + step * TARGET_VELOCITY_SAMPLE_WEIGHT;
+                targetAngularVelocityDegPerTick = ControllerMotionProfile.filteredRate(targetAngularVelocityDegPerTick, step, ControllerMotionProfile.TARGET_VELOCITY_SAMPLE_WEIGHT);
             }
         }
 
@@ -828,9 +963,24 @@ public final class KineticControllerState {
         targetAngularVelocityDegPerTick = 0.0;
     }
 
-    private void failClosed(DoubleConsumer commandGenerator,
-                            boolean blockUntilCommandChange,
-                            String reason) {
+    private void failClosed(DoubleConsumer commandGenerator, boolean blockUntilCommandChange, String reason) {
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record(
+                    "swivel.failure",
+                    motionTraceLevel,
+                    motionTraceControllerPos,
+                    "axis", axis,
+                    "reason", reason,
+                    "blockUntilCommandChange", blockUntilCommandChange,
+                    "hardBlocked", hardBlocked,
+                    "remainingDegrees", remainingDegrees,
+                    "physicalAngle", physicalBearingDegrees,
+                    "desiredBearing", desiredBearingTarget,
+                    "generatorRpm", commandedGeneratorRpm,
+                    "lifecycle", lifecycle
+            );
+        }
+
         stopGenerator(commandGenerator);
         hardBlocked |= blockUntilCommandChange;
         blockedReason = reason;
@@ -841,6 +991,20 @@ public final class KineticControllerState {
     private void commandGenerator(DoubleConsumer command, double rpm) {
         commandedGeneratorRpm = Double.isFinite(rpm) ? rpm : 0.0;
         command.accept(commandedGeneratorRpm);
+
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record(
+                    "swivel.output",
+                    motionTraceLevel,
+                    motionTraceControllerPos,
+                    "axis", axis,
+                    "commandedRpm", commandedGeneratorRpm,
+                    "lifecycle", lifecycle,
+                    "remainingDegrees", remainingDegrees,
+                    "physicalAngle", physicalBearingDegrees,
+                    "desiredBearing", desiredBearingTarget
+            );
+        }
     }
 
     private void holdGenerator(DoubleConsumer command) {
@@ -849,6 +1013,21 @@ public final class KineticControllerState {
         commandedGeneratorRpm = 0.0;
         verificationTicks = 0;
         command.accept(0.0);
+
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record(
+                    "swivel.output",
+                    motionTraceLevel,
+                    motionTraceControllerPos,
+                    "axis", axis,
+                    "commandedRpm", 0.0,
+                    "action", "HOLD_OR_STOP",
+                    "previousOutputNonzero", changed,
+                    "lifecycle", lifecycle,
+                    "remainingDegrees", remainingDegrees,
+                    "reversalTicks", reversalTicks
+            );
+        }
 
         if (changed) {
             syncRequested = true;
@@ -909,6 +1088,21 @@ public final class KineticControllerState {
 
     private void setLifecycle(KineticControllerLifecycle next) {
         if (lifecycle != next) {
+            if (MotionTraceRecorder.isEnabled()) {
+                MotionTraceRecorder.record(
+                        "swivel.lifecycle",
+                        motionTraceLevel,
+                        motionTraceControllerPos,
+                        "axis", axis,
+                        "previous", lifecycle,
+                        "next", next,
+                        "remainingDegrees", remainingDegrees,
+                        "reversalTicks", reversalTicks,
+                        "hardBlocked", hardBlocked,
+                        "blockedReason", blockedReason
+                );
+            }
+
             lifecycle = next;
             syncRequested = true;
         }
@@ -986,6 +1180,8 @@ public final class KineticControllerState {
     }
 
     public void release() {
+        kineticRecoveryPending = false;
+        kineticRecoveryStableTicks = 0;
         commandedGeneratorRpm = 0.0;
         swivelMotion.reset();
         activeAdapter = null;
@@ -1001,6 +1197,8 @@ public final class KineticControllerState {
     }
 
     public void read(CompoundTag parent, boolean wasMoved, boolean clientPacket) {
+        kineticRecoveryPending = false;
+        kineticRecoveryStableTicks = 0;
         activeAdapter = null;
         continuousTracking = false;
         trackingToleranceDegrees = Double.POSITIVE_INFINITY;

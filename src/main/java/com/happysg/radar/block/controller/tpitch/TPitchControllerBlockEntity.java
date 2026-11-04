@@ -5,6 +5,7 @@ import com.happysg.radar.api.mount.RadarMountRegistry;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.controller.kinetic.CannonAxis;
+import com.happysg.radar.block.controller.kinetic.CbcShaftDrive;
 import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
 import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
 import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
@@ -12,17 +13,19 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
+import com.happysg.radar.debug.MotionTraceRecorder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlock;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import javax.annotation.Nullable;
 
 public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity {
@@ -30,6 +33,15 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
     private Direction.Axis cachedCrossbarAxis;
     private List<CannonMountContext> cachedAdjacentMounts = List.of();
     private long adjacentMountResolutionTick = Long.MIN_VALUE;
+
+    private static final int PITCH_SOLVE_FAILURE_TICKS = 30;
+    private static final int PITCH_SOURCE_RETRY_TICKS = 100;
+    private final Map<BlockPos, Integer> pitchSolveFailures = new HashMap<>();
+    private final Map<BlockPos, Long> pitchSourceRetryAfter = new HashMap<>();
+    private final Map<BlockPos, Long> pitchSolveSampleTicks = new HashMap<>();
+
+    @Nullable
+    private String pitchSourceTargetKey;
 
     public TPitchControllerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
@@ -79,11 +91,54 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
 
         List<CannonMountContext> cbcMounts = Mods.CREATEBIGCANNONS.isLoaded() ? resolveControlledCbcMounts() : List.of();
         if (apiMounts.isEmpty() && cbcMounts.isEmpty()) {
+            cbcShaftDrive.clear();
             return view.channels().stream().anyMatch(channel -> isSwivelOwnedMount(channel.mountPos()));
         }
 
-        for (CannonMountContext mount : cbcMounts) {
-            tickCbcMount(mount);
+        boolean swivelSelected = hasStructuralKineticSelectionForTargeting();
+        boolean shaftEligible = !cbcMounts.isEmpty() && cbcMounts.stream().allMatch(mount -> isCrossbarShaftMount(mount, orientation));
+        if (!swivelSelected && shaftEligible) {
+            boolean foreignSource = false;
+
+            for (CannonMountContext mount : cbcMounts) {
+                CannonMountBlockEntity cbc = (CannonMountBlockEntity) mount.blockEntity();
+
+                var endpoint = cbc.getPitchInterface();
+                if (endpoint.isSource() || (endpoint.hasSource() && !CbcShaftDrive.sourcedBy(endpoint, this))) {
+                    foreignSource = true;
+                    break;
+                }
+            }
+
+            if (foreignSource) {
+                cbcShaftDrive.reset(this::commandGeneratedSpeed);
+            } else {
+                CannonMountContext primary = cbcMounts.getFirst();
+                CannonMountContext preferred = resolvePrimaryCbcMount();
+
+                if (preferred != null) {
+                    for (CannonMountContext mount : cbcMounts) {
+                        if (mount.sameMount(preferred)) {
+                            primary = mount;
+                            break;
+                        }
+                    }
+                }
+
+                Direction outputSide = primary.getBlockPos().equals(worldPosition.relative(positive.getOpposite())) ? positive.getOpposite() : positive;
+
+                cbcShaftDrive.tick(this, primary, isRunning, getTargetAngle(), getAvailableInputSpeed(), outputSide, null, this::commandGeneratedSpeed);
+            }
+        } else {
+            if (swivelSelected) {
+                cbcShaftDrive.clear();
+            } else {
+                cbcShaftDrive.reset(this::commandGeneratedSpeed);
+            }
+
+            for (CannonMountContext mount : cbcMounts) {
+                tickCbcMount(mount);
+            }
         }
 
         for (RadarMountAdapter mount : apiMounts) {
@@ -91,6 +146,21 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
         }
 
         return true;
+    }
+
+    private boolean isCrossbarShaftMount(CannonMountContext mount, TPitchControllerBlock.Orientation orientation) {
+        if (!(mount.blockEntity() instanceof CannonMountBlockEntity cbc)) {
+            return false;
+        }
+
+        Direction positive = positiveDirection(orientation.crossbarAxis());
+        BlockPos mountPos = mount.getBlockPos();
+        if (!mountPos.equals(worldPosition.relative(positive)) && !mountPos.equals(worldPosition.relative(positive.getOpposite()))) {
+            return false;
+        }
+
+        BlockState state = cbc.getBlockState();
+        return state.getBlock() instanceof CannonMountBlock block && block.getRotationAxis(state) == orientation.crossbarAxis();
     }
 
     @Override
@@ -121,6 +191,59 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
             addActiveMountAt(active, channel.mountPos());
         }
         return List.copyOf(active);
+    }
+
+    public void reportPitchSourceSolution(@Nullable BlockPos mountPos, @Nullable String targetKey, boolean validSolution) {
+        if (!(level instanceof ServerLevel serverLevel) || mountPos == null || targetKey == null) {
+            return;
+        }
+
+        WeaponNetworkRuntime.WeaponControlView view = WeaponNetworkRuntime.get(serverLevel).getWeaponControlViewFromPitch(worldPosition);
+        if (view == null || !view.validTopology() || view.mode() != WeaponNetworkRuntime.WeaponNetworkMode.T_PITCH_DUAL || view.channelForMount(mountPos) == null) {
+            return;
+        }
+
+        if (!Objects.equals(pitchSourceTargetKey, targetKey)) {
+            pitchSourceTargetKey = targetKey;
+            pitchSolveFailures.clear();
+            pitchSourceRetryAfter.clear();
+            pitchSolveSampleTicks.clear();
+        }
+
+        BlockPos key = mountPos.immutable();
+        long now = serverLevel.getGameTime();
+
+        if (pitchSolveSampleTicks.getOrDefault(key, Long.MIN_VALUE) == now) {
+            return;
+        }
+
+        pitchSolveSampleTicks.put(key, now);
+        if (validSolution) {
+            pitchSolveFailures.remove(key);
+            pitchSourceRetryAfter.remove(key);
+            return;
+        }
+
+        int failures = pitchSolveFailures.merge(key, 1, Integer::sum);
+        if (failures < PITCH_SOLVE_FAILURE_TICKS) {
+            return;
+        }
+
+        pitchSolveFailures.put(key, 0);
+        long retryAfter = now + PITCH_SOURCE_RETRY_TICKS;
+        pitchSourceRetryAfter.put(key, retryAfter);
+
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record(
+                    "tpitch.pitch_source_failed",
+                    serverLevel,
+                    worldPosition,
+                    "mount", key,
+                    "target", targetKey,
+                    "failedTicks", failures,
+                    "retryAfterTick", retryAfter
+            );
+        }
     }
 
     @Override
@@ -180,10 +303,16 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
         int currentIndex = -1;
         int preferredIndex = -1;
         List<Boolean> loaded = new ArrayList<>(mounts.size());
+        List<Boolean> available = new ArrayList<>(mounts.size());
+        long now = serverLevel.getGameTime();
 
         for (int i = 0; i < mounts.size(); i++) {
             CannonMountContext mount = mounts.get(i);
-            loaded.add(WeaponFiringControl.hasResolvableShot(mount, serverLevel));
+            boolean resolvable = WeaponFiringControl.hasResolvableShot(mount, serverLevel);
+            boolean temporarilyRejected = now < pitchSourceRetryAfter.getOrDefault(mount.getBlockPos(), Long.MIN_VALUE);
+
+            loaded.add(resolvable);
+            available.add(resolvable && !temporarilyRejected);
 
             if (current != null && mount.sameMount(current)) {
                 currentIndex = i;
@@ -193,8 +322,16 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
                 preferredIndex = i;
             }
         }
-        int selected = WeaponFiringControl.selectDualAimingSourceIndex(
-                currentIndex, preferredIndex, loaded);
+        boolean hasAvailableSource = available.contains(Boolean.TRUE);
+        List<Boolean> candidates = hasAvailableSource ? available : loaded;
+
+        int selected;
+        if (preferredIndex >= 0 && Boolean.TRUE.equals(candidates.get(preferredIndex))) {
+            selected = preferredIndex;
+        } else {
+            selected = WeaponFiringControl.selectDualAimingSourceIndex(currentIndex, preferredIndex, candidates);
+        }
+
         return selected < 0 ? null : mounts.get(selected);
     }
 
@@ -662,6 +799,8 @@ public class TPitchControllerBlockEntity extends AutoPitchControllerBlockEntity 
 
     @Override
     public void onRelevantNeighborChanged(BlockPos fromPos) {
+        super.onRelevantNeighborChanged(fromPos);
+
         TPitchControllerBlock.Orientation orientation = orientation();
         if (orientation != null
                 && TPitchControllerBlock.isCrossbarEndpointPosition(

@@ -3,17 +3,7 @@ package com.happysg.radar.block.controller.yaw;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 
 import com.happysg.radar.block.controller.WeaponContactUnlinkState;
-import com.happysg.radar.block.controller.kinetic.CannonAxis;
-import com.happysg.radar.block.controller.kinetic.ControllerInputShaft;
-import com.happysg.radar.block.controller.kinetic.DebugSwivelFollow;
-import com.happysg.radar.block.controller.kinetic.DebugSwivelSweep;
-import com.happysg.radar.block.controller.kinetic.KineticAimFrame;
-import com.happysg.radar.block.controller.kinetic.KineticAngleMath;
-import com.happysg.radar.block.controller.kinetic.KineticMountAdapter;
-import com.happysg.radar.block.controller.kinetic.KineticControllerState;
-import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
-import com.happysg.radar.block.controller.kinetic.KineticMountFrame;
-import com.happysg.radar.block.controller.kinetic.KineticPowerSource;
+import com.happysg.radar.block.controller.kinetic.*;
 import com.happysg.radar.block.controller.limits.ControllerLimitAccess;
 import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import com.happysg.radar.block.controller.limits.collision.ControllerCollisionSource;
@@ -38,7 +28,6 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -97,8 +86,9 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     @Nullable
     private BlockPos cachedMountEndpointPos;
 
-    private final KineticControllerState kineticControllerState =
-            new KineticControllerState(CannonAxis.YAW);
+    private final KineticControllerState kineticControllerState = new KineticControllerState(CannonAxis.YAW);
+    private final SwivelReorientationState swivelReorientation = new SwivelReorientationState();
+    private final CbcShaftDrive cbcShaftDrive = new CbcShaftDrive(CannonAxis.YAW);
     private final DebugSwivelSweep debugSwivelSweep = new DebugSwivelSweep();
     private final DebugSwivelFollow debugSwivelFollow = new DebugSwivelFollow();
 
@@ -135,15 +125,20 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         boolean kineticSelected = tickKineticActuator();
         tickDebugSwivelSweep(kineticSelected);
         if (kineticSelected) {
+            cbcShaftDrive.clear();
             return;
         }
 
         Mount mount = resolveMount();
-        if (mount != null) {
-            if (mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
-                cannonHandler.tick(mount.cbc);
+        if (mount != null && mount.kind == MountKind.CBC && Mods.CREATEBIGCANNONS.isLoaded()) {
+            cbcShaftDrive.tick(this, mount.cbc, isRunning, targetAngle, getAvailableInputSpeed(), getBlockState().getValue(DirectionalKineticBlock.FACING).getOpposite(), this::legalYawDelta, this::commandGeneratedSpeed);
+            return;
+        }
 
-            } else if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
+        cbcShaftDrive.reset(this::commandGeneratedSpeed);
+
+        if (mount != null) {
+            if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
                 if (level.getGameTime() % 20 == 5) {
                     physHandler.maybeUpdateYawZeroFromCannonInitialOrientation();
                 }
@@ -621,6 +616,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public void onRelevantNeighborChanged(BlockPos fromPos) {
+        swivelReorientation.onNeighborChanged(level, worldPosition, fromPos);
+
         if (isPerpendicularNeighbor(fromPos)) {
             invalidateKineticActuator();
         }
@@ -689,14 +686,15 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         mountResolutionTick = level.getGameTime();
         mountDirty = false;
 
-        if (oldMount != null && !sameMount(oldMount, newMount)) {
+        boolean preserveSwivelTracking = isRunning && swivelReorientation.shouldPreserve(level, worldPosition);
+        if (oldMount != null && !sameMount(oldMount, newMount) && !preserveSwivelTracking) {
             isRunning = false;
             hasLastCbcYawWritten = false;
             kineticControllerState.onTargetChanged(
                     false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         }
 
-        if (newMount == null && !hasStructuralKineticSelection()) {
+        if (newMount == null && !hasStructuralKineticSelection() && !preserveSwivelTracking) {
             isRunning = false;
             hasLastCbcYawWritten = false;
             physHandler.reset();
@@ -843,18 +841,15 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         };
     }
 
-    /** Input power is sampled, never connected to this isolated generator. */
     @Override
     public double getAvailableInputSpeed() {
-        return KineticPowerSource.strongestAdjacentShaftRpm(this, Direction.Axis.Y);
+        return KineticPowerSource.adjacentShaftRpm(this, getInputShaftDirection());
     }
 
     @Override
     public Direction getInputShaftDirection() {
         BlockState state = getBlockState();
-        return state.hasProperty(DirectionalKineticBlock.FACING)
-                ? state.getValue(DirectionalKineticBlock.FACING)
-                : Direction.UP;
+        return state.hasProperty(DirectionalKineticBlock.FACING) ? state.getValue(DirectionalKineticBlock.FACING) : Direction.UP;
     }
 
     @Override
@@ -903,6 +898,25 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private boolean tickKineticActuator() {
         KineticMountAdapterResolution resolution = resolveKineticMount();
+        swivelReorientation.observe(resolution, isRunning);
+
+        BlockState blockState = getBlockState();
+        boolean swivelMode = resolution.isStructuralSelection();
+
+        if (blockState.hasProperty(AutoYawControllerBlock.SWIVEL_MODE) && blockState.getValue(AutoYawControllerBlock.SWIVEL_MODE) != swivelMode) {
+            level.setBlock(worldPosition, blockState.setValue(AutoYawControllerBlock.SWIVEL_MODE, swivelMode), 2);
+        }
+
+        if (resolution.selection() == KineticMountAdapterResolution.Selection.ABSENT) {
+            if (kineticControllerState.isStructuralMode()) {
+                kineticControllerState.release();
+                commandGeneratedSpeed(0.0);
+            }
+
+            flushKineticStateSync();
+            return false;
+        }
+
         ControllerMovementLimits limits = getMovementLimits();
         double neutral = getLimitNeutralAngleDeg();
         boolean consumed = kineticControllerState.tick(
@@ -997,12 +1011,21 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     public void failClosedRadarAim() {
         kineticControllerState.endContinuousTracking();
         isRunning = false;
-        kineticControllerState.onTargetChanged(
-                false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
+        kineticControllerState.onTargetChanged(false, targetAngle, KINETIC_TRACKING_TOLERANCE_DEG);
         commandGeneratedSpeed(0.0);
         flushKineticStateSync();
         notifyUpdate();
         setChanged();
+    }
+
+    public void onWeaponTopologyChanged() {
+        if (isRunning && swivelReorientation.shouldPreserve(level, worldPosition)) {
+            invalidateKineticActuator();
+            flushKineticStateSync();
+            return;
+        }
+
+        failClosedRadarAim();
     }
 
     private boolean setStructuralAimDirection(@Nullable Vec3 worldAimDirection,
@@ -1026,11 +1049,10 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         KineticMountAdapterResolution resolution = resolveKineticMount();
         KineticMountAdapter adapter = resolution.adapter();
-        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid()
-                || !adapter.isAssembled() || !adapter.isLocked()
-                || adapter.frameIdentity() == null || adapter.aimFrame() == null) {
+        if (!resolution.hasAdapter() || adapter == null || !adapter.isValid() || !adapter.isAssembled() || !adapter.isLocked() || adapter.frameIdentity() == null || adapter.aimFrame() == null) {
             if (continuous) {
-                failClosedRadarAim();
+                invalidateKineticActuator();
+                flushKineticStateSync();
             }
             return false;
         }

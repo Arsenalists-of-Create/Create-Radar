@@ -53,17 +53,14 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
             @NotNull BlockPos pos, @NotNull Player player,
             @NotNull BlockHitResult hit
     ) {
-        if (!player.getMainHandItem().isEmpty()
-                || !player.getOffhandItem().isEmpty()
-                || hasPlacementShaftTowards(
-                        level, pos, state, hit.getDirection())) {
+        if (!player.getMainHandItem().isEmpty() || !player.getOffhandItem().isEmpty() || hasPlacementShaftTowards(level, pos, state, hit.getDirection())) {
             return InteractionResult.PASS;
         }
 
         if (!level.isClientSide) {
-            OpenControllerLimitsScreenPacket.openIfAssembled(
-                    level, pos, player);
+            OpenControllerLimitsScreenPacket.openIfAssembled(level, pos, player);
         }
+
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
@@ -74,29 +71,25 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
 
     @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-        return false;
+        return face == state.getValue(HORIZONTAL_FACING);
     }
 
     @Override
-    public boolean hasPlacementShaftTowards(
-            LevelReader world, BlockPos pos, BlockState state, Direction face
-    ) {
-        return face == state.getValue(HORIZONTAL_FACING).getOpposite();
+    public boolean hasPlacementShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
+        return face.getAxis() == state.getValue(HORIZONTAL_FACING).getAxis();
     }
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         boolean crouching = context.getPlayer() != null && context.getPlayer().isCrouching();
         if (!crouching) {
-            Direction mountDirection = CannonMountPlacement.findPreferredMount(
-                    context, MOUNT_DIRECTIONS);
+            Direction mountDirection = CannonMountPlacement.findPreferredMount(context, MOUNT_DIRECTIONS);
             if (mountDirection != null) {
-                return defaultBlockState()
-                        .setValue(HORIZONTAL_FACING, mountDirection);
+                return defaultBlockState().setValue(HORIZONTAL_FACING, mountDirection);
             }
         }
-        return this.defaultBlockState()
-                .setValue(HORIZONTAL_FACING, crouching ? context.getHorizontalDirection().getOpposite() : context.getHorizontalDirection());
+
+        return this.defaultBlockState().setValue(HORIZONTAL_FACING, crouching ? context.getHorizontalDirection().getOpposite() : context.getHorizontalDirection());
     }
 
     @Override
@@ -153,7 +146,6 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
         super.neighborChanged(state, level, pos, block, fromPos, isMoving);
 
         if (level.isClientSide) return;
-
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof AutoPitchControllerBlockEntity pitch) {
             pitch.onRelevantNeighborChanged(fromPos);

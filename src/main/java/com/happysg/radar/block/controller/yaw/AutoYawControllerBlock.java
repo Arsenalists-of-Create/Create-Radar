@@ -43,21 +43,15 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
     }
 
     @Override
-    protected InteractionResult useWithoutItem(
-            BlockState state, Level level, BlockPos pos,
-            Player player, BlockHitResult hit
-    ) {
-        if (!player.getMainHandItem().isEmpty()
-                || !player.getOffhandItem().isEmpty()
-                || hasPlacementShaftTowards(
-                        level, pos, state, hit.getDirection())) {
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+        if (!player.getMainHandItem().isEmpty() || !player.getOffhandItem().isEmpty() || hasPlacementShaftTowards(level, pos, state, hit.getDirection())) {
             return InteractionResult.PASS;
         }
 
         if (!level.isClientSide) {
-            OpenControllerLimitsScreenPacket.openIfAssembled(
-                    level, pos, player);
+            OpenControllerLimitsScreenPacket.openIfAssembled(level, pos, player);
         }
+
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
@@ -68,33 +62,26 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
 
     @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-        return false;
+        return face == state.getValue(FACING).getOpposite();
     }
 
     @Override
-    public boolean hasPlacementShaftTowards(
-            LevelReader world, BlockPos pos, BlockState state, Direction face
-    ) {
-        return face == state.getValue(FACING);
+    public boolean hasPlacementShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
+        return face.getAxis() == Direction.Axis.Y;
     }
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         boolean crouching = context.getPlayer() != null && context.getPlayer().isCrouching();
         if (!crouching) {
-            Direction mountDirection = CannonMountPlacement.findPreferredMount(
-                    context, MOUNT_DIRECTIONS);
+            Direction mountDirection = CannonMountPlacement.findPreferredMount(context, MOUNT_DIRECTIONS);
             if (mountDirection != null) {
-                return defaultBlockState()
-                        .setValue(FACING, mountDirection.getOpposite());
+                return defaultBlockState().setValue(FACING, mountDirection.getOpposite());
             }
         }
 
-        Direction vertical = context.getPlayer() != null && context.getPlayer().getXRot() > 0
-                ? Direction.UP : Direction.DOWN ;
-
-        return defaultBlockState()
-                .setValue(FACING, crouching ? vertical : vertical.getOpposite());
+        Direction vertical = context.getPlayer() != null && context.getPlayer().getXRot() > 0 ? Direction.UP : Direction.DOWN ;
+        return defaultBlockState().setValue(FACING, crouching ? vertical : vertical.getOpposite());
     }
 
     @Override
@@ -116,7 +103,6 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
             }
 
             if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-
                 if (!isMoving && !SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
                     WeaponNetworkRuntime.get(serverLevel).rememberRelinkRequirement(pos);
                     DataLinkBlock.disconnectAttachedControllerLinks(serverLevel, pos);
@@ -128,6 +114,7 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
 
         super.onRemove(state, level, pos, newState, isMoving);
     }
+
     @Override
     public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
         super.onPlace(state, level, pos, oldState, isMoving);
