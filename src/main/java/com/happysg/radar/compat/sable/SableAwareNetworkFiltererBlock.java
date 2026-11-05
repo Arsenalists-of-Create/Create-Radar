@@ -22,6 +22,7 @@ public class SableAwareNetworkFiltererBlock extends NetworkFiltererBlock impleme
             BlockPos newPos
     ) {
         try {
+            SableDataLinkRelocation.recordEndpointMove(originLevel, resultingLevel, oldPos, newPos);
             if (originLevel == resultingLevel && resultingLevel.getBlockEntity(newPos) instanceof NetworkFiltererBlockEntity filterer) {
                 filterer.onSableMovedFrom(oldPos);
             }
@@ -32,7 +33,6 @@ public class SableAwareNetworkFiltererBlock extends NetworkFiltererBlock impleme
 
     @Override
     public void beforeMove(ServerLevel originLevel, ServerLevel resultingLevel, BlockState oldState, BlockPos oldPos, BlockPos newPos) {
-        SableDataLinkRelocation.recordEndpointMove(originLevel, resultingLevel, oldPos, newPos);
         SableDataLinkRelocation.prepareFiltererMove(originLevel, resultingLevel, oldPos, newPos);
     }
 }

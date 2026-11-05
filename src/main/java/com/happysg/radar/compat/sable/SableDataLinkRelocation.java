@@ -8,6 +8,7 @@ import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
+import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.debug.DiagnosticRecorder;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
@@ -247,6 +248,8 @@ public final class SableDataLinkRelocation {
             processMoveGroup(level, List.of(move), false);
         }
 
+        relocateConfirmedRadars(level, moves);
+
         MOVING_FROM.remove(level);
         MOVING_ENDPOINTS.remove(level);
         CONFIRMED_ENDPOINT_MOVES.remove(level);
@@ -428,6 +431,56 @@ public final class SableDataLinkRelocation {
                         network.onEndpointRemoved(level, controller);
                     }
                 }
+            }
+        }
+    }
+
+    private static void relocateConfirmedRadars(ServerLevel level, List<PendingMove> processedLinks) {
+        Map<BlockPos, BlockPos> confirmed =
+                CONFIRMED_ENDPOINT_MOVES.get(level);
+
+        if (confirmed == null || confirmed.isEmpty()) {
+            return;
+        }
+
+        NetworkData network = NetworkData.get(level);
+        var dim = level.dimension();
+
+        for (Map.Entry<BlockPos, BlockPos> entry : confirmed.entrySet()) {
+            BlockPos oldPos = entry.getKey();
+            BlockPos newPos = entry.getValue();
+
+            if (oldPos.equals(newPos) || !(level.getBlockEntity(newPos) instanceof IRadar)) {
+                continue;
+            }
+
+            List<NetworkData.Group> owners = network.getGroups()
+                    .values()
+                    .stream()
+                    .filter(group -> group.key.dim().equals(dim)
+                            && group.radarEndpoints.contains(oldPos))
+                    .toList();
+
+            if (owners.isEmpty()) {
+                continue;
+            }
+
+
+            boolean allOwnersMoved = owners.stream().allMatch(group -> confirmed.containsKey(group.key.filtererPos()) || confirmed.containsValue(group.key.filtererPos()));
+            if (!allOwnersMoved) {
+                continue;
+            }
+
+            boolean explicitLink = network.getEndpointOrigin(dim, oldPos) == NetworkData.LinkOrigin.DATALINK || owners.stream().anyMatch(group ->
+                    group.dataLinks.stream().anyMatch(linkPos -> oldPos.equals(network.peekEndpointForDataLink(dim, linkPos))));
+            boolean movedWithLink = processedLinks.stream().anyMatch(move -> network.getFiltererForDataLink(dim, move.newDataLink()) != null && (oldPos.equals(move.oldTarget()) && newPos.equals(move.newTarget()) || oldPos.equals(move.oldSource()) && newPos.equals(move.newSource())));
+
+            if (explicitLink && !movedWithLink) {
+                continue;
+            }
+
+            if (!network.updateRadarPosition(level, oldPos, newPos)) {
+                LOGGER.debug("Could not immediately relocate confirmed Sable radar {} -> {}", oldPos, newPos);
             }
         }
     }
