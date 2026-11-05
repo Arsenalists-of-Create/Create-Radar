@@ -884,7 +884,13 @@ public final class WeaponNetworkRuntime {
             return false;
         }
 
-        if (link.type() != DataLinkBlockEntity.WeaponEndpointType.PITCH) {
+        boolean requiresFilterer = link.type() == DataLinkBlockEntity.WeaponEndpointType.PITCH;
+        if (link.type() == DataLinkBlockEntity.WeaponEndpointType.YAW) {
+            BlockState linkState = level.getBlockState(link.dataLinkPos());
+            requiresFilterer = linkState.hasProperty(DataLinkBlock.LINK_STYLE) && linkState.getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.RADAR;
+        }
+
+        if (!requiresFilterer) {
             return true;
         }
 

@@ -423,7 +423,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
 
         BlockState state = getBlockState();
 
-        if (!state.hasProperty(DataLinkBlock.LINK_STYLE) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR || weaponEndpointType == WeaponEndpointType.PITCH) {
+        if (!state.hasProperty(DataLinkBlock.LINK_STYLE) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR || weaponEndpointType != WeaponEndpointType.NONE) {
             return;
         }
 
@@ -449,7 +449,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
             return;
         }
 
-        if (weaponEndpointType == WeaponEndpointType.PITCH) {
+        if (weaponEndpointType != WeaponEndpointType.NONE) {
             return;
         }
 

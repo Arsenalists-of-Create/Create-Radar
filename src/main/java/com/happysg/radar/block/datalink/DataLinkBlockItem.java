@@ -82,6 +82,8 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String DATA_LINK_PLACE_FAILED = CreateRadar.MODID + ".data_link.place_failed";
     private static final String DATA_LINK_SELECT_FIRST = CreateRadar.MODID + ".data_link.select_mount_or_filterer_first";
     private static final String PITCH_LINK_ORDER = CreateRadar.MODID + ".data_link.pitch_link_order";
+    private static final String YAW_LINK_ORDER = CreateRadar.MODID + ".data_link.yaw_link_order";
+    private static final String DATA_LINK_ONLY_AIM_ALLOWED = CreateRadar.MODID + ".data_link.only_aim_allowed";
     private static final String PITCH_MOUNT_UNSUPPORTED = CreateRadar.MODID + ".data_link.pitch_mount_unsupported";
 
     public DataLinkBlockItem(Block pBlock, Properties pProperties) {
@@ -178,15 +180,22 @@ public class DataLinkBlockItem extends BlockItem {
         boolean networkSelected = use.tag().contains(SELECTED_FILTERER_POS);
         boolean mountSelected = use.tag().contains(SELECTED_MOUNT_POS);
 
-        if (controllerType == ControllerType.PITCH) {
+        if (controllerType == ControllerType.PITCH || (controllerType == ControllerType.YAW && networkSelected)) {
             if (!networkSelected || !mountSelected) {
                 if (!level.isClientSide) {
-                    sendError(player, PITCH_LINK_ORDER);
+                    sendError(player, controllerType == ControllerType.YAW ? YAW_LINK_ORDER : PITCH_LINK_ORDER);
                 }
                 return InteractionResult.FAIL;
             }
 
             return completeWeaponLink(use, controllerType);
+        }
+
+        if (networkSelected && mountSelected) {
+            if (!level.isClientSide) {
+                sendError(player, DATA_LINK_ONLY_AIM_ALLOWED);
+            }
+            return InteractionResult.FAIL;
         }
 
         if (networkSelected && mountSelected) {
@@ -335,14 +344,14 @@ public class DataLinkBlockItem extends BlockItem {
         NetworkData networkData = null;
         NetworkData.Group networkGroup = null;
 
-        if (controllerType == ControllerType.PITCH) {
+        if (controllerType == ControllerType.PITCH || (controllerType == ControllerType.YAW && use.tag().contains(SELECTED_FILTERER_POS))) {
             filtererPos = readSelectedPos(use.tag(), SELECTED_FILTERER_POS);
 
             if (filtererPos == null || !serverLevel.hasChunkAt(filtererPos) || !(serverLevel.getBlockEntity(filtererPos) instanceof NetworkFiltererBlockEntity)) {
                 return invalidSelection(use);
             }
 
-            if (selectedCbc == null || !selectedCbc.isCurrent() || selectedCbc.isFixed() || selectedCbc.isCompact()) {
+            if (controllerType == ControllerType.PITCH && (selectedCbc == null || !selectedCbc.isCurrent() || selectedCbc.isFixed() || selectedCbc.isCompact())) {
                 sendError(use.player(), PITCH_MOUNT_UNSUPPORTED);
                 return InteractionResult.FAIL;
             }
@@ -379,8 +388,7 @@ public class DataLinkBlockItem extends BlockItem {
             return placed;
         }
 
-        setLinkStyle(use.level(), placedPos, endpointType == DataLinkBlockEntity.WeaponEndpointType.PITCH ? DataLinkBlock.LinkStyle.RADAR : DataLinkBlock.LinkStyle.CONTROLLER);
-
+        setLinkStyle(use.level(), placedPos, filtererPos != null ? DataLinkBlock.LinkStyle.RADAR : DataLinkBlock.LinkStyle.CONTROLLER);
         if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink && use.clickedPos().equals(dataLink.getSourcePosition())) {
             dataLink.target(mountPos);
 

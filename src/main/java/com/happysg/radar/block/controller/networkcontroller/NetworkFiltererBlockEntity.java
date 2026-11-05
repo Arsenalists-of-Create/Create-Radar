@@ -14,6 +14,7 @@ import com.happysg.radar.block.arad.jammer.DirectionalJammingService;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.SafeZone;
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.IdentificationConfig;
@@ -639,6 +640,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             endpointRepushRequired = false;
             pushToEndpoints(selected);
         } else {
+            pushToYawOnlyEndpoints(selected);
             pushToAddonAimControllers(selected);
         }
     }
@@ -1069,6 +1071,63 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return hasConstrained;
     }
 
+    private List<AutoYawControllerBlockEntity> getYawOnlyEndpoints(ServerLevel sl) {
+        NetworkData data = NetworkData.get(sl);
+        NetworkData.Group group = data.getGroup(sl.dimension(), worldPosition);
+
+        if (group == null) {
+            return List.of();
+        }
+
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(sl);
+        List<AutoYawControllerBlockEntity> result = new ArrayList<>();
+
+        for (BlockPos pos : data.getWeaponEndpoints(group)) {
+            if (!worldPosition.equals(data.getFiltererForEndpoint(sl.dimension(), pos))) {
+                continue;
+            }
+
+            if (!(sl.getBlockEntity(pos) instanceof AutoYawControllerBlockEntity yaw)) {
+                continue;
+            }
+
+            var weaponGroup = runtime.getWeaponGroupViewFromEndpoint(pos);
+            if (weaponGroup == null
+                    || weaponGroup.pitchPos() != null
+                    || !pos.equals(weaponGroup.yawPos())
+                    || !weaponGroup.mountPos().equals(
+                    runtime.getMountForController(pos))) {
+                continue;
+            }
+
+            result.add(yaw);
+        }
+
+        return result;
+    }
+
+    private void pushToYawOnlyEndpoints(@Nullable RadarTrack track) {
+        if (!(level instanceof ServerLevel sl)) {
+            return;
+        }
+
+        Vec3 target = track == null ? null : track.position();
+        for (AutoYawControllerBlockEntity yaw : getYawOnlyEndpoints(sl)) {
+            if (target == null) {
+                if (yaw.isControllerRunning()) {
+                    yaw.failClosedRadarAim();
+                }
+                continue;
+            }
+            if (yaw.hasStructuralKineticSelectionForTargeting()) {
+                Vec3 origin = PhysicsHandler.getWorldVec(yaw);
+                yaw.setRadarAimDirection(target.subtract(origin));
+            } else {
+                yaw.setTarget(target);
+            }
+        }
+    }
+
     private void pushToEndpoints(@Nullable RadarTrack track) {
         TargetingConfig cfg = targeting != null ? targeting : TargetingConfig.DEFAULT;
         this.activeTrackCache = track;
@@ -1078,6 +1137,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             pitch.setAndAcquireTrack(track, cfg);
             pitch.setSafeZones(safeZones);
         }
+        pushToYawOnlyEndpoints(track);
         pushToAddonAimControllers(track);
     }
 
@@ -1296,6 +1356,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             pitch.setAndAcquireTrack(null, cfg);
             pitch.setSafeZones(safeZones);
         }
+        pushToYawOnlyEndpoints(null);
         pushToAddonAimControllers(null);
     }
 

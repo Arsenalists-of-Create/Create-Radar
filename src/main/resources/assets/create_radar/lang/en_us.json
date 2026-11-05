@@ -60,6 +60,8 @@
   "create_radar.display_source.pitch_controller": "Auto Pitch Controller",
   "create_radar.display_source.radar": "Radar",
   "create_radar.display_source.yaw_controller": "Auto Yaw Controller",
+  "create_radar.data_link.yaw_link_order": "Select Network Controller, then Cannon Mount, then Yaw Controller",
+  "create_radar.data_link.only_aim_allowed": "Only Pitch or Yaw Controllers can complete this link",
   "create_radar.enter_username": "Insert Target Username",
   "create_radar.faction.enemy": "Enemy",
   "create_radar.faction.friendly": "Friendly",

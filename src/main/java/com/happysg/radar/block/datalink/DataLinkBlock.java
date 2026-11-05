@@ -5,6 +5,7 @@ import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.controller.WeaponContactUnlinkState;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
+import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.mojang.logging.LogUtils;
@@ -49,7 +50,7 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
     public static boolean isWeaponLink(LinkStyle style, DataLinkBlockEntity.WeaponEndpointType type) {
         return type != DataLinkBlockEntity.WeaponEndpointType.NONE
                 && (style == LinkStyle.CONTROLLER || (style == LinkStyle.RADAR
-                && type == DataLinkBlockEntity.WeaponEndpointType.PITCH));
+                && (type == DataLinkBlockEntity.WeaponEndpointType.PITCH || type == DataLinkBlockEntity.WeaponEndpointType.YAW)));
     }
 
     public static boolean isWeaponLink(BlockState state, DataLinkBlockEntity.WeaponEndpointType type) {
@@ -124,7 +125,9 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
         }
 
         if (targetPos == null) {
-            targetPos = link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH ? link.getSourcePosition() : link.getTargetPosition();
+            var type = link.getWeaponEndpointType();
+
+            targetPos = type == DataLinkBlockEntity.WeaponEndpointType.PITCH || type == DataLinkBlockEntity.WeaponEndpointType.YAW ? link.getSourcePosition() : link.getTargetPosition();
         }
 
         network.removeDataLinkAndCleanup(level.dimension(), linkPos, level, targetPos);
@@ -209,8 +212,14 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
 
             boolean pitchWeaponLink = oldLink != null && oldLink.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH && isWeaponLink(style, oldLink.getWeaponEndpointType());
 
+            boolean yawNetworkLink = oldLink != null
+                    && style == LinkStyle.RADAR
+                    && oldLink.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.YAW
+                    && isWeaponLink(style, oldLink.getWeaponEndpointType());
+
+            boolean networkWeaponLink = pitchWeaponLink || yawNetworkLink;
             if (!assemblyMove) {
-                if ((style == LinkStyle.CONTROLLER || pitchWeaponLink) && serverLevel.hasChunkAt(sourcePos)) {
+                if ((style == LinkStyle.CONTROLLER || networkWeaponLink) && serverLevel.hasChunkAt(sourcePos)) {
                     BlockEntity controllerEntity = serverLevel.getBlockEntity(sourcePos);
 
                     if (controllerEntity instanceof WeaponContactUnlinkState controller) {
@@ -218,18 +227,26 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
                     }
                 }
 
-                if (pitchWeaponLink && data.getFiltererForDataLink(dim, pos) != null) {
+                if (networkWeaponLink && data.getFiltererForDataLink(dim, pos) != null) {
                     data.removeDataLinkAndCleanup(dim, pos, serverLevel, sourcePos);
 
-                    if (serverLevel.hasChunkAt(sourcePos) && serverLevel.getBlockEntity(sourcePos) instanceof AutoPitchControllerBlockEntity pitch) {
-                        pitch.suppressFiltererContact();
-                        pitch.onRadarNetworkDisconnected();
-                        pitch.markMountDirtyExternal();
-                        pitch.onWeaponTopologyChanged();
+                    if (serverLevel.hasChunkAt(sourcePos)) {
+                        BlockEntity controllerEntity = serverLevel.getBlockEntity(sourcePos);
+
+                        if (controllerEntity instanceof AutoPitchControllerBlockEntity pitch) {
+                            pitch.suppressFiltererContact();
+                            pitch.onRadarNetworkDisconnected();
+                            pitch.markMountDirtyExternal();
+                            pitch.onWeaponTopologyChanged();
+                        }
+
+                        if (controllerEntity instanceof AutoYawControllerBlockEntity yaw) {
+                            yaw.failClosedRadarAim();
+                        }
                     }
                 }
 
-                if (style == LinkStyle.RADAR && !pitchWeaponLink) {
+                if (style == LinkStyle.RADAR && !networkWeaponLink) {
                     BlockPos targetPos = oldLink != null ? oldLink.getTargetPosition() : data.peekEndpointForDataLink(dim, pos);
                     data.removeDataLinkAndCleanup(dim, pos, serverLevel, targetPos);
 

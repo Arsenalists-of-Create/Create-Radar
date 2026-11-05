@@ -713,7 +713,7 @@ public class NetworkData extends SavedData {
         }
 
         // in-group uniqueness
-        return !group.usedWeaponMounts.contains(weaponMountPos) || group.weaponEndpoints.contains(controllerPos);
+        return true;
     }
 
     private boolean canClaimEndpoint(Group group, BlockPos endpointPos, LinkOrigin newOrigin) {
@@ -1185,8 +1185,15 @@ public class NetworkData extends SavedData {
             return new ContactEndpoint(ContactKind.MONITOR, controllerPos, null);
         }
 
-        if (be instanceof AutoPitchControllerBlockEntity pitch) {
+        if (be instanceof AutoYawControllerBlockEntity yaw) {
+            BlockPos mountPos = WeaponNetworkRuntime.get(level).getMountForController(pos);
 
+            if (mountPos != null) {
+                return new ContactEndpoint(ContactKind.WEAPON, pos.immutable(), mountPos.immutable());
+            }
+        }
+
+        if (be instanceof AutoPitchControllerBlockEntity pitch) {
             if (pitch.isFiltererContactSuppressed() && getEndpointOrigin(level.dimension(), pos) != LinkOrigin.DATALINK) {
                 return null;
             }
@@ -2067,7 +2074,7 @@ public class NetworkData extends SavedData {
             }
 
             if (DataLinkBlock.isWeaponLink(style, link.getWeaponEndpointType())
-                    && link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH
+                    && (link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH || link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.YAW)
                     && endpointPos.equals(link.getSourcePosition())
                     && endpointKey.equals(recordedEndpoint)) {
                 return true;
