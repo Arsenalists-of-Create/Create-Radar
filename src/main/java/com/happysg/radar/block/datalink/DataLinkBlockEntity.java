@@ -396,7 +396,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
 
         BlockState state = getBlockState();
 
-        if (!(state.getBlock() instanceof DataLinkBlock) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.CONTROLLER || weaponEndpointType != WeaponEndpointType.PITCH) {
+        if (!DataLinkBlock.isWeaponLink(state, weaponEndpointType) || weaponEndpointType != WeaponEndpointType.PITCH) {
             return;
         }
 
@@ -423,7 +423,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
 
         BlockState state = getBlockState();
 
-        if (!state.hasProperty(DataLinkBlock.LINK_STYLE) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR) {
+        if (!state.hasProperty(DataLinkBlock.LINK_STYLE) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR || weaponEndpointType == WeaponEndpointType.PITCH) {
             return;
         }
 
@@ -445,14 +445,15 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     }
 
     private void restoreWeaponFilterLinkFallback() {
-        if (!(level instanceof ServerLevel serverLevel)
-                || serverLevel.getGameTime() % 20 != 0) {
+        if (!(level instanceof ServerLevel serverLevel) || serverLevel.getGameTime() % 20 != 0) {
             return;
         }
 
-        if (!getBlockState().hasProperty(DataLinkBlock.LINK_STYLE)
-                || getBlockState().getValue(DataLinkBlock.LINK_STYLE)
-                != DataLinkBlock.LinkStyle.RADAR) {
+        if (weaponEndpointType == WeaponEndpointType.PITCH) {
+            return;
+        }
+
+        if (!getBlockState().hasProperty(DataLinkBlock.LINK_STYLE) || getBlockState().getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR) {
             return;
         }
 
@@ -554,10 +555,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         if (!(level instanceof ServerLevel sl) || linkedShipId == null) {
             BlockPos relativeTarget = worldPosition.offset(targetOffset);
 
-            if (weaponEndpointType == WeaponEndpointType.PITCH
-                    && filtererOffset != null
-                    && getBlockState().hasProperty(DataLinkBlock.LINK_STYLE)
-                    && getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER) {
+            if (weaponEndpointType == WeaponEndpointType.PITCH && filtererOffset != null) {
                 return relativeTarget;
             }
 
@@ -596,7 +594,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         if (!serverLevel.hasChunkAt(targetWorldPosFallback)) {
             return false;
         }
-        if (getBlockState().hasProperty(DataLinkBlock.LINK_STYLE) && getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER) {
+        if (weaponEndpointType == WeaponEndpointType.PITCH || (getBlockState().hasProperty(DataLinkBlock.LINK_STYLE) && getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER)) {
             return serverLevel.getBlockEntity(relativeTarget) == null && serverLevel.getBlockEntity(targetWorldPosFallback) != null;
         }
         return AllDataBehaviors.targetOf(serverLevel, relativeTarget) == null

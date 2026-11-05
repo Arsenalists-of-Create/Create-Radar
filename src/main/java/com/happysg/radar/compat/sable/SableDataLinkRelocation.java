@@ -135,8 +135,7 @@ public final class SableDataLinkRelocation {
 
         // Controller links establish the canonical mount relocation before a
         // radar-style link migrates its saved endpoint and DataLink position.
-        moves.sort(Comparator.comparingInt(move ->
-                move.style() == DataLinkBlock.LinkStyle.CONTROLLER ? 0 : 1));
+        moves.sort(Comparator.comparingInt(move -> isWeaponControllerMove(move) ? 0 : 1));
 
         Map<WeaponMoveKey, List<PendingMove>> weaponMoves =
                 new LinkedHashMap<>();
@@ -257,9 +256,7 @@ public final class SableDataLinkRelocation {
     }
 
     private static boolean isWeaponControllerMove(PendingMove move) {
-        return move.style() == DataLinkBlock.LinkStyle.CONTROLLER
-                && move.endpointType()
-                != DataLinkBlockEntity.WeaponEndpointType.NONE;
+        return DataLinkBlock.isWeaponLink(move.style(), move.endpointType());
     }
 
     private static PendingMove resolveMovedEndpoints(ServerLevel level, PendingMove move) {
@@ -481,8 +478,7 @@ public final class SableDataLinkRelocation {
         NetworkData.WeaponRelocationResult weaponResult =
                 NetworkData.WeaponRelocationResult.NOT_FOUND;
 
-        if (move.style() == DataLinkBlock.LinkStyle.CONTROLLER
-                && move.endpointType() != DataLinkBlockEntity.WeaponEndpointType.NONE) {
+        if (isWeaponControllerMove(move)) {
             weaponResult = networkData.relocateWeaponEndpoint(
                     level.dimension(),
                     move.oldSource(),

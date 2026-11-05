@@ -46,6 +46,18 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
 
     public static final EnumProperty<LinkStyle> LINK_STYLE = EnumProperty.create("link_style", LinkStyle.class);
 
+    public static boolean isWeaponLink(LinkStyle style, DataLinkBlockEntity.WeaponEndpointType type) {
+        return type != DataLinkBlockEntity.WeaponEndpointType.NONE
+                && (style == LinkStyle.CONTROLLER || (style == LinkStyle.RADAR
+                && type == DataLinkBlockEntity.WeaponEndpointType.PITCH));
+    }
+
+    public static boolean isWeaponLink(BlockState state, DataLinkBlockEntity.WeaponEndpointType type) {
+        return state.getBlock() instanceof DataLinkBlock
+                && state.hasProperty(LINK_STYLE)
+                && isWeaponLink(state.getValue(LINK_STYLE), type);
+    }
+
     public DataLinkBlock(Properties props) {
         super(props);
         this.registerDefaultState(this.stateDefinition.any()
@@ -112,7 +124,7 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
         }
 
         if (targetPos == null) {
-            targetPos = link.getTargetPosition();
+            targetPos = link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH ? link.getSourcePosition() : link.getTargetPosition();
         }
 
         network.removeDataLinkAndCleanup(level.dimension(), linkPos, level, targetPos);
@@ -195,8 +207,10 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
             DataLinkBlockEntity oldLink = oldEntity instanceof DataLinkBlockEntity link ? link : null;
             NetworkData data = NetworkData.get(serverLevel);
 
+            boolean pitchWeaponLink = oldLink != null && oldLink.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH && isWeaponLink(style, oldLink.getWeaponEndpointType());
+
             if (!assemblyMove) {
-                if (style == LinkStyle.CONTROLLER && serverLevel.hasChunkAt(sourcePos)) {
+                if ((style == LinkStyle.CONTROLLER || pitchWeaponLink) && serverLevel.hasChunkAt(sourcePos)) {
                     BlockEntity controllerEntity = serverLevel.getBlockEntity(sourcePos);
 
                     if (controllerEntity instanceof WeaponContactUnlinkState controller) {
@@ -204,7 +218,7 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
                     }
                 }
 
-                if (style == LinkStyle.CONTROLLER && oldLink != null && oldLink.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH && data.getFiltererForDataLink(dim, pos) != null) {
+                if (pitchWeaponLink && data.getFiltererForDataLink(dim, pos) != null) {
                     data.removeDataLinkAndCleanup(dim, pos, serverLevel, sourcePos);
 
                     if (serverLevel.hasChunkAt(sourcePos) && serverLevel.getBlockEntity(sourcePos) instanceof AutoPitchControllerBlockEntity pitch) {
@@ -215,7 +229,7 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
                     }
                 }
 
-                if (style == LinkStyle.RADAR) {
+                if (style == LinkStyle.RADAR && !pitchWeaponLink) {
                     BlockPos targetPos = oldLink != null ? oldLink.getTargetPosition() : data.peekEndpointForDataLink(dim, pos);
                     data.removeDataLinkAndCleanup(dim, pos, serverLevel, targetPos);
 

@@ -1129,8 +1129,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             }
 
             BlockState state = link.getBlockState();
-            if (state.getBlock() instanceof DataLinkBlock
-                    && state.getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER
+            if (DataLinkBlock.isWeaponLink(state, DataLinkBlockEntity.WeaponEndpointType.PITCH)
                     && link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH
                     && worldPosition.equals(link.getSourcePosition())) {
                 return link;

@@ -286,7 +286,7 @@ public class NetworkFiltererBlock extends WrenchableDirectionalBlock implements 
                         BlockEntity be = serverLevel.getBlockEntity(linkPos);
 
                         if (be instanceof DataLinkBlockEntity link
-                                && link.getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER
+                                && DataLinkBlock.isWeaponLink(link.getBlockState(), link.getWeaponEndpointType())
                                 && link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH
                                 && pos.equals(network.getFiltererForDataLink(serverLevel.dimension(), linkPos))) {
 

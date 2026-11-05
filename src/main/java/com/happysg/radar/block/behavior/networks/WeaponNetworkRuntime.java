@@ -169,9 +169,7 @@ public final class WeaponNetworkRuntime {
         }
 
         BlockState state = dataLink.getBlockState();
-        if (!(state.getBlock() instanceof DataLinkBlock)
-                || !state.hasProperty(DataLinkBlock.LINK_STYLE)
-                || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.CONTROLLER) {
+        if (!DataLinkBlock.isWeaponLink(state, type)) {
             unregister(dataLinkPos);
             return false;
         }
@@ -778,9 +776,7 @@ public final class WeaponNetworkRuntime {
             }
 
             BlockState state = dataLink.getBlockState();
-            return !(state.getBlock() instanceof DataLinkBlock)
-                    || !state.hasProperty(DataLinkBlock.LINK_STYLE)
-                    || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.CONTROLLER
+            return !DataLinkBlock.isWeaponLink(state, entry.getValue().type())
                     || dataLink.getWeaponEndpointType() != entry.getValue().type()
                     || !dataLink.getSourcePosition().equals(entry.getValue().endpointPos())
                     || !dataLink.getTargetPosition().equals(entry.getValue().mountPos());

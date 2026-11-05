@@ -995,8 +995,7 @@ public class NetworkData extends SavedData {
                         continue;
                     }
 
-                    if (link.getBlockState().getValue(
-                            DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER
+                    if (DataLinkBlock.isWeaponLink(link.getBlockState(), link.getWeaponEndpointType())
                             && link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH
                             && endpointPos.equals(link.getSourcePosition())
                             && savedMount.equals(link.getTargetPosition())) {
@@ -2067,7 +2066,7 @@ public class NetworkData extends SavedData {
                 return true;
             }
 
-            if (style == DataLinkBlock.LinkStyle.CONTROLLER
+            if (DataLinkBlock.isWeaponLink(style, link.getWeaponEndpointType())
                     && link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH
                     && endpointPos.equals(link.getSourcePosition())
                     && endpointKey.equals(recordedEndpoint)) {

@@ -379,7 +379,7 @@ public class DataLinkBlockItem extends BlockItem {
             return placed;
         }
 
-        setLinkStyle(use.level(), placedPos, DataLinkBlock.LinkStyle.CONTROLLER);
+        setLinkStyle(use.level(), placedPos, endpointType == DataLinkBlockEntity.WeaponEndpointType.PITCH ? DataLinkBlock.LinkStyle.RADAR : DataLinkBlock.LinkStyle.CONTROLLER);
 
         if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink && use.clickedPos().equals(dataLink.getSourcePosition())) {
             dataLink.target(mountPos);
