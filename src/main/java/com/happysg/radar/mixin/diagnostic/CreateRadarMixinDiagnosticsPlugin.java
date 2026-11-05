@@ -37,6 +37,15 @@ public final class CreateRadarMixinDiagnosticsPlugin implements IMixinConfigPlug
             }
         }
 
+        if (mixinClassName.endsWith(".SableEndpointAssemblyMixin")) {
+            try {
+                var mods = net.neoforged.fml.loading.FMLLoader.getLoadingModList();
+                return mods.getModFileById("sable") != null;
+            } catch (RuntimeException exception) {
+                return false;
+            }
+        }
+
         return true;
     }
     @Override

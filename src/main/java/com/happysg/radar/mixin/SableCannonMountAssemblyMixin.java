@@ -13,7 +13,13 @@ import org.spongepowered.asm.mixin.Pseudo;
 public abstract class SableCannonMountAssemblyMixin implements BlockSubLevelAssemblyListener {
 
     @Override
+    public void beforeMove(ServerLevel originLevel, ServerLevel resultingLevel, BlockState oldState, BlockPos oldPos, BlockPos newPos) {
+        SableDataLinkRelocation.prepareEndpointMove(originLevel, oldPos);
+    }
+
+    @Override
     public void afterMove(ServerLevel originLevel, ServerLevel resultingLevel, BlockState newState, BlockPos oldPos, BlockPos newPos) {
+        SableDataLinkRelocation.recordEndpointMove(originLevel, resultingLevel, oldPos, newPos);
         SableDataLinkRelocation.captureMountMove(originLevel, resultingLevel, oldPos, newPos);
     }
 }

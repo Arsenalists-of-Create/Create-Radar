@@ -11,6 +11,7 @@ import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.debug.DiagnosticRecorder;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -18,14 +19,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import org.slf4j.Logger;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.WeakHashMap;
+import java.util.*;
 
 /**
  * Bridges Sable's block-copy move into the position-keyed weapon network.
@@ -39,45 +33,131 @@ public final class SableDataLinkRelocation {
     private static final Map<ServerLevel, List<PendingMove>> PENDING = new WeakHashMap<>();
     private static final Map<ServerLevel, List<PendingMountMove>> PENDING_MOUNT_MOVES = new WeakHashMap<>();
     private static final Map<ServerLevel, Set<BlockPos>> MOVING_FROM = new WeakHashMap<>();
-    private static final Map<ServerLevel, Set<BlockPos>> MOVING_ENDPOINTS =
-            new WeakHashMap<>();
+    private static final Map<ServerLevel, Set<BlockPos>> MOVING_ENDPOINTS = new WeakHashMap<>();
+    private static final Map<ServerLevel, Map<BlockPos, BlockPos>> CONFIRMED_ENDPOINT_MOVES = new WeakHashMap<>();
+    private static final Map<ServerLevel, Map<BlockPos, BlockPos>> PREPARED_FILTERER_MOVES = new WeakHashMap<>();
 
-    private SableDataLinkRelocation() {
+    private record PreparedLink(BlockPos source, BlockPos target, Block sourceBlock, Block targetBlock, DataLinkBlock.LinkStyle style, DataLinkBlockEntity.WeaponEndpointType type) {}
+    private static final Map<ServerLevel, Map<BlockPos, PreparedLink>> PREPARED_LINKS = new WeakHashMap<>();
+
+    private SableDataLinkRelocation() {}
+
+    public static void prepareEndpointMove(ServerLevel level, BlockPos oldPos) {
+        MOVING_ENDPOINTS.computeIfAbsent(level, ignored -> new HashSet<>()).add(oldPos.immutable());
     }
 
-    public static void capture(ServerLevel originLevel, ServerLevel resultingLevel,
-                               BlockPos oldPos, BlockPos newPos) {
-        if (!(originLevel.getBlockEntity(oldPos) instanceof DataLinkBlockEntity oldLink)
-                || !(resultingLevel.getBlockEntity(newPos) instanceof DataLinkBlockEntity newLink)) {
+    public static void prepare(ServerLevel level, BlockPos oldPos) {
+        if (!(level.getBlockEntity(oldPos) instanceof DataLinkBlockEntity link)) {
             return;
         }
-        if (!oldLink.getBlockState().hasProperty(DataLinkBlock.LINK_STYLE)) {
+
+        if (!link.getBlockState().hasProperty(DataLinkBlock.LINK_STYLE)) {
+            return;
+        }
+
+        BlockPos source = link.getSourcePosition().immutable();
+        BlockPos target = link.getTargetPosition().immutable();
+
+        PREPARED_LINKS
+                .computeIfAbsent(level, ignored -> new HashMap<>())
+                .put(oldPos.immutable(), new PreparedLink(
+                        source,
+                        target,
+                        level.getBlockState(source).getBlock(),
+                        level.getBlockState(target).getBlock(),
+                        link.getBlockState().getValue(DataLinkBlock.LINK_STYLE),
+                        link.getWeaponEndpointType()
+                ));
+
+        MOVING_FROM.computeIfAbsent(level, ignored -> new HashSet<>()).add(oldPos.immutable());
+    }
+
+    public static void prepareFiltererMove(ServerLevel originLevel, ServerLevel resultingLevel, BlockPos oldPos, BlockPos newPos) {
+        if (originLevel != resultingLevel || oldPos.equals(newPos)) {
+            return;
+        }
+
+        prepareEndpointMove(originLevel, oldPos);
+
+        PREPARED_FILTERER_MOVES.computeIfAbsent(resultingLevel, ignored -> new HashMap<>()).put(newPos.immutable(), oldPos.immutable());
+    }
+
+    public static BlockPos getPreparedFiltererSource(ServerLevel level, BlockPos newPos) {
+        Map<BlockPos, BlockPos> moves = PREPARED_FILTERER_MOVES.get(level);
+        return moves == null ? null : moves.get(newPos);
+    }
+
+    public static void finishPreparedFiltererMove(ServerLevel level, BlockPos newPos) {
+        Map<BlockPos, BlockPos> moves = PREPARED_FILTERER_MOVES.get(level);
+
+        if (moves == null) {
+            return;
+        }
+
+        moves.remove(newPos);
+
+        if (moves.isEmpty()) {
+            PREPARED_FILTERER_MOVES.remove(level);
+        }
+    }
+
+    public static void recordEndpointMove(ServerLevel originLevel, ServerLevel resultingLevel, BlockPos oldPos, BlockPos newPos) {
+        if (originLevel != resultingLevel || oldPos.equals(newPos)) {
+            return;
+        }
+
+        CONFIRMED_ENDPOINT_MOVES.computeIfAbsent(resultingLevel, ignored -> new HashMap<>()).put(oldPos.immutable(), newPos.immutable());
+    }
+
+    private static BlockPos confirmedEndpointDestination(ServerLevel level, BlockPos oldPos) {
+        Map<BlockPos, BlockPos> moves = CONFIRMED_ENDPOINT_MOVES.get(level);
+        return moves == null ? null : moves.get(oldPos);
+    }
+
+    private static PreparedLink takePreparedLink(ServerLevel level, BlockPos oldPos) {
+        Map<BlockPos, PreparedLink> prepared = PREPARED_LINKS.get(level);
+        if (prepared == null) {
+            return null;
+        }
+
+        PreparedLink result = prepared.remove(oldPos);
+
+        if (prepared.isEmpty()) {
+            PREPARED_LINKS.remove(level);
+        }
+
+        return result;
+    }
+
+    public static void capture(ServerLevel originLevel, ServerLevel resultingLevel, BlockPos oldPos, BlockPos newPos) {
+        PreparedLink prepared = takePreparedLink(originLevel, oldPos);
+        if (!(resultingLevel.getBlockEntity(newPos) instanceof DataLinkBlockEntity newLink)) {
+            return;
+        }
+
+        if (prepared == null || originLevel != resultingLevel) {
+            newLink.clearSavedConnection();
+            LOGGER.warn("Sable Data Link {} -> {} has no valid source snapshot; disconnected", oldPos, newPos);
             return;
         }
 
         BlockPos delta = newPos.subtract(oldPos);
-        BlockPos oldSource = oldLink.getSourcePosition().immutable();
-        BlockPos oldTarget = oldLink.getTargetPosition().immutable();
-        Block oldSourceBlock = originLevel.getBlockState(oldSource).getBlock();
-        Block oldTargetBlock = originLevel.getBlockState(oldTarget).getBlock();
-        DataLinkBlock.LinkStyle style = oldLink.getBlockState().getValue(DataLinkBlock.LINK_STYLE);
 
         PendingMove move = new PendingMove(
                 originLevel,
                 oldPos.immutable(),
                 newPos.immutable(),
-                oldSource,
-                oldSource.offset(delta),
-                oldTarget,
-                oldTarget.offset(delta),
-                oldSourceBlock,
-                oldTargetBlock,
-                style,
-                oldLink.getWeaponEndpointType()
+                prepared.source(),
+                newLink.getSourcePosition().immutable(),
+                prepared.target(),
+                prepared.target().offset(delta),
+                prepared.sourceBlock(),
+                prepared.targetBlock(),
+                prepared.style(),
+                prepared.type()
         );
+
         PENDING.computeIfAbsent(resultingLevel, ignored -> new ArrayList<>()).add(move);
-        MOVING_FROM.computeIfAbsent(originLevel, ignored -> new HashSet<>()).add(oldPos.immutable());
-        MOVING_ENDPOINTS.computeIfAbsent(originLevel, ignored -> new HashSet<>()).add(oldSource);
         newLink.markAssemblyRelocated();
     }
 
@@ -129,23 +209,32 @@ public final class SableDataLinkRelocation {
             resolvedMoves.add(resolveMovedEndpoints(level, move));
         }
 
-        moves = resolvedMoves;
+        List<PendingMove> validMoves = new ArrayList<>();
 
-        List<PendingMountMove> mountMoves = PENDING_MOUNT_MOVES.remove(level);
+        for (PendingMove move : resolvedMoves) {
+            if (movedTogether(level, move)) {
+                validMoves.add(move);
+            } else {
+                disconnectRejectedMove(level, move);
+                clearMovingMarker(move);
+            }
+        }
+
+        moves = validMoves;
+        disconnectStationaryLinksForMovedEndpoints(level, moves);
+
+        PENDING_MOUNT_MOVES.remove(level);
 
         // Controller links establish the canonical mount relocation before a
         // radar-style link migrates its saved endpoint and DataLink position.
         moves.sort(Comparator.comparingInt(move -> isWeaponControllerMove(move) ? 0 : 1));
 
-        Map<WeaponMoveKey, List<PendingMove>> weaponMoves =
-                new LinkedHashMap<>();
+        Map<WeaponMoveKey, List<PendingMove>> weaponMoves = new LinkedHashMap<>();
         List<PendingMove> otherMoves = new ArrayList<>();
         for (PendingMove move : moves) {
             if (isWeaponControllerMove(move)) {
-                WeaponMoveKey key = new WeaponMoveKey(move.originLevel(),
-                        move.oldTarget(), move.newTarget());
-                weaponMoves.computeIfAbsent(key,
-                        ignored -> new ArrayList<>()).add(move);
+                WeaponMoveKey key = new WeaponMoveKey(move.originLevel(), move.oldTarget(), move.newTarget());
+                weaponMoves.computeIfAbsent(key, ignored -> new ArrayList<>()).add(move);
             } else {
                 otherMoves.add(move);
             }
@@ -158,16 +247,10 @@ public final class SableDataLinkRelocation {
             processMoveGroup(level, List.of(move), false);
         }
 
-        if (mountMoves != null) {
-            for (PendingMountMove move : mountMoves) {
-                try {
-                    processMountOnly(level, move);
-                } catch (RuntimeException exception) {
-                    DiagnosticRecorder.error("sable", "mount_only_relocation", "topology_migration_failed", exception, level, move.newMount(), "sable", "createbigcannons");
-                    LOGGER.error("Failed mount-only relocation {} -> {}", move.oldMount(), move.newMount(), exception);
-                }
-            }
-        }
+        MOVING_FROM.remove(level);
+        MOVING_ENDPOINTS.remove(level);
+        CONFIRMED_ENDPOINT_MOVES.remove(level);
+        PREPARED_LINKS.remove(level);
     }
 
     private static void processMountOnly(ServerLevel level, PendingMountMove move) {
@@ -213,6 +296,142 @@ public final class SableDataLinkRelocation {
         LOGGER.debug("Relocated stationary weapon links from {} to {}", oldMount, newMount);
     }
 
+    private static void disconnectStationaryLinksForMovedEndpoints(ServerLevel level, List<PendingMove> dataLinkMoves) {
+        Map<BlockPos, BlockPos> moved = CONFIRMED_ENDPOINT_MOVES.get(level);
+        if (moved == null || moved.isEmpty()) {
+            return;
+        }
+
+        var dim = level.dimension();
+        NetworkData network = NetworkData.get(level);
+        ARADData arad = ARADData.get(level);
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(level);
+
+        Set<BlockPos> movingLinks = new HashSet<>();
+        for (PendingMove move : dataLinkMoves) {
+            movingLinks.add(move.oldDataLink());
+            movingLinks.add(move.newDataLink());
+        }
+
+        Set<BlockPos> linksToDisconnect = new HashSet<>();
+
+        for (NetworkData.Group group : List.copyOf(network.getGroups().values())) {
+            if (!dim.equals(group.key.dim())) {
+                continue;
+            }
+
+            boolean filtererMoved = moved.containsKey(group.key.filtererPos()) || moved.containsValue(group.key.filtererPos());
+            for (BlockPos linkPos : List.copyOf(group.dataLinks)) {
+                if (movingLinks.contains(linkPos)) {
+                    continue;
+                }
+
+                BlockPos savedEndpoint = network.peekEndpointForDataLink(dim, linkPos);
+                boolean split = filtererMoved || savedEndpoint != null && (moved.containsKey(savedEndpoint) || moved.containsValue(savedEndpoint));
+                if (level.isLoaded(linkPos) && level.getBlockEntity(linkPos) instanceof DataLinkBlockEntity link) {
+                    split |= moved.containsKey(link.getSourcePosition()) || moved.containsKey(link.getTargetPosition());
+                }
+
+                if (split) {
+                    linksToDisconnect.add(linkPos);
+                }
+            }
+        }
+
+        for (BlockPos oldEndpoint : moved.keySet()) {
+            for (Direction direction : Direction.values()) {
+                BlockPos linkPos = oldEndpoint.relative(direction);
+
+                if (movingLinks.contains(linkPos) || !level.isLoaded(linkPos)) {
+                    continue;
+                }
+
+                if (level.getBlockEntity(linkPos) instanceof DataLinkBlockEntity link && oldEndpoint.equals(link.getSourcePosition())) {
+                    linksToDisconnect.add(linkPos);
+                }
+            }
+        }
+
+
+        for (Map.Entry<BlockPos, BlockPos> movement : moved.entrySet()) {
+            for (BlockPos endpoint : List.of(movement.getKey(), movement.getValue())) {
+                ARADData.Group rwrGroup = arad.getGroup(dim, endpoint);
+
+                if (rwrGroup != null) {
+                    linksToDisconnect.addAll(rwrGroup.dataLinks);
+                }
+
+                BlockPos rwrPos = arad.getRwrForMonitor(dim, endpoint);
+                if (rwrPos == null) {
+                    rwrPos = arad.getRwrForJammer(dim, endpoint);
+                }
+
+                if (rwrPos == null) {
+                    continue;
+                }
+
+                ARADData.Group group = arad.getGroup(dim, rwrPos);
+                if (group == null) {
+                    continue;
+                }
+
+                for (BlockPos linkPos : List.copyOf(group.dataLinks)) {
+                    if (endpoint.equals(arad.peekEndpointForDataLink(dim, linkPos))) {
+                        linksToDisconnect.add(linkPos);
+                    }
+                }
+            }
+        }
+
+        // Disconnect only Data Links that did not move.
+        for (BlockPos linkPos : linksToDisconnect) {
+            if (movingLinks.contains(linkPos) || isRelocating(level, linkPos)) {
+                continue;
+            }
+
+            if (!level.isLoaded(linkPos)) {
+                LOGGER.warn("Cannot yet disconnect unloaded stationary Data Link {}", linkPos);
+                continue;
+            }
+
+            DataLinkBlockEntity link = level.getBlockEntity(linkPos) instanceof DataLinkBlockEntity found ? found : null;
+            BlockPos endpoint = network.peekEndpointForDataLink(dim, linkPos);
+
+            if (endpoint == null && link != null) {
+                endpoint = link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH ? link.getSourcePosition() : link.getTargetPosition();
+            }
+
+            network.removeDataLinkAndCleanup(dim, linkPos, level, endpoint);
+            arad.removeDataLinkAndCleanup(dim, linkPos, level);
+            runtime.unregister(linkPos);
+
+            if (link != null) {
+                link.clearSavedConnection();
+            }
+
+            LOGGER.debug("Disconnected Data Link {} left behind during Sable movement", linkPos);
+        }
+
+
+        for (BlockPos oldMount : moved.keySet()) {
+            for (NetworkData.Group group : List.copyOf(network.getGroups().values())) {
+                if (!dim.equals(group.key.dim())) {
+                    continue;
+                }
+
+                for (BlockPos controller : List.copyOf(group.weaponEndpoints)) {
+                    if (moved.containsKey(controller)) {
+                        continue;
+                    }
+
+                    if (oldMount.equals(network.getWeaponMountForController(dim, controller))) {
+                        network.onEndpointRemoved(level, controller);
+                    }
+                }
+            }
+        }
+    }
+
     private static void processMoveGroup(ServerLevel level,
                                          List<PendingMove> moves,
                                          boolean weaponGroup) {
@@ -245,14 +464,6 @@ public final class SableDataLinkRelocation {
                 MOVING_FROM.remove(move.originLevel());
             }
         }
-
-        Set<BlockPos> endpoints = MOVING_ENDPOINTS.get(move.originLevel());
-        if (endpoints != null) {
-            endpoints.remove(move.oldSource());
-            if (endpoints.isEmpty()) {
-                MOVING_ENDPOINTS.remove(move.originLevel());
-            }
-        }
     }
 
     private static boolean isWeaponControllerMove(PendingMove move) {
@@ -264,41 +475,75 @@ public final class SableDataLinkRelocation {
             return move;
         }
 
-        BlockPos source = link.getSourcePosition().immutable();
-        BlockPos target = move.newTarget();
-
-        var dim = level.dimension();
-
-        BlockPos canonical = NetworkData.get(level).peekEndpointForDataLink(dim, move.oldDataLink());
-
-        if (canonical == null) {
-            canonical = ARADData.get(level).peekEndpointForDataLink(dim, move.oldDataLink());
-        }
-
-        if (move.oldTarget().equals(move.oldSource())) {
-            target = source;
-        }
-
-        else if (canonical != null && !canonical.equals(move.oldTarget()) && matchesMovedBlock(level, canonical, move.oldTargetBlock())) {
-            target = canonical;
-        }
-        else if (!matchesMovedBlock(level, target, move.oldTargetBlock()) && matchesMovedBlock(level, move.oldTarget(), move.oldTargetBlock())) {
-            target = move.oldTarget();
-        }
+        BlockPos newSource = link.getSourcePosition().immutable();
+        BlockPos mappedTarget = confirmedEndpointDestination(level, move.oldTarget());
+        BlockPos newTarget = mappedTarget != null ? mappedTarget : move.newTarget();
 
         return new PendingMove(
                 move.originLevel(),
                 move.oldDataLink(),
                 move.newDataLink(),
                 move.oldSource(),
-                source,
+                newSource,
                 move.oldTarget(),
-                target,
+                newTarget,
                 move.oldSourceBlock(),
                 move.oldTargetBlock(),
                 move.style(),
                 move.endpointType()
         );
+    }
+
+    private static boolean movedTogether(
+            ServerLevel level,
+            PendingMove move
+    ) {
+        if (move.originLevel() != level) {
+            return false;
+        }
+
+        BlockPos movedSource = confirmedEndpointDestination(
+                level, move.oldSource()
+        );
+
+        BlockPos movedTarget = confirmedEndpointDestination(
+                level, move.oldTarget()
+        );
+
+        return movedSource != null
+                && movedTarget != null
+                && movedSource.equals(move.newSource())
+                && movedTarget.equals(move.newTarget())
+                && level.getBlockEntity(move.newDataLink())
+                instanceof DataLinkBlockEntity
+                && matchesMovedBlock(
+                level, move.newSource(), move.oldSourceBlock()
+        )
+                && matchesMovedBlock(
+                level, move.newTarget(), move.oldTargetBlock()
+        );
+    }
+
+    private static void disconnectRejectedMove(ServerLevel level, PendingMove move) {
+        NetworkData network = NetworkData.get(level);
+        ARADData arad = ARADData.get(level);
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(level);
+
+        var dimension = level.dimension();
+
+        network.removeDataLinkAndCleanup(dimension, move.oldDataLink(), level, move.oldTarget());
+        arad.removeDataLinkAndCleanup(dimension, move.oldDataLink(), level);
+        network.removeDataLinkAndCleanup(dimension, move.newDataLink(), level, move.newTarget());
+        arad.removeDataLinkAndCleanup(dimension, move.newDataLink(), level);
+
+        runtime.unregister(move.oldDataLink());
+        runtime.unregister(move.newDataLink());
+
+        if (level.getBlockEntity(move.newDataLink()) instanceof DataLinkBlockEntity link) {
+            link.clearSavedConnection();
+        }
+
+        LOGGER.debug("Disconnected incomplete Sable Data Link move {} -> {}", move.oldDataLink(), move.newDataLink());
     }
 
     private static boolean matchesMovedBlock(ServerLevel level, BlockPos pos, Block expected) {
@@ -316,8 +561,11 @@ public final class SableDataLinkRelocation {
     public static void clear(ServerLevel level) {
         PENDING_MOUNT_MOVES.remove(level);
         PENDING.remove(level);
+        PREPARED_FILTERER_MOVES.remove(level);
         MOVING_FROM.remove(level);
         MOVING_ENDPOINTS.remove(level);
+        CONFIRMED_ENDPOINT_MOVES.remove(level);
+        PREPARED_LINKS.remove(level);
         for (List<PendingMove> moves : PENDING.values()) {
             moves.removeIf(move -> move.originLevel() == level);
         }

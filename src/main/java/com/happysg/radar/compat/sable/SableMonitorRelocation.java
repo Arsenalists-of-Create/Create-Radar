@@ -35,6 +35,14 @@ public final class SableMonitorRelocation {
     private record GroupKey(ServerLevel originLevel, BlockPos oldController) {}
     private SableMonitorRelocation() {}
 
+    public static void prepare(ServerLevel level, BlockPos oldPos) {
+        if (!(level.getBlockEntity(oldPos) instanceof MonitorBlockEntity)) {
+            return;
+        }
+
+        MOVING_FROM.computeIfAbsent(level, ignored -> new HashSet<>()).add(oldPos.immutable());
+    }
+
     public static void capture(ServerLevel originLevel, ServerLevel resultingLevel, BlockPos oldPos, BlockPos newPos) {
         if (!(originLevel.getBlockEntity(oldPos) instanceof MonitorBlockEntity oldMonitor) || !(resultingLevel.getBlockEntity(newPos) instanceof MonitorBlockEntity)) {
             return;
@@ -57,17 +65,7 @@ public final class SableMonitorRelocation {
                 facing
         ));
 
-        Set<BlockPos> moving = MOVING_FROM.computeIfAbsent(originLevel, ignored -> new HashSet<>());
-
-        for (int y = 0; y < size; y++) {
-            for (int x = 0; x < size; x++) {
-                BlockPos member = controller.above(y).relative(facing.getClockWise(), x);
-
-                if (originLevel.getBlockEntity(member) instanceof MonitorBlockEntity monitor && controller.equals(monitor.getControllerPos())) {
-                    moving.add(member.immutable());
-                }
-            }
-        }
+        MOVING_FROM.computeIfAbsent(originLevel, ignored -> new HashSet<>()).add(oldPos.immutable());
     }
 
     public static boolean isRelocating(ServerLevel level, BlockPos pos) {
@@ -79,6 +77,7 @@ public final class SableMonitorRelocation {
         List<Move> moves = PENDING.remove(level);
 
         if (moves == null || moves.isEmpty()) {
+            MOVING_FROM.remove(level);
             return;
         }
 
@@ -102,11 +101,7 @@ public final class SableMonitorRelocation {
                     continue;
                 }
 
-                for (int y = 0; y < move.size(); y++) {
-                    for (int x = 0; x < move.size(); x++) {
-                        moving.remove(move.oldController().above(y).relative(move.facing().getClockWise(), x));
-                    }
-                }
+                moving.remove(move.oldPos());
 
                 if (moving.isEmpty()) {
                     MOVING_FROM.remove(move.originLevel());
@@ -132,9 +127,7 @@ public final class SableMonitorRelocation {
         int size = controllerMove.size();
         BlockPos oldController = controllerMove.oldController();
         BlockPos newController = controllerMove.newPos();
-        if (first.originLevel() == level) {
-            disconnectLeftBehindMonitorLinks(level, oldController);
-        }
+        Set<BlockPos> leftBehindLinks = first.originLevel() == level && !oldController.equals(newController) ? collectLeftBehindMonitorLinks(level, oldController) : Set.of();
         Direction oldFacing = controllerMove.facing();
         Direction oldRight = oldFacing.getClockWise();
 
@@ -199,11 +192,18 @@ public final class SableMonitorRelocation {
         }
 
         if (aradLinked && !arad.updateMonitorPosition(dimension, oldController, newController)) {
+            if (networkLinked && !network.updateMonitorPosition(dimension, newController, oldController)) {
+                LOGGER.error("Could not roll back monitor network relocation {} -> {}", newController, oldController);
+            }
+
             LOGGER.warn("Could not relocate ARAD monitor {} -> {}", oldController, newController);
             return;
         }
 
         MonitorMultiBlockHelper.restoreAfterSableMove(level, newController, size);
+        for (BlockPos linkPos : leftBehindLinks) {
+            disconnectIfLeftBehind(level, linkPos, oldController);
+        }
     }
 
     public static void clear(ServerLevel level) {
@@ -215,8 +215,9 @@ public final class SableMonitorRelocation {
         }
     }
 
-    private static void disconnectLeftBehindMonitorLinks(ServerLevel level, BlockPos oldController) {
+    private static Set<BlockPos> collectLeftBehindMonitorLinks(ServerLevel level, BlockPos oldController) {
         var dim = level.dimension();
+        Set<BlockPos> links = new HashSet<>();
 
         NetworkData network = NetworkData.get(level);
         NetworkData.Group networkGroup = network.getGroupForEndpoint(dim, oldController);
@@ -224,7 +225,7 @@ public final class SableMonitorRelocation {
         if (networkGroup != null) {
             for (BlockPos linkPos : List.copyOf(networkGroup.dataLinks)) {
                 if (oldController.equals(network.peekEndpointForDataLink(dim, linkPos))) {
-                    disconnectIfLeftBehind(level, linkPos, oldController);
+                    links.add(linkPos);
                 }
             }
         }
@@ -238,11 +239,13 @@ public final class SableMonitorRelocation {
             if (aradGroup != null) {
                 for (BlockPos linkPos : List.copyOf(aradGroup.dataLinks)) {
                     if (oldController.equals(arad.peekEndpointForDataLink(dim, linkPos))) {
-                        disconnectIfLeftBehind(level, linkPos, oldController);
+                        links.add(linkPos);
                     }
                 }
             }
         }
+
+        return links;
     }
 
     private static void disconnectIfLeftBehind(ServerLevel level, BlockPos linkPos, BlockPos oldController) {

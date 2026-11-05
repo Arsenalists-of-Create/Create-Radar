@@ -67,16 +67,14 @@ public class FireControllerBlock extends Block implements EntityBlock {
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!level.isClientSide && state.getBlock() != newState.getBlock() ) {
-            if (level instanceof net.minecraft.server.level.ServerLevel
-                    serverLevel) {
-                if (!SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos)) {
+            if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                boolean assemblyMove = isMoving || SableDataLinkRelocation.isRelocatingEndpoint(serverLevel, pos);
 
-                    if (!isMoving) {
-                        WeaponNetworkRuntime.get(serverLevel).rememberRelinkRequirement(pos);
-                    }
-
+                if (!assemblyMove) {
+                    WeaponNetworkRuntime.get(serverLevel).rememberRelinkRequirement(pos);
                     breakAttachedDataLinks(level, pos);
                 }
+
                 WeaponNetworkRuntime.get(serverLevel).unregisterContactController(pos);
             } else {
                 breakAttachedDataLinks(level, pos);

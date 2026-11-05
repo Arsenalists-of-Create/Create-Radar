@@ -24,6 +24,7 @@ import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarSublevelConnectorBlock;
 
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableAwareNetworkFiltererBlock;
 import com.happysg.radar.compat.sable.SableMonitorFactory;
 import com.happysg.radar.compat.sable.SableDataLinkFactory;
 import com.simibubi.create.foundation.data.AssetLookup;
@@ -70,6 +71,14 @@ public class ModBlocks {
         }
 
         return new MonitorBlock(properties);
+    }
+
+    private static NetworkFiltererBlock createNetworkFiltererBlock(BlockBehaviour.Properties properties) {
+        if (Mods.SABLE.isLoaded()) {
+            return new SableAwareNetworkFiltererBlock(properties);
+        }
+
+        return new NetworkFiltererBlock(properties);
     }
 
     public static final BlockEntry<DataLinkBlock> RADAR_LINK =
@@ -280,7 +289,7 @@ public class ModBlocks {
                     .simpleItem()
                     .register();
     public static final BlockEntry<NetworkFiltererBlock> NETWORK_FILTERER_BLOCK =
-            REGISTRATE.block("network_filterer", NetworkFiltererBlock::new)
+            REGISTRATE.block("network_filterer", ModBlocks::createNetworkFiltererBlock)
                     .initialProperties(SharedProperties::softMetal)
                     .properties(p -> p.noOcclusion())
                     .properties(p -> p.strength(0.8f))

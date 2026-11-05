@@ -12,11 +12,14 @@ import net.minecraft.world.level.block.state.BlockState;
  * subclass prevents the ordinary DataLink block from acquiring a hard Sable
  * class-loading dependency.
  */
-public final class SableAwareDataLinkBlock extends DataLinkBlock
-        implements BlockSubLevelAssemblyListener {
-
+public final class SableAwareDataLinkBlock extends DataLinkBlock implements BlockSubLevelAssemblyListener {
     public SableAwareDataLinkBlock(BlockBehaviour.Properties properties) {
         super(properties);
+    }
+
+    @Override
+    public void beforeMove(ServerLevel originLevel, ServerLevel resultingLevel, BlockState oldState, BlockPos oldPos, BlockPos newPos) {
+        SableDataLinkRelocation.prepare(originLevel, oldPos);
     }
 
     @Override

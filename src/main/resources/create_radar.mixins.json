@@ -28,6 +28,7 @@
     "MountedAutocannonContraptionMixin",
     "MountedBigCannonContraptionMixin",
     "SableCannonMountAssemblyMixin",
+    "SableEndpointAssemblyMixin",
     "RotatedPillarKineticBlockPlacementMixin",
     "SimulatedCompassNavigationTargetMixin",
     "SimulatedSwivelCogwheelBlockEntityMixin"

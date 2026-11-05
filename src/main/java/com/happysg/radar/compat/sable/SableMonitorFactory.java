@@ -21,13 +21,13 @@ public final class SableMonitorFactory {
         }
 
         @Override
-        public void afterMove(
-                ServerLevel originLevel,
-                ServerLevel resultingLevel,
-                BlockState newState,
-                BlockPos oldPos,
-                BlockPos newPos
-        ) {
+        public void beforeMove(ServerLevel originLevel, ServerLevel resultingLevel, BlockState oldState, BlockPos oldPos, BlockPos newPos) {
+            SableMonitorRelocation.prepare(originLevel, oldPos);
+        }
+
+        @Override
+        public void afterMove(ServerLevel originLevel, ServerLevel resultingLevel, BlockState newState, BlockPos oldPos, BlockPos newPos) {
+            SableDataLinkRelocation.recordEndpointMove(originLevel, resultingLevel, oldPos, newPos);
             SableMonitorRelocation.capture(originLevel, resultingLevel, oldPos, newPos);
         }
     }

@@ -26,6 +26,7 @@ import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.create.CreateSchematicLinkPersistence;
+import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.compat.sable.SableLinkPersistence;
 import com.happysg.radar.compat.sable.SableNetworkFiltererAccess;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -156,6 +157,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         if (!be.lastKnownPos.equals(pos)) {
             if (!be.relocateNetworkIfNeeded(sl)) {
+                if (data.getGroup(sl.dimension(), be.lastKnownPos) != null) {
+                    return;
+                }
+
                 be.lastKnownPos = pos.immutable();
                 be.setChanged();
             }
@@ -245,6 +250,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
     private boolean relocateNetworkIfNeeded(ServerLevel level) {
         if (lastKnownPos == null || lastKnownPos.equals(worldPosition)) {
+            return false;
+        }
+
+        if (level.hasChunkAt(lastKnownPos) && level.getBlockEntity(lastKnownPos) instanceof NetworkFiltererBlockEntity) {
             return false;
         }
 
@@ -1757,12 +1766,16 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
 
         pendingCreateSchematicSnapshot = null;
+
         boolean sableSnapshot = Mods.SABLE.isLoaded() && SableLinkPersistence.isPlacingSchematic();
-        CompoundTag snapshot = sableSnapshot
-                ? SableLinkPersistence.readControllerSnapshot(nbt)
-                : CreateSchematicLinkPersistence.readControllerSnapshot(nbt);
-        if (snapshot != null) {
-            if (sableSnapshot) CreateSchematicLinkPersistence.markSchematicCopy(snapshot);
+        CompoundTag snapshot = sableSnapshot ? SableLinkPersistence.readControllerSnapshot(nbt) : CreateSchematicLinkPersistence.readControllerSnapshot(nbt);
+        boolean schematicCopy = snapshot != null && (sableSnapshot || CreateSchematicLinkPersistence.restorationMode(snapshot) == NetworkData.RestorationMode.SCHEMATIC_COPY);
+
+        if (schematicCopy) {
+            if (sableSnapshot) {
+                CreateSchematicLinkPersistence.markSchematicCopy(snapshot);
+            }
+
             pendingCreateSchematicSnapshot = snapshot;
             lastKnownPos = worldPosition;
         }
@@ -1803,6 +1816,24 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return data.copyTag();
     }
 
+    public void onSableMovedFrom(BlockPos oldPos) {
+        if (!(level instanceof ServerLevel serverLevel) || oldPos == null || oldPos.equals(worldPosition)) {
+            return;
+        }
+
+        NetworkData data = NetworkData.get(serverLevel);
+        if (data.getGroup(serverLevel.dimension(), oldPos) == null) {
+            return;
+        }
+
+        lastKnownPos = oldPos.immutable();
+        setChanged();
+
+        if (relocateNetworkIfNeeded(serverLevel)) {
+            applyFiltersToNetwork();
+        }
+    }
+
     @Override
     public void onLoad() {
         super.onLoad();
@@ -1812,6 +1843,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
 
         if (level instanceof ServerLevel sl) {
+
+            BlockPos movedFrom = SableDataLinkRelocation.getPreparedFiltererSource(sl, worldPosition);
+
+            if (movedFrom != null) {
+                pendingCreateSchematicSnapshot = null;
+                lastKnownPos = movedFrom.immutable();
+            }
+
             if (pendingCreateSchematicSnapshot != null) {
                 CompoundTag snapshot = pendingCreateSchematicSnapshot;
                 pendingCreateSchematicSnapshot = null;
@@ -1828,7 +1867,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 }
             }
 
-            relocateNetworkIfNeeded(sl);
+            if (!lastKnownPos.equals(worldPosition) && !relocateNetworkIfNeeded(sl) && NetworkData.get(sl).getGroup(sl.dimension(), lastKnownPos) != null) {
+                return;
+            }
+
             applyFiltersToNetwork();
         }
     }
