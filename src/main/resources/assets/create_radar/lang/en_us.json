@@ -46,6 +46,8 @@
   "create_radar.data_link.invalid_selection": "Selected source is missing or in another dimension; select it again",
   "create_radar.data_link.link_to_monitor": "Link to Monitor Or Cannon Mount",
   "create_radar.data_link.mount_set": "Cannon Mount Selected",
+  "create_radar.data_link.pitch_link_order": "Select Network Controller, then Cannon Mount, then Pitch Controller",
+  "create_radar.data_link.pitch_mount_unsupported": "Pitch linking requires a mount",
   "create_radar.data_link.rwr_set": "Radar Warning Receiver Selected",
   "create_radar.data_link.arad_monitor_conflict": "ARAD endpoint already linked to another network",
   "create_radar.data_link.only_pitch_allowed": "Only Pitch Controller Allowed",

@@ -80,6 +80,19 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         updateGatheredData();
     }
 
+    public void clearSavedNetworkAssociation() {
+        if (!(level instanceof ServerLevel)) {
+            return;
+        }
+
+        filtererOffset = null;
+        filtererWorldPosFallback = null;
+        lastObservedWeaponCandidates = List.of();
+
+        setChanged();
+        notifyUpdate();
+    }
+
     public void clearSavedConnection() {
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
@@ -376,6 +389,33 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
         }
     }
 
+    private void restoreMountAfterRelocation() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        BlockState state = getBlockState();
+
+        if (!(state.getBlock() instanceof DataLinkBlock) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.CONTROLLER || weaponEndpointType != WeaponEndpointType.PITCH) {
+            return;
+        }
+
+        NetworkData data = NetworkData.get(serverLevel);
+        var dimension = serverLevel.dimension();
+
+        BlockPos sourcePos = getSourcePosition();
+        BlockPos networkPos = data.getFiltererForDataLink(dimension, worldPosition);
+
+        if (networkPos == null || !networkPos.equals(data.getFiltererForEndpoint(dimension, sourcePos)) || !sourcePos.equals(data.peekEndpointForDataLink(dimension, worldPosition))) {
+            return;
+        }
+
+        BlockPos savedMount = data.getWeaponMountForController(dimension, sourcePos);
+        if (savedMount != null && !savedMount.equals(getTargetPosition())) {
+            finishAssemblyRelocation(savedMount);
+        }
+    }
+
     private void reconcileSavedRadarEndpoint() {
         if (!(level instanceof ServerLevel serverLevel) || serverLevel.getGameTime() % 20 != 0) {
             return;
@@ -513,6 +553,14 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     public BlockPos getTargetPosition() {
         if (!(level instanceof ServerLevel sl) || linkedShipId == null) {
             BlockPos relativeTarget = worldPosition.offset(targetOffset);
+
+            if (weaponEndpointType == WeaponEndpointType.PITCH
+                    && filtererOffset != null
+                    && getBlockState().hasProperty(DataLinkBlock.LINK_STYLE)
+                    && getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER) {
+                return relativeTarget;
+            }
+
             if (targetWorldPosFallback != null && shouldUseWorldTargetFallback(relativeTarget)) {
                 return targetWorldPosFallback;
             }
@@ -570,6 +618,7 @@ public class DataLinkBlockEntity extends SmartBlockEntity implements Transformab
     @Override
     public void onLoad() {
         super.onLoad();
+        restoreMountAfterRelocation();
         refreshWeaponRuntime();
 
         if (level instanceof ServerLevel serverLevel) {

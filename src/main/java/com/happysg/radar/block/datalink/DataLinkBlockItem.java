@@ -81,6 +81,8 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String DATA_LINK_ONLY_PITCH_ALLOWED = CreateRadar.MODID + ".data_link.only_pitch_allowed";
     private static final String DATA_LINK_PLACE_FAILED = CreateRadar.MODID + ".data_link.place_failed";
     private static final String DATA_LINK_SELECT_FIRST = CreateRadar.MODID + ".data_link.select_mount_or_filterer_first";
+    private static final String PITCH_LINK_ORDER = CreateRadar.MODID + ".data_link.pitch_link_order";
+    private static final String PITCH_MOUNT_UNSUPPORTED = CreateRadar.MODID + ".data_link.pitch_mount_unsupported";
 
     public DataLinkBlockItem(Block pBlock, Properties pProperties) {
         super(pBlock, pProperties);
@@ -169,12 +171,32 @@ public class DataLinkBlockItem extends BlockItem {
         LinkUse use = LinkUse.create(ctx, stack, player, level, getLinkTag(stack));
 
         InteractionResult selection = trySelectSource(use);
-        if (selection != null)
-            return selection;
+        if (selection != null) return selection;
 
         ControllerType controllerType = ControllerType.from(use.be(), use.clickedState());
 
-        if (controllerType != null && use.tag().contains(SELECTED_MOUNT_POS)) {
+        boolean networkSelected = use.tag().contains(SELECTED_FILTERER_POS);
+        boolean mountSelected = use.tag().contains(SELECTED_MOUNT_POS);
+
+        if (controllerType == ControllerType.PITCH) {
+            if (!networkSelected || !mountSelected) {
+                if (!level.isClientSide) {
+                    sendError(player, PITCH_LINK_ORDER);
+                }
+                return InteractionResult.FAIL;
+            }
+
+            return completeWeaponLink(use, controllerType);
+        }
+
+        if (networkSelected && mountSelected) {
+            if (!level.isClientSide) {
+                sendError(player, DATA_LINK_ONLY_PITCH_ALLOWED);
+            }
+            return InteractionResult.FAIL;
+        }
+
+        if (controllerType != null && mountSelected) {
             return completeWeaponLink(use, controllerType);
         }
 
@@ -203,11 +225,12 @@ public class DataLinkBlockItem extends BlockItem {
 
         if (selectedMount != null) {
             if (!use.level().isClientSide) {
+                if (use.tag().contains(SELECTED_FILTERER_POS) && !selectionDimensionMatches(use.tag(), (ServerLevel) use.level())) {
+                    return invalidSelection(use);
+                }
+
                 use.tag().put(SELECTED_MOUNT_POS, NbtUtils.writeBlockPos(selectedMount));
-
                 rememberSelectionDimension(use);
-
-                use.tag().remove(SELECTED_FILTERER_POS);
                 use.tag().remove(SELECTED_RWR_POS);
 
                 clearControllerSelections(use.tag());
@@ -308,6 +331,31 @@ public class DataLinkBlockItem extends BlockItem {
             mountPos = apiMount.getMountPos().immutable();
         }
 
+        BlockPos filtererPos = null;
+        NetworkData networkData = null;
+        NetworkData.Group networkGroup = null;
+
+        if (controllerType == ControllerType.PITCH) {
+            filtererPos = readSelectedPos(use.tag(), SELECTED_FILTERER_POS);
+
+            if (filtererPos == null || !serverLevel.hasChunkAt(filtererPos) || !(serverLevel.getBlockEntity(filtererPos) instanceof NetworkFiltererBlockEntity)) {
+                return invalidSelection(use);
+            }
+
+            if (selectedCbc == null || !selectedCbc.isCurrent() || selectedCbc.isFixed() || selectedCbc.isCompact()) {
+                sendError(use.player(), PITCH_MOUNT_UNSUPPORTED);
+                return InteractionResult.FAIL;
+            }
+
+            networkData = NetworkData.get(serverLevel);
+            networkGroup = networkData.getOrCreateGroup(serverLevel.dimension(), filtererPos);
+
+            if (networkData.getEndpointOrigin(serverLevel.dimension(), use.clickedPos()) == NetworkData.LinkOrigin.DATALINK || !networkData.canAttachWeaponEndpoint(networkGroup, use.clickedPos(), mountPos)) {
+                sendError(use.player(), DATA_LINK_FILTER_ATTACH_DENIED);
+                return InteractionResult.FAIL;
+            }
+        }
+
         WeaponNetworkRuntime weaponRuntime = WeaponNetworkRuntime.get(serverLevel);
         List<BlockPos> existingMounts = weaponRuntime.getExplicitMountsForController(use.clickedPos());
 
@@ -333,15 +381,42 @@ public class DataLinkBlockItem extends BlockItem {
 
         setLinkStyle(use.level(), placedPos, DataLinkBlock.LinkStyle.CONTROLLER);
 
-        if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink) {
+        if (serverLevel.getBlockEntity(placedPos) instanceof DataLinkBlockEntity dataLink && use.clickedPos().equals(dataLink.getSourcePosition())) {
             dataLink.target(mountPos);
+
+            if (filtererPos != null) {
+                dataLink.setFiltererPosition(filtererPos);
+            }
+
             dataLink.setWeaponEndpointType(endpointType);
-            weaponRuntime.register(dataLink);
+
+            if (!weaponRuntime.register(dataLink)) {
+                setLinkStyle(serverLevel, placedPos, DataLinkBlock.LinkStyle.RADAR);
+                serverLevel.destroyBlock(placedPos, !use.player().getAbilities().instabuild);
+
+                sendError(use.player(), DATA_LINK_COMMIT_FAILED);
+                clearLinkTag(use.stack());
+                return InteractionResult.FAIL;
+            }
+
+            if (networkData != null && networkGroup != null) {
+                networkData.attachWeaponEndpoint(networkGroup, use.clickedPos(), mountPos);
+                networkData.addDataLinkToGroup(networkGroup, placedPos, use.clickedPos());
+
+                if (serverLevel.getBlockEntity(filtererPos)
+                        instanceof NetworkFiltererBlockEntity filterer) {
+                    filterer.onWeaponTopologyChanged();
+                }
+            }
         } else {
+            setLinkStyle(serverLevel, placedPos, DataLinkBlock.LinkStyle.RADAR);
+            serverLevel.destroyBlock(placedPos, !use.player().getAbilities().instabuild);
+
             sendError(use.player(), DATA_LINK_COMMIT_FAILED);
             clearLinkTag(use.stack());
-            return InteractionResult.SUCCESS;
+            return InteractionResult.FAIL;
         }
+
         sendSuccess(use.player());
         clearLinkTag(use.stack());
         return InteractionResult.SUCCESS;

@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.api.weapon.RadarWeaponAdapter;
 import com.happysg.radar.api.weapon.RadarWeaponRegistry;
+import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.behavior.networks.SafeZone;
@@ -10,6 +11,9 @@ import com.happysg.radar.block.controller.kinetic.*;
 import com.happysg.radar.block.controller.limits.ControllerLimitAccess;
 import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import com.happysg.radar.block.controller.limits.collision.ControllerCollisionSource;
+import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
+import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
@@ -22,6 +26,7 @@ import com.happysg.radar.api.mount.RadarMountAdapter;
 import com.happysg.radar.api.mount.RadarMountRegistry;
 import com.happysg.radar.api.controller.RadarPitchController;
 import com.mojang.logging.LogUtils;
+import com.simibubi.create.content.kinetics.RotationPropagator;
 import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
@@ -41,6 +46,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 
 import javax.annotation.Nullable;
@@ -178,9 +184,21 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         getFiringControl();
 
+        DataLinkBlockEntity pitchLink = findPitchDataLink();
+        boolean networkPitch = isNetworkedPitchLink(pitchLink);
+
+        if (pitchLink != null && !networkPitch) {
+            cbcShaftDrive.reset(this::commandGeneratedSpeed);
+
+            if (isRunning) {
+                failClosedRadarAim();
+            }
+            return;
+        }
+
         debugSwivelSweep.enforce(targetAngle, this::applyDebugSwivelCommand);
         tickDebugSwivelFollow();
-        boolean kineticSelected = tickKineticActuator();
+        boolean kineticSelected = !networkPitch && tickKineticActuator();
         tickDebugSwivelSweep(kineticSelected);
         if (kineticSelected) {
             cbcShaftDrive.clear();
@@ -193,6 +211,54 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         List<CannonMountContext> cbcMounts = resolveControlledCbcMounts();
+
+        if (networkPitch) {
+            if (getClass() != AutoPitchControllerBlockEntity.class || cbcMounts.size() != 1) {
+                cbcShaftDrive.reset(this::commandGeneratedSpeed);
+
+                if (isRunning) {
+                    failClosedRadarAim();
+                }
+                return;
+            }
+
+            CannonMountContext mount = cbcMounts.getFirst();
+            if (!mount.isCurrent() || mount.isFixed() || mount.isCompact()) {
+                cbcShaftDrive.reset(this::commandGeneratedSpeed);
+
+                if (isRunning) {
+                    failClosedRadarAim();
+                }
+                return;
+            }
+
+            // Physically connected output: preserve the original shaft drive.
+            if (hasConnectedPitchOutput()) {
+                cbcShaftDrive.tick(
+                        this,
+                        mount,
+                        isRunning,
+                        targetAngle,
+                        getAvailableInputSpeed(),
+                        getBlockState().getValue(HorizontalDirectionalBlock.FACING),
+                        null,
+                        this::commandGeneratedSpeed
+                );
+                return;
+            }
+
+            cbcShaftDrive.reset(this::commandGeneratedSpeed);
+            if (mount.blockEntity() instanceof CannonMountBlockEntity cbc && Math.abs(cbc.getPitchInterface().getTheoreticalSpeed()) > 0.001f) {
+
+                if (isRunning) {
+                    failClosedRadarAim();
+                }
+                return;
+            }
+
+            cannonHandler.tick(mount);
+            return;
+        }
 
         if (Mods.CREATEBIGCANNONS.isLoaded() && !cbcMounts.isEmpty()) {
             if (getClass() == AutoPitchControllerBlockEntity.class && cbcMounts.size() == 1 && !cbcMounts.get(0).isFixed() && !cbcMounts.get(0).isCompact()) {
@@ -614,7 +680,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
 
         KineticMountAdapterResolution kineticResolution = resolveKineticMount();
-        if (kineticResolution.isStructuralSelection() && shouldUseStructuralTargeting()) {
+        if (!isNetworkedPitchLink(findPitchDataLink()) && kineticResolution.isStructuralSelection() && shouldUseStructuralTargeting()) {
             Vec3 origin = PhysicsHandler.getWorldVec(this);
             setStructuralAimDirection(targetPos.subtract(origin), false);
             return;
@@ -1022,6 +1088,78 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         return mounts.isEmpty() ? null : mounts.getFirst();
     }
 
+    private boolean hasConnectedPitchOutput() {
+        if (level == null) {
+            return false;
+        }
+
+        BlockState state = getBlockState();
+
+        if (!state.hasProperty(HorizontalDirectionalBlock.FACING)) {
+            return false;
+        }
+
+        Direction outputSide = state.getValue(HorizontalDirectionalBlock.FACING);
+        BlockPos outputPos = worldPosition.relative(outputSide);
+
+        if (!level.hasChunkAt(outputPos)) {
+            return false;
+        }
+
+        BlockEntity neighbor = level.getBlockEntity(outputPos);
+
+        return neighbor instanceof KineticBlockEntity kinetic && kinetic != this && RotationPropagator.isConnected(this, kinetic);
+    }
+
+    @Nullable
+    private DataLinkBlockEntity findPitchDataLink() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+
+        for (Direction direction : Direction.values()) {
+            BlockPos linkPos = worldPosition.relative(direction);
+
+            if (!serverLevel.hasChunkAt(linkPos)) {
+                continue;
+            }
+
+            if (!(serverLevel.getBlockEntity(linkPos) instanceof DataLinkBlockEntity link)) {
+                continue;
+            }
+
+            BlockState state = link.getBlockState();
+            if (state.getBlock() instanceof DataLinkBlock
+                    && state.getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER
+                    && link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH
+                    && worldPosition.equals(link.getSourcePosition())) {
+                return link;
+            }
+        }
+
+        return null;
+    }
+
+    private boolean isNetworkedPitchLink(@Nullable DataLinkBlockEntity link) {
+        if (link == null || !(level instanceof ServerLevel serverLevel)) {
+            return false;
+        }
+
+        NetworkData data = NetworkData.get(serverLevel);
+        BlockPos networkPos = data.getFiltererForEndpoint(serverLevel.dimension(), worldPosition);
+        BlockPos mountPos = data.getWeaponMountForController(serverLevel.dimension(), worldPosition);
+
+        if (networkPos == null || mountPos == null
+                || !serverLevel.hasChunkAt(networkPos)
+                || !(serverLevel.getBlockEntity(networkPos) instanceof NetworkFiltererBlockEntity)
+                || !networkPos.equals(data.getFiltererForDataLink(serverLevel.dimension(), link.getBlockPos()))
+                || !mountPos.equals(link.getTargetPosition())) {
+            return false;
+        }
+
+        return mountPos.equals(WeaponNetworkRuntime.get(serverLevel).getMountForController(worldPosition));
+    }
+
     /** Server-side mount data used by the controller collision-view snapshot. */
     @Override
     public List<CannonMountContext> resolveCollisionCbcMounts() {
@@ -1275,7 +1413,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     private boolean hasStructuralKineticSelection() {
-        return resolveKineticMount().isStructuralSelection();
+        return !isNetworkedPitchLink(findPitchDataLink()) && resolveKineticMount().isStructuralSelection();
     }
 
     public boolean hasStructuralKineticSelectionForTargeting() {

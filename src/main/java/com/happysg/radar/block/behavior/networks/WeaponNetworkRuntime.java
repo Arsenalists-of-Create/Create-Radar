@@ -261,6 +261,15 @@ public final class WeaponNetworkRuntime {
                 .toList();
     }
 
+    public boolean hasExplicitLinksForMount(BlockPos mountPos) {
+        if (mountPos == null) {
+            return false;
+        }
+
+        pruneStaleInputs();
+        return linksByDataLink.values().stream().anyMatch(entry -> entry.mountPos().equals(mountPos));
+    }
+
     @Nullable
     public EndpointOrigin getEndpointOrigin(BlockPos controllerPos) {
         reconcileIfDirty();
@@ -875,7 +884,25 @@ public final class WeaponNetworkRuntime {
             return false;
         }
 
-        return endpointType(level.getBlockEntity(link.endpointPos())) == link.type();
+        if (endpointType(level.getBlockEntity(link.endpointPos())) != link.type()) {
+            return false;
+        }
+
+        if (link.type() != DataLinkBlockEntity.WeaponEndpointType.PITCH) {
+            return true;
+        }
+
+        NetworkData data = NetworkData.get(level);
+        var dimension = level.dimension();
+
+        BlockPos filtererPos = data.getFiltererForDataLink(dimension, link.dataLinkPos());
+        if (filtererPos == null || !level.hasChunkAt(filtererPos) || !(level.getBlockEntity(filtererPos) instanceof NetworkFiltererBlockEntity)) {
+            return false;
+        }
+
+        return filtererPos.equals(data.getFiltererForEndpoint(dimension, link.endpointPos()))
+                && link.endpointPos().equals(data.peekEndpointForDataLink(dimension, link.dataLinkPos()))
+                && link.mountPos().equals(data.getWeaponMountForController(dimension, link.endpointPos()));
     }
 
     private boolean isExplicitMountAvailable(BlockPos mountPos) {
@@ -916,9 +943,15 @@ public final class WeaponNetworkRuntime {
         }
 
         EnumMap<DataLinkBlockEntity.WeaponEndpointType, BlockPos> desired = new EnumMap<>(DataLinkBlockEntity.WeaponEndpointType.class);
+
         for (LinkEntry entry : linksByDataLink.values()) {
-            if (entry.mountPos().equals(newMount)) {
-                desired.put(entry.type(), entry.endpointPos());
+            if (!entry.mountPos().equals(newMount) || entry.type() == DataLinkBlockEntity.WeaponEndpointType.FIRING) {
+                continue;
+            }
+
+            BlockPos existing = desired.putIfAbsent(entry.type(), entry.endpointPos());
+            if (existing != null && !existing.equals(entry.endpointPos())) {
+                return false;
             }
         }
 
@@ -928,9 +961,11 @@ public final class WeaponNetworkRuntime {
                 continue;
             }
             BlockPos endpoint = movedEndpoints.getOrDefault(link, link.getSourcePosition());
-            BlockPos existing = desired.putIfAbsent(type, endpoint);
-            if (existing != null && !existing.equals(endpoint)) {
-                return false;
+            if (type != DataLinkBlockEntity.WeaponEndpointType.FIRING) {
+                BlockPos existing = desired.putIfAbsent(type, endpoint);
+                if (existing != null && !existing.equals(endpoint)) {
+                    return false;
+                }
             }
             boolean mappedElsewhere = getExplicitMountsForController(endpoint)
                     .stream()

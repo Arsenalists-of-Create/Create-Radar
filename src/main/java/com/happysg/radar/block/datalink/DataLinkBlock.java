@@ -41,12 +41,10 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
         private final String name;
         LinkStyle(String name) { this.name = name; }
         @Override public String getSerializedName() { return name; }
-        }
+    }
 
 
-        public static final EnumProperty<LinkStyle> LINK_STYLE =
-                EnumProperty.create("link_style", LinkStyle.class);
-
+    public static final EnumProperty<LinkStyle> LINK_STYLE = EnumProperty.create("link_style", LinkStyle.class);
 
     public DataLinkBlock(Properties props) {
         super(props);
@@ -61,15 +59,10 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
         builder.add(FACING, LINK_STYLE);
     }
 
-
-
-    
-
     @Override
     public VoxelShape getShape(BlockState pState, BlockGetter pLevel, BlockPos pPos, CollisionContext pContext) {
         return AllShapes.DATA_GATHERER.get(pState.getValue(FACING));
     }
-
 
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         BlockState placed = super.getStateForPlacement(context);
@@ -208,6 +201,17 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
 
                     if (controllerEntity instanceof WeaponContactUnlinkState controller) {
                         controller.suppressWeaponContact();
+                    }
+                }
+
+                if (style == LinkStyle.CONTROLLER && oldLink != null && oldLink.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH && data.getFiltererForDataLink(dim, pos) != null) {
+                    data.removeDataLinkAndCleanup(dim, pos, serverLevel, sourcePos);
+
+                    if (serverLevel.hasChunkAt(sourcePos) && serverLevel.getBlockEntity(sourcePos) instanceof AutoPitchControllerBlockEntity pitch) {
+                        pitch.suppressFiltererContact();
+                        pitch.onRadarNetworkDisconnected();
+                        pitch.markMountDirtyExternal();
+                        pitch.onWeaponTopologyChanged();
                     }
                 }
 

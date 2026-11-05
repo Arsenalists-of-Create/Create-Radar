@@ -27,6 +27,7 @@
     "HorizontalKineticBlockPlacementMixin",
     "MountedAutocannonContraptionMixin",
     "MountedBigCannonContraptionMixin",
+    "SableCannonMountAssemblyMixin",
     "RotatedPillarKineticBlockPlacementMixin",
     "SimulatedCompassNavigationTargetMixin",
     "SimulatedSwivelCogwheelBlockEntityMixin"

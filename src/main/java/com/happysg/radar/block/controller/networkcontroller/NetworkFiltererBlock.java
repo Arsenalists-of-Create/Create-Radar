@@ -3,6 +3,7 @@ package com.happysg.radar.block.controller.networkcontroller;
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.behavior.networks.NetworkData;
 import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.item.RadarCompassLink;
 import com.happysg.radar.registry.ModBlockEntityTypes;
@@ -277,7 +278,22 @@ public class NetworkFiltererBlock extends WrenchableDirectionalBlock implements 
 
                 if (group != null) {
                     for (BlockPos linkPos : java.util.List.copyOf(group.dataLinks)) {
-                        DataLinkBlock.disconnectSavedLink(serverLevel, linkPos);
+
+                        if (!serverLevel.hasChunkAt(linkPos) || SableDataLinkRelocation.isRelocating(serverLevel, linkPos)) {
+                            continue;
+                        }
+
+                        BlockEntity be = serverLevel.getBlockEntity(linkPos);
+
+                        if (be instanceof DataLinkBlockEntity link
+                                && link.getBlockState().getValue(DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER
+                                && link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH
+                                && pos.equals(network.getFiltererForDataLink(serverLevel.dimension(), linkPos))) {
+
+                            link.clearSavedNetworkAssociation();
+                        } else {
+                            DataLinkBlock.disconnectSavedLink(serverLevel, linkPos);
+                        }
                     }
                 }
 

@@ -13,8 +13,10 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.slf4j.Logger;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -35,6 +37,7 @@ import java.util.WeakHashMap;
 public final class SableDataLinkRelocation {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<ServerLevel, List<PendingMove>> PENDING = new WeakHashMap<>();
+    private static final Map<ServerLevel, List<PendingMountMove>> PENDING_MOUNT_MOVES = new WeakHashMap<>();
     private static final Map<ServerLevel, Set<BlockPos>> MOVING_FROM = new WeakHashMap<>();
     private static final Map<ServerLevel, Set<BlockPos>> MOVING_ENDPOINTS =
             new WeakHashMap<>();
@@ -74,9 +77,32 @@ public final class SableDataLinkRelocation {
         );
         PENDING.computeIfAbsent(resultingLevel, ignored -> new ArrayList<>()).add(move);
         MOVING_FROM.computeIfAbsent(originLevel, ignored -> new HashSet<>()).add(oldPos.immutable());
-        MOVING_ENDPOINTS.computeIfAbsent(originLevel,
-                ignored -> new HashSet<>()).add(oldSource);
+        MOVING_ENDPOINTS.computeIfAbsent(originLevel, ignored -> new HashSet<>()).add(oldSource);
         newLink.markAssemblyRelocated();
+    }
+
+    public static void captureMountMove(ServerLevel originLevel, ServerLevel resultingLevel, BlockPos oldMount, BlockPos newMount) {
+        if (oldMount.equals(newMount)) {
+            return;
+        }
+
+        if (originLevel != resultingLevel) {
+            LOGGER.warn("Cannot relocate weapon mount link across ServerLevel instances: {} -> {}", oldMount, newMount);
+            return;
+        }
+
+        if (!(resultingLevel.getBlockEntity(newMount) instanceof CannonMountBlockEntity)) {
+            return;
+        }
+
+        boolean radarOwned = NetworkData.get(originLevel).getFiltererForWeaponMount(originLevel.dimension(), oldMount) != null;
+        boolean weaponLinked = WeaponNetworkRuntime.get(originLevel).hasExplicitLinksForMount(oldMount);
+
+        if (!radarOwned && !weaponLinked) {
+            return;
+        }
+
+        PENDING_MOUNT_MOVES.computeIfAbsent(resultingLevel, ignored -> new ArrayList<>()).add(new PendingMountMove(originLevel, oldMount.immutable(), newMount.immutable()));
     }
 
     public static boolean isRelocating(ServerLevel level, BlockPos position) {
@@ -92,9 +118,20 @@ public final class SableDataLinkRelocation {
 
     public static void process(ServerLevel level) {
         List<PendingMove> moves = PENDING.remove(level);
-        if (moves == null || moves.isEmpty()) {
-            return;
+
+        if (moves == null) {
+            moves = new ArrayList<>();
         }
+
+        List<PendingMove> resolvedMoves = new ArrayList<>(moves.size());
+
+        for (PendingMove move : moves) {
+            resolvedMoves.add(resolveMovedEndpoints(level, move));
+        }
+
+        moves = resolvedMoves;
+
+        List<PendingMountMove> mountMoves = PENDING_MOUNT_MOVES.remove(level);
 
         // Controller links establish the canonical mount relocation before a
         // radar-style link migrates its saved endpoint and DataLink position.
@@ -121,6 +158,60 @@ public final class SableDataLinkRelocation {
         for (PendingMove move : otherMoves) {
             processMoveGroup(level, List.of(move), false);
         }
+
+        if (mountMoves != null) {
+            for (PendingMountMove move : mountMoves) {
+                try {
+                    processMountOnly(level, move);
+                } catch (RuntimeException exception) {
+                    DiagnosticRecorder.error("sable", "mount_only_relocation", "topology_migration_failed", exception, level, move.newMount(), "sable", "createbigcannons");
+                    LOGGER.error("Failed mount-only relocation {} -> {}", move.oldMount(), move.newMount(), exception);
+                }
+            }
+        }
+    }
+
+    private static void processMountOnly(ServerLevel level, PendingMountMove move) {
+
+        if (move.originLevel() != level || !level.hasChunkAt(move.newMount()) || !(level.getBlockEntity(move.newMount()) instanceof CannonMountBlockEntity)) {
+            return;
+        }
+
+        NetworkData data = NetworkData.get(level);
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(level);
+
+        BlockPos oldMount = move.oldMount();
+        BlockPos newMount = move.newMount();
+
+        NetworkData.WeaponMountReferenceRelocation relocation = data.relocateWeaponMountReferences(level.dimension(), oldMount, newMount);
+        if (relocation.result() == NetworkData.WeaponRelocationResult.NOT_FOUND && !runtime.hasExplicitLinksForMount(oldMount)) {
+            return;
+        }
+
+        if (relocation.result() == NetworkData.WeaponRelocationResult.CONFLICT) {
+            LOGGER.warn("Mount-only relocation conflicts with existing ownership: {} -> {}", oldMount, newMount);
+            return;
+        }
+
+        boolean moved;
+
+        try {
+            moved = runtime.relocateMountGroup(oldMount, newMount, Map.of());
+        } catch (RuntimeException exception) {
+            data.rollbackWeaponMountReferences(relocation);
+            throw exception;
+        }
+
+        if (!moved) {
+            data.rollbackWeaponMountReferences(relocation);
+
+            LOGGER.warn("Mount-only relocation rejected; previous links restored: {} -> {}", oldMount, newMount);
+            return;
+        }
+
+        invalidateControllers(level, newMount);
+
+        LOGGER.debug("Relocated stationary weapon links from {} to {}", oldMount, newMount);
     }
 
     private static void processMoveGroup(ServerLevel level,
@@ -171,7 +262,62 @@ public final class SableDataLinkRelocation {
                 != DataLinkBlockEntity.WeaponEndpointType.NONE;
     }
 
+    private static PendingMove resolveMovedEndpoints(ServerLevel level, PendingMove move) {
+        if (!(level.getBlockEntity(move.newDataLink()) instanceof DataLinkBlockEntity link)) {
+            return move;
+        }
+
+        BlockPos source = link.getSourcePosition().immutable();
+        BlockPos target = move.newTarget();
+
+        var dim = level.dimension();
+
+        BlockPos canonical = NetworkData.get(level).peekEndpointForDataLink(dim, move.oldDataLink());
+
+        if (canonical == null) {
+            canonical = ARADData.get(level).peekEndpointForDataLink(dim, move.oldDataLink());
+        }
+
+        if (move.oldTarget().equals(move.oldSource())) {
+            target = source;
+        }
+
+        else if (canonical != null && !canonical.equals(move.oldTarget()) && matchesMovedBlock(level, canonical, move.oldTargetBlock())) {
+            target = canonical;
+        }
+        else if (!matchesMovedBlock(level, target, move.oldTargetBlock()) && matchesMovedBlock(level, move.oldTarget(), move.oldTargetBlock())) {
+            target = move.oldTarget();
+        }
+
+        return new PendingMove(
+                move.originLevel(),
+                move.oldDataLink(),
+                move.newDataLink(),
+                move.oldSource(),
+                source,
+                move.oldTarget(),
+                target,
+                move.oldSourceBlock(),
+                move.oldTargetBlock(),
+                move.style(),
+                move.endpointType()
+        );
+    }
+
+    private static boolean matchesMovedBlock(ServerLevel level, BlockPos pos, Block expected) {
+        if (!level.hasChunkAt(pos)) {
+            return false;
+        }
+
+        if (expected == Blocks.AIR) {
+            return level.getBlockEntity(pos) != null;
+        }
+
+        return level.getBlockState(pos).getBlock() == expected;
+    }
+
     public static void clear(ServerLevel level) {
+        PENDING_MOUNT_MOVES.remove(level);
         PENDING.remove(level);
         MOVING_FROM.remove(level);
         MOVING_ENDPOINTS.remove(level);
@@ -288,10 +434,7 @@ public final class SableDataLinkRelocation {
                     move.newDataLink());
             return null;
         }
-        if (level.getBlockState(move.newSource()).getBlock()
-                != move.oldSourceBlock()
-                || level.getBlockState(move.newTarget()).getBlock()
-                != move.oldTargetBlock()) {
+        if (!matchesMovedBlock(level, move.newSource(), move.oldSourceBlock()) || !matchesMovedBlock(level, move.newTarget(), move.oldTargetBlock())) {
             WeaponNetworkRuntime.get(level).unregister(move.newDataLink());
             LOGGER.warn("Relocated DataLink {} did not retain its source/target blocks; "
                             + "refusing topology migration",
@@ -326,15 +469,11 @@ public final class SableDataLinkRelocation {
 
     private static void processMove(ServerLevel level, PendingMove move) {
         if (!(level.getBlockEntity(move.newDataLink()) instanceof DataLinkBlockEntity newLink)) {
-            LOGGER.warn("Relocated DataLink at {} was unavailable; topology remains detached",
-                    move.newDataLink());
+            LOGGER.warn("Relocated DataLink at {} was unavailable; topology remains detached", move.newDataLink());
             return;
         }
-        if (level.getBlockState(move.newSource()).getBlock() != move.oldSourceBlock()
-                || level.getBlockState(move.newTarget()).getBlock() != move.oldTargetBlock()) {
-            LOGGER.warn("Relocated DataLink {} did not retain its source/target blocks; "
-                            + "refusing topology migration",
-                    move.newDataLink());
+        if (!matchesMovedBlock(level, move.newSource(), move.oldSourceBlock()) || !matchesMovedBlock(level, move.newTarget(), move.oldTargetBlock())) {
+            LOGGER.warn("Relocated DataLink {} did not retain its source/target blocks; " + "refusing topology migration", move.newDataLink());
             return;
         }
 
@@ -360,19 +499,14 @@ public final class SableDataLinkRelocation {
 
             boolean runtimeRelocated;
             try {
-                runtimeRelocated = WeaponNetworkRuntime.get(level)
-                        .relocateMountGroup(move.oldTarget(), move.newTarget(),
-                                newLink, move.newSource());
+                runtimeRelocated = WeaponNetworkRuntime.get(level).relocateMountGroup(move.oldTarget(), move.newTarget(), newLink, move.newSource());
             } catch (RuntimeException exception) {
-                rollbackSavedWeaponRelocation(networkData, level, move,
-                        weaponResult);
+                rollbackSavedWeaponRelocation(networkData, level, move, weaponResult);
                 throw exception;
             }
             if (!runtimeRelocated) {
-                rollbackSavedWeaponRelocation(networkData, level, move,
-                        weaponResult);
-                LOGGER.warn("Refused ambiguous weapon group relocation from mount {} to {}",
-                        move.oldTarget(), move.newTarget());
+                rollbackSavedWeaponRelocation(networkData, level, move, weaponResult);
+                LOGGER.warn("Refused ambiguous weapon group relocation from mount {} to {}", move.oldTarget(), move.newTarget());
                 return;
             }
             invalidateControllers(level, move.newTarget());
@@ -418,20 +552,14 @@ public final class SableDataLinkRelocation {
             NetworkData.WeaponRelocationResult weaponResult
     ) {
         NetworkData networkData = NetworkData.get(level);
-        boolean networkLinkMoved = networkData.updateDataLinkPosition(
-                level.dimension(), move.oldDataLink(), move.newDataLink());
-        ARADData.get(level).updateDataLinkPosition(
-                level.dimension(), move.oldDataLink(), move.newDataLink());
+        boolean networkLinkMoved = networkData.updateDataLinkPosition(level.dimension(), move.oldDataLink(), move.newDataLink());
+        ARADData.get(level).updateDataLinkPosition(level.dimension(), move.oldDataLink(), move.newDataLink());
 
-        BlockPos filtererPos = networkData.getFiltererForDataLink(
-                level.dimension(), move.newDataLink());
-        if (filtererPos == null
-                && weaponResult == NetworkData.WeaponRelocationResult.UPDATED) {
-            filtererPos = networkData.getFiltererForEndpoint(
-                    level.dimension(), move.newSource());
+        BlockPos filtererPos = networkData.getFiltererForDataLink(level.dimension(), move.newDataLink());
+        if (filtererPos == null && weaponResult == NetworkData.WeaponRelocationResult.UPDATED) {
+            filtererPos = networkData.getFiltererForEndpoint(level.dimension(), move.newSource());
         }
-        if (filtererPos != null
-                && level.getBlockEntity(filtererPos)
+        if (filtererPos != null && level.getBlockEntity(filtererPos)
                 instanceof NetworkFiltererBlockEntity filterer) {
             filterer.onWeaponTopologyChanged();
         }
@@ -502,6 +630,8 @@ public final class SableDataLinkRelocation {
             }
         }
     }
+
+    private record PendingMountMove(ServerLevel originLevel, BlockPos oldMount, BlockPos newMount) {}
 
     private record WeaponMoveKey(
             ServerLevel originLevel,

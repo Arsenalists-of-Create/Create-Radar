@@ -48,8 +48,8 @@ public final class WeaponGroupCoordinator {
     public static void onLevelTick(LevelTickEvent.Post event) {
         if (!(event.getLevel() instanceof ServerLevel sl)) return;
 
-        SableDataLinkRelocation.process(sl);
         SableMonitorRelocation.process(sl);
+        SableDataLinkRelocation.process(sl);
         WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(sl);
         runtime.reconcile();
 

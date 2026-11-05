@@ -959,6 +959,58 @@ public class NetworkData extends SavedData {
                 continue;
             }
 
+            BlockPos savedMount = getWeaponMountForController(group.key.dim(), endpointPos);
+            if (savedMount != null) {
+                boolean linkUnavailable = false;
+
+                for (BlockPos linkPos : group.dataLinks) {
+                    if (level.hasChunkAt(linkPos)) {
+                        continue;
+                    }
+
+                    BlockPos recordedEndpoint = peekEndpointForDataLink(group.key.dim(), linkPos);
+                    if (endpointPos.equals(recordedEndpoint)) {
+                        linkUnavailable = true;
+                        break;
+                    }
+                }
+
+                if (linkUnavailable) {
+                    continue;
+                }
+            }
+
+            if (savedMount != null) {
+                if (!level.hasChunkAt(savedMount)) {
+                    continue;
+                }
+
+                boolean linked = false;
+                for (BlockPos linkPos : group.dataLinks) {
+                    if (!level.hasChunkAt(linkPos)) {
+                        continue;
+                    }
+
+                    if (!(level.getBlockEntity(linkPos) instanceof DataLinkBlockEntity link)) {
+                        continue;
+                    }
+
+                    if (link.getBlockState().getValue(
+                            DataLinkBlock.LINK_STYLE) == DataLinkBlock.LinkStyle.CONTROLLER
+                            && link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH
+                            && endpointPos.equals(link.getSourcePosition())
+                            && savedMount.equals(link.getTargetPosition())) {
+
+                        linked = true;
+                        break;
+                    }
+                }
+
+                if (linked) {
+                    continue;
+                }
+            }
+
             BlockPos effectiveMount = runtime.getMountForController(endpointPos);
             if (effectiveMount != null) {
                 WeaponNetworkRuntime.WeaponControlView view = runtime.getWeaponControlViewFromPitch(endpointPos);
@@ -2001,14 +2053,24 @@ public class NetworkData extends SavedData {
             }
 
             BlockState state = level.getBlockState(linkPos);
-
-            if (!(state.getBlock() instanceof DataLinkBlock) || state.getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR) {
+            if (!(state.getBlock() instanceof DataLinkBlock)) {
                 continue;
             }
 
             BlockEntity be = level.getBlockEntity(linkPos);
+            if (!(be instanceof DataLinkBlockEntity link)) {
+                continue;
+            }
 
-            if (be instanceof DataLinkBlockEntity link && endpointPos.equals(link.getTargetPosition())) {
+            DataLinkBlock.LinkStyle style = state.getValue(DataLinkBlock.LINK_STYLE);
+            if (style == DataLinkBlock.LinkStyle.RADAR && endpointPos.equals(link.getTargetPosition())) {
+                return true;
+            }
+
+            if (style == DataLinkBlock.LinkStyle.CONTROLLER
+                    && link.getWeaponEndpointType() == DataLinkBlockEntity.WeaponEndpointType.PITCH
+                    && endpointPos.equals(link.getSourcePosition())
+                    && endpointKey.equals(recordedEndpoint)) {
                 return true;
             }
         }

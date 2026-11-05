@@ -3,6 +3,8 @@ package com.happysg.radar.compat.sable;
 
 import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlock;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.monitor.MonitorMultiBlockHelper;
@@ -130,8 +132,21 @@ public final class SableMonitorRelocation {
         int size = controllerMove.size();
         BlockPos oldController = controllerMove.oldController();
         BlockPos newController = controllerMove.newPos();
-        Direction facing = controllerMove.facing();
-        Direction right = facing.getClockWise();
+        if (first.originLevel() == level) {
+            disconnectLeftBehindMonitorLinks(level, oldController);
+        }
+        Direction oldFacing = controllerMove.facing();
+        Direction oldRight = oldFacing.getClockWise();
+
+        BlockState destinationState = level.getBlockState(newController);
+
+        if (!destinationState.is(ModBlocks.MONITOR.get())) {
+            LOGGER.warn("Relocated monitor controller missing at {}", newController);
+            return;
+        }
+
+        Direction newFacing = destinationState.getValue(MonitorBlock.FACING);
+        Direction newRight = newFacing.getClockWise();
 
         if (moves.size() != size * size) {
             LOGGER.warn("Incomplete monitor relocation at {}: {} of {} blocks", oldController, moves.size(), size * size);
@@ -140,8 +155,8 @@ public final class SableMonitorRelocation {
 
         for (int y = 0; y < size; y++) {
             for (int x = 0; x < size; x++) {
-                BlockPos oldMember = oldController.above(y).relative(right, x);
-                BlockPos newMember = newController.above(y).relative(right, x);
+                BlockPos oldMember = oldController.above(y).relative(oldRight, x);
+                BlockPos newMember = newController.above(y).relative(newRight, x);
                 Move moved = byOldPosition.get(oldMember);
 
                 if (moved == null || !newMember.equals(moved.newPos())) {
@@ -150,7 +165,7 @@ public final class SableMonitorRelocation {
                 }
 
                 BlockState state = level.getBlockState(newMember);
-                if (!state.is(ModBlocks.MONITOR.get()) || state.getValue(MonitorBlock.FACING) != facing || !(level.getBlockEntity(newMember) instanceof MonitorBlockEntity)) {
+                if (!state.is(ModBlocks.MONITOR.get()) || state.getValue(MonitorBlock.FACING) != newFacing || !(level.getBlockEntity(newMember) instanceof MonitorBlockEntity)) {
                     LOGGER.warn("Relocated monitor piece missing at {}", newMember);
                     return;
                 }
@@ -164,11 +179,16 @@ public final class SableMonitorRelocation {
         boolean aradLinked = arad.isMonitorLinked(dimension, oldController);
 
         if (!oldController.equals(newController)) {
-            if ((networkLinked
-                    && network.isEndpointLinked(dimension, newController))
-                    || (aradLinked
-                    && arad.isMonitorLinked(dimension, newController))) {
-                LOGGER.warn("Monitor relocation destination already linked: {}", newController);
+            boolean networkConflict = networkLinked
+                    && network.isEndpointLinked(dimension, newController)
+                    && !Objects.equals(network.getFiltererForEndpoint(dimension, oldController), network.getFiltererForEndpoint(dimension, newController));
+
+            boolean aradConflict = aradLinked
+                    && arad.isMonitorLinked(dimension, newController)
+                    && !Objects.equals(arad.getRwrForMonitor(dimension, oldController), arad.getRwrForMonitor(dimension, newController));
+
+            if (networkConflict || aradConflict) {
+                LOGGER.warn("Monitor relocation destination owned by another network: {}", newController);
                 return;
             }
         }
@@ -193,5 +213,61 @@ public final class SableMonitorRelocation {
         for (List<Move> moves : PENDING.values()) {
             moves.removeIf(move -> move.originLevel() == level);
         }
+    }
+
+    private static void disconnectLeftBehindMonitorLinks(ServerLevel level, BlockPos oldController) {
+        var dim = level.dimension();
+
+        NetworkData network = NetworkData.get(level);
+        NetworkData.Group networkGroup = network.getGroupForEndpoint(dim, oldController);
+
+        if (networkGroup != null) {
+            for (BlockPos linkPos : List.copyOf(networkGroup.dataLinks)) {
+                if (oldController.equals(network.peekEndpointForDataLink(dim, linkPos))) {
+                    disconnectIfLeftBehind(level, linkPos, oldController);
+                }
+            }
+        }
+
+        ARADData arad = ARADData.get(level);
+        BlockPos rwrPos = arad.getRwrForMonitor(dim, oldController);
+
+        if (rwrPos != null) {
+            ARADData.Group aradGroup = arad.getGroup(dim, rwrPos);
+
+            if (aradGroup != null) {
+                for (BlockPos linkPos : List.copyOf(aradGroup.dataLinks)) {
+                    if (oldController.equals(arad.peekEndpointForDataLink(dim, linkPos))) {
+                        disconnectIfLeftBehind(level, linkPos, oldController);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void disconnectIfLeftBehind(ServerLevel level, BlockPos linkPos, BlockPos oldController) {
+        if (SableDataLinkRelocation.isRelocating(level, linkPos) || !level.hasChunkAt(linkPos)) {
+            return;
+        }
+
+        if (!(level.getBlockEntity(linkPos) instanceof DataLinkBlockEntity link)) {
+            return;
+        }
+
+        if (link.getBlockState().getValue(DataLinkBlock.LINK_STYLE) != DataLinkBlock.LinkStyle.RADAR) {
+            return;
+        }
+
+        BlockPos sourcePos = link.getSourcePosition();
+        if (!level.hasChunkAt(sourcePos)) {
+            return;
+        }
+
+        if (level.getBlockEntity(sourcePos) instanceof MonitorBlockEntity monitor && oldController.equals(monitor.getControllerPos())) {
+            return;
+        }
+
+        DataLinkBlock.disconnectSavedLink(level, linkPos);
+        LOGGER.debug("Disconnected stationary Data Link {} after monitor relocation {}", linkPos, oldController);
     }
 }
