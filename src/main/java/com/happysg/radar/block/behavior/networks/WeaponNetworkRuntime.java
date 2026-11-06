@@ -290,6 +290,13 @@ public final class WeaponNetworkRuntime {
         return mountPos == null ? null : getWeaponGroupViewInternal(mountPos);
     }
 
+    public boolean hasValidWeaponGroup(BlockPos mountPos) {
+        reconcileIfDirty();
+
+        Group group = snapshot.groupsByMount().get(mountPos);
+        return group != null && group.validTopology();
+    }
+
     @Nullable
     public WeaponGroupView getWeaponGroupView(BlockPos mountPos) {
         reconcileIfDirty();

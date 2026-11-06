@@ -1,12 +1,16 @@
 package com.happysg.radar.block.controller.yaw;
 
+import com.happysg.radar.block.behavior.networks.SafeZone;
+import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 
+import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.WeaponContactUnlinkState;
 import com.happysg.radar.block.controller.kinetic.*;
 import com.happysg.radar.block.controller.limits.ControllerLimitAccess;
 import com.happysg.radar.block.controller.limits.ControllerMovementLimits;
 import com.happysg.radar.block.controller.limits.collision.ControllerCollisionSource;
+import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
@@ -15,6 +19,7 @@ import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.api.mount.RadarMountAdapter;
 import com.happysg.radar.api.mount.RadarMountRegistry;
 import com.happysg.radar.api.controller.RadarYawController;
+import com.happysg.radar.debug.MotionTraceRecorder;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
@@ -51,6 +56,8 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     private static final double DEADBAND_DEG = 0.5;
     private static final double KINETIC_TRACKING_TOLERANCE_DEG = 0.05;
     private static final int MOVEMENT_LIMITS_VERSION = 1;
+    @Nullable
+    private WeaponFiringControl yawOnlyAimControl;
 
     private double targetAngle = 0.0;
     private boolean isRunning = false;
@@ -104,6 +111,78 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         this.cannonHandler = new CannonMountYaw(this);
         this.physHandler = new PhysBearingYaw(this);
         this.apiHandler = new ApiMountYaw(this);
+    }
+
+    @Nullable
+    public WeaponFiringControl getYawOnlyAimControl() {
+        return yawOnlyAimControl;
+    }
+
+    @Nullable
+    public WeaponFiringControl getOrCreateYawOnlyAimControl() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(serverLevel);
+        var group = runtime.getWeaponGroupViewFromEndpoint(worldPosition);
+        if (group == null || group.pitchPos() != null || !worldPosition.equals(group.yawPos()) || !runtime.hasValidWeaponGroup(group.mountPos())) {
+            clearYawOnlyAimControl();
+            return null;
+        }
+
+        if (yawOnlyAimControl != null) {
+            boolean stale =
+                    yawOnlyAimControl.cannonMount != null ? !yawOnlyAimControl.cannonMount.isCurrent() || !group.mountPos().equals(
+                    yawOnlyAimControl.cannonMount.getBlockPos()) : yawOnlyAimControl.weapon == null || !yawOnlyAimControl.weapon.isValid() || !group.mountPos().equals(
+                    yawOnlyAimControl.weapon.getMountPos());
+
+            if (stale) {
+                clearYawOnlyAimControl();
+            }
+        }
+
+        if (yawOnlyAimControl == null) {
+            WeaponFiringControl created = new WeaponFiringControl(this, group.mountPos());
+
+            if (created.cannonMount == null && created.weapon == null) {
+                return null;
+            }
+
+            yawOnlyAimControl = created;
+        }
+
+        return yawOnlyAimControl;
+    }
+
+    public void setAndAcquireYawOnlyTrack(@Nullable RadarTrack track, TargetingConfig config, List<SafeZone> zones) {
+        if (track == null || track.position() == null) {
+            if (yawOnlyAimControl != null) {
+                clearYawOnlyAimControl();
+                failClosedRadarAim();
+            }
+            return;
+        }
+
+        WeaponFiringControl control = getOrCreateYawOnlyAimControl();
+        if (control == null) {
+            return;
+        }
+
+        var group = WeaponNetworkRuntime.get((ServerLevel) level).getWeaponGroupViewFromEndpoint(worldPosition);
+        if (group == null) {
+            return;
+        }
+
+        control.setSafeZones(zones);
+        control.setTarget(track.position(), config, track, group);
+    }
+
+    private void clearYawOnlyAimControl() {
+        if (yawOnlyAimControl != null) {
+            yawOnlyAimControl.resetTarget();
+            yawOnlyAimControl = null;
+        }
     }
 
     @Override
@@ -618,7 +697,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     public void onRelevantNeighborChanged(BlockPos fromPos) {
         swivelReorientation.onNeighborChanged(level, worldPosition, fromPos);
 
-        if (isPerpendicularNeighbor(fromPos)) {
+        if (isPerpendicularNeighbor(fromPos) && (kineticControllerState.isStructuralMode() || hasStructuralKineticSelection())) {
             invalidateKineticActuator();
         }
 
@@ -875,6 +954,22 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private void commandGeneratedSpeed(double rpm) {
         sequenceContext = null;
+        if (MotionTraceRecorder.isEnabled() && level != null && !level.isClientSide()) {
+            StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+            MotionTraceRecorder.record(
+                    "cbc_generator.command",
+                    level,
+                    worldPosition,
+                    "axis", "YAW",
+                    "requestedRpm", rpm,
+                    "previousGeneratedRpm", generatedSpeed,
+                    "actualRpm", getSpeed(),
+                    "theoreticalRpm", getTheoreticalSpeed(),
+                    "hasSource", hasSource(),
+                    "caller", stack.length > 2 ? stack[2].getMethodName() : "unknown"
+            );
+        }
+
         if (hasSource()) {
             generatedSpeed = 0.0f;
             detachKinetics();
@@ -893,6 +988,21 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         generatedSpeed = next;
         updateGeneratedRotation();
+
+        if (MotionTraceRecorder.isEnabled() && level != null && !level.isClientSide()) {
+            MotionTraceRecorder.record(
+                    "cbc_generator.after_update",
+                    level,
+                    worldPosition,
+                    "axis", "YAW",
+                    "requestedRpm", rpm,
+                    "generatedRpm", generatedSpeed,
+                    "actualRpm", getSpeed(),
+                    "theoreticalRpm", getTheoreticalSpeed(),
+                    "hasSource", hasSource()
+            );
+        }
+
         setChanged();
     }
 
@@ -1019,6 +1129,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
     }
 
     public void onWeaponTopologyChanged() {
+        clearYawOnlyAimControl();
         if (isRunning && swivelReorientation.shouldPreserve(level, worldPosition)) {
             invalidateKineticActuator();
             flushKineticStateSync();
@@ -1373,10 +1484,10 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     @Override
     public void onChunkUnloaded() {
+        clearYawOnlyAimControl();
         if (level != null && !level.isClientSide()) {
             if (level instanceof ServerLevel serverLevel) {
-                WeaponNetworkRuntime.get(serverLevel)
-                        .unregisterContactController(worldPosition);
+                WeaponNetworkRuntime.get(serverLevel).unregisterContactController(worldPosition);
             }
             stopDebugSwivelFollow("controller_chunk_unloaded", false);
             releaseKineticActuator();

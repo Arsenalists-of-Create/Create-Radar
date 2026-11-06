@@ -9,11 +9,15 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountInterfaceBlockEntity;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.function.DoubleConsumer;
 
@@ -39,6 +43,7 @@ public final class CbcShaftDrive {
     private int probeTicks;
     private int reverseHoldTicks;
     private boolean hadDrive;
+    private List<ConfirmedDriveNode> confirmedDrivePath = List.of();
     private Level traceLevel;
     private BlockPos traceControllerPos;
     private BlockPos traceMountPos;
@@ -58,6 +63,7 @@ public final class CbcShaftDrive {
         probeTicks = 0;
         reverseHoldTicks = 0;
         hadDrive = false;
+        confirmedDrivePath = List.of();
         motionProfile.reset();
         filteredActualRate = 0.0;
         filteredDesiredRate = 0.0;
@@ -280,7 +286,55 @@ public final class CbcShaftDrive {
         }
 
         double maximumRpm = Math.min(256.0, Math.abs(inputRpm));
-        boolean driven = selected != null && sourcedBy(selected, controller);
+        boolean physicallyDriven = selected != null && sourcedBy(selected, controller);
+
+        if (physicallyDriven && confirmedDrivePath.isEmpty()) {
+            rememberConfirmedDrivePath(selected, controller);
+        }
+
+        boolean retainedStoppedDrive = !physicallyDriven && hasConfirmedStoppedDrivePath(selected, controller, outputSide);
+        boolean driven = physicallyDriven || retainedStoppedDrive;
+
+        if (!physicallyDriven
+                && !retainedStoppedDrive
+                && confirmedDrivePath.size() >= 2
+                && Math.abs(lastCommandedRpm) <= EPSILON
+                && MotionTraceRecorder.isEnabled()) {
+
+            boolean nodesPresent = true;
+            boolean statesMatch = true;
+            boolean connectionsIntact = true;
+            boolean nodesStopped = true;
+            boolean foreignNodeSource = false;
+
+            for (int i = 0; i < confirmedDrivePath.size(); i++) {
+                ConfirmedDriveNode recorded = confirmedDrivePath.get(i);
+                KineticBlockEntity node = recorded.entity();
+
+                boolean present = level.isLoaded(node.getBlockPos()) && !node.isRemoved() && level.getBlockEntity(node.getBlockPos()) == node;
+
+                nodesPresent &= present;
+
+                if (!present) {
+                    continue;
+                }
+
+                statesMatch &= recorded.state().equals(node.getBlockState());
+                nodesStopped &= Math.abs(node.getSpeed()) <= EPSILON && Math.abs(node.getTheoreticalSpeed()) <= EPSILON && !node.isOverStressed();
+
+                if (node != controller) {
+                    foreignNodeSource |= node.isSource();
+                }
+
+                if (i + 1 < confirmedDrivePath.size()) {
+                    KineticBlockEntity upstream = confirmedDrivePath.get(i + 1).entity();
+                    connectionsIntact &= RotationPropagator.isConnected(upstream, node);
+                    foreignNodeSource |= node.hasSource() && (node.source == null || !node.source.equals(upstream.getBlockPos()));
+                }
+            }
+
+            MotionTraceRecorder.record("cbc_shaft.retention_diagnostic", level, controller.getBlockPos(), "mount", mount.getBlockPos(), "axis", axis, "nodesPresent", nodesPresent, "statesMatch", statesMatch, "connectionsIntact", connectionsIntact, "nodesStopped", nodesStopped, "foreignNodeSource", foreignNodeSource, "foreignOutputSource", hasForeignOutputSource(controller, outputSide), "controllerHasSource", controller.hasSource(), "controllerTheoreticalSpeed", controller.getTheoreticalSpeed(), "endpointIsSource", selected != null && selected.isSource(), "firstNodeMatches", confirmedDrivePath.getFirst().entity() == selected, "lastNodeMatches", confirmedDrivePath.getLast().entity() == controller, "lastCommandedRpm", lastCommandedRpm, "speedRatio", speedRatio);
+        }
 
         if (MotionTraceRecorder.isEnabled()) {
             MotionTraceRecorder.record(
@@ -290,6 +344,9 @@ public final class CbcShaftDrive {
                     "mount", mount.getBlockPos(),
                     "axis", axis,
                     "driven", driven,
+                    "physicallyDriven", physicallyDriven,
+                    "retainedStoppedDrive", retainedStoppedDrive,
+                    "confirmedPathLength", confirmedDrivePath.size(),
                     "endpointPresent", selected != null,
                     "endpointPosition",
                     selected == null ? null : selected.getBlockPos(),
@@ -308,21 +365,50 @@ public final class CbcShaftDrive {
         if (!driven) {
             if (MotionTraceRecorder.isEnabled()) {
                 MotionTraceRecorder.record(
-                        "cbc_shaft.drive_missing",
+                        "cbc_shaft.drive_loss_detail",
                         level,
                         controller.getBlockPos(),
                         "mount", mount.getBlockPos(),
                         "axis", axis,
-                        "error", error,
-                        "endpointPresent", selected != null,
+                        "commandedRpm", lastCommandedRpm,
+                        "generatedRpm", controller.getGeneratedSpeed(),
+                        "controllerSpeed", controller.getSpeed(),
+                        "controllerTheoreticalSpeed",
+                        controller.getTheoreticalSpeed(),
+                        "endpointSpeed",
+                        selected == null ? null : selected.getSpeed(),
+                        "endpointTheoreticalSpeed",
+                        selected == null ? null : selected.getTheoreticalSpeed(),
+                        "controllerHasSource", controller.hasSource(),
                         "endpointHasSource",
                         selected != null && selected.hasSource(),
-                        "endpointIsSource",
-                        selected != null && selected.isSource(),
+                        "controllerHasNetwork", controller.hasNetwork(),
+                        "endpointHasNetwork",
+                        selected != null && selected.hasNetwork(),
+                        "directConnectionIntact",
+                        selected != null && RotationPropagator.isConnected(controller, selected),
+                        "controllerRegistered",
+                        level.getBlockEntity(controller.getBlockPos()) == controller,
+                        "endpointOwnedByMount",
+                        selected != null
+                                && level.getBlockEntity(selected.getBlockPos()) instanceof CannonMountBlockEntity parent
+                                && (parent.getYawInterface() == selected || parent.getPitchInterface() == selected),
+                        "cachedPathLength", confirmedDrivePath.size(),
+                        "hadDrive", hadDrive,
+                        "reverseHoldTicks", reverseHoldTicks,
                         "probeTicks", probeTicks,
-                        "nextProbeTick", nextProbeTick,
-                        "previouslyDriven", hadDrive
+                        "speedRatio", speedRatio,
+                        "controllerOverstressed", controller.isOverStressed(),
+                        "endpointOverstressed",
+                        selected != null && selected.isOverStressed(),
+                        "foreignOutputSource",
+                        hasForeignOutputSource(controller, outputSide)
                 );
+            }
+
+            confirmedDrivePath = List.of();
+            if (MotionTraceRecorder.isEnabled()) {
+                MotionTraceRecorder.record("cbc_shaft.drive_missing", level, controller.getBlockPos(), "mount", mount.getBlockPos(), "axis", axis, "error", error, "endpointPresent", selected != null, "endpointHasSource", selected != null && selected.hasSource(), "endpointIsSource", selected != null && selected.isSource(), "probeTicks", probeTicks, "nextProbeTick", nextProbeTick, "previouslyDriven", hadDrive);
             }
 
             if (reverseHoldTicks > 0) {
@@ -594,6 +680,119 @@ public final class CbcShaftDrive {
                     "hadDrive", hadDrive
             );
         }
+    }
+
+    private record ConfirmedDriveNode(KineticBlockEntity entity, BlockState state) {}
+
+    private void rememberConfirmedDrivePath(KineticBlockEntity selected, KineticBlockEntity controller) {
+        Level level = controller.getLevel();
+
+        if (level == null || selected == controller || selected.getLevel() != level) {
+            return;
+        }
+
+        List<ConfirmedDriveNode> path = new ArrayList<>();
+        Set<BlockPos> visited = new HashSet<>();
+
+        KineticBlockEntity node = selected;
+
+        for (int hop = 0; hop < MAX_SOURCE_HOPS; hop++) {
+            if (!visited.add(node.getBlockPos())
+                    || !node.hasSource()
+                    || node.source == null) {
+                return;
+            }
+
+            path.add(new ConfirmedDriveNode(
+                    node, node.getBlockState()));
+
+            BlockPos sourcePos = node.source;
+
+            if (!level.isLoaded(sourcePos)) {
+                return;
+            }
+
+            BlockEntity upstream =
+                    level.getBlockEntity(sourcePos);
+
+            if (!(upstream instanceof KineticBlockEntity prev)
+                    || !RotationPropagator.isConnected(prev, node)) {
+                return;
+            }
+
+            if (prev == controller) {
+                path.add(new ConfirmedDriveNode(
+                        controller, controller.getBlockState()));
+
+                confirmedDrivePath = List.copyOf(path);
+                return;
+            }
+
+            node = prev;
+        }
+    }
+
+    private boolean hasConfirmedStoppedDrivePath(KineticBlockEntity selected, KineticBlockEntity controller, Direction outputSide) {
+        Level level = controller.getLevel();
+
+        if (level == null
+                || selected == null
+                || !hadDrive
+                || Math.abs(lastCommandedRpm) > EPSILON
+                || !Double.isFinite(speedRatio)
+                || Math.abs(speedRatio) <= EPSILON
+                || confirmedDrivePath.size() < 2
+                || confirmedDrivePath.getFirst().entity() != selected
+                || confirmedDrivePath.getLast().entity() != controller
+                || controller.hasSource()
+                || controller.isOverStressed()
+                || selected.isOverStressed()
+                || Math.abs(controller.getSpeed()) > EPSILON
+                || Math.abs(controller.getTheoreticalSpeed()) > EPSILON
+                || hasForeignOutputSource(controller, outputSide)) {
+            return false;
+        }
+
+        for (int i = 0; i < confirmedDrivePath.size(); i++) {
+            ConfirmedDriveNode recorded = confirmedDrivePath.get(i);
+
+            KineticBlockEntity node = recorded.entity();
+            BlockPos pos = node.getBlockPos();
+
+            if (!level.isLoaded(pos) || node.isRemoved() || node.getLevel() != level || !recorded.state().equals(node.getBlockState())) {
+                return false;
+            }
+
+            BlockEntity worldEntity = level.getBlockEntity(pos);
+
+            if (node instanceof CannonMountInterfaceBlockEntity) {
+                if (!(worldEntity instanceof CannonMountBlockEntity parent) || parent.isRemoved() || (parent.getYawInterface() != node && parent.getPitchInterface() != node)) {
+                    return false;
+                }
+            } else if (worldEntity != node) {
+                return false;
+            }
+
+            if (node != controller) {
+                if (node.isSource() || node.isOverStressed() || Math.abs(node.getSpeed()) > EPSILON || Math.abs(node.getTheoreticalSpeed()) > EPSILON) {
+                    return false;
+                }
+            }
+
+            if (i + 1 < confirmedDrivePath.size()) {
+                KineticBlockEntity upstream = confirmedDrivePath.get(i + 1).entity();
+
+                if (node.hasSource() && (node.source == null || !node.source.equals(upstream.getBlockPos()))) {
+                    return false;
+                }
+
+                if (!RotationPropagator.isConnected(upstream, node)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private static boolean hasForeignOutputSource(KineticBlockEntity controller, Direction outputSide) {

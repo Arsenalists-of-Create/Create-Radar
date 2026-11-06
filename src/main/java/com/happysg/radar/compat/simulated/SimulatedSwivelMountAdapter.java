@@ -10,6 +10,7 @@ import com.happysg.radar.block.controller.kinetic.KineticMountAdapterResolution;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.compat.cbc.CannonMountContext;
+import com.happysg.radar.debug.MotionTraceRecorder;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
 import com.simibubi.create.content.kinetics.RotationPropagator;
@@ -336,6 +337,22 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         return true;
     }
 
+    private void traceFrameUnavailable(String reason, @Nullable UUID assemblyId, @Nullable CannonCalibration calibration) {
+        if (!(controller.getLevel() instanceof ServerLevel sl) || !MotionTraceRecorder.isEnabled() || sl.getGameTime() % 20L != 0L) {
+            return;
+        }
+
+        WeaponNetworkRuntime runtime = WeaponNetworkRuntime.get(sl);
+        BlockPos explicitMount = runtime.getExplicitMountForController(controller.getBlockPos());
+        BlockPos effectiveMount = runtime.getMountForController(controller.getBlockPos());
+        BlockPos mountPos = explicitMount != null ? explicitMount : effectiveMount;
+        boolean mountLoaded = mountPos != null && sl.hasChunkAt(mountPos);
+        BlockEntity mountEntity = mountLoaded ? sl.getBlockEntity(mountPos) : null;
+        CannonMountContext mount = CannonMountContext.of(mountEntity);
+
+        MotionTraceRecorder.record("swivel.frame_unavailable_detail", sl, controller.getBlockPos(), "axis", cannonAxis, "reason", reason, "assemblyId", assemblyId, "explicitMount", explicitMount, "effectiveMount", effectiveMount, "mountLoaded", mountLoaded, "mountFound", mount != null, "cannonAssembled", mount != null && mount.hasAssembledCannon(), "initialOrientation", mount == null ? null : mount.initialOrientation(), "calibrationHasMount", calibration != null && calibration.hasMount(), "calibrationBlocked", calibration != null && calibration.blocked());
+    }
+
     @Override
     public KineticMountFrame frameIdentity() {
         if (!isValid() || !isAssembled()) {
@@ -345,11 +362,13 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         Direction bearingFacing = bearing.getBlockState().getValue(SwivelBearingBlock.FACING);
         Direction controllerFacing = controllerFacing();
         if (assemblyId == null || controllerFacing == null) {
+            traceFrameUnavailable(assemblyId == null ? "assembly_id_missing" : "controller_facing_missing", assemblyId, null);
             return null;
         }
 
         CannonCalibration calibration = resolveCannonCalibration(assemblyId);
         if (calibration.blocked()) {
+            traceFrameUnavailable("calibration_blocked", assemblyId, calibration);
             return null;
         }
 

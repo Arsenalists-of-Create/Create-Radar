@@ -2,6 +2,7 @@ package com.happysg.radar.block.behavior.networks;
 
 import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
+import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.compat.sable.SableMonitorRelocation;
 import com.happysg.radar.debug.DiagnosticRecorder;
@@ -64,7 +65,26 @@ public final class WeaponGroupCoordinator {
                 continue;
             }
 
-            if (g.pitchPos() == null) continue;
+            if (g.pitchPos() == null) {
+                if (g.yawPos() != null && sl.getBlockEntity(g.yawPos()) instanceof AutoYawControllerBlockEntity yaw) {
+                    WeaponFiringControl control = yaw.getYawOnlyAimControl();
+                    if (control != null) {
+                        try {
+                            control.refreshControllers();
+                            control.tick();
+
+                        } catch (RuntimeException exception) {
+                            control.resetAimForRetry();
+                            yaw.failClosedRadarAim();
+
+                            DiagnosticRecorder.error("weapon_network", "yaw_only_tick", "yaw_only_targeting_failed", exception, sl, mountPos, "createbigcannons", "sable");
+                            LOGGER.error("Yaw-only targeting failed at {}", mountPos, exception);
+                        }
+                    }
+                }
+
+                continue;
+            }
             if (!processedPitchEndpoints.add(g.pitchPos())) continue;
 
             BlockEntity be = sl.getBlockEntity(g.pitchPos());
@@ -75,16 +95,12 @@ public final class WeaponGroupCoordinator {
                 pitch.getFiringControl();
             }
             if (pitch.firingControl == null) {
-                ConflictTraceRecorder.invariant(false, "weapon_network",
-                        "controller_resolution", "firing_control_missing",
-                        sl, g.pitchPos());
+                ConflictTraceRecorder.invariant(false, "weapon_network", "controller_resolution", "firing_control_missing", sl, g.pitchPos());
                 continue;
             }
 
             // Keep controller refs fresh (yaw/pitch/fire)
-            ConflictTraceRecorder.Scope trace = ConflictTraceRecorder.begin(
-                    "weapon_network", "coordinator_tick", sl, mountPos,
-                    ConflictTraceRecorder.isEnabled() ? Map.of("pitch", g.pitchPos().toShortString()) : Map.of());
+            ConflictTraceRecorder.Scope trace = ConflictTraceRecorder.begin("weapon_network", "coordinator_tick", sl, mountPos, ConflictTraceRecorder.isEnabled() ? Map.of("pitch", g.pitchPos().toShortString()) : Map.of());
             try {
                 if (sl.getGameTime() % REFRESH_EVERY_TICKS == 0) {
                     pitch.firingControl.refreshControllers();
@@ -93,9 +109,7 @@ public final class WeaponGroupCoordinator {
             } catch (RuntimeException exception) {
                 trace.failed(exception.getClass().getSimpleName());
                 pitch.firingControl.resetAimForRetry();
-                DiagnosticRecorder.error("weapon_network", "coordinator_tick",
-                        "network_tick_failed_and_firing_stopped", exception,
-                        sl, mountPos, "createbigcannons", "sable");
+                DiagnosticRecorder.error("weapon_network", "coordinator_tick", "network_tick_failed_and_firing_stopped", exception, sl, mountPos, "createbigcannons", "sable");
                 long now = sl.getGameTime();
                 String mountKey = sl.dimension().location() + "|" + mountPos.asLong();
                 long last = LAST_ERROR_LOG.getOrDefault(mountKey, Long.MIN_VALUE);

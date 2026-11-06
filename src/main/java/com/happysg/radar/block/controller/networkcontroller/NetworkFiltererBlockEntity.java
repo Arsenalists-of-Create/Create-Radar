@@ -26,6 +26,7 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.compat.create.CreateSchematicLinkPersistence;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.compat.sable.SableLinkPersistence;
@@ -60,6 +61,7 @@ import net.minecraft.world.phys.Vec3;
 
 import net.neoforged.neoforge.items.ItemStackHandler;
 import org.slf4j.Logger;
+import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -367,7 +369,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             }
 
             if (selectedWasAuto && cfg.autoTarget()) {
-                List<AutoPitchControllerBlockEntity> endpoints = getWeaponEndpointsCached(sl);
+                List<AutoTargetWeapon> endpoints = getAutoTargetWeapons(sl);
 
                 boolean checkVisibility = RadarConfig.server().autoTargetDropInvalidTargets.get();
                 boolean cycleVisibleTargets = RadarConfig.server().autoTargetCycleVisibleTargets.get();
@@ -376,17 +378,14 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 boolean hasLoadedWeapon = false;
                 boolean hasVisibleWeapon = !checkLos;
 
-                for (AutoPitchControllerBlockEntity pitch : endpoints) {
-                    if (!hasResolvableAutoShot(sl, pitch)) {
+                for (AutoTargetWeapon endpoint : endpoints) {
+                    if (!hasResolvableAutoShot(sl, endpoint)) {
                         continue;
                     }
 
                     hasLoadedWeapon = true;
 
-                    if (checkLos
-                            && !hasVisibleWeapon
-                            && pitch.firingControl != null
-                            && pitch.firingControl.hasLineOfSightTo(selected, true)) {
+                    if (checkLos && !hasVisibleWeapon && endpoint.control().hasLineOfSightTo(selected, true)) {
                         hasVisibleWeapon = true;
                     }
 
@@ -415,15 +414,16 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 }
 
                 if (hasLoadedWeapon && sl.getGameTime() % 20L == 0L) {
-                    List<AutoPitchControllerBlockEntity> availableWeapons = new ArrayList<>();
-                    for (AutoPitchControllerBlockEntity pitch : endpoints) {
-                        if (hasResolvableAutoShot(sl, pitch)) {
-                            availableWeapons.add(pitch);
+                    List<AutoTargetWeapon> availableWeapons = new ArrayList<>();
+
+                    for (AutoTargetWeapon endpoint : endpoints) {
+                        if (hasResolvableAutoShot(sl, endpoint)) {
+                            availableWeapons.add(endpoint);
                         }
                     }
 
                     if (!availableWeapons.isEmpty()) {
-                        boolean canEngage = anyCannonCanEngage(availableWeapons, selected, cfg.lineOfSight());
+                        boolean canEngage = anyCannonCanEngage(sl, availableWeapons, selected, cfg.lineOfSight(), new IdentityHashMap<>());
 
                         if (canEngage) {
                             autoUnengageableTargetId = null;
@@ -549,14 +549,12 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             boolean hasPendingWeapon = false;
             boolean hasReachableWeapon = false;
 
-            for (AutoPitchControllerBlockEntity pitch
-                    : getWeaponEndpointsCached(sl)) {
-
-                if (!hasResolvableAutoShot(sl, pitch)) {
+            for (AutoTargetWeapon endpoint : getAutoTargetWeapons(sl)) {
+                if (!hasResolvableAutoShot(sl, endpoint)) {
                     continue;
                 }
 
-                WeaponFiringControl control = pitch.firingControl;
+                WeaponFiringControl control = endpoint.control();
 
                 if (control == null) {
                     hasPendingWeapon = true;
@@ -1026,10 +1024,26 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         endpointRepushRequired = false;
     }
 
-    private boolean hasResolvableAutoShot(ServerLevel sl, AutoPitchControllerBlockEntity pitch) {
-        pitch.getFiringControl();
+    private record AutoTargetWeapon(@Nullable AutoPitchControllerBlockEntity pitch, @Nullable AutoYawControllerBlockEntity yaw, @Nullable WeaponFiringControl control) {}
 
-        WeaponFiringControl control = pitch.firingControl;
+    private List<AutoTargetWeapon> getAutoTargetWeapons(ServerLevel sl) {
+        List<AutoTargetWeapon> result = new ArrayList<>();
+
+        for (AutoPitchControllerBlockEntity pitch : getWeaponEndpointsCached(sl)) {
+            pitch.getFiringControl();
+            result.add(new AutoTargetWeapon(pitch, null, pitch.firingControl));
+        }
+
+        for (AutoYawControllerBlockEntity yaw : getYawOnlyEndpoints(sl)) {
+            result.add(new AutoTargetWeapon(null, yaw, yaw.getOrCreateYawOnlyAimControl()));
+        }
+
+        return result;
+    }
+
+    private boolean hasResolvableAutoShot(ServerLevel sl, AutoTargetWeapon endpoint) {
+        WeaponFiringControl control = endpoint.control();
+
         if (control == null) {
             return false;
         }
@@ -1041,17 +1055,51 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return WeaponFiringControl.hasResolvableShot(control.weapon, sl);
     }
 
-    private boolean anyCannonCanEngage(List<AutoPitchControllerBlockEntity> endpoints, RadarTrack track, boolean requireLos) {
-        Vec3 target = track != null ? track.position() : null;
-        if (target == null) return false;
+    private boolean autoWeaponCanEngage(ServerLevel sl, AutoTargetWeapon endpoint, RadarTrack track, boolean requireLos, Map<AutoYawControllerBlockEntity, Double> yawRangeCache) {
+        if (endpoint.pitch() != null) {
+            return endpoint.pitch().canEngageTrack(track, requireLos);
+        }
 
-        for (AutoPitchControllerBlockEntity pitch : endpoints) {
-            pitch.getFiringControl();
+        WeaponFiringControl control = endpoint.control();
+        AutoYawControllerBlockEntity yaw = endpoint.yaw();
 
-            Vec3 origin = pitch.getRayStart();
-            if (origin == null) continue;
+        if (control == null || yaw == null) {
+            return false;
+        }
 
-            if (pitch.canEngageTrack(track, requireLos)) {
+        Vec3 aimPoint = control.resolveEngagementAimPoint(sl, track, requireLos);
+        Vec3 origin = control.getCannonRayStart();
+        if (aimPoint == null || origin == null) {
+            return false;
+        }
+
+        if (control.cannonMount != null) {
+            if (!control.canYawAimAtTarget(aimPoint)) {
+                return false;
+            }
+
+            if (control.cannonMount.getContraption() != null && control.cannonMount.getContraption().getContraption() instanceof AbstractMountedCannonContraption cannon) {
+                double range = yawRangeCache.computeIfAbsent(yaw, ignored -> CannonUtil.getMaxProjectileRangeBlocks(cannon, sl));
+
+                if (range > 0.0 && origin.distanceToSqr(aimPoint) > range * range) {
+                    return false;
+                }
+            }
+
+        } else if (!yaw.canPossiblyAimAt(origin, aimPoint)) {
+            return false;
+        }
+
+        return !requireLos || "Sable:ship".equals(track.entityType()) || control.hasLineOfSightTo(track, true);
+    }
+
+    private boolean anyCannonCanEngage(ServerLevel sl, List<AutoTargetWeapon> endpoints, RadarTrack track, boolean requireLos, Map<AutoYawControllerBlockEntity, Double> yawRangeCache) {
+        if (track == null || track.position() == null) {
+            return false;
+        }
+
+        for (AutoTargetWeapon endpoint : endpoints) {
+            if (autoWeaponCanEngage(sl, endpoint, track, requireLos, yawRangeCache)) {
                 return true;
             }
         }
@@ -1059,16 +1107,26 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         return false;
     }
 
-    private boolean hasTargetConstrainedWeaponEndpoint(List<AutoPitchControllerBlockEntity> endpoints) {
-        boolean hasConstrained = false;
+    private boolean hasTargetConstrainedWeaponEndpoint(List<AutoTargetWeapon> endpoints) {
+        for (AutoTargetWeapon endpoint : endpoints) {
 
-        for (AutoPitchControllerBlockEntity pitch : endpoints) {
-            if (pitch.canConstrainAutoTargeting()) {
-                hasConstrained = true;
+            if (endpoint.pitch() != null && endpoint.pitch().canConstrainAutoTargeting()) {
+                return true;
+            }
+
+            WeaponFiringControl control = endpoint.control();
+            if (endpoint.yaw() != null && control != null) {
+                if (control.cannonMount != null && control.cannonMount.getContraption() != null && control.getCannonRayStart() != null) {
+                    return true;
+                }
+
+                if (control.weapon != null && control.weapon.isValid() && control.weapon.isAssembled() && control.getCannonRayStart() != null) {
+                    return true;
+                }
             }
         }
 
-        return hasConstrained;
+        return false;
     }
 
     private List<AutoYawControllerBlockEntity> getYawOnlyEndpoints(ServerLevel sl) {
@@ -1111,20 +1169,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return;
         }
 
-        Vec3 target = track == null ? null : track.position();
         for (AutoYawControllerBlockEntity yaw : getYawOnlyEndpoints(sl)) {
-            if (target == null) {
-                if (yaw.isControllerRunning()) {
-                    yaw.failClosedRadarAim();
-                }
-                continue;
-            }
-            if (yaw.hasStructuralKineticSelectionForTargeting()) {
-                Vec3 origin = PhysicsHandler.getWorldVec(yaw);
-                yaw.setRadarAimDirection(target.subtract(origin));
-            } else {
-                yaw.setTarget(target);
-            }
+            yaw.setAndAcquireYawOnlyTrack(track, targeting, safeZones);
         }
     }
 
@@ -1654,12 +1700,12 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         final Vec3 sortOrigin = filtererPos;
         candidates.sort(Comparator.comparingDouble(t -> sortOrigin.distanceToSqr(t.position())));
 
-        List<AutoPitchControllerBlockEntity> allEndpoints = getWeaponEndpointsCached(sl);
-        List<AutoPitchControllerBlockEntity> rangeBatchEndpoints = new ArrayList<>();
+        List<AutoTargetWeapon> allEndpoints = getAutoTargetWeapons(sl);
+        List<AutoTargetWeapon> rangeBatchEndpoints = new ArrayList<>();
 
-        for (AutoPitchControllerBlockEntity pitch : allEndpoints) {
-            if (hasResolvableAutoShot(sl, pitch)) {
-                rangeBatchEndpoints.add(pitch);
+        for (AutoTargetWeapon endpoint : allEndpoints) {
+            if (hasResolvableAutoShot(sl, endpoint)) {
+                rangeBatchEndpoints.add(endpoint);
             }
         }
 
@@ -1671,24 +1717,27 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return candidates.isEmpty() ? null : candidates.get(0);
         }
 
-        int startedBatches = 0;
-
+        List<AutoPitchControllerBlockEntity> batchingPitch = new ArrayList<>();
         try {
-            for (AutoPitchControllerBlockEntity pitch : rangeBatchEndpoints) {
-                pitch.beginAutoTargetRangeBatch();
-                startedBatches++;
+            for (AutoTargetWeapon endpoint : rangeBatchEndpoints) {
+                if (endpoint.pitch() != null) {
+                    endpoint.pitch().beginAutoTargetRangeBatch();
+                    batchingPitch.add(endpoint.pitch());
+                }
             }
 
-            for (RadarTrack t : candidates) {
-                if (anyCannonCanEngage(rangeBatchEndpoints, t, requireLos)) {
-                    return t;
+            Map<AutoYawControllerBlockEntity, Double> yawRanges = new IdentityHashMap<>();
+            for (RadarTrack track : candidates) {
+                if (anyCannonCanEngage(sl, rangeBatchEndpoints, track, requireLos, yawRanges)) {
+                    return track;
                 }
             }
 
             return null;
+
         } finally {
-            for (int i = 0; i < startedBatches; i++) {
-                rangeBatchEndpoints.get(i).endAutoTargetRangeBatch();
+            for (AutoPitchControllerBlockEntity pitch : batchingPitch) {
+                pitch.endAutoTargetRangeBatch();
             }
         }
     }

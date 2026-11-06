@@ -25,6 +25,7 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.api.mount.RadarMountAdapter;
 import com.happysg.radar.api.mount.RadarMountRegistry;
 import com.happysg.radar.api.controller.RadarPitchController;
+import com.happysg.radar.debug.MotionTraceRecorder;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.kinetics.RotationPropagator;
 import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
@@ -1052,7 +1053,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
     public void onRelevantNeighborChanged(BlockPos fromPos) {
         swivelReorientation.onNeighborChanged(level, worldPosition, fromPos);
 
-        if (isPerpendicularNeighbor(fromPos)) {
+        if (isPerpendicularNeighbor(fromPos) && (kineticControllerState.isStructuralMode() || hasStructuralKineticSelection())) {
             invalidateKineticActuator();
         }
 
@@ -1363,6 +1364,22 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     protected void commandGeneratedSpeed(double rpm) {
         sequenceContext = null;
+        if (MotionTraceRecorder.isEnabled() && level != null && !level.isClientSide()) {
+            StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+
+            MotionTraceRecorder.record(
+                    "cbc_generator.command",
+                    level,
+                    worldPosition,
+                    "axis", "PITCH",
+                    "requestedRpm", rpm,
+                    "previousGeneratedRpm", generatedSpeed,
+                    "actualRpm", getSpeed(),
+                    "theoreticalRpm", getTheoreticalSpeed(),
+                    "hasSource", hasSource(),
+                    "caller", stack.length > 2 ? stack[2].getMethodName() : "unknown"
+            );
+        }
         if (hasSource()) {
             generatedSpeed = 0.0f;
             detachKinetics();
@@ -1381,6 +1398,21 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         generatedSpeed = next;
         updateGeneratedRotation();
+
+        if (MotionTraceRecorder.isEnabled() && level != null && !level.isClientSide()) {
+            MotionTraceRecorder.record(
+                    "cbc_generator.after_update",
+                    level,
+                    worldPosition,
+                    "axis", "PITCH",
+                    "requestedRpm", rpm,
+                    "generatedRpm", generatedSpeed,
+                    "actualRpm", getSpeed(),
+                    "theoreticalRpm", getTheoreticalSpeed(),
+                    "hasSource", hasSource()
+            );
+        }
+
         setChanged();
     }
 
