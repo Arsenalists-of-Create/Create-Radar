@@ -42,6 +42,8 @@ public final class CbcShaftDrive {
     private long nextProbeTick = Long.MIN_VALUE;
     private int probeTicks;
     private int reverseHoldTicks;
+    private int pendingFineReverseSign;
+    private long pendingFineReverseTick = Long.MIN_VALUE;
     private boolean hadDrive;
     private List<ConfirmedDriveNode> confirmedDrivePath = List.of();
     private Level traceLevel;
@@ -50,6 +52,11 @@ public final class CbcShaftDrive {
 
     public CbcShaftDrive(CannonAxis axis) {
         this.axis = axis;
+    }
+
+    private void clearFineReversal() {
+        pendingFineReverseSign = 0;
+        pendingFineReverseTick = Long.MIN_VALUE;
     }
 
     public void clear() {
@@ -62,6 +69,7 @@ public final class CbcShaftDrive {
         nextProbeTick = Long.MIN_VALUE;
         probeTicks = 0;
         reverseHoldTicks = 0;
+        clearFineReversal();
         hadDrive = false;
         confirmedDrivePath = List.of();
         motionProfile.reset();
@@ -182,6 +190,7 @@ public final class CbcShaftDrive {
             filteredActualRate = 0.0;
             filteredDesiredRate = 0.0;
             reverseHoldTicks = 0;
+            clearFineReversal();
             lastSampleTick = Long.MIN_VALUE;
             lastActualAngle = Double.NaN;
             lastDesiredAngle = Double.NaN;
@@ -264,6 +273,7 @@ public final class CbcShaftDrive {
         }
 
         if (Math.abs(error) < 0.06 && Math.abs(desiredRate) < 0.03 && Math.abs(actualRate) < 0.06) {
+            clearFineReversal();
             if (MotionTraceRecorder.isEnabled()) {
                 MotionTraceRecorder.record(
                         "cbc_shaft.settled",
@@ -311,15 +321,14 @@ public final class CbcShaftDrive {
                 ConfirmedDriveNode recorded = confirmedDrivePath.get(i);
                 KineticBlockEntity node = recorded.entity();
 
-                boolean present = level.isLoaded(node.getBlockPos()) && !node.isRemoved() && level.getBlockEntity(node.getBlockPos()) == node;
-
+                boolean present = isCurrentDriveNode(level, node);
                 nodesPresent &= present;
 
                 if (!present) {
                     continue;
                 }
 
-                statesMatch &= recorded.state().equals(node.getBlockState());
+                statesMatch &= recorded.state().getBlock() == node.getBlockState().getBlock();
                 nodesStopped &= Math.abs(node.getSpeed()) <= EPSILON && Math.abs(node.getTheoreticalSpeed()) <= EPSILON && !node.isOverStressed();
 
                 if (node != controller) {
@@ -363,6 +372,7 @@ public final class CbcShaftDrive {
         }
 
         if (!driven) {
+            clearFineReversal();
             if (MotionTraceRecorder.isEnabled()) {
                 MotionTraceRecorder.record(
                         "cbc_shaft.drive_loss_detail",
@@ -402,7 +412,16 @@ public final class CbcShaftDrive {
                         "endpointOverstressed",
                         selected != null && selected.isOverStressed(),
                         "foreignOutputSource",
-                        hasForeignOutputSource(controller, outputSide)
+                        hasForeignOutputSource(controller, outputSide),
+                        "endpointRemoved",
+                        selected != null && selected.isRemoved(),
+                        "endpointLevelMatches",
+                        selected != null && selected.getLevel() == level,
+                        "endpointCurrent",
+                        isCurrentDriveNode(level, selected),
+                        "controllerCurrent",
+                        isCurrentDriveNode(level, controller),
+                        "lastCommandedRpm", lastCommandedRpm
                 );
             }
 
@@ -567,12 +586,38 @@ public final class CbcShaftDrive {
         }
 
         double rpm = clamp(plannedStep / physicalDegreesPerMotorRpm, -maximumRpm, maximumRpm);
-
         if (Math.abs(rpm) < 0.5) {
             rpm = 0.0;
         }
 
         rpm = Math.rint(rpm * 2.0) / 2.0;
+
+        if (pendingFineReverseSign != 0) {
+            boolean confirmed = pendingFineReverseTick == tick - 1 && Math.abs(rpm) > EPSILON && (int) Math.signum(rpm) == pendingFineReverseSign;
+
+            if (MotionTraceRecorder.isEnabled()) {
+                MotionTraceRecorder.record(
+                        confirmed ? "cbc_shaft.fine_reverse_confirmed" : "cbc_shaft.fine_reverse_cancelled",
+                        level,
+                        controller.getBlockPos(),
+                        "mount", mount.getBlockPos(),
+                        "axis", axis,
+                        "requestedRpm", rpm,
+                        "angleError", error,
+                        "desiredRate", desiredRate
+                );
+            }
+
+            clearFineReversal();
+
+            if (confirmed) {
+                reverseHoldTicks = Math.max(0, ControllerMotionProfile.REVERSAL_HOLD_TICKS - 2);
+                motionProfile.recordAppliedStep(0.0);
+                send(command, 0.0);
+                return;
+            }
+        }
+
         if (reverseHoldTicks > 0) {
             int completedHoldTicks = ControllerMotionProfile.REVERSAL_HOLD_TICKS - reverseHoldTicks;
 
@@ -608,6 +653,30 @@ public final class CbcShaftDrive {
         }
 
         if (Math.abs(lastCommandedRpm) > EPSILON && Math.abs(rpm) > EPSILON && Math.signum(lastCommandedRpm) != Math.signum(rpm)) {
+            if (Math.abs(error) <= 0.5 && Math.abs(desiredRate) < 0.15) {
+                pendingFineReverseSign = (int) Math.signum(rpm);
+                pendingFineReverseTick = tick;
+
+                if (MotionTraceRecorder.isEnabled()) {
+                    MotionTraceRecorder.record(
+                            "cbc_shaft.fine_reverse_deferred",
+                            level,
+                            controller.getBlockPos(),
+                            "mount", mount.getBlockPos(),
+                            "axis", axis,
+                            "previousRpm", lastCommandedRpm,
+                            "requestedRpm", rpm,
+                            "angleError", error,
+                            "actualRate", actualRate,
+                            "desiredRate", desiredRate
+                    );
+                }
+
+                motionProfile.recordAppliedStep(0.0);
+                send(command, 0.0);
+                return;
+            }
+
             if (MotionTraceRecorder.isEnabled()) {
                 MotionTraceRecorder.record(
                         "cbc_shaft.reversal_start",
@@ -624,7 +693,7 @@ public final class CbcShaftDrive {
                 );
             }
 
-            reverseHoldTicks = ControllerMotionProfile.REVERSAL_HOLD_TICKS;
+            reverseHoldTicks = Math.max(0, ControllerMotionProfile.REVERSAL_HOLD_TICKS - 1);
             motionProfile.recordAppliedStep(0.0);
             send(command, 0.0);
             return;
@@ -681,6 +750,24 @@ public final class CbcShaftDrive {
             );
         }
     }
+
+
+    private static boolean isCurrentDriveNode(Level level, KineticBlockEntity node) {
+        if (level == null || node == null || !level.isLoaded(node.getBlockPos())) {
+            return false;
+        }
+
+        BlockEntity worldEntity = level.getBlockEntity(node.getBlockPos());
+        if (node instanceof CannonMountInterfaceBlockEntity) {
+            return worldEntity instanceof CannonMountBlockEntity parent
+                    && !parent.isRemoved()
+                    && parent.getLevel() == level
+                    && (parent.getYawInterface() == node || parent.getPitchInterface() == node);
+        }
+
+        return !node.isRemoved() && node.getLevel() == level && worldEntity == node;
+    }
+
 
     private record ConfirmedDriveNode(KineticBlockEntity entity, BlockState state) {}
 
@@ -757,19 +844,7 @@ public final class CbcShaftDrive {
             ConfirmedDriveNode recorded = confirmedDrivePath.get(i);
 
             KineticBlockEntity node = recorded.entity();
-            BlockPos pos = node.getBlockPos();
-
-            if (!level.isLoaded(pos) || node.isRemoved() || node.getLevel() != level || !recorded.state().equals(node.getBlockState())) {
-                return false;
-            }
-
-            BlockEntity worldEntity = level.getBlockEntity(pos);
-
-            if (node instanceof CannonMountInterfaceBlockEntity) {
-                if (!(worldEntity instanceof CannonMountBlockEntity parent) || parent.isRemoved() || (parent.getYawInterface() != node && parent.getPitchInterface() != node)) {
-                    return false;
-                }
-            } else if (worldEntity != node) {
+            if (!isCurrentDriveNode(level, node) || recorded.state().getBlock() != node.getBlockState().getBlock()) {
                 return false;
             }
 
