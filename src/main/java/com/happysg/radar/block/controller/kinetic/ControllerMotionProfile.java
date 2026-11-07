@@ -39,6 +39,42 @@ public final class ControllerMotionProfile {
         return 2.0 * maxSpeed / acceleration + (distance - accelerationDistance) / maxSpeed;
     }
 
+    public static double estimateTicksFromVelocity(double signedErrorDegrees, double rpm, double currentVelocityDegreesPerTick) {
+        if (!Double.isFinite(signedErrorDegrees) || !Double.isFinite(currentVelocityDegreesPerTick)) {
+            return Double.POSITIVE_INFINITY;
+        }
+
+        double distance = Math.abs(signedErrorDegrees);
+        if (distance <= EPSILON) {
+            return 0.0;
+        }
+
+        double speed = maxSpeedForRpm(rpm);
+        if (speed <= EPSILON) {
+            return Double.POSITIVE_INFINITY;
+        }
+
+        double acceleration = MAX_ACCELERATION_DEGREES_PER_TICK2;
+        double initialSpeed = Math.max(-speed, Math.min(speed, currentVelocityDegreesPerTick * Math.signum(signedErrorDegrees)));
+        double accelerateDistance = (speed * speed - initialSpeed * initialSpeed) / (2.0 * acceleration);
+        double brakeDistance = speed * speed / (2.0 * acceleration);
+
+        if (distance >= accelerateDistance + brakeDistance) {
+            double accelerateTime = (speed - initialSpeed) / acceleration;
+            double cruiseTime = (distance - accelerateDistance - brakeDistance) / speed;
+            double brakeTime = speed / acceleration;
+            return accelerateTime + cruiseTime + brakeTime;
+        }
+
+        double peakSpeed = Math.sqrt(Math.max(0.0, acceleration * distance + 0.5 * initialSpeed * initialSpeed));
+
+        if (initialSpeed > peakSpeed) {
+            return estimateTicks(distance, rpm) + initialSpeed / acceleration;
+        }
+
+        return (peakSpeed - initialSpeed) / acceleration + peakSpeed / acceleration;
+    }
+
     public static final int REVERSAL_HOLD_TICKS = 5;
     public static final int REVERSAL_MIN_HOLD_TICKS = 2;
     public static final double REVERSAL_RELEASE_SPEED_DEG_PER_TICK = 0.20;

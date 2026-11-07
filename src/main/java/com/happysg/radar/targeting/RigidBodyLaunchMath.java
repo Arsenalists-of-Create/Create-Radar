@@ -6,7 +6,7 @@ import net.minecraft.world.phys.Vec3;
 public final class RigidBodyLaunchMath {
     private RigidBodyLaunchMath() {}
 
-    private static final double ACCELERATION_HORIZON_TICKS = 20.0;
+    public static final double ACCELERATION_HORIZON_TICKS = 20.0;
 
     public record Motion(Vec3 origin, Vec3 linearVelocity, Vec3 angularVelocity, Vec3 linearAcceleration, Vec3 angularAcceleration) {
         // Preserve compatibility with existing three-argument constructors.

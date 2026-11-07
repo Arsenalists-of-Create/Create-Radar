@@ -26,6 +26,8 @@ public class SimulatedAimSolver implements AimSolver {
    private static final double WARM_AGREEMENT_TARGET_BLOCKS = 0.1;
    private static final double WARM_AGREEMENT_MISS_BLOCKS = 0.05;
    private static final double WARM_MISS_TIE_BLOCKS = 1.0E-4;
+   private static final double CONTINUITY_RECHECK_JUMP_DEG = 2.0;
+   private static final double CONTINUITY_MAX_EXTRA_MISS_BLOCKS = 0.10;
    private static final double LONG_RANGE_ACCEPTANCE_DISTANCE_BLOCKS = 8000.0;
    private static final double LONG_RANGE_ACCEPTANCE_MISS_BLOCKS = 5.0;
    private static final double MIN_ACCEPTABLE_CONFIDENCE = 0.05;
@@ -73,6 +75,11 @@ public class SimulatedAimSolver implements AimSolver {
 
       if (analytic != null) {
          candidates.add(analytic);
+      }
+
+      Candidate closedDrag = tryClosedFormDragCandidate(snapshot, model, ObstructionChecker.NONE, initial, stats);
+      if (closedDrag != null) {
+         candidates.add(closedDrag);
       }
 
       Candidate dragMath = tryDragMathCandidate(snapshot, model, ObstructionChecker.NONE, initial, horizon, stats);
@@ -230,9 +237,10 @@ public class SimulatedAimSolver implements AimSolver {
          stats.analyticStart = true;
          boolean highArc = analytic.pitchDeg >= highArcPitchFloor(initial.pitchDeg);
 
-         return this.buildResult(
+         return this.buildContinuousResult(
                  snapshot,
                  projectileModel,
+                 obstructionChecker,
                  initial,
                  analytic,
                  0,
@@ -242,6 +250,26 @@ public class SimulatedAimSolver implements AimSolver {
                  stats,
                  startedNanos
          );
+      }
+
+      Candidate closedFormDrag = this.tryClosedFormDragCandidate(snapshot, projectileModel, obstructionChecker, initial, stats);
+
+      if (closedFormDrag != null) {
+         stats.linearDragStart = true;
+         boolean highArc = closedFormDrag.pitchDeg() >= highArcPitchFloor(initial.pitchDeg);
+
+         return this.buildContinuousResult(
+                 snapshot,
+                 projectileModel,
+                 obstructionChecker,
+                 initial,
+                 closedFormDrag,
+                 0,
+                 0.0,
+                 highArc ? "high" : "low",
+                 "none",
+                 stats,
+                 startedNanos);
       }
 
       Candidate dragMath = this.tryDragMathCandidate(
@@ -254,9 +282,10 @@ public class SimulatedAimSolver implements AimSolver {
       );
 
       if (dragMath != null) {
-         return this.buildResult(
+         return this.buildContinuousResult(
                  snapshot,
                  projectileModel,
+                 obstructionChecker,
                  initial,
                  dragMath,
                  0,
@@ -324,13 +353,11 @@ public class SimulatedAimSolver implements AimSolver {
                        snapshot, previousWarm, analyticWarm, true)
                        ? previousWarm : analyticWarm;
                stats.warmStart = true;
-               int iterations = previousRefinement.iterations()
-                       + analyticRefinement.iterations();
-               double finalStepDeg = Math.max(
-                       previousRefinement.finalStepDeg(),
-                       analyticRefinement.finalStepDeg());
-               return this.buildResult(
-                       snapshot, projectileModel, initial, warm,
+               int iterations = previousRefinement.iterations() + analyticRefinement.iterations();
+               double finalStepDeg = Math.max(previousRefinement.finalStepDeg(), analyticRefinement.finalStepDeg());
+               return this.buildContinuousResult(
+                       snapshot, projectileModel, obstructionChecker,
+                       initial, warm,
                        iterations, finalStepDeg,
                        previousHighArc ? "high" : "low",
                        "none", stats, startedNanos);
@@ -399,9 +426,9 @@ public class SimulatedAimSolver implements AimSolver {
                   savedHighRefinement = highRefinement;
 
                   if (!nearHorizon(highBest, highHorizon) || highHorizon >= maxHorizon) {
-                     return buildResult(
-                             snapshot, projectileModel, initial,
-                             highBest,
+                     return buildContinuousResult(
+                             snapshot, projectileModel, obstructionChecker,
+                             initial, highBest,
                              highRefinement.iterations(),
                              highRefinement.finalStepDeg(),
                              "high", "none", stats, startedNanos);
@@ -425,9 +452,9 @@ public class SimulatedAimSolver implements AimSolver {
             }
 
             if (savedHigh != null) {
-               return buildResult(
-                       snapshot, projectileModel, initial,
-                       savedHigh,
+               return buildContinuousResult(
+                       snapshot, projectileModel, obstructionChecker,
+                       initial, savedHigh,
                        savedHighRefinement.iterations(),
                        savedHighRefinement.finalStepDeg(),
                        "high", "none", stats, startedNanos);
@@ -474,9 +501,9 @@ public class SimulatedAimSolver implements AimSolver {
          ++stats.horizonExpansions;
       }
 
-      return this.buildResult(
-              snapshot, projectileModel, initial,
-              best,
+      return this.buildContinuousResult(
+              snapshot, projectileModel, obstructionChecker,
+              initial, best,
               refinement.iterations(),
               refinement.finalStepDeg(),
               isAcceptableShot(snapshot, best) ? "low" : "none",
@@ -491,7 +518,7 @@ public class SimulatedAimSolver implements AimSolver {
            InitialGuess initial,
            SolveStats stats
    ) {
-      if (snapshot.swivelLaunchGeometry() != null || snapshot.launchAngularVelocity().lengthSqr() > 1.0e-18 || snapshot.rigidBodyTargetMotion() != null) {
+      if (snapshot.swivelLaunchGeometry() != null || snapshot.launchAngularVelocity().lengthSqr() > 1.0e-18) {
          return null;
       }
       // Do not use analytical ballistics for drag or custom dynamics.
@@ -543,6 +570,44 @@ public class SimulatedAimSolver implements AimSolver {
          }
 
          if (best == null || betterRefinementCandidate(snapshot, checked, best, true)) {
+            best = checked;
+         }
+      }
+
+      return best;
+   }
+
+   @Nullable
+   private Candidate tryClosedFormDragCandidate(TargetingSnapshot snapshot, ProjectileModel model, ObstructionChecker checker, InitialGuess initial, SolveStats stats) {
+      if (!LinearDragMath.supports(model) || model.drag() <= 0.0 || snapshot.swivelLaunchGeometry() != null || snapshot.launchAngularVelocity().lengthSqr() > 1.0e-18) {
+         return null;
+      }
+
+      List<Vec3> directions = LinearDragIntercept.directions(snapshot, model, accelerationTrust(snapshot));
+      if (directions.isEmpty()) {
+         return null;
+      }
+
+      Candidate best = null;
+      double highArcFloor = highArcPitchFloor(initial.pitchDeg);
+
+      for (Vec3 direction : directions) {
+         TargetingMath.YawPitch angles = TargetingMath.yawPitchFromDirection(direction);
+
+         boolean highArc = angles.pitchDeg() >= highArcFloor;
+         if (highArc != snapshot.preferHighArc()) {
+            continue;
+         }
+
+         EvaluationContext context = new EvaluationContext(snapshot, model, snapshot.maxFlightTicks(), stats);
+         Candidate candidate = evaluate(context, angles.yawDeg(), angles.pitchDeg(), ObstructionResult.clearPath());
+
+         if (candidate == null || !isAcceptableShot(snapshot, candidate)) {
+            continue;
+         }
+
+         Candidate checked = applyObstruction(snapshot, model, checker, candidate);
+         if (checked != null && isAcceptableShot(snapshot, checked) && (best == null || betterRefinementCandidate(snapshot, checked, best, true))) {
             best = checked;
          }
       }
@@ -756,16 +821,87 @@ public class SimulatedAimSolver implements AimSolver {
       return shortlist;
    }
 
+   private TargetingResult buildContinuousResult(
+           TargetingSnapshot snapshot,
+           ProjectileModel model,
+           ObstructionChecker checker,
+           InitialGuess initial,
+           Candidate selected,
+           int refinementIterations,
+           double finalStepDeg,
+           String selectedArc,
+           String fallbackReason,
+           SolveStats stats,
+           long startedNanos) {
+      Candidate chosen = selected;
+      Double previousYaw = snapshot.preferredYawDeg();
+      Double previousPitch = snapshot.preferredPitchDeg();
+
+      stats.continuityDecision = "no_reference";
+
+      if (previousYaw != null && previousPitch != null && isAcceptableShot(snapshot, selected)) {
+         double jump = Math.hypot(TargetingMath.shortestAngleDelta(previousYaw, selected.yawDeg), previousPitch - selected.pitchDeg);
+         stats.continuityJumpDeg = jump;
+         stats.continuitySelectedMiss = selected.missDistance;
+
+         double highArcFloor = highArcPitchFloor(initial.pitchDeg);
+
+         if (jump < CONTINUITY_RECHECK_JUMP_DEG) {
+            stats.continuityDecision = "small_change";
+         } else if ((previousPitch >= highArcFloor) != (selected.pitchDeg >= highArcFloor)) {
+            stats.continuityDecision = "arc_changed";
+
+         } else {
+            int horizon = Math.min(snapshot.maxFlightTicks(), Math.max(initialHorizon(snapshot, initial.interceptTicks), selected.flightTick + HORIZON_MARGIN_TICKS));
+            Candidate previous = this.evaluate(
+                    new EvaluationContext(snapshot, model, horizon, stats),
+                    previousYaw, previousPitch,
+                    ObstructionResult.clearPath());
+
+            if (previous == null) {
+               stats.continuityDecision = "old_unreachable";
+
+            } else {
+               previous = this.applyObstruction(snapshot, model, checker, previous);
+
+               if (previous == null || !isAcceptableShot(snapshot, previous) || previous.obstruction.blocked()) {
+                  stats.continuityDecision = "old_not_valid";
+
+               } else {
+                  stats.continuityPreviousMiss = previous.missDistance;
+
+                  double allowedExtraMiss = Math.min(CONTINUITY_MAX_EXTRA_MISS_BLOCKS, acceptableMissDistance(snapshot) * 0.25);
+                  if (previous.missDistance <= selected.missDistance + allowedExtraMiss) {
+                     chosen = previous;
+                     stats.continuityDecision = "retained_previous";
+                  } else {
+                     stats.continuityDecision = "new_more_accurate";
+                  }
+               }
+            }
+         }
+      }
+
+      return this.buildResult(
+              snapshot, model, initial, chosen,
+              refinementIterations, finalStepDeg,
+              selectedArc, fallbackReason, stats, startedNanos);
+   }
+
    private TargetingResult buildResult(TargetingSnapshot snapshot, ProjectileModel projectileModel, InitialGuess initial, Candidate candidate, int refinementIterations, double finalStepDeg, String selectedArc, String fallbackReason, SolveStats stats, long startedNanos) {
       Candidate best = this.materializeTrajectory(snapshot, projectileModel, candidate);
       long elapsedMicros = (System.nanoTime() - startedNanos) / 1_000L;
       List<String> debug = new ArrayList<>();
       debug.add("solver=simulated_moving_v4");
-      String solvePath = stats.analyticStart ? "analytic" : stats.rigidMathStart ? "math_rigid" : stats.dragMathStart ? "math_drag" : stats.warmStart ? "warm_dual" : stats.warmAttempted ? "ranked_fallback" : "ranked";
+      String solvePath = stats.analyticStart ? "analytic" : stats.linearDragStart ? "math_linear_drag" : stats.rigidMathStart ? "math_rigid" : stats.dragMathStart ? "math_drag" : stats.warmStart ? "warm_dual" : stats.warmAttempted ? "ranked_fallback" : "ranked";
       debug.add("path=" + solvePath);
       debug.add("warmAttempted=" + stats.warmAttempted);
       debug.add("warmConverged=" + stats.warmConverged);
       debug.add("warmAgreed=" + stats.warmAgreed);
+      debug.add("continuityDecision=" + stats.continuityDecision);
+      debug.add("continuityJumpDeg=" + stats.continuityJumpDeg);
+      debug.add("continuityPreviousMiss=" + stats.continuityPreviousMiss);
+      debug.add("continuitySelectedMiss=" + stats.continuitySelectedMiss);
       debug.add("refinementPrecisionBlocks=" + (stats.warmStart ? WARM_REFINEMENT_TARGET_BLOCKS : REFINEMENT_TARGET_BLOCKS));
       debug.add("initialInterceptTicks=" + initial.interceptTicks);
       debug.add("preferHighArc=" + snapshot.preferHighArc());
@@ -1451,19 +1587,19 @@ public class SimulatedAimSolver implements AimSolver {
       double cz = fromZ - context.targetZ(startTick);
 
       // Relative velocity inside this segment.
-      double bx = (toX - fromX)
-              - (context.velocityX + context.accelerationX * startTick);
+      double acceleratedTicks = Math.min(startTick, context.snapshot.targetAccelerationRemainingTicks());
+      double accelerationActive = startTick < context.snapshot.targetAccelerationRemainingTicks()
+              ? 1.0 : 0.0;
 
-      double by = (toY - fromY)
-              - (context.velocityY + context.accelerationY * startTick);
-
-      double bz = (toZ - fromZ)
-              - (context.velocityZ + context.accelerationZ * startTick);
+      // Relative velocity this segment.
+      double bx = (toX - fromX) - (context.velocityX + context.accelerationX * acceleratedTicks);
+      double by = (toY - fromY) - (context.velocityY + context.accelerationY * acceleratedTicks);
+      double bz = (toZ - fromZ) - (context.velocityZ + context.accelerationZ * acceleratedTicks);
 
       // Relative quadratic coefficients.
-      double qx = -0.5 * context.accelerationX;
-      double qy = -0.5 * context.accelerationY;
-      double qz = -0.5 * context.accelerationZ;
+      double qx = -0.5 * context.accelerationX * accelerationActive;
+      double qy = -0.5 * context.accelerationY * accelerationActive;
+      double qz = -0.5 * context.accelerationZ * accelerationActive;
 
       double cb = cx * bx + cy * by + cz * bz;
       double bb = bx * bx + by * by + bz * bz;
@@ -1706,7 +1842,7 @@ public class SimulatedAimSolver implements AimSolver {
 
       double safeTick = Double.isFinite(tick) ? Math.max(0.0, tick) : 0.0;
       Vec3 acceleration = clampAcceleration(finiteOrZero(snapshot.targetAcceleration())).scale(accelerationTrust(snapshot));
-      return snapshot.targetPosition().add(finiteOrZero(snapshot.targetVelocity()).scale(safeTick)).add(acceleration.scale(0.5 * safeTick * safeTick));
+      return TargetingMotion.futureTargetPosition(snapshot.targetPosition(), finiteOrZero(snapshot.targetVelocity()), acceleration, safeTick, snapshot.targetAccelerationRemainingTicks());
    }
 
    @Nullable
@@ -1824,6 +1960,10 @@ public class SimulatedAimSolver implements AimSolver {
 
    private static final class SolveStats {
       int candidateEvaluations;
+      String continuityDecision = "not_checked";
+      double continuityJumpDeg = Double.NaN;
+      double continuityPreviousMiss = Double.NaN;
+      double continuitySelectedMiss = Double.NaN;
       double nearestHighMiss = Double.POSITIVE_INFINITY;
       double nearestHighPitch = Double.NaN;
       double nearestHighTime = Double.NaN;
@@ -1837,6 +1977,7 @@ public class SimulatedAimSolver implements AimSolver {
       boolean warmAgreed;
       boolean warmStart;
       boolean analyticStart;
+      boolean linearDragStart;
       boolean dragMathStart;
       boolean rigidMathStart;
    }
@@ -1902,7 +2043,7 @@ public class SimulatedAimSolver implements AimSolver {
             return rigidPosition(tick).x;
          }
 
-         return targetBaseX + velocityX * tick + accelerationX * 0.5 * tick * tick;
+         return targetBaseX + velocityX * tick + accelerationX * TargetingMotion.accelerationDisplacementFactor(tick, snapshot.targetAccelerationRemainingTicks());
       }
 
       double targetY(double tick, boolean upper) {
@@ -1910,7 +2051,7 @@ public class SimulatedAimSolver implements AimSolver {
             return rigidPosition(tick).y;
          }
 
-         return (upper ? targetUpperY : targetCenterY) + velocityY * tick + accelerationY * 0.5 * tick * tick;
+         return (upper ? targetUpperY : targetCenterY) + velocityY * tick + accelerationY * TargetingMotion.accelerationDisplacementFactor(tick, snapshot.targetAccelerationRemainingTicks());
       }
 
       double targetZ(double tick) {
@@ -1918,7 +2059,7 @@ public class SimulatedAimSolver implements AimSolver {
             return rigidPosition(tick).z;
          }
 
-         return targetBaseZ + velocityZ * tick + accelerationZ * 0.5 * tick * tick;
+         return targetBaseZ + velocityZ * tick + accelerationZ * TargetingMotion.accelerationDisplacementFactor(tick, snapshot.targetAccelerationRemainingTicks());
       }
    }
 }

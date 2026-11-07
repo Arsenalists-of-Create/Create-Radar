@@ -4,6 +4,23 @@ import net.minecraft.world.phys.Vec3;
 
 public final class TargetingMotion {
     private TargetingMotion() {}
+    public static final int TARGET_ACCEL_HOLD_TICKS = 6;
+
+    public static double accelerationDisplacementFactor(double ticks, int remainingAccelerationTicks) {
+        double t = Double.isFinite(ticks) ? Math.max(0.0, ticks) : 0.0;
+        double accelerated = Math.min(t, Math.max(0, remainingAccelerationTicks));
+        return accelerated * (t - 0.5 * accelerated);
+    }
+
+    public static Vec3 futureTargetPosition(Vec3 position, Vec3 velocity, Vec3 effectiveAcceleration, double ticks, int remainingAccelerationTicks) {
+        double t = Double.isFinite(ticks) ? Math.max(0.0, ticks) : 0.0;
+        return position.add(velocity.scale(t)).add(effectiveAcceleration.scale(accelerationDisplacementFactor(t, remainingAccelerationTicks)));
+    }
+
+    public static Vec3 futureTargetVelocity(Vec3 velocity, Vec3 effectiveAcceleration, double ticks, int remainingAccelerationTicks) {
+        double t = Double.isFinite(ticks) ? Math.max(0.0, ticks) : 0.0;
+        return velocity.add(effectiveAcceleration.scale(Math.min(t, Math.max(0, remainingAccelerationTicks))));
+    }
 
     public static double accelerationTrust(TargetMotionClass motionClass) {
         if (motionClass == TargetMotionClass.ERRATIC) {

@@ -9,13 +9,7 @@ public final class AnalyticBallisticIntercept {
     private AnalyticBallisticIntercept() {}
 
     public static List<Vec3> directions(TargetingSnapshot snapshot, ProjectileModel model, double accelerationTrust) {
-        if (snapshot == null
-                || model == null
-                || model.usesCustomDynamics()
-                || model.drag() != 0.0
-                || model.muzzleSpeed() <= 0.0
-                || !Double.isFinite(model.gravity())
-                || snapshot.maxFlightTicks() <= 0) {
+        if (snapshot == null || model == null || model.usesCustomDynamics() || model.drag() != 0.0 || model.muzzleSpeed() <= 0.0 || !Double.isFinite(model.gravity()) || snapshot.maxFlightTicks() <= 0) {
             return List.of();
         }
 
@@ -26,16 +20,14 @@ public final class AnalyticBallisticIntercept {
         }
 
         Vec3 gravity = new Vec3(0.0, model.gravity(), 0.0);
-        Vec3 targetAcceleration = snapshot.targetAcceleration();
-        double accelerationLength = targetAcceleration.length();
+        AnalyticTargetMotion targetMotion = AnalyticTargetMotion.from(snapshot, accelerationTrust);
 
-        if (accelerationLength > 0.25) {
-            targetAcceleration = targetAcceleration.scale(0.25 / accelerationLength);
+        if (targetMotion == null) {
+            return List.of();
         }
 
-        targetAcceleration = targetAcceleration.scale(Math.max(0.0, Math.min(1.0, accelerationTrust)));
-        Vec3 relativeQuadratic = targetAcceleration.subtract(gravity).scale(0.5);
-        Vec3 relativeVelocity = snapshot.targetVelocity().subtract(snapshot.inheritedVelocity());
+        Vec3 targetAcceleration = targetMotion.acceleration();
+        Vec3 relativeVelocity = targetMotion.velocity().subtract(snapshot.inheritedVelocity());
 
         if (!model.cbcPhysics()) {
             relativeVelocity = relativeVelocity.add(gravity.scale(0.5));
@@ -44,46 +36,101 @@ public final class AnalyticBallisticIntercept {
         List<Vec3> directions = new ArrayList<>(4);
         AABB box = snapshot.targetAabb();
 
-        if (box == null) {
-            addIntercepts(
+        if (box == null || snapshot.rigidBodyTargetMotion() != null) {
+            addPiecewiseIntercepts(
                     directions,
-                    snapshot.targetPosition(),
+                    targetMotion.position(),
                     pivot,
                     relativeVelocity,
-                    relativeQuadratic,
+                    targetAcceleration,
+                    gravity,
                     muzzleOffset,
                     model.muzzleSpeed(),
-                    snapshot.maxFlightTicks()
+                    snapshot.maxFlightTicks(),
+                    targetMotion.accelerationRemainingTicks()
             );
         } else {
             Vec3 center = box.getCenter();
 
-            addIntercepts(
+            addPiecewiseIntercepts(
                     directions,
                     center,
                     pivot,
                     relativeVelocity,
-                    relativeQuadratic,
+                    targetAcceleration,
+                    gravity,
                     muzzleOffset,
                     model.muzzleSpeed(),
-                    snapshot.maxFlightTicks()
+                    snapshot.maxFlightTicks(),
+                    targetMotion.accelerationRemainingTicks()
             );
 
             Vec3 upper = new Vec3(center.x, box.minY + 0.75 * box.getYsize(), center.z);
 
-            addIntercepts(
+            addPiecewiseIntercepts(
                     directions,
                     upper,
                     pivot,
                     relativeVelocity,
-                    relativeQuadratic,
+                    targetAcceleration,
+                    gravity,
                     muzzleOffset,
                     model.muzzleSpeed(),
-                    snapshot.maxFlightTicks()
+                    snapshot.maxFlightTicks(),
+                    targetMotion.accelerationRemainingTicks()
             );
         }
 
         return directions;
+    }
+
+    private static void addPiecewiseIntercepts(
+            List<Vec3> solutions,
+            Vec3 target,
+            Vec3 pivot,
+            Vec3 relativeVelocity,
+            Vec3 targetAcceleration,
+            Vec3 gravity,
+            double muzzleOffset,
+            double speed,
+            int maxTicks,
+            double remainingAccelerationTicks) {
+
+        double cutoff = Math.max(0.0, Math.min(maxTicks, remainingAccelerationTicks));
+
+        if (targetAcceleration.lengthSqr() < 1.0e-18) {
+            addIntercepts(solutions, target, pivot, relativeVelocity, gravity.scale(-0.5), muzzleOffset, speed, 1.0e-6, maxTicks);
+            return;
+        }
+
+        if (cutoff > 1.0e-6) {
+            addIntercepts(
+                    solutions,
+                    target,
+                    pivot,
+                    relativeVelocity,
+                    targetAcceleration.subtract(gravity).scale(0.5),
+                    muzzleOffset,
+                    speed,
+                    1.0e-6,
+                    cutoff);
+        }
+
+        if (maxTicks > cutoff) {
+            Vec3 shiftedTarget = target.subtract(targetAcceleration.scale(0.5 * cutoff * cutoff));
+            Vec3 shiftedVelocity = relativeVelocity.add(targetAcceleration.scale(cutoff));
+
+            addIntercepts(
+                    solutions,
+                    shiftedTarget,
+                    pivot,
+                    shiftedVelocity,
+                    gravity.scale(-0.5),
+                    muzzleOffset,
+                    speed,
+                    Math.max(1.0e-6, cutoff),
+                    maxTicks);
+        }
     }
 
     private static void addIntercepts(
@@ -94,7 +141,8 @@ public final class AnalyticBallisticIntercept {
             Vec3 quadratic,
             double offset,
             double speed,
-            int maxTicks
+            double minTicks,
+            double maxTicks
     ) {
         Vec3 relative = target.subtract(pivot);
 
@@ -106,7 +154,7 @@ public final class AnalyticBallisticIntercept {
                 quadratic.dot(quadratic)
         };
 
-        for (double time : PolynomialRoots.inRange(polynomial, 1.0e-6, maxTicks)) {
+        for (double time : PolynomialRoots.inRange(polynomial, minTicks, maxTicks)) {
             double pathLength = offset + speed * time;
 
             if (pathLength <= 1.0e-8) continue;

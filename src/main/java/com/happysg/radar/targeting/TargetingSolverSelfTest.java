@@ -63,15 +63,20 @@ public final class TargetingSolverSelfTest {
       results.add(checkBigCannonUnreachable());
       results.add(checkTrustedAccelerationPrediction());
       results.add(checkLaunchTimeTargetRebase());
+      results.add(checkPiecewiseAnalyticIntercept());
       results.add(checkRigidBodyLaunchPrediction());
       results.add(checkRigidBodyAccelerationPrediction());
       results.add(checkRigidBodyTargetRotation());
       results.add(checkRotatingRigidBodyIntercept());
+      results.add(checkTranslatingRigidBodyAnalytic());
       results.add(checkCandidateSpecificMuzzleVelocity());
       results.add(checkLongRangeStationarySolve());
       results.add(checkLongRangeMovingSolve());
       results.add(checkLongRangeCbcStyleSolve());
       results.add(checkDragMathIntercept());
+      results.add(checkClosedFormDragIntercept());
+      results.add(checkTranslatingSableLinearDrag());
+      results.add(checkClosedFormLinearDrag());
       results.add(checkProjectileSimulatorLongCap());
       results.add(checkCoupledMuzzleCloseRangeStability());
       results.add(checkCoupledMuzzleMovingLead());
@@ -372,6 +377,61 @@ public final class TargetingSolverSelfTest {
       return new Result("rigid_body_target_rotation", passed, "launch=" + predictedLaunch + " impact=" + predictedImpact + " velocity=" + predictedVelocity + " linearOnly=" + linearOnlyPrediction);
    }
 
+   private static Result checkTranslatingRigidBodyAnalytic() {
+      RigidBodyLaunchMath.Motion motion = new RigidBodyLaunchMath.Motion(new Vec3(100.0, 0.0, 0.0), new Vec3(0.1, 0.0, 0.05), Vec3.ZERO, new Vec3(0.02, 0.0, 0.01), Vec3.ZERO);
+      RigidBodyTargetMotion target = new RigidBodyTargetMotion(motion, new Vec3(100.0, 0.0, 10.0), 4.0);
+      ProjectileModel model = ProjectileModel.simple(10.0, 0.0, 0.0);
+      SimulatedAimSolver solver = new SimulatedAimSolver(new ProjectileSimulator(), new TargetPredictor());
+
+      for (Vec3 inherited : new Vec3[]{Vec3.ZERO, new Vec3(0.05, 0.0, 0.02)}) {
+         TargetingSnapshot snapshot =
+                 TargetingSnapshot.builder(null)
+                         .muzzlePosition(Vec3.ZERO)
+                         .inheritedVelocity(inherited)
+                         .targetPosition(target.launchPosition())
+                         .targetVelocity(target.launchVelocity())
+                         .rigidBodyTargetMotion(target)
+                         .projectileSpeed(model.muzzleSpeed())
+                         .gravity(model.gravity())
+                         .drag(model.drag())
+                         .maxFlightTicks(55)
+                         .targetMotionClass(TargetMotionClass.STEADY)
+                         .build();
+
+         AnalyticTargetMotion linear = AnalyticTargetMotion.from(snapshot, 1.0);
+         TargetingResult result = solver.solve(snapshot, model, ObstructionChecker.NONE);
+
+         boolean passed = linear != null
+                 && Math.abs(linear.accelerationRemainingTicks() - 16.0)
+                 < 1.0e-9
+                 && result != null
+                 && result.valid()
+                 && result.hasShot()
+                 && result.missDistance() < 0.05
+                 && "analytic".equals(debugValue(result, "path="));
+
+         if (!passed) {
+            return new Result("translating_rigid_body_analytic", false, "inherited=" + inherited + " result=" + (result == null ? "null" : result.debugString()));
+         }
+      }
+
+      RigidBodyLaunchMath.Motion rotatingMotion = new RigidBodyLaunchMath.Motion(motion.origin(), motion.linearVelocity(), new Vec3(0.0, 0.05, 0.0), motion.linearAcceleration(), Vec3.ZERO);
+      RigidBodyTargetMotion rotatingTarget = new RigidBodyTargetMotion(rotatingMotion, new Vec3(100.0, 0.0, 10.0), 4.0);
+
+      TargetingSnapshot rotatingSnapshot =
+              TargetingSnapshot.builder(null)
+                      .muzzlePosition(Vec3.ZERO)
+                      .targetPosition(rotatingTarget.launchPosition())
+                      .targetVelocity(rotatingTarget.launchVelocity())
+                      .rigidBodyTargetMotion(rotatingTarget)
+                      .projectileSpeed(10.0)
+                      .maxFlightTicks(55)
+                      .build();
+
+      boolean rotationRejected = AnalyticTargetMotion.from(rotatingSnapshot, 1.0) == null;
+      return new Result("translating_rigid_body_analytic", rotationRejected, "Translating ships solved analytically; " + "rotating ship rejected=" + rotationRejected);
+   }
+
    private static Result checkRotatingRigidBodyIntercept() {
       Vec3 origin = new Vec3(120.0, 0.0, 0.0);
       Vec3 linearVelocity = new Vec3(0.08, 0.0, 0.0);
@@ -418,6 +478,139 @@ public final class TargetingSolverSelfTest {
       return new Result("rotating_rigid_body_intercept", passed, result == null ? "null result" : result.debugString());
    }
 
+   private static Result checkClosedFormLinearDrag() {
+      ProjectileSimulator simulator = new ProjectileSimulator();
+
+      ProjectileModel[] models = {
+              ProjectileModel.simple(10.0, -0.05, 0.0),
+              ProjectileModel.simple(10.0, -0.05, 0.01),
+              ProjectileModel.simple(10.0, -0.05, 0.000001),
+              ProjectileModel.cbc(8.0, -0.05, 0.01, 1.0, false),
+              ProjectileModel.cbc(8.0, -0.05, 0.02, 1.4, false)
+      };
+
+      Vec3 start = new Vec3(12.0, 75.0, -8.0);
+      Vec3 direction = new Vec3(0.9, 0.08, 0.39).normalize();
+      Vec3 inherited = new Vec3(0.12, 0.03, -0.08);
+
+      double maxError = 0.0;
+      int checks = 0;
+
+      for (ProjectileModel model : models) {
+         if (!LinearDragMath.supports(model)) {
+            return new Result("closed_form_linear_drag", false, "Unexpected unsupported model");
+         }
+
+         Vec3 initialVelocity = inherited.add(direction.scale(model.muzzleSpeed()));
+
+         for (int ticks : new int[]{1, 2, 6, 30, 150, 2400}) {
+            Vec3 simulated = simulator.simulate(start, direction, inherited, model, ticks).endPosition();
+            Vec3 analytical = LinearDragMath.positionAtTick(start, initialVelocity, model, ticks);
+
+            double error = simulated.distanceTo(analytical);
+            maxError = Math.max(maxError, error);
+            checks++;
+
+            if (!Double.isFinite(error) || error > 1.0e-6) {
+               return new Result("closed_form_linear_drag", false, "cbc=" + model.cbcPhysics() + " drag=" + model.drag() + " ticks=" + ticks + " error=" + error);
+            }
+         }
+      }
+
+      boolean rejectsQuadratic = !LinearDragMath.supports(ProjectileModel.simple(10.0, -0.05, 0.01, true));
+
+      return new Result("closed_form_linear_drag", rejectsQuadratic, "checks=" + checks + " maxError=" + maxError + " quadraticRejected=" + rejectsQuadratic);
+   }
+
+   private static Result checkTranslatingSableLinearDrag() {
+      ProjectileModel model = ProjectileModel.simple(10.0, -0.02, 0.01);
+      SimulatedAimSolver solver = new SimulatedAimSolver(new ProjectileSimulator(), new TargetPredictor());
+
+      int checks = 0;
+      double maxMiss = 0.0;
+
+      for (double range : new double[]{100.0, 220.0}) {
+         RigidBodyLaunchMath.Motion motion = new RigidBodyLaunchMath.Motion(new Vec3(range, 0.0, 0.0), new Vec3(0.08, 0.0, 0.05), Vec3.ZERO, new Vec3(0.012, 0.0, 0.006), Vec3.ZERO);
+
+         for (double delay : new double[]{4.0, 18.0}) {
+            RigidBodyTargetMotion target = new RigidBodyTargetMotion(motion, new Vec3(range, 0.0, 10.0), delay);
+
+            for (Vec3 inherited : new Vec3[]{Vec3.ZERO, new Vec3(0.05, 0.0, 0.02)}) {
+               TargetingSnapshot snapshot =
+                       TargetingSnapshot.builder(null)
+                               .muzzlePosition(Vec3.ZERO)
+                               .inheritedVelocity(inherited)
+                               .targetPosition(target.launchPosition())
+                               .targetVelocity(target.launchVelocity())
+                               .rigidBodyTargetMotion(target)
+                               .projectileSpeed(model.muzzleSpeed())
+                               .gravity(model.gravity())
+                               .drag(model.drag())
+                               .maxFlightTicks(80)
+                               .targetMotionClass(TargetMotionClass.STEADY)
+                               .build();
+
+               TargetingResult result = solver.solve(snapshot, model, ObstructionChecker.NONE);
+               String path = result == null ? "null" : debugValue(result, "path=");
+
+               if (result == null || !result.valid() || !result.hasShot() || result.missDistance() >= 0.05 || !"math_linear_drag".equals(path)) {
+                  return new Result("translating_sable_linear_drag", false, "range=" + range + " delay=" + delay + " inherited=" + inherited + " path=" + path + " result=" + (result == null ? "null" : result.debugString()));
+               }
+
+               maxMiss = Math.max(maxMiss, result.missDistance());
+               checks++;
+            }
+         }
+      }
+
+      RigidBodyLaunchMath.Motion rotating = new RigidBodyLaunchMath.Motion(new Vec3(100.0, 0.0, 0.0), new Vec3(0.08, 0.0, 0.05), new Vec3(0.0, 0.05, 0.0), Vec3.ZERO, Vec3.ZERO);
+      RigidBodyTargetMotion rotatingTarget = new RigidBodyTargetMotion(rotating, new Vec3(100.0, 0.0, 10.0), 4.0);
+
+      TargetingSnapshot rotatingSnapshot =
+              TargetingSnapshot.builder(null)
+                      .muzzlePosition(Vec3.ZERO)
+                      .targetPosition(rotatingTarget.launchPosition())
+                      .targetVelocity(rotatingTarget.launchVelocity())
+                      .rigidBodyTargetMotion(rotatingTarget)
+                      .projectileSpeed(model.muzzleSpeed())
+                      .gravity(model.gravity())
+                      .drag(model.drag())
+                      .maxFlightTicks(80)
+                      .build();
+
+      boolean rotationRejected = AnalyticTargetMotion.from(rotatingSnapshot, 1.0) == null && LinearDragIntercept.directions(rotatingSnapshot, model, 1.0).isEmpty();
+
+      return new Result("translating_sable_linear_drag", rotationRejected, "checks=" + checks + " maxMiss=" + maxMiss + " rotatingRejected=" + rotationRejected);
+   }
+
+   private static Result checkClosedFormDragIntercept() {
+      ProjectileModel model = ProjectileModel.simple(4.0, -0.2, 0.01);
+      TargetingComputer computer = TargetingComputer.createDefault();
+
+      for (boolean highArc : new boolean[]{false, true}) {
+         TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
+                 .muzzlePosition(Vec3.ZERO)
+                 .targetPosition(new Vec3(40.0, 0.0, 0.0))
+                 .targetVelocity(Vec3.ZERO)
+                 .targetAccelerationRemainingTicks(6)
+                 .projectileSpeed(model.muzzleSpeed())
+                 .gravity(model.gravity())
+                 .drag(model.drag())
+                 .maxFlightTicks(80)
+                 .preferHighArc(highArc)
+                 .build();
+
+         TargetingResult result = computer.solve(snapshot, model);
+
+         boolean passed = result != null && result.valid() && result.hasShot() && result.missDistance() < 0.05 && result.debugString().contains("path=math_linear_drag");
+         if (!passed) {
+            return new Result("closed_form_drag_intercept", false, "highArc=" + highArc + " result=" + (result == null ? "null" : result.debugString()));
+         }
+      }
+
+      return new Result("closed_form_drag_intercept", true, "Both low-arc and high-arc closed-form drag intercepts passed");
+   }
+
    private static Result checkDragMathIntercept() {
       ProjectileModel model = ProjectileModel.cbc(8.0, -0.05, 0.01, 1.0, false);
 
@@ -441,7 +634,7 @@ public final class TargetingSolverSelfTest {
               && result.valid()
               && result.hasShot()
               && result.missDistance() <= 0.10
-              && "math_drag".equals(path)
+              && ("math_drag".equals(path) || "math_linear_drag".equals(path))
               && evaluations > 0
               && evaluations <= 45;
 
@@ -640,33 +833,72 @@ public final class TargetingSolverSelfTest {
       Vec3 velocity = new Vec3(0.8, 0.03, -0.07);
       Vec3 acceleration = new Vec3(0.4, -0.01, 0.03);
 
-      double firingDelay = 12.0;
-      double flightTime = 15.5;
-
+      int accelerationWindow = TargetingMotion.TARGET_ACCEL_HOLD_TICKS;
       for (TargetMotionClass motionClass : new TargetMotionClass[]{TargetMotionClass.STEADY, TargetMotionClass.ERRATIC, TargetMotionClass.UNKNOWN}) {
          Vec3 effectiveAcceleration = TargetingMotion.effectiveAcceleration(acceleration, motionClass);
-         Vec3 delayedPosition = TargetingMotion.futurePosition(position, velocity, effectiveAcceleration, firingDelay);
-         Vec3 delayedVelocity = TargetingMotion.futureVelocity(velocity, effectiveAcceleration, firingDelay);
+         for (double firingDelay : new double[]{0.0, 4.0, 12.0}) {
+            Vec3 delayedPosition = TargetingMotion.futureTargetPosition(position, velocity, effectiveAcceleration, firingDelay, accelerationWindow);
+            Vec3 delayedVelocity = TargetingMotion.futureTargetVelocity(velocity, effectiveAcceleration, firingDelay, accelerationWindow);
+            int remainingTicks = Math.max(0, accelerationWindow - (int) firingDelay);
 
-         TargetingSnapshot snapshot = TargetingSnapshot.builder(null)
-                 .muzzlePosition(Vec3.ZERO)
-                 .targetPosition(delayedPosition)
-                 .targetVelocity(delayedVelocity)
-                 .targetAcceleration(acceleration)
-                 .targetMotionClass(motionClass)
-                 .projectileSpeed(10.0)
-                 .maxFlightTicks(100)
-                 .build();
+            TargetingSnapshot snapshot =
+                    TargetingSnapshot.builder(null)
+                            .muzzlePosition(Vec3.ZERO)
+                            .targetPosition(delayedPosition)
+                            .targetVelocity(delayedVelocity)
+                            .targetAcceleration(acceleration)
+                            .targetAccelerationRemainingTicks(remainingTicks)
+                            .targetMotionClass(motionClass)
+                            .projectileSpeed(10.0)
+                            .maxFlightTicks(100)
+                            .build();
 
-         Vec3 actual = predictor.predictPosition(snapshot, flightTime, TargetingMotion.accelerationTrust(motionClass));
-         Vec3 expected = TargetingMotion.futurePosition(position, velocity, effectiveAcceleration, firingDelay + flightTime);
+            for (double flightTime : new double[]{1.0, 3.0, 15.5}) {
 
-         if (actual.distanceToSqr(expected) > 1.0e-12) {
-            return new Result("launch_time_target_rebase", false, "motionClass=" + motionClass + " actual=" + actual + " expected=" + expected);
+               Vec3 actual = predictor.predictPosition(snapshot, flightTime, TargetingMotion.accelerationTrust(motionClass));
+               Vec3 expected = TargetingMotion.futureTargetPosition(position, velocity, effectiveAcceleration, firingDelay + flightTime, accelerationWindow);
+
+               if (actual.distanceToSqr(expected) > 1.0e-12) {
+                  return new Result("launch_time_target_rebase", false, "motionClass=" + motionClass + " delay=" + firingDelay + " flight=" + flightTime + " actual=" + actual + " expected=" + expected);
+               }
+            }
          }
       }
 
-      return new Result("launch_time_target_rebase", true, "Position and velocity remain consistent " + "across firing delays and acceleration trust");
+      return new Result("launch_time_target_rebase", true, "Piecewise acceleration remains consistent " + "across launch delays, flight times, and motion classes");
+   }
+
+
+   private static Result checkPiecewiseAnalyticIntercept() {
+      TargetingComputer computer = new TargetingComputer(null, new ProjectileSimulator(), new TargetPredictor(), ObstructionChecker.NONE);
+
+      for (double range : new double[]{25.0, 100.0}) {
+         for (int remaining : new int[]{0, 3, 6}) {
+
+            TargetingSnapshot snapshot =
+                    TargetingSnapshot.builder(null)
+                            .muzzlePosition(Vec3.ZERO)
+                            .targetPosition(new Vec3(range, 0.0, 0.0))
+                            .targetVelocity(new Vec3(0.0, 0.0, 0.12))
+                            .targetAcceleration(new Vec3(0.0, 0.0, 0.05))
+                            .targetAccelerationRemainingTicks(remaining)
+                            .targetMotionClass(TargetMotionClass.STEADY)
+                            .projectileSpeed(10.0)
+                            .gravity(0.0)
+                            .drag(0.0)
+                            .maxFlightTicks(30)
+                            .build();
+
+            TargetingResult result = computer.solve(snapshot);
+
+            boolean passed = result.valid() && result.hasShot() && result.missDistance() < 0.05 && result.debugString().contains("path=analytic");
+            if (!passed) {
+               return new Result("piecewise_analytic_intercept", false, "range=" + range + " remaining=" + remaining + " " + result.debugString());
+            }
+         }
+      }
+
+      return new Result("piecewise_analytic_intercept", true, "Analytical solves passed before, during, " + "and after the acceleration cutoff");
    }
 
    private static Result checkTrustedAccelerationPrediction() {

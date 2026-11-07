@@ -18,7 +18,7 @@ public class TargetPredictor {
          return rigidMotion.positionAt(ticksAhead);
       }
 
-      return this.predictPosition(snapshot.targetPosition(), snapshot.targetVelocity(), snapshot.targetAcceleration(), ticksAhead);
+      return TargetingMotion.futureTargetPosition(snapshot.targetPosition(), snapshot.targetVelocity(), sanitizeAcceleration(snapshot.targetAcceleration()), ticksAhead, snapshot.targetAccelerationRemainingTicks());
    }
 
    public Vec3 predictPosition(Vec3 position, Vec3 velocity, Vec3 acceleration, double ticksAhead) {
@@ -42,7 +42,7 @@ public class TargetPredictor {
 
       Vec3 acceleration = this.sanitizeAcceleration(snapshot.targetAcceleration()).scale(clamp01(accelerationTrust));
 
-      return this.predictPosition(snapshot.targetPosition(), snapshot.targetVelocity(), acceleration, ticksAhead);
+      return TargetingMotion.futureTargetPosition(snapshot.targetPosition(), snapshot.targetVelocity(), acceleration, ticksAhead, snapshot.targetAccelerationRemainingTicks());
    }
 
    @Nullable
