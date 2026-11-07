@@ -88,6 +88,7 @@ public final class KineticControllerState {
     private double watchdogLastPhysical = Double.NaN;
     private double watchdogLastDestination = Double.NaN;
     private double watchdogMaxStep;
+    private int watchdogConvergedTicks;
     private boolean continuousTracking;
     private boolean physicalVelocitySampleValid;
     private double trackingToleranceDegrees = Double.POSITIVE_INFINITY;
@@ -863,11 +864,55 @@ public final class KineticControllerState {
         watchdogLastPhysical = physicalAngle;
         watchdogLastDestination = destination;
         watchdogMaxStep = adapter.effectiveDegreesPerTick(maximumRpm);
+        watchdogConvergedTicks = 0;
     }
 
     private boolean watchdogAllows(double bearingAngle, double physicalAngle, double destination, double tolerance) {
         if (!watchdogActive) {
             return false;
+        }
+
+        double convergenceDegrees =
+                Math.max(0.25, Math.min(2.0, 2.0 * watchdogMaxStep));
+
+        boolean physicallyConverged =
+                continuousTracking
+                        && physicalVelocitySampleValid
+                        && Double.isFinite(watchdogMaxStep)
+                        && watchdogMaxStep > SPEED_EPSILON
+                        && Double.isFinite(physicalAngularVelocityDegPerTick)
+                        && Math.abs(plannedBearingDelta(physicalAngle, destination))
+                        <= convergenceDegrees
+                        && Math.abs(plannedBearingDelta(bearingAngle, destination))
+                        <= convergenceDegrees
+                        && Math.abs(physicalAngularVelocityDegPerTick)
+                        <= Math.max(0.25, watchdogMaxStep * 1.25);
+
+        watchdogConvergedTicks = physicallyConverged ? Math.min(3, watchdogConvergedTicks + 1) : 0;
+        if (watchdogConvergedTicks >= 3 && (watchdogBearingTravel >= 2.0 * watchdogMaxStep || watchdogPhysicalTravel >= 2.0 * watchdogMaxStep)) {
+            if (MotionTraceRecorder.isEnabled()) {
+                MotionTraceRecorder.record(
+                        "swivel.watchdog_progress_reset",
+                        motionTraceLevel,
+                        motionTraceControllerPos,
+                        "axis", axis,
+                        "remainingDegrees",
+                        plannedBearingDelta(physicalAngle, destination),
+                        "bearingTravel", watchdogBearingTravel,
+                        "physicalTravel", watchdogPhysicalTravel
+                );
+            }
+
+            watchdogInitialError = Math.abs(plannedBearingDelta(physicalAngle, destination));
+            watchdogDestinationTravel = 0.0;
+            watchdogBearingTravel = 0.0;
+            watchdogPhysicalTravel = 0.0;
+            watchdogLastBearing = bearingAngle;
+            watchdogLastPhysical = physicalAngle;
+            watchdogLastDestination = destination;
+            watchdogConvergedTicks = 0;
+
+            return true;
         }
 
         double bearingStep = KineticAngleMath.shortestDelta(watchdogLastBearing, bearingAngle);

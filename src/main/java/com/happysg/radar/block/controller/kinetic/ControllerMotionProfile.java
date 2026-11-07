@@ -138,6 +138,10 @@ public final class ControllerMotionProfile {
         }
 
         public double nextTrackingStep(double errorDegrees, double rpm, double targetDegrees, long gameTick, boolean wrappedAngle) {
+            return nextTrackingStep(errorDegrees, rpm, targetDegrees, gameTick, wrappedAngle, TRACKING_ACCELERATION_DEGREES_PER_TICK2);
+        }
+
+        public double nextTrackingStep(double errorDegrees, double rpm, double targetDegrees, long gameTick, boolean wrappedAngle, double trackingAcceleration) {
             if (!Double.isFinite(errorDegrees) || !Double.isFinite(targetDegrees)) {
                 reset();
                 return 0.0;
@@ -195,7 +199,8 @@ public final class ControllerMotionProfile {
                 requestedVelocity = Math.max(-maxSpeed, Math.min(maxSpeed, requestedVelocity));
             }
 
-            velocityDegreesPerTick = approach(velocityDegreesPerTick, requestedVelocity, TRACKING_ACCELERATION_DEGREES_PER_TICK2);
+            double acceleration = Double.isFinite(trackingAcceleration) ? Math.max(0.1, Math.min(2.0, trackingAcceleration)) : TRACKING_ACCELERATION_DEGREES_PER_TICK2;
+            velocityDegreesPerTick = approach(velocityDegreesPerTick, requestedVelocity, acceleration);
             double step = direction * Math.min(distance, Math.max(0.0, velocityDegreesPerTick * direction));
             velocityDegreesPerTick = step;
             return step;

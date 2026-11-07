@@ -541,7 +541,8 @@ public final class CbcShaftDrive {
         }
 
         double profileRpm = maximumPhysicalStep * 12.0;
-        double plannedStep = motionProfile.nextTrackingStep(error, profileRpm, desired, tick, axis == CannonAxis.YAW);
+        double trackingAcceleration = axis == CannonAxis.YAW && Math.abs(error) > 3.0 && Math.abs(desiredRate) >= 0.15 && error * desiredRate > 0.0 ? 1.5 : 1.0;
+        double plannedStep = motionProfile.nextTrackingStep(error, profileRpm, desired, tick, axis == CannonAxis.YAW, trackingAcceleration);
         double unbrakedStep = plannedStep;
 
         double direction = Math.signum(error);

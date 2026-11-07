@@ -1836,7 +1836,7 @@ public class WeaponFiringControl {
                                         targetingResultProvisional = targetingResult != null && !targetingResultFreshForFire;
                                         this.lastTargetingSteeringProvisional = targetingResultProvisional;
                                         this.lastTargetingFireFresh = targetingResultFreshForFire;
-                                        this.lastTargetingFreshnessReason = targetingResult != null && !cachedBallisticReachableForFire ? "ballistic_launch_unreachable" : this.asyncFreshnessReason(serverLevel, cannon, targetMotionId, solvePos, currentProjectile.fingerprint());
+                                        this.lastTargetingFreshnessReason = targetingResult != null && !cachedBallisticReachableForFire ? (isExternallyTriggeredYawMount(serverLevel) ? "external_trigger_no_local_launch_schedule" : "ballistic_launch_unreachable") : this.asyncFreshnessReason(serverLevel, cannon, targetMotionId, solvePos, currentProjectile.fingerprint());
 
                                         if (this.shouldRefreshAsyncTargeting(serverLevel, solveEveryTick, completedAsyncResult)) {
                                             this.submitAsyncTargetingSolve(
@@ -2689,6 +2689,10 @@ public class WeaponFiringControl {
             }
         }
 
+        if (!this.cachedBallisticReachableForFire) {
+            return age <= 30L && finite(solvePos) && finite(this.cachedTargetingSolvePos);
+        }
+
         Vec3 currentOrigin = this.cachedTargetingRequest != null
                 ? this.predictedAsyncSteeringOrigin(serverLevel, cannonContraption, this.cachedTargetingRequest.leadTicks())
                 : this.resolveSteeringOrigin(cannonContraption);
@@ -2887,6 +2891,22 @@ public class WeaponFiringControl {
 
                 this.lastAsyncValidationReason = asyncResult == null ? "empty_async_result" : "request_not_applicable";
                 ++this.asyncSolveRejected;
+                if (MotionTraceRecorder.isEnabled()) {
+                    MotionTraceRecorder.record(
+                            "targeting.async_rejected",
+                            serverLevel,
+                            getWeaponMountPos(),
+                            "stage", "applicability",
+                            "reason", this.lastAsyncValidationReason,
+                            "rawSolverResult", this.lastAsyncRawResult,
+                            "requestAgeTicks",
+                            asyncResult == null ? null : serverLevel.getGameTime() - asyncResult.request().requestTick(),
+                            "requestTarget",
+                            asyncResult == null ? null : asyncResult.request().solvePos(),
+                            "currentTarget", solvePos
+                    );
+                }
+
                 return null;
             }
 
@@ -2896,7 +2916,7 @@ public class WeaponFiringControl {
 
                 if (primary.obstructed() && !(asyncResult.request().projectileModel() instanceof CBCMWCannonCompat.LauncherProjectileModel)) {
                     this.lastAsyncValidationReason = "blocked_path_fallback_requested";
-                    this.clearTargetingResultCache();
+                    this.cachedBallisticReachableForFire = false;
                     this.submitAsyncObstructionFallback(asyncResult.request());
                     return null;
                 }
@@ -2918,7 +2938,24 @@ public class WeaponFiringControl {
                     this.lastAsyncValidationReason = "no_fallback_candidates";
                 }
                 ++this.asyncSolveRejected;
-                this.clearTargetingResultCache();
+
+                if (MotionTraceRecorder.isEnabled()) {
+                    MotionTraceRecorder.record(
+                            "targeting.async_rejected",
+                            serverLevel,
+                            getWeaponMountPos(),
+                            "stage", "validation",
+                            "reason", this.lastAsyncValidationReason,
+                            "rawSolverResult", this.lastAsyncRawResult,
+                            "requestAgeTicks",
+                            serverLevel.getGameTime() - asyncResult.request().requestTick(),
+                            "requestTarget", asyncResult.request().solvePos(),
+                            "currentTarget", solvePos,
+                            "alternatives",
+                            asyncResult.alternatives() == null ? null : asyncResult.alternatives().size()
+                    );
+                }
+                this.cachedBallisticReachableForFire = false;
                 return null;
             }
 
@@ -2928,7 +2965,8 @@ public class WeaponFiringControl {
             boolean ballisticReachable = actualSlewTicks <= availableSlewTicks;
 
             int correctedDelay = LaunchTimeFeasibility.refinedDelay(solvedRequest.leadTicks(), solvedRequest.trackingLeadTicks(), actualSlewTicks, 60);
-            boolean requestCorrection = !isExternallyTriggeredYawMount(serverLevel) && !ballisticReachable && !solvedRequest.ballisticRefined() && correctedDelay > solvedRequest.leadTicks();
+            boolean externallyTriggered = isExternallyTriggeredYawMount(serverLevel);
+            boolean requestCorrection = !externallyTriggered && !ballisticReachable && !solvedRequest.ballisticRefined() && correctedDelay > solvedRequest.leadTicks();
             if (MotionTraceRecorder.isEnabled()) {
                 MotionTraceRecorder.record(
                         "targeting.ballistic_refinement_decision",
@@ -2943,6 +2981,8 @@ public class WeaponFiringControl {
                         "actualSlewTicks", actualSlewTicks,
                         "availableSlewTicks", availableSlewTicks,
                         "reachable", ballisticReachable,
+                        "externallyTriggered", externallyTriggered,
+                        "localLaunchScheduleApplicable", !externallyTriggered,
                         "correctedDelayTicks", correctedDelay,
                         "alreadyRefined", solvedRequest.ballisticRefined(),
                         "requestCorrection", requestCorrection,
@@ -2951,11 +2991,8 @@ public class WeaponFiringControl {
             }
 
             if (requestCorrection) {
-                this.clearTargetingResultCache();
                 this.pendingBallisticRefinementFloorTicks = correctedDelay;
                 this.lastAsyncValidationReason = "ballistic_refinement_requested";
-
-                return null;
             }
 
             this.storeTargetingResult(
@@ -4325,14 +4362,18 @@ public class WeaponFiringControl {
     }
 
     private TargetingValidation validateAsyncTargetingResult(ServerLevel serverLevel, AbstractMountedCannonContraption cannonContraption, AsyncTargetingRequest request, @Nullable TargetingResult result) {
-        if (result == null || !result.valid() || !result.hasShot() || result.aimSolution() == null) {
-            return TargetingValidation.invalid();
+        if (result == null) {
+            return rejectAsyncValidation("solver_result_null");
+        }
+
+        if (!result.valid() || !result.hasShot() || result.aimSolution() == null) {
+            return rejectAsyncValidation("solver_no_valid_shot:" + result.reason());
         }
 
         AimSolution aim = result.aimSolution();
         Vec3 direction = aim.aimDirection();
         if (direction == null || direction.lengthSqr() < 1.0E-12) {
-            return TargetingValidation.invalid();
+            return rejectAsyncValidation("invalid_aim_direction");
         }
 
         TargetingSnapshot snapshot = request.snapshot();
@@ -4341,7 +4382,7 @@ public class WeaponFiringControl {
         if (currentProjectile == null
                 || !request.shotFingerprint().equals(currentProjectile.fingerprint())
                 || request.solverKind() != currentProjectile.solverKind()) {
-            return TargetingValidation.invalid();
+            return rejectAsyncValidation("projectile_profile_changed");
         }
 
         int validationTicks = Math.max(1, Math.min(snapshot.maxFlightTicks(), result.predictedFlightTicks() + 1));
