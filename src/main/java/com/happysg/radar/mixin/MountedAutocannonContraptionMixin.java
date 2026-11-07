@@ -1,5 +1,6 @@
 package com.happysg.radar.mixin;
 
+import com.happysg.radar.debug.MotionTraceRecorder;
 import com.happysg.radar.item.radarproxfuze.AdvancedProximityFuze;
 import com.happysg.radar.debug.ConflictTraceRecorder;
 import net.minecraft.server.level.ServerLevel;
@@ -19,15 +20,19 @@ public class MountedAutocannonContraptionMixin {
 
     @Inject(method = "fireShot", at = @At("HEAD"), remap = false)
     private void createRadar$pushAdvancedProximityFuzeContext(ServerLevel level, PitchOrientedContraptionEntity contraptionEntity, CallbackInfo ci) {
-        ConflictTraceRecorder.heartbeat("mixin_callback",
-                "autocannon_fire_head", level, true);
+        ConflictTraceRecorder.heartbeat("mixin_callback", "autocannon_fire_head", level, true);
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record("cbc.autocannon_fire_enter", level, contraptionEntity.blockPosition(), "cannonEntityId", contraptionEntity.getUUID(), "gameTime", level.getGameTime(), "contraptionType", contraptionEntity.getContraption().getClass().getSimpleName());
+        }
         this.createRadar$hasFuzeLaunchContext = AdvancedProximityFuze.pushLaunchContext(level, contraptionEntity);
     }
 
     @Inject(method = "fireShot", at = @At("RETURN"), remap = false)
     private void createRadar$popAdvancedProximityFuzeContext(ServerLevel level, PitchOrientedContraptionEntity contraptionEntity, CallbackInfo ci) {
-        ConflictTraceRecorder.heartbeat("mixin_callback",
-                "autocannon_fire_return", level, true);
+        ConflictTraceRecorder.heartbeat("mixin_callback", "autocannon_fire_return", level, true);
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record("cbc.autocannon_fire_return", level, contraptionEntity.blockPosition(), "cannonEntityId", contraptionEntity.getUUID(), "gameTime", level.getGameTime());
+        }
         if (this.createRadar$hasFuzeLaunchContext) {
             AdvancedProximityFuze.popLaunchContext();
             this.createRadar$hasFuzeLaunchContext = false;

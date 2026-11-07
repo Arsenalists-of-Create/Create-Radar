@@ -1,6 +1,7 @@
 package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.cbc.CannonTargeting;
@@ -159,8 +160,11 @@ public class CannonMountPitch {
             return false;
         }
 
+        boolean sableShip = track.trackCategory() == TrackCategory.SABLE && "Sable:ship".equals(track.entityType());
+        boolean requireAimLos = requireLos && !sableShip;
+
         Vec3 p = controller.firingControl.resolveEngagementAimPoint(
-                sl, track, requireLos);
+                sl, track, requireAimLos);
         if (p == null) {
             return false;
         }

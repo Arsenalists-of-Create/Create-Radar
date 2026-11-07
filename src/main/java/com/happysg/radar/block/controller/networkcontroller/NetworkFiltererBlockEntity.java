@@ -373,7 +373,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
                 boolean checkVisibility = RadarConfig.server().autoTargetDropInvalidTargets.get();
                 boolean cycleVisibleTargets = RadarConfig.server().autoTargetCycleVisibleTargets.get();
-                boolean checkLos = cycleVisibleTargets || (checkVisibility && cfg.lineOfSight());
+                boolean checkLos = cfg.lineOfSight() && (checkVisibility || cycleVisibleTargets);
 
                 boolean hasLoadedWeapon = false;
                 boolean hasVisibleWeapon = !checkLos;
@@ -385,8 +385,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
                     hasLoadedWeapon = true;
 
-                    if (checkLos && !hasVisibleWeapon && endpoint.control().hasLineOfSightTo(selected, true)) {
-                        hasVisibleWeapon = true;
+                    if (checkLos && !hasVisibleWeapon) {
+                        boolean sableShip = selected.trackCategory() == TrackCategory.SABLE && "Sable:ship".equals(selected.entityType());
+                        if (sableShip || (endpoint.control() != null && endpoint.control().hasLineOfSightTo(selected, true))) {
+                            hasVisibleWeapon = true;
+                        }
                     }
 
                     if (!checkLos || hasVisibleWeapon) {
@@ -413,7 +416,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                     autoUnloadedSinceTick = Long.MIN_VALUE;
                 }
 
-                if (hasLoadedWeapon && sl.getGameTime() % 20L == 0L) {
+                if (checkVisibility && hasLoadedWeapon && sl.getGameTime() % 20L == 0L) {
                     List<AutoTargetWeapon> availableWeapons = new ArrayList<>();
 
                     for (AutoTargetWeapon endpoint : endpoints) {
@@ -456,7 +459,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                         }
                     }
 
-                } else if (!hasLoadedWeapon) {
+                } else if (!checkVisibility || !hasLoadedWeapon) {
                     autoUnengageableTargetId = null;
                     autoUnengageableSinceTick = Long.MIN_VALUE;
                 }
@@ -1067,7 +1070,10 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return false;
         }
 
-        Vec3 aimPoint = control.resolveEngagementAimPoint(sl, track, requireLos);
+        boolean sableShip = track.trackCategory() == TrackCategory.SABLE && "Sable:ship".equals(track.entityType());
+        boolean requireAimLos = requireLos && !sableShip;
+
+        Vec3 aimPoint = control.resolveEngagementAimPoint(sl, track, requireAimLos);
         Vec3 origin = control.getCannonRayStart();
         if (aimPoint == null || origin == null) {
             return false;
@@ -1090,7 +1096,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return false;
         }
 
-        return !requireLos || "Sable:ship".equals(track.entityType()) || control.hasLineOfSightTo(track, true);
+        return !requireLos || sableShip || control.hasLineOfSightTo(track, true);
     }
 
     private boolean anyCannonCanEngage(ServerLevel sl, List<AutoTargetWeapon> endpoints, RadarTrack track, boolean requireLos, Map<AutoYawControllerBlockEntity, Double> yawRangeCache) {
