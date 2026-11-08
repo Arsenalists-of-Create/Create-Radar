@@ -4573,6 +4573,12 @@ public class WeaponFiringControl {
             return false;
         }
 
+        UUID obstructingShip = obstruction.obstructingSublevelId();
+
+        if (obstructingShip != null && !obstructingShip.equals(snapshot.targetSublevelId())) {
+            return false;
+        }
+
         int blockedTick = Math.max(0, obstruction.blockedTick());
         Vec3 targetAtBlock = predictSnapshotTarget(snapshot, blockedTick);
         AABB targetAabb = snapshot.targetAabb() == null ? null : snapshot.targetAabb().move(targetAtBlock.subtract(snapshot.targetPosition()));
