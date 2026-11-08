@@ -17,7 +17,6 @@
     "create_radar:radar_warning_receiver",
     "create_radar:sky_radar",
     "create_radar:sonar_bearing",
-    "create_radar:sonar_sensor",
-    "create_radar:t_pitch"
+    "create_radar:sonar_sensor"
   ]
 }
