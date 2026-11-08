@@ -12,7 +12,7 @@ public final class ControllerMotionProfile {
     private static final double TRACKING_RATE_BLEND = 0.45;
     private static final double TRACKING_ERROR_GAIN = 0.75;
     private static final double TRACKING_ACCELERATION_DEGREES_PER_TICK2 = 1.0;
-    private static final double TRACKING_MIN_RATE = 0.15;
+    private static final double TRACKING_MIN_RATE = 0.10;
     private static final double TRACKING_MAX_SETPOINT_JUMP = MAX_DEGREES_PER_TICK * 1.5;
 
     private ControllerMotionProfile() {}

@@ -36,27 +36,12 @@ public final class SableLaunchMotion {
                 return null;
             }
 
-            String key = ship.getUniqueId() + "|" + level.dimension().location() + "|rigid_motion|";
-
-            UUID linearId = UUID.nameUUIDFromBytes((key + "linear").getBytes(StandardCharsets.UTF_8));
-            UUID angularId = UUID.nameUUIDFromBytes((key + "angular").getBytes(StandardCharsets.UTF_8));
-
-            long tick = level.getGameTime();
-            Vec3 linearAcceleration = AccelerationTracker.getAccelerationPerTick2(linearId, measured.linearVelocity(), tick);
-
-            Vec3 angularAcceleration = AccelerationTracker.getAccelerationPerTick2(angularId, measured.angularVelocity(), tick);
-            double maxAngularAcceleration = 0.02;
-
-            if (angularAcceleration.lengthSqr() > maxAngularAcceleration * maxAngularAcceleration) {
-                angularAcceleration = angularAcceleration.normalize().scale(maxAngularAcceleration);
-            }
-
             return new RigidBodyLaunchMath.Motion(
                     measured.origin(),
                     measured.linearVelocity(),
                     measured.angularVelocity(),
-                    linearAcceleration,
-                    angularAcceleration
+                    Vec3.ZERO,
+                    Vec3.ZERO
             );
 
         } catch (RuntimeException e) {

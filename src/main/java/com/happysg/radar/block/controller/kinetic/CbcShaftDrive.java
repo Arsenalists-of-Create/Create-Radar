@@ -622,7 +622,7 @@ public final class CbcShaftDrive {
         if (reverseHoldTicks > 0) {
             int completedHoldTicks = ControllerMotionProfile.REVERSAL_HOLD_TICKS - reverseHoldTicks;
 
-            boolean movingTarget = Math.abs(desiredRate) >= 0.15;
+            boolean movingTarget = Math.abs(desiredRate) >= 0.10;
             boolean physicallySlowed = Math.abs(actualRate) <= ControllerMotionProfile.REVERSAL_RELEASE_SPEED_DEG_PER_TICK;
 
             if (MotionTraceRecorder.isEnabled()) {
@@ -643,7 +643,7 @@ public final class CbcShaftDrive {
                 );
             }
 
-            if (movingTarget && completedHoldTicks >= ControllerMotionProfile.REVERSAL_MIN_HOLD_TICKS && physicallySlowed) {
+            if (movingTarget && completedHoldTicks >= 1 && physicallySlowed) {
                 reverseHoldTicks = 0;
             } else {
                 reverseHoldTicks--;
