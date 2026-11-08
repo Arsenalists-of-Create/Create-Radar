@@ -1,6 +1,7 @@
 package com.happysg.radar.block.arad.rwr;
 
 import com.happysg.radar.api.arad.ARADTargeting;
+import com.happysg.radar.api.physics.RadarPhysics;
 import com.happysg.radar.api.radar.rwr.RadarRwrEmitter;
 import com.happysg.radar.api.radar.rwr.RadarRwrEvaluation;
 import com.happysg.radar.api.radar.rwr.RadarRwrTarget;
@@ -362,6 +363,12 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
 
         Vec3 displayReceiverPos = receivers.get(0).position();
         Set<String> receiverSecrets = receiverSecrets(receivers);
+
+        Set<UUID> receiverShipIds = new HashSet<>();
+        for (ReceiverTarget receiver : receivers) {
+            receiverShipIds.add(receiver.shipId());
+        }
+
         Map<String, ContactAccumulator> contactsBySource = new LinkedHashMap<>();
         List<RadarRwrEmitter> addonEmitters = ARADTargeting.liveRwrEmitters(level).stream().filter(emitter -> !(emitter instanceof IRadar)).toList();
 
@@ -442,7 +449,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
 
                     boolean withinRadarRange = horizontalDistanceSqr(receiver.position(), radarWorldPos) <= radarRange * radarRange;
                     boolean engaged = RadarContactRegistry.isSourceEngaged(level, receiver.shipId(), sourceId);
-                    boolean friendly = isFriendlyRadar(level, emitterPos, receiverSecrets);
+                    boolean friendly = isFriendlyRadar(level, emitterPos, receiverSecrets, receiverShipIds);
 
                     contactsBySource.computeIfAbsent(sourceId, ignored -> new ContactAccumulator(
                             sourceId, emitter, displayReceiverPos, radarWorldPos
@@ -634,7 +641,15 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         }
     }
 
-    private static boolean isFriendlyRadar(ServerLevel level, BlockPos radarPos, Set<String> receiverSecrets) {
+    private static boolean isFriendlyRadar(ServerLevel level, BlockPos radarPos, Set<String> receiverSecrets, Set<UUID> receiverShipIds) {
+        Set<UUID> connected = RadarPhysics.connectedFrameIds(level, radarPos);
+
+        for (UUID receiverId : receiverShipIds) {
+            if (connected.contains(receiverId)) {
+                return true;
+            }
+        }
+
         if (receiverSecrets.isEmpty()) {
             return false;
         }

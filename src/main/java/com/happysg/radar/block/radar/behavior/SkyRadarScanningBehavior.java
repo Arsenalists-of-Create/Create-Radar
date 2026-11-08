@@ -562,7 +562,11 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
     public void setTrackExpiration(int trackExpiration) { this.trackExpiration = trackExpiration; }
 
     public Collection<RadarTrack> getRadarTracks() {
-        return radarTracks.values();
+        if (!running || !scanSable || !isHighEnough()) {
+            return radarTracks.values();
+        }
+
+        return RadarTrackUtil.withConnectedFriendlies(blockEntity.getLevel(), blockEntity.getBlockPos(), radarTracks.values());
     }
 
     @Override

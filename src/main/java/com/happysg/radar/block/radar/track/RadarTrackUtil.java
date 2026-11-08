@@ -1,7 +1,12 @@
 package com.happysg.radar.block.radar.track;
 
+import com.happysg.radar.api.physics.RadarPhysics;
+import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
+import com.happysg.radar.compat.Mods;
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -9,9 +14,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
+import java.util.*;
 
 public class RadarTrackUtil {
 
@@ -64,8 +67,48 @@ public class RadarTrackUtil {
                 && Double.isFinite(value.y) && Double.isFinite(value.z);
     }
 
+    public static Collection<RadarTrack> withConnectedFriendlies(Level level, BlockPos radarPos, Collection<RadarTrack> contacts) {
+        if (level == null || !Mods.SABLE.isLoaded()) {
+            return contacts;
+        }
 
+        Set<UUID> connected = RadarPhysics.connectedFrameIds(level, radarPos);
+        if (connected.size() <= 1) {
+            return contacts;
+        }
 
+        SubLevelAccess own = SableUtils.getShipManagingPos(level, radarPos);
+        SubLevelContainer container = SubLevelContainer.getContainer(level);
+
+        if (own == null || container == null) {
+            return contacts;
+        }
+
+        Map<String, RadarTrack> result = new LinkedHashMap<>();
+
+        for (RadarTrack track : contacts) {
+            if (track != null) {
+                result.put(track.getId(), track);
+            }
+        }
+
+        for (UUID id : connected) {
+            if (id.equals(own.getUniqueId())) {
+                continue;
+            }
+
+            SubLevelAccess sublevel = container.getSubLevel(id);
+            if (sublevel == null) {
+                continue;
+            }
+
+            RadarTrack track = getRadarTrack(sublevel, level);
+            track.setFriendly(true);
+            result.put(track.getId(), track);
+        }
+
+        return List.copyOf(result.values());
+    }
 
     public static CompoundTag serializeNBTList(Collection<RadarTrack> tracks) {
         ListTag list = new ListTag();
@@ -85,5 +128,4 @@ public class RadarTrackUtil {
         }
         return tracks;
     }
-
 }

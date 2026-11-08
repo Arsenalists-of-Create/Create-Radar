@@ -736,7 +736,11 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
     }
 
     public Collection<RadarTrack> getRadarTracks() {
-        return radarTracks.values();
+        if (!running || range <= 0 || !scanSable) {
+            return radarTracks.values();
+        }
+
+        return RadarTrackUtil.withConnectedFriendlies(sonar.getLevel(), sonar.getBlockPos(), radarTracks.values());
     }
 
     public void setRange(double range) {

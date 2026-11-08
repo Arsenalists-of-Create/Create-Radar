@@ -22,7 +22,9 @@ public final class SableMonitorRelocation {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<ServerLevel, List<Move>> PENDING = new WeakHashMap<>();
     private static final Map<ServerLevel, Set<BlockPos>> MOVING_FROM = new WeakHashMap<>();
+    private static final Map<ServerLevel, Map<BlockPos, PreparedMonitor>> PREPARED = new WeakHashMap<>();
 
+    private record PreparedMonitor(BlockPos controller, int size, Direction facing) {}
     private record Move(
             ServerLevel originLevel,
             BlockPos oldPos,
@@ -36,35 +38,40 @@ public final class SableMonitorRelocation {
     private SableMonitorRelocation() {}
 
     public static void prepare(ServerLevel level, BlockPos oldPos) {
-        if (!(level.getBlockEntity(oldPos) instanceof MonitorBlockEntity)) {
+        if (!(level.getBlockEntity(oldPos) instanceof MonitorBlockEntity monitor)) {
             return;
         }
 
-        MOVING_FROM.computeIfAbsent(level, ignored -> new HashSet<>()).add(oldPos.immutable());
-    }
-
-    public static void capture(ServerLevel originLevel, ServerLevel resultingLevel, BlockPos oldPos, BlockPos newPos) {
-        if (!(originLevel.getBlockEntity(oldPos) instanceof MonitorBlockEntity oldMonitor) || !(resultingLevel.getBlockEntity(newPos) instanceof MonitorBlockEntity)) {
-            return;
-        }
-
-        int size = oldMonitor.getSize();
+        int size = monitor.getSize();
         if (size < 1 || size > RadarConfig.server().monitorMaxSize.get()) {
             return;
         }
 
-        BlockPos controller = oldMonitor.getControllerPos().immutable();
-        Direction facing = oldMonitor.getBlockState().getValue(MonitorBlock.FACING);
+        BlockPos controller = monitor.getControllerPos().immutable();
+        Direction facing = monitor.getBlockState().getValue(MonitorBlock.FACING);
 
-        PENDING.computeIfAbsent(resultingLevel, ignored -> new ArrayList<>()).add(new Move(
-                originLevel,
-                oldPos.immutable(),
-                newPos.immutable(),
-                controller,
-                size,
-                facing
-        ));
+        PREPARED.computeIfAbsent(level, ignored -> new HashMap<>()).put(oldPos.immutable(), new PreparedMonitor(controller, size, facing));
+        MOVING_FROM.computeIfAbsent(level, ignored -> new HashSet<>()).add(oldPos.immutable());
+    }
 
+    public static void capture(ServerLevel originLevel, ServerLevel resultingLevel, BlockPos oldPos, BlockPos newPos) {
+        Map<BlockPos, PreparedMonitor> preparedMap = PREPARED.get(originLevel);
+        PreparedMonitor prepared = preparedMap == null ? null : preparedMap.remove(oldPos);
+        if (preparedMap != null && preparedMap.isEmpty()) {
+            PREPARED.remove(originLevel);
+        }
+
+        if (prepared == null) {
+            LOGGER.warn("Missing prepared monitor snapshot for Sable move {} -> {}", oldPos, newPos);
+            return;
+        }
+
+        if (!(resultingLevel.getBlockEntity(newPos) instanceof MonitorBlockEntity)) {
+            LOGGER.warn("Destination monitor block entity unavailable during Sable move {} -> {}", oldPos, newPos);
+            return;
+        }
+
+        PENDING.computeIfAbsent(resultingLevel, ignored -> new ArrayList<>()).add(new Move(originLevel, oldPos.immutable(), newPos.immutable(), prepared.controller(), prepared.size(), prepared.facing()));
         MOVING_FROM.computeIfAbsent(originLevel, ignored -> new HashSet<>()).add(oldPos.immutable());
     }
 
@@ -204,11 +211,20 @@ public final class SableMonitorRelocation {
         for (BlockPos linkPos : leftBehindLinks) {
             disconnectIfLeftBehind(level, linkPos, oldController);
         }
+
+        if (level.getBlockEntity(newController) instanceof MonitorBlockEntity monitor && monitor.isController()) {
+            monitor.refreshAfterSableMove();
+        }
     }
 
     public static void clear(ServerLevel level) {
         PENDING.remove(level);
         MOVING_FROM.remove(level);
+        PREPARED.remove(level);
+
+        for (Map<BlockPos, PreparedMonitor> prepared : PREPARED.values()) {
+            prepared.clear();
+        }
 
         for (List<Move> moves : PENDING.values()) {
             moves.removeIf(move -> move.originLevel() == level);

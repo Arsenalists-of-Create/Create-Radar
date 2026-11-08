@@ -316,6 +316,18 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return;
         }
 
+        if (selected != null && selectedWasAuto && selected.isFriendly()) {
+            List<RadarTrack> alternatives = cachedTracks.stream()
+                    .filter(track -> track != null
+                            && !track.isFriendly()
+                            && !Objects.equals(track.getId(), selected.getId()))
+                    .toList();
+
+            RadarTrack replacement = targeting.autoTarget() ? pickAutoTarget_PerCannon(sl, alternatives, safeZones) : null;
+            applySelectedTarget(sl, data, group, replacement, replacement != null);
+            return;
+        }
+
         if (selected != null && isSelectedTrackStale(sl, selected)) {
             if (targeting.autoTarget()) {
                 dropOrReselectAuto(sl, data, group);
@@ -465,11 +477,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 }
 
                 Vec3 selectedPos = selected.position();
-
                 boolean invalidTarget = checkVisibility
-                        && (selectedPos == null
-                        || AutoTargetingHelper.isInSafeZone(selectedPos, safeZones, sl)
-                        || (cfg.lineOfSight()
+                        && (selectedPos == null || AutoTargetingHelper.isInSafeZone(selectedPos, safeZones, sl) || (cfg.lineOfSight()
                         && hasLoadedWeapon
                         && !hasVisibleWeapon)
                 );
@@ -726,6 +735,18 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 }
 
                 merged.merge(id, track, DirectionalJammingService::preferObservation);
+            }
+        }
+
+        IdentificationConfig identification = readIdentificationFromSlot();
+        Set<String> friendlyIds = buildIgnoreList(identification == null ? IdentificationConfig.DEFAULT : identification);
+        for (RadarTrack track : merged.values()) {
+            if (track.isFriendly()) {
+                continue;
+            }
+
+            if (AutoTargetingHelper.isIgnoredByIdentification(track, sl, friendlyIds)) {
+                track.setFriendly(true);
             }
         }
 
@@ -1676,6 +1697,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         ArrayList<RadarTrack> candidates = new ArrayList<>();
         for (RadarTrack track : tracks) {
             if (track == null) continue;
+            if (track.isFriendly()) continue;
 
             if (skipTimedOutTarget && Objects.equals(track.getId(), autoTimedOutTargetId)) {
                 continue;

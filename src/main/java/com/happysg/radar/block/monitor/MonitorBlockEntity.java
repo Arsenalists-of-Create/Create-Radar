@@ -674,7 +674,31 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         return angle;
     }
 
+    public void refreshAfterSableMove() {
+        if (!(level instanceof ServerLevel sl) || !isController()) {
+            return;
+        }
 
+        radar = null;
+        radarCache.clear();
+        lastSerializedTracksSource = null;
+        lastSerializedTracksTag = null;
+        lastSerializedTracksGameTime = Long.MIN_VALUE;
+
+        radarPos = null;
+        radarInfos = List.of();
+        rwrInfos = List.of();
+
+        syncFromNetwork(sl);
+        refreshAradLinkState();
+        syncFromArad(sl);
+        updateCacheServerOrClient();
+
+        activetrack = resolveActiveTrack();
+
+        setChanged();
+        sendData();
+    }
 
     private void syncFromNetwork(ServerLevel sl) {
         NetworkData.Group g = getNetworkGroup(sl);

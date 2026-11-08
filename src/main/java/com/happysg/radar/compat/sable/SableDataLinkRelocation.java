@@ -249,6 +249,7 @@ public final class SableDataLinkRelocation {
         }
 
         relocateConfirmedRadars(level, moves);
+        SableMonitorRelocation.process(level);
 
         MOVING_FROM.remove(level);
         MOVING_ENDPOINTS.remove(level);
