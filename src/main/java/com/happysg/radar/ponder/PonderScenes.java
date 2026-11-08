@@ -225,13 +225,14 @@ public class PonderScenes {
         showSelection(scene, pitch);
         showSelection(scene, pitchNetworkLink);
 
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, cannon, new AABB(new BlockPos(9, 2, 6)), 85);
         scene.overlay().showText(85)
                 .pointAt(pitch.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame()
                 .text(monitorFocus
-                        ? "Weapon Networks receive selected targets from the Monitor through the connected Network Controller."
-                        : "Weapon Networks also connect through a Data Link on the Pitch Controller.");
+                        ? "Weapon Networks receive selected targets through the Network Controller."
+                        : "To link weapons, select Network Controller, then Cannon Mount, then Auto Pitch.");
         scene.idle(95);
         scene.overlay().showText(85)
                 .pointAt(monitorFocus ? monitor.getCenter() : controller.getCenter())
@@ -679,11 +680,12 @@ public class PonderScenes {
                     .text("Right-click Auto Yaw to attach a Data Link connecting it to the selected cannon mount.");
             scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, yawControllerLink, new AABB(new BlockPos(3, 1, 1)), 80);
             scene.idle(100);
+            scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, lowerCannonMount, new AABB(new BlockPos(3, 2, 2)), 85);
             scene.overlay().showText(85)
                     .pointAt(lowerPitchDataLink.getCenter())
                     .placeNearTarget()
                     .attachKeyFrame()
-                    .text("To join a radar network, select a Network Controller, then attach its Data Link to the Pitch Controller.");
+                    .text("To join a radar network, select Network Controller, then Cannon Mount, then Auto Pitch.");
             scene.idle(100);
             scene.overlay().showText(85)
                     .pointAt(networkController.getCenter())
@@ -697,7 +699,7 @@ public class PonderScenes {
                     .pointAt(lowerYawController.getCenter())
                     .placeNearTarget()
                     .attachKeyFrame()
-                    .text("Place Auto Yaw directly beneath the cannon mount.");
+                    .text("Auto Yaw can be linked through Network Controller, then Cannon Mount, then Auto Yaw, just like Auto Pitch.");
             scene.idle(85);
             scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, lowerCannonMount, new AABB(new BlockPos(3, 2, 2)), 80);
             scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, yawControllerLink, new AABB(new BlockPos(3, 1, 1)), 80);
@@ -705,7 +707,7 @@ public class PonderScenes {
                     .pointAt(yawControllerLink.getCenter())
                     .placeNearTarget()
                     .attachKeyFrame()
-                    .text("Use the Data Link on Auto Yaw to connect it to the cannon mount.");
+                    .text("Alternatively, select the Cannon Mount with a Data Link, then attach it to Auto Yaw.");
             scene.idle(90);
             scene.overlay().showText(80)
                     .pointAt(lowerYawController.getCenter())
@@ -741,12 +743,13 @@ public class PonderScenes {
             scene.overlay().showControls(lowerPitchController.getCenter(), Pointing.DOWN, 35).rightClick();
             scene.idle(95);
             scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(new BlockPos(7, 1, 6)), 80);
-            scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, lowerPitchDataLink, new AABB(new BlockPos(4, 3, 2)), 80);
+            scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, lowerCannonMount, new AABB(new BlockPos(3, 2, 2)), 80);
+            scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, lowerPitchController, new AABB(new BlockPos(4, 2, 2)), 80);
             scene.overlay().showText(80)
                     .pointAt(lowerPitchDataLink.getCenter())
                     .placeNearTarget()
                     .attachKeyFrame()
-                    .text("Select the Network Controller, then connect it to Auto Pitch with a Data Link.");
+                    .text("Select Network Controller, then Cannon Mount, then Auto Pitch to complete the link.");
             scene.idle(95);
         } else {
             scene.overlay().showText(85)
@@ -755,11 +758,12 @@ public class PonderScenes {
                     .attachKeyFrame()
                     .text("Combine a CBC mount with Auto Yaw and Auto Pitch for automatic aiming.");
             scene.idle(95);
+            scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, lowerPitchDataLink, new AABB(new BlockPos(4, 3, 2)), 85);
             scene.overlay().showText(85)
                     .pointAt(lowerPitchDataLink.getCenter())
                     .placeNearTarget()
                     .attachKeyFrame()
-                    .text("Connect the Pitch Controller to a Network Controller with a Data Link to receive targets.");
+                    .text("Link Network Controller, then Cannon Mount, then Auto Pitch to receive targets.");
             scene.idle(95);
         }
         showSelection(scene, upperYawController);
@@ -842,12 +846,13 @@ public class PonderScenes {
 
         showSelection(scene, pitchNetworkLink);
         scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(new BlockPos(0, 1, 1)), 80);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, cannonMount, new AABB(new BlockPos(2, 2, 4)), 80);
         scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, pitchNetworkLink, new AABB(new BlockPos(1, 3, 4)), 80);
         scene.overlay().showText(75)
                 .pointAt(pitchNetworkLink.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame()
-                .text("Connect Auto Pitch to the Network Controller using a Data Link.");
+                .text("Select Network Controller, then Cannon Mount, then Auto Pitch.");
         scene.idle(90);
 
         showSelection(scene, dualYawSwivel);
@@ -875,12 +880,13 @@ public class PonderScenes {
         scene.idle(90);
         showSelection(scene, dualNetworkLink);
         scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, networkController, new AABB(new BlockPos(0, 1, 1)), 80);
+        scene.overlay().chaseBoundingBoxOutline(PonderPalette.INPUT, dualCannonMount, new AABB(new BlockPos(2, 3, 2)), 80);
         scene.overlay().chaseBoundingBoxOutline(PonderPalette.OUTPUT, dualNetworkLink, new AABB(new BlockPos(3, 2, 3)), 80);
         scene.overlay().showText(75)
                 .pointAt(dualNetworkLink.getCenter())
                 .placeNearTarget()
                 .attachKeyFrame()
-                .text("Connect the Pitch Controller to the Network Controller using a Data Link.");
+                .text("Select Network Controller, then Cannon Mount, then Auto Pitch.");
         scene.idle(85);
         scene.overlay().showText(85)
                 .pointAt(dualPitchSwivel.getCenter())

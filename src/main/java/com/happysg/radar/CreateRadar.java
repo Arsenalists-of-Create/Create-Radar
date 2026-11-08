@@ -80,6 +80,7 @@ public class CreateRadar {
         ModLang.register();
         ModPartials.init();
         ModSounds.register(modEventBus);
+        ModParticles.register(modEventBus);
         RadarConfig.register(container);
 
         modEventBus.addListener(CreateRadar::init);

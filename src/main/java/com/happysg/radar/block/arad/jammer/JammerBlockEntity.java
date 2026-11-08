@@ -9,10 +9,12 @@ import com.happysg.radar.block.arad.aradnetworks.ARADData;
 import com.happysg.radar.block.arad.rwr.ExternalRwrEmitterRegistry;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
+import com.happysg.radar.registry.ModParticles;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
@@ -23,6 +25,8 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -462,11 +466,8 @@ public class JammerBlockEntity extends KineticBlockEntity {
     }
 
     private void updateJammingContribution(ServerLevel serverLevel) {
-        RadarRwrEmitter emitter = selectedEmitterSource == null ? null
-                : ARADTargeting.resolveRwrEmitter(serverLevel, selectedEmitterSource).orElse(null);
-
-        ExternalRwrEmitterRegistry.EmitterState externalEmitter = selectedEmitterSource == null || emitter != null ? null
-                        : ExternalRwrEmitterRegistry.resolveSelectable(serverLevel, selectedEmitterSource).orElse(null);
+        RadarRwrEmitter emitter = selectedEmitterSource == null ? null : ARADTargeting.resolveRwrEmitter(serverLevel, selectedEmitterSource).orElse(null);
+        ExternalRwrEmitterRegistry.EmitterState externalEmitter = selectedEmitterSource == null || emitter != null ? null : ExternalRwrEmitterRegistry.resolveSelectable(serverLevel, selectedEmitterSource).orElse(null);
 
         if (!isDischarging() || selectedEmitterSource == null || selectedEmitterPosition == null || (emitter == null && externalEmitter == null)) {
             DirectionalJammingService.remove(serverLevel, worldPosition);
@@ -510,6 +511,41 @@ public class JammerBlockEntity extends KineticBlockEntity {
                 Math.abs(getSpeed()),
                 alignmentDegrees
         );
+
+        if (jammingProfile.active()) {
+            emitTransmissionWaves(serverLevel, jammerWorldPosition);
+        }
+    }
+
+    private void emitTransmissionWaves(ServerLevel serverLevel, Vec3 emissionOrigin) {
+        long time = serverLevel.getGameTime();
+        if ((time + worldPosition.asLong()) % 6L != 0L) {
+            return;
+        }
+
+        Quaternionf rotation = JammerOrientation.rotation(getMountFacing(), yaw, pitch);
+        Vector3f muzzleOffset = new Vector3f(-5.0f / 16.0f, 4.0f / 16.0f, -24.0f / 16.0f);
+
+        rotation.transform(muzzleOffset);
+        Vec3 muzzleWorldOffset = PhysicsHandler.getWorldVecDirectionTransform(new Vec3(muzzleOffset.x(), muzzleOffset.y(), muzzleOffset.z()), this);
+
+        Vec3 tip = emissionOrigin.add(muzzleWorldOffset);
+        Vector3f localForward = new Vector3f(0, 0, -1);
+        rotation.transform(localForward);
+
+        Vec3 worldForward = PhysicsHandler.getWorldVecDirectionTransform(new Vec3(localForward.x(), localForward.y(), localForward.z()), this);
+        if (!finite(worldForward) || worldForward.lengthSqr() <= DIRECTION_EPSILON_SQR) {
+            return;
+        }
+
+        worldForward = worldForward.normalize();
+        Vec3 velocity = worldForward.scale(0.4D);
+        serverLevel.sendParticles(
+                ModParticles.JAMMER_WAVE.get(), tip.x, tip.y, tip.z,
+                0,
+                velocity.x, velocity.y, velocity.z,
+                1.0D
+        );
     }
 
     public boolean affects(BlockPos radarPos) {
@@ -523,33 +559,28 @@ public class JammerBlockEntity extends KineticBlockEntity {
         super.read(compound, registries, clientPacket);
         chargeTicks = Mth.clamp(compound.getInt("JammerChargeTicks"), 0, 12000);
         dischargeEndGameTick = Math.max(0L, compound.getLong("JammerDischargeEndGameTick"));
+
         if (compound.contains("Yaw", Tag.TAG_FLOAT)) {
             yaw = wrap360(compound.getFloat("Yaw"));
         }
-        targetYaw = compound.contains("TargetYaw", Tag.TAG_FLOAT)
-                ? wrap360(compound.getFloat("TargetYaw")) : yaw;
+
+        targetYaw = compound.contains("TargetYaw", Tag.TAG_FLOAT) ? wrap360(compound.getFloat("TargetYaw")) : yaw;
         if (compound.contains("Pitch", Tag.TAG_FLOAT)) {
             pitch = clampPitch(compound.getFloat("Pitch"));
         }
-        targetPitch = compound.contains("TargetPitch", Tag.TAG_FLOAT)
-                ? clampPitch(compound.getFloat("TargetPitch"))
-                : pitch;
-        restYaw = compound.contains("RestYaw", Tag.TAG_FLOAT)
-                ? wrap360(compound.getFloat("RestYaw")) : targetYaw;
-        restPitch = compound.contains("RestPitch", Tag.TAG_FLOAT)
-                ? clampPitch(compound.getFloat("RestPitch")) : targetPitch;
+
+        targetPitch = compound.contains("TargetPitch", Tag.TAG_FLOAT) ? clampPitch(compound.getFloat("TargetPitch")) : pitch;
+        restYaw = compound.contains("RestYaw", Tag.TAG_FLOAT) ? wrap360(compound.getFloat("RestYaw")) : targetYaw;
+        restPitch = compound.contains("RestPitch", Tag.TAG_FLOAT) ? clampPitch(compound.getFloat("RestPitch")) : targetPitch;
         previousYaw = yaw;
         previousPitch = pitch;
-        lastKnownPos = compound.contains("LastKnownPos", Tag.TAG_LONG)
-                ? BlockPos.of(compound.getLong("LastKnownPos"))
-                : worldPosition.immutable();
+        lastKnownPos = compound.contains("LastKnownPos", Tag.TAG_LONG) ? BlockPos.of(compound.getLong("LastKnownPos")) : worldPosition.immutable();
         aradLinked = compound.getBoolean("AradLinked");
         readSelectedEmitter(compound);
     }
 
     @Override
-    protected void write(CompoundTag compound, HolderLookup.Provider registries,
-                         boolean clientPacket) {
+    protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
         super.write(compound, registries, clientPacket);
         compound.putInt("JammerChargeTicks", chargeTicks);
         compound.putLong("JammerDischargeEndGameTick", dischargeEndGameTick);
@@ -570,27 +601,20 @@ public class JammerBlockEntity extends KineticBlockEntity {
         }
         compound.putString("SelectedEmitterSource", selectedEmitterSource);
         if (selectingMonitorPos != null) {
-            compound.put("SelectingMonitorPos",
-                    NbtUtils.writeBlockPos(selectingMonitorPos));
+            compound.put("SelectingMonitorPos", NbtUtils.writeBlockPos(selectingMonitorPos));
         }
-        compound.put("SelectedRadarPos",
-                NbtUtils.writeBlockPos(selectedTarget.radarPos()));
+        compound.put("SelectedRadarPos", NbtUtils.writeBlockPos(selectedTarget.radarPos()));
         if (selectedTarget.emitterId() != null) {
             compound.putUUID("SelectedEmitterId", selectedTarget.emitterId());
         }
         compound.putDouble("SelectedRangeRatio", selectedTarget.rangeRatio());
-        putVec3(compound, "SelectedNoisyPosition",
-                selectedTarget.noisyWorldPosition());
-        if (selectedTarget.targetSublevelId() != null
-                && selectedTarget.targetLocalPosition() != null) {
-            compound.putUUID("SelectedTargetSublevelId",
-                    selectedTarget.targetSublevelId());
-            putVec3(compound, "SelectedTargetLocalPosition",
-                    selectedTarget.targetLocalPosition());
+        putVec3(compound, "SelectedNoisyPosition", selectedTarget.noisyWorldPosition());
+        if (selectedTarget.targetSublevelId() != null && selectedTarget.targetLocalPosition() != null) {
+            compound.putUUID("SelectedTargetSublevelId", selectedTarget.targetSublevelId());
+            putVec3(compound, "SelectedTargetLocalPosition", selectedTarget.targetLocalPosition());
         }
         if (selectedEmitterPosition != null) {
-            putVec3(compound, "SelectedEmitterPosition",
-                    selectedEmitterPosition);
+            putVec3(compound, "SelectedEmitterPosition", selectedEmitterPosition);
         }
         compound.putString("SelectedRadarTypeId", selectedRadarTypeId.toString());
         compound.putFloat("SelectedRollingRpm", selectedRollingRpm);
@@ -606,23 +630,17 @@ public class JammerBlockEntity extends KineticBlockEntity {
         }
 
         selectedEmitterSource = compound.getString("SelectedEmitterSource");
-        selectingMonitorPos = NbtUtils
-                .readBlockPos(compound, "SelectingMonitorPos").orElse(null);
-        BlockPos radarPos = NbtUtils.readBlockPos(compound,
-                "SelectedRadarPos").orElse(null);
+        selectingMonitorPos = NbtUtils.readBlockPos(compound, "SelectingMonitorPos").orElse(null);
+        BlockPos radarPos = NbtUtils.readBlockPos(compound, "SelectedRadarPos").orElse(null);
         Vec3 noisyPosition = getVec3(compound, "SelectedNoisyPosition");
-        if (selectedEmitterSource.isBlank() || radarPos == null
-                || noisyPosition == null) {
+        if (selectedEmitterSource.isBlank() || radarPos == null || noisyPosition == null) {
             clearAradSelectionInternal();
             return;
         }
 
-        UUID emitterId = compound.hasUUID("SelectedEmitterId")
-                ? compound.getUUID("SelectedEmitterId") : null;
-        UUID sublevelId = compound.hasUUID("SelectedTargetSublevelId")
-                ? compound.getUUID("SelectedTargetSublevelId") : null;
-        Vec3 localPosition = getVec3(compound,
-                "SelectedTargetLocalPosition");
+        UUID emitterId = compound.hasUUID("SelectedEmitterId") ? compound.getUUID("SelectedEmitterId") : null;
+        UUID sublevelId = compound.hasUUID("SelectedTargetSublevelId") ? compound.getUUID("SelectedTargetSublevelId") : null;
+        Vec3 localPosition = getVec3(compound, "SelectedTargetLocalPosition");
         if ((sublevelId == null) != (localPosition == null)) {
             sublevelId = null;
             localPosition = null;
@@ -635,8 +653,7 @@ public class JammerBlockEntity extends KineticBlockEntity {
                 sublevelId,
                 localPosition
         );
-        selectedEmitterPosition = getVec3(compound,
-                "SelectedEmitterPosition");
+        selectedEmitterPosition = getVec3(compound, "SelectedEmitterPosition");
         if (selectedEmitterPosition == null) {
             selectedEmitterPosition = noisyPosition;
         }

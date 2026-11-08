@@ -2114,6 +2114,7 @@ public class WeaponFiringControl {
                                                 this.activetrack != null && this.activetrack.isSynthetic(),
                                                 "resolvedEntityType",
                                                 this.targetEntity == null ? null : this.targetEntity.getType().toString(),
+                                                "targetSublevelId",
                                                 this.targetSublevel == null ? null : this.targetSublevel.getUniqueId(),
                                                 "rawTargetPos", rawTargetPos,
                                                 "worldTargetPos", solvePos,
@@ -2436,7 +2437,17 @@ public class WeaponFiringControl {
                                                 currentProjectile.fingerprint());
 
                                         long nowTick = serverLevel.getGameTime();
-                                        Long predictedLaunchTick = matchingRequest ? request.snapshot().gameTime() : null;
+                                        Long predictedLaunchTick = matchingRequest ? request.requestTick() + request.leadTicks() : null;
+
+                                        RigidBodyLaunchMath.Motion liveShooterMotion = matchingRequest && this.isSableMount() ? this.captureAsyncSableMotion(serverLevel) : null;
+                                        RigidBodyLaunchMath.Motion requestShooterMotion = matchingRequest ? request.shooterMotion() : null;
+                                        Vec3 observedSteeringOrigin = matchingRequest ? this.resolveSteeringOrigin(cannon) : null;
+                                        long requestAgeTicks = matchingRequest ? Math.max(0L, nowTick - request.requestTick()) : 0L;
+                                        Vec3 predictedSteeringOriginNow = requestShooterMotion == null ? null : requestShooterMotion.futurePosition(request.observedSteeringOrigin(), requestAgeTicks);
+
+                                        double steeringOriginError = predictedSteeringOriginNow != null && observedSteeringOrigin != null ? predictedSteeringOriginNow.distanceTo(observedSteeringOrigin) : Double.NaN;
+                                        Vec3 predictedShooterVelocityNow = requestShooterMotion == null ? null : requestShooterMotion.futureVelocity(request.observedSteeringOrigin(), requestAgeTicks);
+                                        Vec3 liveShooterVelocityNow = liveShooterMotion == null || observedSteeringOrigin == null ? null : liveShooterMotion.futureVelocity(observedSteeringOrigin, 0.0);
 
                                         MotionTraceRecorder.record(
                                                 "targeting.launch_timing",
@@ -2463,8 +2474,27 @@ public class WeaponFiringControl {
                                                 "targetVelocityAtFireCommand", targetVel,
                                                 "targetAccelerationAtFireCommand", targetAccel,
                                                 "aimPoint", offsetAim,
+                                                "observedMuzzleAtFireCommand", cannonMuzzleWorld,
+                                                "observedShooterVelocity", shooterVel,
+                                                "predictedMuzzleAtLaunch",
+                                                matchingRequest ? request.snapshot().muzzlePosition() : null,
+                                                "predictedInheritedVelocityAtLaunch",
+                                                matchingRequest ? request.snapshot().inheritedVelocity() : null,
+                                                "predictedAimDirection",
+                                                targetingResult != null && targetingResult.aimSolution() != null ? targetingResult.aimSolution().aimDirection() : null,
+                                                "projectileMuzzleSpeed",
+                                                currentProjectile == null ? null : currentProjectile.model().muzzleSpeed(),
                                                 "solverFreshForFire", targetingResultFreshForFire,
                                                 "sourceSable", this.isSableMount(),
+                                                "predictedSteeringOriginNow", predictedSteeringOriginNow,
+                                                "observedSteeringOriginNow", observedSteeringOrigin,
+                                                "steeringOriginErrorBlocks", steeringOriginError,
+                                                "predictedShooterVelocityNow", predictedShooterVelocityNow,
+                                                "liveShooterVelocityNow", liveShooterVelocityNow,
+                                                "shooterVelocityErrorBlocksPerTick",
+                                                predictedShooterVelocityNow != null && liveShooterVelocityNow != null ? predictedShooterVelocityNow.distanceTo(liveShooterVelocityNow) : Double.NaN,
+                                                "remainingPredictedLaunchTicks",
+                                                predictedLaunchTick == null ? null : predictedLaunchTick - nowTick,
                                                 "fireControllerPos", this.fireController.getBlockPos()
                                         );
                                     }
@@ -2720,9 +2750,10 @@ public class WeaponFiringControl {
             return age <= 30L && finite(solvePos) && finite(this.cachedTargetingSolvePos);
         }
 
-        Vec3 currentOrigin = this.cachedTargetingRequest != null
-                ? this.predictedAsyncSteeringOrigin(serverLevel, cannonContraption, this.cachedTargetingRequest.leadTicks())
-                : this.resolveSteeringOrigin(cannonContraption);
+        AsyncTargetingRequest request = this.cachedTargetingRequest;
+
+        int remainingLead = request == null ? 0 : remainingLaunchLeadTicks(serverLevel.getGameTime(), request.requestTick(), request.leadTicks());
+        Vec3 currentOrigin = request != null ? this.predictedAsyncSteeringOrigin(serverLevel, cannonContraption, remainingLead) : this.resolveSteeringOrigin(cannonContraption);
         Vec3 requestDirection = directionFromTo(this.cachedTargetingOriginPos, this.cachedTargetingSolvePos);
         Vec3 currentDirection = directionFromTo(currentOrigin, solvePos);
         return requestDirection != null && currentDirection != null
@@ -3130,16 +3161,16 @@ public class WeaponFiringControl {
                             originalMotion,
                             liveMotion,
                             result.predictedFlightTicks(),
-                            cachedRequest.leadTicks()
+                            remainingLaunchLeadTicks(serverLevel.getGameTime(), cachedRequest.requestTick(), cachedRequest.leadTicks())
                     );
                 }
             }
         }
 
         Vec3 currentOrigin = this.resolveSteeringOrigin(cannonContraption);
-
-        if (this.cachedTargetingRequest != null && this.level instanceof ServerLevel serverLevel) {
-            currentOrigin = this.predictedAsyncSteeringOrigin(serverLevel, cannonContraption, this.cachedTargetingRequest.leadTicks());
+        if (cachedRequest != null && this.level instanceof ServerLevel serverLevel) {
+            int remainingLead = remainingLaunchLeadTicks(serverLevel.getGameTime(), cachedRequest.requestTick(), cachedRequest.leadTicks());
+            currentOrigin = this.predictedAsyncSteeringOrigin(serverLevel, cannonContraption, remainingLead);
         }
 
         Vec3 direction = rebaseAimDirection(
@@ -3257,10 +3288,9 @@ public class WeaponFiringControl {
             return "target_changed";
         }
         Vec3 observedOrigin = this.resolveSteeringOrigin(cannonContraption);
-
-        Vec3 currentOrigin = this.cachedTargetingRequest != null
-                ? this.predictedAsyncSteeringOrigin(serverLevel, cannonContraption, this.cachedTargetingRequest.leadTicks())
-                : observedOrigin;
+        AsyncTargetingRequest request = this.cachedTargetingRequest;
+        int remainingLead = request == null ? 0 : remainingLaunchLeadTicks(serverLevel.getGameTime(), request.requestTick(), request.leadTicks());
+        Vec3 currentOrigin = request != null ? this.predictedAsyncSteeringOrigin(serverLevel, cannonContraption, remainingLead) : observedOrigin;
         if (currentOrigin == null || solvePos == null) {
             return "missing_position";
         }
@@ -3279,8 +3309,6 @@ public class WeaponFiringControl {
         double targetMovementSquared = solvePos.distanceToSqr(this.cachedTargetingSolvePos);
         double originMovementSquared = currentOrigin.distanceToSqr(this.cachedTargetingOriginPos);
 
-        AsyncTargetingRequest request = this.cachedTargetingRequest;
-
         if (request != null && request.snapshot().rigidBodyTargetMotion() != null) {
             RigidBodyTargetMotion rigidTarget = request.snapshot().rigidBodyTargetMotion();
             Vec3 expectedTargetNow = rigidTarget.motion().futurePosition(rigidTarget.observedWorldPoint(), Math.max(0L, age));
@@ -3292,7 +3320,8 @@ public class WeaponFiringControl {
                 return "shooter_motion_unavailable";
             }
 
-            originMovementSquared = asyncSableOriginPredictionErrorSquared(request.shooterMotion(), request.observedSteeringOrigin(), age, request.leadTicks(), currentOrigin);
+            Vec3 expectedLaunchOrigin = request.shooterMotion().futurePosition(request.observedSteeringOrigin(), request.leadTicks());
+            originMovementSquared = expectedLaunchOrigin.distanceToSqr(currentOrigin);
         }
 
         if (age < 0L || age > ASYNC_TARGETING_FIRE_FRESH_TICKS) {
@@ -4022,6 +4051,11 @@ public class WeaponFiringControl {
         return this.cachedAsyncSableMotion;
     }
 
+    static int remainingLaunchLeadTicks(long nowTick, long requestTick, int originalLeadTicks) {
+        long elapsed = Math.max(0L, nowTick - requestTick);
+        return (int) Math.max(0L, (long) originalLeadTicks - elapsed);
+    }
+
     @Nullable
     private Vec3 predictedAsyncSteeringOrigin(ServerLevel serverLevel, AbstractMountedCannonContraption cannon, int leadTicks) {
         Vec3 observed = this.resolveSteeringOrigin(cannon);
@@ -4290,13 +4324,17 @@ public class WeaponFiringControl {
         final int[] contactTick = {-1};
         final Vec3 firingDirection = physicalDirection;
 
+        if (MotionTraceRecorder.isEnabled()) {
+            MotionTraceRecorder.record("firing.physical_launch_state", serverLevel, getWeaponMountPos(), "physicalMuzzle", muzzle, "physicalDirection", firingDirection, "inheritedVelocity", launchVelocity, "muzzleSpeed", model.muzzleSpeed(), "expectedInitialVelocity", launchVelocity.add(firingDirection.scale(model.muzzleSpeed())), "sourceSable", isSableMount(), "coupledGeometry", geometry.coupled());
+        }
+
         ProjectileSimulator.SimulationResult trajectory;
 
         try {
             trajectory = validationProjectileSimulator.simulate(
-                    snapshot.launchPosition(firingDirection),
+                    muzzle,
                     firingDirection,
-                    snapshot.inheritedVelocityAt(firingDirection),
+                    launchVelocity,
                     model,
                     simulationTicks,
                     serverLevel,
@@ -4344,6 +4382,11 @@ public class WeaponFiringControl {
             ObstructionResult obstruction = mainThreadObstructionChecker.check(serverLevel, trajectory, contactTick[0], contactPoint[0], cbcSweep);
 
             if (!obstruction.clear() && !isValidatedObstructionAtTarget(snapshot, obstruction)) {
+                if (MotionTraceRecorder.isEnabled()) {
+                    var shooterShip = Mods.SABLE.isLoaded() ? SableCompanion.INSTANCE.getContaining(this.cannonMount.blockEntity()) : null;
+                    MotionTraceRecorder.record("firing.obstruction_detail", serverLevel, getWeaponMountPos(), "blockedTick", obstruction.blockedTick(), "blockedBlock", obstruction.blockPosition(), "blockedWorldPosition", obstruction.blockedPosition(), "obstructingSublevelId", obstruction.obstructingSublevelId(), "shooterSublevelId", shooterShip == null ? null : shooterShip.getUniqueId(), "sameSublevel", shooterShip != null && shooterShip.getUniqueId().equals(obstruction.obstructingSublevelId()), "muzzle", snapshot.muzzlePosition(), "target", snapshot.targetPosition(), "cbcSweep", cbcSweep);
+                }
+
                 return ImmediateLaunchCheck.reject("path_obstructed");
             }
         }
@@ -4558,6 +4601,11 @@ public class WeaponFiringControl {
         }
 
         //LOGGER.debug("[RADAR-TRACE][LIVE-OBSTRUCTION] " + "tick={} mount={} highRequested={} " + "pitch={} flightTicks={} " + "blockedTick={} blockedBlock={} blockedPosition={} " + "muzzle={} target={}", serverLevel.getGameTime(), this.cannonMount.getBlockPos(), snapshot.preferHighArc(), result.desiredPitchDeg(), result.predictedFlightTicks(), obstruction.blockedTick(), obstruction.blockPosition(), obstruction.blockedPosition(), snapshot.muzzlePosition(), snapshot.targetPosition());
+
+        if (MotionTraceRecorder.isEnabled()) {
+            var shooterShip = Mods.SABLE.isLoaded() ? SableCompanion.INSTANCE.getContaining(this.cannonMount.blockEntity()) : null;
+            MotionTraceRecorder.record("targeting.obstruction_detail", serverLevel, getWeaponMountPos(), "blockedTick", obstruction.blockedTick(), "blockedBlock", obstruction.blockPosition(), "blockedWorldPosition", obstruction.blockedPosition(), "obstructingSublevelId", obstruction.obstructingSublevelId(), "shooterSublevelId", shooterShip == null ? null : shooterShip.getUniqueId(), "sameSublevel", shooterShip != null && shooterShip.getUniqueId().equals(obstruction.obstructingSublevelId()), "muzzle", snapshot.muzzlePosition(), "target", snapshot.targetPosition(), "predictedFlightTicks", result.predictedFlightTicks(), "cbcSweep", cbcSweep);
+        }
 
         this.lastAsyncValidationReason = "blocked_path";
         return TargetingValidation.blockedPath();
