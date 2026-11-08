@@ -566,7 +566,7 @@ public class SkyRadarScanningBehavior extends BlockEntityBehaviour {
             return radarTracks.values();
         }
 
-        return RadarTrackUtil.withConnectedFriendlies(blockEntity.getLevel(), blockEntity.getBlockPos(), radarTracks.values());
+        return RadarTrackUtil.groupConnectedSableTracks(blockEntity.getLevel(), RadarTrackUtil.withConnectedFriendlies(blockEntity.getLevel(), blockEntity.getBlockPos(), radarTracks.values()));
     }
 
     @Override

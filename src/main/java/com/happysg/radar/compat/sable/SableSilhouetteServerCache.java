@@ -3,6 +3,7 @@ package com.happysg.radar.compat.sable;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.config.RadarConfig;
 import com.mojang.logging.LogUtils;
+import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.resources.ResourceKey;
@@ -10,18 +11,14 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import org.slf4j.Logger;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 public final class SableSilhouetteServerCache {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int MAX_SYNC_BOXES = 16_384;
     private static final Map<ResourceKey<Level>, Map<UUID, Entry>> BY_DIMENSION = new HashMap<>();
 
-    private SableSilhouetteServerCache() {
-    }
+    private SableSilhouetteServerCache() {}
 
     public static void attachMetadata(ServerLevel level, RadarTrack track) {
         if (!"Sable:ship".equals(track.entityType())) {
@@ -37,12 +34,50 @@ public final class SableSilhouetteServerCache {
             return;
         }
 
-        Entry entry = getOrBuild(level, id, false);
+        SableAssemblyRegistry registry = SableAssemblyRegistry.get(level);
+        List<SubLevel> members = registry.loadedMembers(level, id);
+        UUID silhouetteSourceId = id;
+
+        SubLevelContainer container = SubLevelContainer.getContainer(level);
+        SubLevel direct = container == null ? null : container.getSubLevel(id);
+
+        if ((direct == null || direct.isRemoved()) && !members.isEmpty()) {
+            silhouetteSourceId = members.get(0).getUniqueId();
+        }
+
+        Entry entry = getOrBuild(level, silhouetteSourceId, false);
         if (entry == null || entry.status == SableSilhouetteStatus.NONE) {
             track.clearSilhouette();
             return;
         }
-        track.setSilhouette(id, entry.revision, entry.status);
+        track.setSilhouette(silhouetteSourceId, entry.revision, entry.status);
+    }
+
+    public record ConnectedSilhouetteMember(UUID sublevelId, int revision, byte status, SubLevelSilhouette silhouette) {}
+
+    public static List<ConnectedSilhouetteMember> getConnectedSilhouettes(ServerLevel level, UUID representativeId) {
+        SubLevelContainer container = SubLevelContainer.getContainer(level);
+        if (container == null) {
+            return List.of();
+        }
+
+        SableAssemblyRegistry registry = SableAssemblyRegistry.get(level);
+        registry.observe(level, representativeId);
+        List<SubLevel> members = registry.loadedMembers(level, representativeId);
+        List<ConnectedSilhouetteMember> result = new ArrayList<>();
+
+        for (SubLevel member : members) {
+            UUID id = member.getUniqueId();
+
+            Entry entry = getOrBuild(level, id, false);
+            if (entry == null || entry.silhouette == null || !SableSilhouetteStatus.drawable(entry.status)) {
+                continue;
+            }
+
+            result.add(new ConnectedSilhouetteMember(id, entry.revision, entry.status, entry.silhouette));
+        }
+
+        return List.copyOf(result);
     }
 
     public static SubLevelSilhouette getSilhouette(ServerLevel level, UUID id) {

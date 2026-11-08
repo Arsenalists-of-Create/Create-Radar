@@ -41,14 +41,19 @@ public final class SubLevelSilhouette {
      * ticks when the monitor does not need perfectly continuous shape rotation.</p>
      */
     public ProjectedSilhouette project(final PointProjector projector, final ProjectionSettings requestedSettings) {
-        Objects.requireNonNull(projector, "projector");
+        return projectCombined(List.of(new ProjectionPart(this, projector)), requestedSettings);
+    }
+
+    public static ProjectedSilhouette projectCombined(final List<ProjectionPart> parts, final ProjectionSettings requestedSettings) {
+
+        Objects.requireNonNull(parts, "parts");
         Objects.requireNonNull(requestedSettings, "requestedSettings");
 
-        if (this.localBoxes.isEmpty()) {
+        if (parts.isEmpty()) {
             return ProjectedSilhouette.empty(requestedSettings.preferredCellSize());
         }
 
-        final List<Polygon> projectedBoxes = new ArrayList<>(this.localBoxes.size());
+        final List<Polygon> projectedBoxes = new ArrayList<>();
         final MutableVec3 transformed = new MutableVec3();
 
         double minX = Double.POSITIVE_INFINITY;
@@ -56,17 +61,23 @@ public final class SubLevelSilhouette {
         double maxX = Double.NEGATIVE_INFINITY;
         double maxZ = Double.NEGATIVE_INFINITY;
 
-        for (final LocalBox box : this.localBoxes) {
-            final Polygon polygon = projectBox(box, projector, transformed);
-            if (polygon.points.size() < 3 || polygon.areaSquared() <= EPSILON) {
+        for (final ProjectionPart part : parts) {
+            if (part == null || part.silhouette() == null || part.projector() == null) {
                 continue;
             }
 
-            projectedBoxes.add(polygon);
-            minX = Math.min(minX, polygon.minX);
-            minZ = Math.min(minZ, polygon.minZ);
-            maxX = Math.max(maxX, polygon.maxX);
-            maxZ = Math.max(maxZ, polygon.maxZ);
+            for (final LocalBox box : part.silhouette().localBoxes()) {
+                final Polygon polygon = projectBox(box, part.projector(), transformed);
+                if (polygon.points.size() < 3 || polygon.areaSquared() <= EPSILON) {
+                    continue;
+                }
+
+                projectedBoxes.add(polygon);
+                minX = Math.min(minX, polygon.minX);
+                minZ = Math.min(minZ, polygon.minZ);
+                maxX = Math.max(maxX, polygon.maxX);
+                maxZ = Math.max(maxZ, polygon.maxZ);
+            }
         }
 
         if (projectedBoxes.isEmpty()) {
@@ -405,6 +416,8 @@ public final class SubLevelSilhouette {
     public interface PointProjector {
         void transform(double localX, double localY, double localZ, MutableVec3 destination);
     }
+
+    public record ProjectionPart(SubLevelSilhouette silhouette, PointProjector projector) {}
 
     /**
      * preferredCellSize controls visual detail. 0.5 is a good selected-target default.

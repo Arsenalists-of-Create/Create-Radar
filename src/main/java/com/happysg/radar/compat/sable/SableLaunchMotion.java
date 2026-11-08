@@ -36,14 +36,7 @@ public final class SableLaunchMotion {
                 return null;
             }
 
-            return new RigidBodyLaunchMath.Motion(
-                    measured.origin(),
-                    measured.linearVelocity(),
-                    measured.angularVelocity(),
-                    Vec3.ZERO,
-                    Vec3.ZERO
-            );
-
+            return new RigidBodyLaunchMath.Motion(measured.origin(), measured.linearVelocity(), measured.angularVelocity(), Vec3.ZERO, Vec3.ZERO);
         } catch (RuntimeException e) {
             if ("Body has been removed".equals(e.getMessage())) {
                 return null;

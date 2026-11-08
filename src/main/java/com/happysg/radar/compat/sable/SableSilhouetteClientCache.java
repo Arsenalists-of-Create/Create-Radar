@@ -1,10 +1,6 @@
 package com.happysg.radar.compat.sable;
 
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.Supplier;
 
 public final class SableSilhouetteClientCache {
@@ -13,8 +9,8 @@ public final class SableSilhouetteClientCache {
 
     private static final Map<UUID, Entry> CACHE = new HashMap<>();
     private static final Map<UUID, Long> LAST_REQUEST_TICK = new HashMap<>();
-    private static final LinkedHashMap<UUID, Boolean> SYNTHETIC_LRU =
-            new LinkedHashMap<>(16, 0.75F, true);
+    private static final LinkedHashMap<UUID, Boolean> SYNTHETIC_LRU = new LinkedHashMap<>(16, 0.75F, true);
+    private static final Map<UUID, UUID> ASSEMBLY_BY_MEMBER = new HashMap<>();
 
     private SableSilhouetteClientCache() {
     }
@@ -22,6 +18,37 @@ public final class SableSilhouetteClientCache {
     public static boolean has(UUID id, int revision) {
         Entry entry = CACHE.get(id);
         return entry != null && entry.revision == revision && entry.silhouette != null;
+    }
+
+    public static void setAssemblyMember(UUID memberId, UUID assemblyId) {
+        ASSEMBLY_BY_MEMBER.put(memberId, assemblyId);
+    }
+
+    public static List<UUID> getAssemblyMemberIds(UUID assemblyId) {
+        UUID actualAssemblyId = ASSEMBLY_BY_MEMBER.getOrDefault(assemblyId, assemblyId);
+        List<UUID> result = new ArrayList<>();
+        result.add(assemblyId);
+
+        for (Map.Entry<UUID, UUID> entry : ASSEMBLY_BY_MEMBER.entrySet()) {
+            if (actualAssemblyId.equals(entry.getValue()) && !assemblyId.equals(entry.getKey())) {
+                result.add(entry.getKey());
+            }
+        }
+
+        result.sort(Comparator.comparing(UUID::toString));
+        return List.copyOf(result);
+    }
+
+    @javax.annotation.Nullable
+    public static SubLevelSilhouette getLatest(UUID id) {
+        Entry entry = CACHE.get(id);
+
+        if (entry == null || entry.silhouette == null) {
+            return null;
+        }
+
+        touchSynthetic(id, entry);
+        return entry.silhouette;
     }
 
     public static SubLevelSilhouette get(UUID id, int revision) {
@@ -86,6 +113,18 @@ public final class SableSilhouetteClientCache {
         return rebuilt;
     }
 
+    private static final Map<UUID, Long> LAST_ASSEMBLY_REFRESH = new HashMap<>();
+    public static boolean shouldRefreshAssembly(UUID id, long gameTime) {
+        Long last = LAST_ASSEMBLY_REFRESH.get(id);
+
+        if (last != null && gameTime - last < 100L) {
+            return false;
+        }
+
+        LAST_ASSEMBLY_REFRESH.put(id, gameTime);
+        return true;
+    }
+
     public static boolean shouldRequest(UUID id, int revision, long gameTime) {
         Entry entry = CACHE.get(id);
         if (entry != null && entry.revision == revision) {
@@ -101,6 +140,8 @@ public final class SableSilhouetteClientCache {
 
     public static void clear() {
         CACHE.clear();
+        LAST_ASSEMBLY_REFRESH.clear();
+        ASSEMBLY_BY_MEMBER.clear();
         LAST_REQUEST_TICK.clear();
         SYNTHETIC_LRU.clear();
     }

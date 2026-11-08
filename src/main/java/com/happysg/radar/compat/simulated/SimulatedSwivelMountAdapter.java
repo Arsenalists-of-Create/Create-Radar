@@ -194,6 +194,25 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         return containing != null && (containing == attached || SubLevelHelper.getConnectedChain(attached).contains(containing));
     }
 
+    @Nullable
+    public static UUID controlledAssemblyId(KineticBlockEntity controller, Direction.Axis axis, BlockPos mountPos) {
+        if (controller == null || mountPos == null) {
+            return null;
+        }
+
+        KineticMountAdapterResolution resolution = resolve(controller, axis);
+        if (!(resolution.adapter() instanceof SimulatedSwivelMountAdapter swivel) || !swivel.isValid() || !swivel.isAssembled()) {
+            return null;
+        }
+
+        UUID assemblyId = swivel.bearing.getSubLevelID();
+        if (assemblyId == null || !isMountOnControllerSwivel(controller, axis, mountPos)) {
+            return null;
+        }
+
+        return assemblyId;
+    }
+
     /**
      * Used by the Simulated compatibility mixin to make the selected custom
      * kinetic edge report the same ratio in both propagation directions.

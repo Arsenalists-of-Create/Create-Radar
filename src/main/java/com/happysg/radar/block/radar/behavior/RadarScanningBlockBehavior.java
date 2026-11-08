@@ -44,7 +44,6 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
-
     public static final BehaviourType<RadarScanningBlockBehavior> TYPE = new BehaviourType<>();
     private static final double RWR_PASSIVE_RANGE_MULTIPLIER = 1.5;
 
@@ -670,7 +669,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return radarTracks.values();
         }
 
-        return RadarTrackUtil.withConnectedFriendlies(blockEntity.getLevel(), blockEntity.getBlockPos(), radarTracks.values());
+        return RadarTrackUtil.groupConnectedSableTracks(blockEntity.getLevel(), RadarTrackUtil.withConnectedFriendlies(blockEntity.getLevel(), blockEntity.getBlockPos(), radarTracks.values()));
     }
 
     @Override

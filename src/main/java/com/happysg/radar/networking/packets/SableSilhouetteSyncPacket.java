@@ -16,13 +16,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte status,
-                                        List<SubLevelSilhouette.LocalBox> boxes) implements CustomPacketPayload {
+public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte status, List<SubLevelSilhouette.LocalBox> boxes, UUID assemblyId) implements CustomPacketPayload {
     private static final int MAX_PACKET_BOXES = 16_384;
 
-    public static final Type<SableSilhouetteSyncPacket> TYPE = new Type<>(
-            ResourceLocation.fromNamespaceAndPath(CreateRadar.MODID, "sable_silhouette_sync")
-    );
+    public static final Type<SableSilhouetteSyncPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(CreateRadar.MODID, "sable_silhouette_sync"));
 
     public static final StreamCodec<RegistryFriendlyByteBuf, SableSilhouetteSyncPacket> STREAM_CODEC =
             StreamCodec.ofMember(SableSilhouetteSyncPacket::encode, SableSilhouetteSyncPacket::decode);
@@ -36,6 +33,7 @@ public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte stat
 
     private void encode(RegistryFriendlyByteBuf buf) {
         buf.writeUUID(sublevelId);
+        buf.writeUUID(assemblyId);
         buf.writeVarInt(revision);
         buf.writeByte(status);
         buf.writeVarInt(boxes.size());
@@ -51,6 +49,7 @@ public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte stat
 
     private static SableSilhouetteSyncPacket decode(RegistryFriendlyByteBuf buf) {
         UUID id = buf.readUUID();
+        UUID assemblyId = buf.readUUID();
         int revision = buf.readVarInt();
         byte status = buf.readByte();
         int count = buf.readVarInt();
@@ -72,7 +71,7 @@ public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte stat
             }
             boxes.add(new SubLevelSilhouette.LocalBox(minX, minY, minZ, maxX, maxY, maxZ));
         }
-        return new SableSilhouetteSyncPacket(id, revision, status, boxes);
+        return new SableSilhouetteSyncPacket(id, revision, status, boxes, assemblyId);
     }
 
     @Override
@@ -87,6 +86,7 @@ public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte stat
     @OnlyIn(Dist.CLIENT)
     private static final class Client {
         private static void handle(SableSilhouetteSyncPacket packet) {
+            SableSilhouetteClientCache.setAssemblyMember(packet.sublevelId(), packet.assemblyId());
             if (SableSilhouetteStatus.drawable(packet.status())) {
                 SableSilhouetteClientCache.put(packet.sublevelId(), packet.revision(), SubLevelSilhouette.of(packet.boxes()));
             }

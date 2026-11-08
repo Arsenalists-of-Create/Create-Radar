@@ -26,7 +26,12 @@ import com.happysg.radar.compat.cbc.CannonLead;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
+import com.happysg.radar.compat.sable.*;
 import com.happysg.radar.debug.*;
+import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
+import dev.ryanhcode.sable.mixinterface.clip_overwrite.ClipContextExtension;
+import dev.ryanhcode.sable.sublevel.SubLevel;
+import dev.ryanhcode.sable.api.SubLevelHelper;
 import rbasamoyai.createbigcannons.config.CBCConfigs;
 import com.happysg.radar.block.controller.kinetic.ControllerMotionProfile;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
@@ -37,16 +42,12 @@ import com.happysg.radar.compat.cbcmoreshells.CBCMSAimSolver;
 import com.happysg.radar.compat.cbcmoreshells.CBCMSCannonCompat;
 import com.happysg.radar.compat.cbcmw.CBCMWCannonCompat;
 import com.happysg.radar.compat.cbcmw.CBCMWGuidanceCompat;
-import com.happysg.radar.compat.sable.SableLaunchMotion;
 import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
-import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
-import com.happysg.radar.compat.sable.SubLevelAimResolver;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.item.radarproxfuze.AdvancedProximityFuze;
-import com.happysg.radar.compat.sable.SableWeaponFiringAccess;
 import com.happysg.radar.targeting.*;
 import com.mojang.logging.LogUtils;
 import com.simibubi.create.content.contraptions.Contraption;
@@ -139,6 +140,7 @@ public class WeaponFiringControl {
     private static final int SABLE_SOLVE_INTERVAL = 3;
     private static final int SUBLEVEL_AIM_REACQUIRE_TICKS = 10;
     private static final int SUBLEVEL_AIM_CANDIDATE_LIMIT = 64;
+    private static final double SUBLEVEL_COMPONENT_SWITCH_DISTANCE_RATIO_SQR = 0.64;
     @Nullable
     private CachedSublevelAim cachedSublevelAim;
     @Nullable
@@ -372,6 +374,52 @@ public class WeaponFiringControl {
         LOGGER.debug("FiringControlBlockEntity.<init>() -> controller={} mountPos={} weaponApi={} cbc={}", controller, mountPos, weapon != null, cannonMount != null);
     }
 
+    @Nullable
+    private UUID targetingSwivelSublevelId() {
+        if (!Mods.SABLE.isLoaded() || !(this.level instanceof ServerLevel)) {
+            return null;
+        }
+
+        BlockPos mountPos = getWeaponMountPos();
+        if (mountPos == null) {
+            return null;
+        }
+
+        if (this.pitchController != null && this.pitchController.hasStructuralKineticSelectionForTargeting()) {
+            var state = this.pitchController.getBlockState();
+            if (state.hasProperty(HorizontalDirectionalBlock.FACING)) {
+                UUID id = SimulatedSwivelMountAdapter.controlledAssemblyId(this.pitchController, state.getValue(HorizontalDirectionalBlock.FACING).getAxis(), mountPos);
+
+                if (id != null) {
+                    return id;
+                }
+            }
+        }
+
+        if (this.yawController != null && this.yawController.hasStructuralKineticSelectionForTargeting()) {
+            return SimulatedSwivelMountAdapter.controlledAssemblyId(this.yawController, Direction.Axis.Y, mountPos);
+        }
+
+        return null;
+    }
+
+    private void excludeOwnSwivelFromTargetingRay(ClipContext context) {
+        UUID ignoredId = targetingSwivelSublevelId();
+        if (ignoredId == null || !(this.level instanceof ServerLevel server)) {
+            return;
+        }
+
+        SubLevelContainer container = SubLevelContainer.getContainer(server);
+        if (container == null) {
+            return;
+        }
+
+        SubLevel ignored = container.getSubLevel(ignoredId);
+        if (ignored != null && !ignored.isRemoved() && context instanceof ClipContextExtension extension) {
+            extension.sable$setIgnoredSubLevel(ignored);
+        }
+    }
+
     private RayResult rayClear(Vec3 start, Vec3 end) {
         RayResult result = WeaponFiringControl.RayResult.CLEAR;
         if (!this.safeZones.isEmpty()) {
@@ -384,6 +432,7 @@ public class WeaponFiringControl {
 
         if (result == WeaponFiringControl.RayResult.CLEAR) {
             ClipContext ctx = new ClipContext(start, end, Block.COLLIDER, Fluid.NONE, CollisionContext.empty());
+            excludeOwnSwivelFromTargetingRay(ctx);
             HitResult hit = this.level.clip(ctx);
             Vec3 worldHit = hit.getLocation();
 
@@ -976,7 +1025,27 @@ public class WeaponFiringControl {
         if (!Mods.SABLE.isLoaded()) {
             return null;
         }
-        return SableWeaponFiringAccess.findSubLevel(level, UUID.fromString(uuid));
+
+        UUID id;
+        try {
+            id = UUID.fromString(uuid);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+
+        return resolveAssemblySublevel(level, id);
+    }
+
+    @Nullable
+    private static SubLevelAccess resolveAssemblySublevel(ServerLevel level, UUID assemblyId) {
+        SubLevelAccess direct = SableWeaponFiringAccess.findSubLevel(level, assemblyId);
+
+        if (direct != null) {
+            return direct;
+        }
+
+        List<SubLevel> members = SableAssemblyRegistry.get(level).loadedMembers(level, assemblyId);
+        return members.isEmpty() ? null : members.get(0);
     }
 
     public void refreshControllers() {
@@ -1616,7 +1685,7 @@ public class WeaponFiringControl {
                                 } else {
                                     if (this.targetSublevel != null && !this.binoMode) {
                                         UUID id = UUID.fromString(this.activetrack.id());
-                                        SubLevelAccess live = SableWeaponFiringAccess.findSubLevel(serverLevel, id);
+                                        SubLevelAccess live = resolveAssemblySublevel(serverLevel, id);
                                         if (live == null) {
                                             LOGGER.debug("WFC: Sable ship id={} unloaded mid-tick, stopping fire", id);
                                             if (MotionTraceRecorder.isEnabled()) {
@@ -1651,14 +1720,11 @@ public class WeaponFiringControl {
                                             this.stopFireCannon();
                                             return;
                                         }
-                                        ResolvedSublevelAim sublevelAim =
-                                                this.resolveSublevelAim(
-                                                        serverLevel,
-                                                        this.targetSublevel,
-                                                        sublevelAimOrigin,
-                                                        this.targetingConfig
-                                                                .lineOfSight(),
-                                                        true);
+
+                                        SubLevelAccess representative = resolveAssemblySublevel(serverLevel, UUID.fromString(this.activetrack.id()));
+                                        ConnectedSublevelAim connectedAim = resolveConnectedSublevelAim(serverLevel, representative, sublevelAimOrigin, this.targetingConfig.lineOfSight(), true);
+
+                                        ResolvedSublevelAim sublevelAim = connectedAim == null ? null : connectedAim.aim();
                                         if (sublevelAim == null) {
                                             if (MotionTraceRecorder.isEnabled()) {
                                                 MotionTraceRecorder.record("firing.early_rejected", serverLevel, this.cannonMount.getBlockPos(), "reason", "SABLE_AIM_RESOLUTION_FAILED", "targetShipId", this.targetSublevel == null ? null : this.targetSublevel.getUniqueId());
@@ -1666,6 +1732,7 @@ public class WeaponFiringControl {
                                             this.stopFireCannon();
                                             return;
                                         }
+                                        this.targetSublevel = connectedAim.owner();
                                         this.currentSublevelAim = sublevelAim;
                                         rawTargetPos = sublevelAim.worldPoint();
                                         this.target = this.toWorldPosition(serverLevel, rawTargetPos, this.targetSublevel);
@@ -6715,6 +6782,8 @@ public class WeaponFiringControl {
             int revision, boolean fallback) {
     }
 
+    private record ConnectedSublevelAim(SubLevelAccess owner, ResolvedSublevelAim aim) {}
+
     private static record AimGeometry(
             Vec3 steeringOrigin, Vec3 muzzlePosition,
             double muzzleForwardOffset, boolean coupled) {
@@ -6752,14 +6821,14 @@ public class WeaponFiringControl {
             return null;
         }
 
-        SubLevelAccess subLevel = SableWeaponFiringAccess.findSubLevel(serverLevel, id);
+        SubLevelAccess subLevel = resolveAssemblySublevel(serverLevel, id);
         Vec3 origin = this.getCannonRayStart();
         if (subLevel == null || origin == null) {
             return null;
         }
-        ResolvedSublevelAim aim = this.resolveSublevelAim(
-                serverLevel, subLevel, origin, requireLos, false);
-        return aim == null ? null : aim.worldPoint();
+
+        ConnectedSublevelAim selected = this.resolveConnectedSublevelAim(serverLevel, subLevel, origin, requireLos, false);
+        return selected == null ? null : selected.aim().worldPoint();
     }
 
     private static boolean isSableTrack(RadarTrack track) {
@@ -6768,12 +6837,69 @@ public class WeaponFiringControl {
     }
 
     @Nullable
-    private ResolvedSublevelAim resolveSublevelAim(
-            ServerLevel serverLevel, SubLevelAccess subLevel,
-            Vec3 worldOrigin, boolean requireLos, boolean cacheSelection) {
+    private ConnectedSublevelAim resolveConnectedSublevelAim(ServerLevel serverLevel, SubLevelAccess representative, Vec3 worldOrigin, boolean requireLos, boolean cacheSelection) {
+        if (representative == null || !finite(worldOrigin)) {
+            return null;
+        }
+
+        List<SubLevelAccess> members = new ArrayList<>(SableAssemblyRegistry.get(serverLevel).loadedMembers(serverLevel, representative.getUniqueId()));
+        if (members.isEmpty()) {
+            members.add(representative);
+        }
+
+        members.sort(java.util.Comparator.comparing(member -> member.getUniqueId().toString()));
+        ConnectedSublevelAim best = null;
+        double bestDistance = Double.POSITIVE_INFINITY;
+
+        ConnectedSublevelAim retained = null;
+        double retainedDistance = Double.POSITIVE_INFINITY;
+
+        UUID retainedId = cacheSelection && this.cachedSublevelAim != null ? this.cachedSublevelAim.sublevelId() : null;
+
+        for (SubLevelAccess member : members) {
+            ResolvedSublevelAim candidate = resolveSublevelAim(serverLevel, member, worldOrigin, requireLos, false);
+
+            if (candidate == null || !finite(candidate.worldPoint())) {
+                continue;
+            }
+
+            double distance = candidate.worldPoint().distanceToSqr(worldOrigin);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = new ConnectedSublevelAim(member, candidate);
+            }
+
+            if (retainedId != null && retainedId.equals(member.getUniqueId())) {
+                retainedDistance = distance;
+                retained = new ConnectedSublevelAim(member, candidate);
+            }
+        }
+
+        if (best == null) {
+            return null;
+        }
+
+        if (retained != null && retainedDistance > 0.0 && bestDistance > retainedDistance * SUBLEVEL_COMPONENT_SWITCH_DISTANCE_RATIO_SQR) {
+            best = retained;
+        }
+
+        if (!cacheSelection) {
+            return best;
+        }
+
+        ResolvedSublevelAim selected = resolveSublevelAim(serverLevel, best.owner(), worldOrigin, requireLos, true);
+
+        return selected == null ? null : new ConnectedSublevelAim(best.owner(), selected);
+    }
+
+    @Nullable
+    private ResolvedSublevelAim resolveSublevelAim(ServerLevel serverLevel, SubLevelAccess subLevel, Vec3 worldOrigin, boolean requireLos, boolean cacheSelection) {
+        if (!(subLevel instanceof SubLevel actualSubLevel)) {
+            return null;
+        }
+
         UUID id = subLevel.getUniqueId();
-        SableSilhouetteServerCache.Snapshot snapshot =
-                SableSilhouetteServerCache.getSnapshot(serverLevel, id);
+        SableSilhouetteServerCache.Snapshot snapshot = SableSilhouetteServerCache.getSnapshot(serverLevel, id);
         long now = serverLevel.getGameTime();
 
         if (!snapshot.hasDetailedHull()) {
@@ -6792,13 +6918,12 @@ public class WeaponFiringControl {
             return fallback;
         }
 
-        CachedSublevelAim cached = cacheSelection
-                ? this.cachedSublevelAim : null;
+        CachedSublevelAim cached = cacheSelection ? this.cachedSublevelAim : null;
         boolean sameCache = cached != null
                 && id.equals(cached.sublevelId())
                 && cached.revision() == snapshot.revision()
                 && cached.requireLos() == requireLos;
-        boolean cachedPointGone = sameCache && !isSublevelAimBlockPresent(serverLevel, cached.localAim());
+        boolean cachedPointGone = sameCache && !isSublevelAimBlockPresent(actualSubLevel.getLevel(), cached.localAim());
 
         if (cachedPointGone) {
             SableSilhouetteServerCache.requestRefreshForStaleAim(serverLevel, id, snapshot.revision());
@@ -6809,10 +6934,8 @@ public class WeaponFiringControl {
                 || now - cached.acquiredTick() >= SUBLEVEL_AIM_REACQUIRE_TICKS;
 
         if (sameCache && !reacquire) {
-            ResolvedSublevelAim resolved = this.materializeSublevelAim(
-                    subLevel, cached.localAim(), cached.revision());
-            if (!requireLos || this.rayReachesTargetSublevel(
-                    worldOrigin, resolved.worldPoint(), id)) {
+            ResolvedSublevelAim resolved = this.materializeSublevelAim(subLevel, cached.localAim(), cached.revision());
+            if (!requireLos || this.rayReachesTargetSublevel(worldOrigin, resolved.worldPoint(), id)) {
                 return resolved;
             }
         }
@@ -6823,7 +6946,7 @@ public class WeaponFiringControl {
         SubLevelAimResolver.LocalAim selected = SubLevelAimResolver.select(
                 snapshot.silhouette().localBoxes(), localOrigin,
                 SUBLEVEL_AIM_CANDIDATE_LIMIT, candidate -> {
-                    if (!isSublevelAimBlockPresent(serverLevel, candidate)) {
+                    if (!isSublevelAimBlockPresent(actualSubLevel.getLevel(), candidate)) {
                         missingCandidate[0] = true;
                         return false;
                     }
@@ -6850,19 +6973,18 @@ public class WeaponFiringControl {
 
         if (cacheSelection) {
             boolean changed = cached == null
+                    || !id.equals(cached.sublevelId())
                     || cached.revision() != snapshot.revision()
                     || !cached.localAim().equals(selected);
-            this.cachedSublevelAim = new CachedSublevelAim(
-                    id, selected, snapshot.revision(), requireLos, now);
+            this.cachedSublevelAim = new CachedSublevelAim(id, selected, snapshot.revision(), requireLos, now);
             if (changed) {
                 this.invalidateSublevelAimDependentState(id);
             }
         }
-        return this.materializeSublevelAim(
-                subLevel, selected, snapshot.revision());
+        return this.materializeSublevelAim(subLevel, selected, snapshot.revision());
     }
 
-    private static boolean isSublevelAimBlockPresent(ServerLevel level, SubLevelAimResolver.LocalAim aim) {
+    private static boolean isSublevelAimBlockPresent(Level level, SubLevelAimResolver.LocalAim aim) {
         BlockPos localPos = BlockPos.containing(aim.point());
         var state = level.getBlockState(localPos);
 
@@ -6878,14 +7000,14 @@ public class WeaponFiringControl {
                 localAim, revision, false);
     }
 
-    private boolean rayReachesTargetSublevel(Vec3 start, Vec3 end,
-                                             UUID targetId) {
+    private boolean rayReachesTargetSublevel(Vec3 start, Vec3 end, UUID targetId) {
         for (SafeZone zone : this.safeZones) {
             if (zone != null && zone.intersects(this.level, start, end)) {
                 return false;
             }
         }
         ClipContext context = new ClipContext(start, end, Block.COLLIDER, Fluid.NONE, CollisionContext.empty());
+        excludeOwnSwivelFromTargetingRay(context);
         HitResult hit = this.level.clip(context);
 
         if (hit.getType() == Type.MISS) {

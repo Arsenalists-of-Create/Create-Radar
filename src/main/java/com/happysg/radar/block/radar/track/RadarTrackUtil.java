@@ -1,15 +1,19 @@
 package com.happysg.radar.block.radar.track;
 
 import com.happysg.radar.api.physics.RadarPhysics;
+import com.happysg.radar.compat.sable.SableAssemblyRegistry;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import com.happysg.radar.compat.Mods;
+import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
+import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
@@ -85,7 +89,6 @@ public class RadarTrackUtil {
         }
 
         Map<String, RadarTrack> result = new LinkedHashMap<>();
-
         for (RadarTrack track : contacts) {
             if (track != null) {
                 result.put(track.getId(), track);
@@ -105,6 +108,71 @@ public class RadarTrackUtil {
             RadarTrack track = getRadarTrack(sublevel, level);
             track.setFriendly(true);
             result.put(track.getId(), track);
+        }
+
+        return List.copyOf(result.values());
+    }
+
+    public static Collection<RadarTrack> groupConnectedSableTracks(
+            Level level,
+            Collection<RadarTrack> tracks) {
+
+        if (!(level instanceof ServerLevel serverLevel) || tracks == null || !Mods.SABLE.isLoaded()) {
+            return tracks;
+        }
+
+        SableAssemblyRegistry registry = SableAssemblyRegistry.get(serverLevel);
+        SubLevelContainer container = SubLevelContainer.getContainer(level);
+
+        Map<String, RadarTrack> result = new LinkedHashMap<>();
+        for (RadarTrack track : tracks) {
+            if (track == null) {
+                continue;
+            }
+
+            if (track.trackCategory() != TrackCategory.SABLE || track.isSynthetic()) {
+                result.put(track.id(), track);
+                continue;
+            }
+
+            UUID memberId;
+
+            try {
+                memberId = UUID.fromString(track.id());
+            } catch (IllegalArgumentException ignored) {
+                result.put(track.id(), track);
+                continue;
+            }
+
+            UUID ownerId = registry.observe(serverLevel, memberId);
+            String key = ownerId.toString();
+
+            SubLevelAccess owner = container == null ? null : container.getSubLevel(ownerId);
+            RadarTrack grouped = owner == null
+                    ? new RadarTrack(
+                    key,
+                    track.position(),
+                    track.velocity(),
+                    track.scannedTime(),
+                    TrackCategory.SABLE,
+                    "Sable:ship",
+                    track.getEnityHeight()
+            ) : RadarTrackUtil.getRadarTrack(owner, level);
+
+            grouped.setFriendly(track.isFriendly());
+            grouped.setJammingData(track.getJammingData());
+            grouped.setScannedTime(track.scannedTime());
+
+            RadarTrack existing = result.get(key);
+            if (existing == null) {
+                result.put(key, grouped);
+            } else {
+                existing.setFriendly(existing.isFriendly() || track.isFriendly());
+                if (track.scannedTime() > existing.scannedTime()) {
+                    existing.setScannedTime(track.scannedTime());
+                    existing.setJammingData(track.getJammingData());
+                }
+            }
         }
 
         return List.copyOf(result.values());

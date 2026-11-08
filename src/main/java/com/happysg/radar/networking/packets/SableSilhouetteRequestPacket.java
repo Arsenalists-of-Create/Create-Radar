@@ -4,6 +4,7 @@ import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableAssemblyRegistry;
 import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
 import com.happysg.radar.compat.sable.SubLevelSilhouette;
 import net.minecraft.core.BlockPos;
@@ -72,7 +73,27 @@ public record SableSilhouetteRequestPacket(BlockPos controllerPos, UUID sublevel
             if (silhouette == null || revision != packet.revision()) {
                 return;
             }
-            PacketDistributor.sendToPlayer(player, new SableSilhouetteSyncPacket(packet.sublevelId(), revision, status, silhouette.localBoxes()));
+
+            PacketDistributor.sendToPlayer(player, new SableSilhouetteSyncPacket(packet.sublevelId(), revision, status, silhouette.localBoxes(), SableAssemblyRegistry.get(level).groupOf(packet.sublevelId())));
+
+            int sentMembers = 0;
+            int sentBoxes = silhouette.localBoxes().size();
+
+            for (var member : SableSilhouetteServerCache.getConnectedSilhouettes(level, packet.sublevelId())) {
+                if (member.sublevelId().equals(packet.sublevelId())) {
+                    continue;
+                }
+
+                int boxCount = member.silhouette().localBoxes().size();
+                if (sentMembers >= 32 || sentBoxes + boxCount > 16384) {
+                    break;
+                }
+
+                PacketDistributor.sendToPlayer(player, new SableSilhouetteSyncPacket(member.sublevelId(), member.revision(), member.status(), member.silhouette().localBoxes(), SableAssemblyRegistry.get(level).groupOf(packet.sublevelId())));
+
+                sentMembers++;
+                sentBoxes += boxCount;
+            }
         });
     }
 

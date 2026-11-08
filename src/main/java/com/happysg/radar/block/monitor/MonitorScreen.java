@@ -1064,6 +1064,13 @@ public class MonitorScreen extends Screen {
             return;
         }
 
+        if (!syntheticSilhouette && silhouette != null) {
+            long now = monitor.getLevel().getGameTime();
+            if (SableSilhouetteClientCache.shouldRefreshAssembly(silhouetteId, now)) {
+                SableSilhouetteRequestPacket.send(monitor.getControllerPos(), silhouetteId, revision);
+            }
+        }
+
         long gameTime = monitor.getLevel().getGameTime();
 
         SubLevelSilhouette.ProjectionSettings projectionSettings = silhouetteProjectionSettings();

@@ -740,7 +740,7 @@ public class SonarScanningBlockBehavior extends BlockEntityBehaviour {
             return radarTracks.values();
         }
 
-        return RadarTrackUtil.withConnectedFriendlies(sonar.getLevel(), sonar.getBlockPos(), radarTracks.values());
+        return RadarTrackUtil.groupConnectedSableTracks(sonar.getLevel(), RadarTrackUtil.withConnectedFriendlies(sonar.getLevel(), sonar.getBlockPos(), radarTracks.values()));
     }
 
     public void setRange(double range) {
