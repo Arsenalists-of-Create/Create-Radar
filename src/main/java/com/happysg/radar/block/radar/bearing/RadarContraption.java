@@ -20,7 +20,6 @@ import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemp
 import org.apache.commons.lang3.tuple.Pair;
 
 public class RadarContraption extends BearingContraption {
-
     private int dishCount;
     private boolean hasReceiver;
     private boolean creative;

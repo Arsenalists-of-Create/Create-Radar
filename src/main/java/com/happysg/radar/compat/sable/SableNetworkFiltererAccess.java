@@ -5,6 +5,7 @@ import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
+import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 
@@ -16,7 +17,17 @@ public final class SableNetworkFiltererAccess {
 
     public static boolean isShipLoaded(ServerLevel level, UUID shipId) {
         SubLevelContainer container = SubLevelContainer.getContainer(level);
-        return container != null && container.getSubLevel(shipId) != null;
+
+        if (container == null) {
+            return false;
+        }
+
+        SubLevel direct = container.getSubLevel(shipId);
+        if (direct != null && !direct.isRemoved()) {
+            return true;
+        }
+
+        return !SableAssemblyRegistry.get(level).loadedMembers(level, shipId).isEmpty();
     }
 
     @Nullable
@@ -33,7 +44,18 @@ public final class SableNetworkFiltererAccess {
     @Nullable
     public static Vec3 resolveShipPosition(ServerLevel level, UUID shipId) {
         SubLevelContainer container = SubLevelContainer.getContainer(level);
-        SubLevelAccess ship = container == null ? null : container.getSubLevel(shipId);
+
+        if (container == null) {
+            return null;
+        }
+
+        SubLevelAccess ship = container.getSubLevel(shipId);
+        if (ship == null) {
+            var members = SableAssemblyRegistry.get(level).loadedMembers(level, shipId);
+            if (!members.isEmpty()) {
+                ship = members.get(0);
+            }
+        }
 
         return ship == null ? null : RadarTrackUtil.getPosition(ship);
     }

@@ -88,3 +88,19 @@ type = "optional"
 versionRange = "[1.2.1,)"
 ordering = "AFTER"
 side = "BOTH"
+
+[[dependencies.create_radar]]
+modId = "cbcatfix"
+type = "incompatible"
+versionRange = "(,1.1.4]"
+reason = "CBC: Advanced technologies crash fix 1.1.4 and below is incompatible with Create: Radars 5.1.0 and above"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.create_radar]]
+modId = "cbc_firepower_components"
+type = "incompatible"
+versionRange = "(,0.4.4]"
+reason = "CBC: Firepower Components 0.4.4 and below is incompatible with Create: Radars 5.1.0 and above"
+ordering = "NONE"
+side = "BOTH"

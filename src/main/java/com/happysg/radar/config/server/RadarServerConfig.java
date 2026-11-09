@@ -44,6 +44,8 @@ public class RadarServerConfig extends ConfigBase {
     public final ConfigFloat chaffResistanceChanceMultiplier = f(0.50F, 0.0F, 1.0F, "resistanceChanceMultiplier", "Chance multiplier while post-chaff resistance is active");
     public final ConfigFloat chaffPermanentBreakChancePerSuccess = f(0.02F, 0.0F, 1.0F, "permanentBreakChancePerSuccess", "Permanent lock-break chance added by each successful chaff roll");
 
+    public final ConfigGroup sableCannonTargetingConfig = group(3, "sableCannonTargetingConfig", "Sable cannon aim selection");
+    public final ConfigBool sableCannonDamageableAimOnly = b(true, "damageableBlocksOnly", "When enabled, cannon targeting avoids blocks that are unbreakable.");
     public final ConfigGroup sableSilhouetteConfig = group(3, "sableSilhouetteConfig", "Configs for Sable radar monitor silhouettes");
     public final ConfigInt sableSilhouetteMaxScannedBlocks = i(20000, 1, "sableSilhouetteMaxScannedBlocks", "Maximum loaded Sable sublevel blocks inspected while building one radar silhouette");
     public final ConfigInt sableSilhouetteMaxCollisionBoxes = i(12000, 1, "sableSilhouetteMaxCollisionBoxes", "Maximum collision boxes stored in one Sable radar silhouette");

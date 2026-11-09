@@ -27,6 +27,7 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableAssemblyRegistry;
 import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
@@ -906,12 +907,15 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         MonitorBlockEntity controllerBe = getController();
         if (controllerBe == null)
             return;
-        if (track != null && !track.isSynthetic()
-                && track.trackCategory() == TrackCategory.SABLE
-                && "Sable:ship".equals(track.entityType())) {
-            UUID shipId = UUID.fromString(track.id());
-            SubLevelAccess subLevel = SubLevelContainer.getContainer(sl).getSubLevel(shipId);
-            if (subLevel == null) {
+        if (track != null && !track.isSynthetic() && track.trackCategory() == TrackCategory.SABLE && "Sable:ship".equals(track.entityType())) {
+            boolean available = false;
+
+            try {
+                UUID shipId = UUID.fromString(track.id());
+                available = !SableAssemblyRegistry.get(sl).loadedMembers(sl, shipId).isEmpty();
+            } catch (IllegalArgumentException ignored) {}
+
+            if (!available) {
                 track = null;
                 this.activetrack = null;
                 this.selectedEntity = null;
@@ -1046,6 +1050,24 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
 
         cachedTracks = List.copyOf(displayTracks);
+        if (serverLevel != null && selectedEntity != null) {
+            try {
+                UUID oldId = UUID.fromString(selectedEntity);
+                String canonicalId = SableAssemblyRegistry.get(serverLevel).groupOf(oldId).toString();
+
+                if (!canonicalId.equals(selectedEntity) && displayTracks.stream().anyMatch(track -> canonicalId.equals(track.id()))) {
+
+                    String previousId = selectedEntity;
+                    selectedEntity = canonicalId;
+
+                    NetworkData.Group group = getNetworkGroup(serverLevel);
+
+                    if (group != null && previousId.equals(group.selectedTargetId)) {
+                        NetworkData.get(serverLevel).setSelectedTargetId(group, canonicalId);
+                    }
+                }
+            } catch (IllegalArgumentException ignored) {}
+        }
 
         if (!level.isClientSide) {
             activetrack = resolveActiveTrack();

@@ -174,12 +174,12 @@ public final class ControllerMotionProfile {
             lastTargetDegrees = targetDegrees;
             lastTargetTick = gameTick;
 
-            if (!consecutive || Math.abs(filteredTargetRate) < TRACKING_MIN_RATE) {
+            if (!consecutive) {
                 return nextStep(errorDegrees, rpm);
             }
 
             double distance = Math.abs(errorDegrees);
-            if (distance <= EPSILON) {
+            if (distance <= EPSILON && Math.abs(filteredTargetRate) <= EPSILON) {
                 velocityDegreesPerTick = 0.0;
                 return 0.0;
             }
@@ -189,19 +189,17 @@ public final class ControllerMotionProfile {
                 velocityDegreesPerTick = 0.0;
             }
 
-            double requestedVelocity;
-
-            if (!consecutive || Math.abs(filteredTargetRate) < TRACKING_MIN_RATE) {
-                double brakingSpeed = Math.sqrt(2.0 * TRACKING_ACCELERATION_DEGREES_PER_TICK2 * distance);
-                requestedVelocity = direction * Math.min(maxSpeed, brakingSpeed);
-            } else {
-                requestedVelocity = filteredTargetRate + TRACKING_ERROR_GAIN * errorDegrees;
-                requestedVelocity = Math.max(-maxSpeed, Math.min(maxSpeed, requestedVelocity));
-            }
+            double requestedVelocity = filteredTargetRate + TRACKING_ERROR_GAIN * errorDegrees;
+            requestedVelocity = Math.max(-maxSpeed, Math.min(maxSpeed, requestedVelocity));
 
             double acceleration = Double.isFinite(trackingAcceleration) ? Math.max(0.1, Math.min(2.0, trackingAcceleration)) : TRACKING_ACCELERATION_DEGREES_PER_TICK2;
             velocityDegreesPerTick = approach(velocityDegreesPerTick, requestedVelocity, acceleration);
-            double step = direction * Math.min(distance, Math.max(0.0, velocityDegreesPerTick * direction));
+
+            double step = velocityDegreesPerTick;
+            if (Math.abs(filteredTargetRate) <= EPSILON) {
+                step = direction * Math.min(distance, Math.max(0.0, step * direction));
+            }
+
             velocityDegreesPerTick = step;
             return step;
         }

@@ -20,8 +20,24 @@ public final class SableSilhouetteClientCache {
         return entry != null && entry.revision == revision && entry.silhouette != null;
     }
 
+    private static void invalidateProjected(UUID assemblyId) {
+        Entry entry = CACHE.get(assemblyId);
+        if (entry != null) {
+            entry.projected = null;
+        }
+    }
+
     public static void setAssemblyMember(UUID memberId, UUID assemblyId) {
-        ASSEMBLY_BY_MEMBER.put(memberId, assemblyId);
+        UUID previous = ASSEMBLY_BY_MEMBER.put(memberId, assemblyId);
+
+        if (!Objects.equals(previous, assemblyId)) {
+            if (previous != null) {
+                invalidateProjected(previous);
+            }
+
+            invalidateProjected(assemblyId);
+            invalidateProjected(memberId);
+        }
     }
 
     public static List<UUID> getAssemblyMemberIds(UUID assemblyId) {
@@ -61,8 +77,18 @@ public final class SableSilhouetteClientCache {
     }
 
     public static void put(UUID id, int revision, SubLevelSilhouette silhouette) {
+        Entry existing = CACHE.get(id);
+
+        if (existing != null && !existing.synthetic && existing.revision == revision && existing.silhouette != null) {
+            return;
+        }
+
         CACHE.put(id, new Entry(revision, silhouette, false));
         SYNTHETIC_LRU.remove(id);
+
+        UUID assemblyId = ASSEMBLY_BY_MEMBER.getOrDefault(id, id);
+
+        invalidateProjected(assemblyId);
     }
 
     public static SubLevelSilhouette getOrCreateSynthetic(

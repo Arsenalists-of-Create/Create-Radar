@@ -93,6 +93,7 @@ import org.joml.Vector3f;
 import org.slf4j.Logger;
 import rbasamoyai.createbigcannons.cannon_control.contraption.AbstractMountedCannonContraption;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
+import rbasamoyai.createbigcannons.munitions.ProjectileDamageHooks;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionProperties;
 import rbasamoyai.createbigcannons.munitions.config.DimensionMunitionPropertiesHandler;
 import rbasamoyai.createbigcannons.munitions.config.components.BallisticPropertiesComponent;
@@ -6908,22 +6909,26 @@ public class WeaponFiringControl {
                 this.cachedSublevelAim = null;
             }
             Vec3 center = RadarTrackUtil.getPosition(subLevel);
+            Vec3 localCenter = SubLevelAimResolver.toLocal(subLevel, center);
+            BlockPos centerPos = BlockPos.containing(localCenter);
+            var centerState = actualSubLevel.getLevel().getBlockState(centerPos);
+
+            if (RadarConfig.server().sableCannonDamageableAimOnly.get() && !centerState.isAir() && ((Mods.SIMULATED.isLoaded() && SimulatedSwivelMountAdapter.isCannonImmuneSwivel(centerState)) || centerState.getDestroySpeed(actualSubLevel.getLevel(), centerPos) < 0.0F || !ProjectileDamageHooks.canDamageTerrain(actualSubLevel.getLevel(), centerPos))) {
+                return null;
+            }
+
             ResolvedSublevelAim fallback = new ResolvedSublevelAim(
                     center, this.resolveWholeSublevelWorldAabb(subLevel),
                     null, snapshot.revision(), true);
-            if (requireLos && !this.rayReachesTargetSublevel(
-                    worldOrigin, center, id)) {
+            if (requireLos && !this.rayReachesTargetSublevel(worldOrigin, center, id)) {
                 return null;
             }
             return fallback;
         }
 
         CachedSublevelAim cached = cacheSelection ? this.cachedSublevelAim : null;
-        boolean sameCache = cached != null
-                && id.equals(cached.sublevelId())
-                && cached.revision() == snapshot.revision()
-                && cached.requireLos() == requireLos;
-        boolean cachedPointGone = sameCache && !isSublevelAimBlockPresent(actualSubLevel.getLevel(), cached.localAim());
+        boolean sameCache = cached != null && id.equals(cached.sublevelId()) && cached.revision() == snapshot.revision() && cached.requireLos() == requireLos;
+        boolean cachedPointGone = sameCache && (!isSublevelAimBlockPresent(actualSubLevel.getLevel(), cached.localAim()) || !canCannonDamageAimBlock(actualSubLevel.getLevel(), cached.localAim()));
 
         if (cachedPointGone) {
             SableSilhouetteServerCache.requestRefreshForStaleAim(serverLevel, id, snapshot.revision());
@@ -6948,6 +6953,10 @@ public class WeaponFiringControl {
                 SUBLEVEL_AIM_CANDIDATE_LIMIT, candidate -> {
                     if (!isSublevelAimBlockPresent(actualSubLevel.getLevel(), candidate)) {
                         missingCandidate[0] = true;
+                        return false;
+                    }
+
+                    if (!canCannonDamageAimBlock(actualSubLevel.getLevel(), candidate)) {
                         return false;
                     }
 
@@ -6982,6 +6991,25 @@ public class WeaponFiringControl {
             }
         }
         return this.materializeSublevelAim(subLevel, selected, snapshot.revision());
+    }
+
+    private static boolean canCannonDamageAimBlock(Level level, SubLevelAimResolver.LocalAim aim) {
+        if (!RadarConfig.server().sableCannonDamageableAimOnly.get()) {
+            return true;
+        }
+
+        BlockPos pos = BlockPos.containing(aim.point());
+        var state = level.getBlockState(pos);
+
+        if (state.isAir()) {
+            return false;
+        }
+
+        if (Mods.SIMULATED.isLoaded() && SimulatedSwivelMountAdapter.isCannonImmuneSwivel(state)) {
+            return false;
+        }
+
+        return state.getDestroySpeed(level, pos) >= 0.0F && ProjectileDamageHooks.canDamageTerrain(level, pos);
     }
 
     private static boolean isSublevelAimBlockPresent(Level level, SubLevelAimResolver.LocalAim aim) {
@@ -7029,14 +7057,25 @@ public class WeaponFiringControl {
             return true;
         }
 
-        return hitSublevel != null && targetId.equals(hitSublevel.getUniqueId());
+        if (hitSublevel == null) {
+            return false;
+        }
+
+        UUID hitId = hitSublevel.getUniqueId();
+        if (targetId.equals(hitId)) {
+            return true;
+        }
+
+        if (this.level instanceof ServerLevel serverLevel) {
+            SableAssemblyRegistry registry = SableAssemblyRegistry.get(serverLevel);
+            return registry.groupOf(targetId).equals(registry.groupOf(hitId)) && (registry.groupOf(targetId).equals(targetId) ? registry.loadedMembers(serverLevel, targetId).size() > 1 : true);
+        }
+
+        return false;
     }
 
-    public static record SolverDebugReport(List<String> lines, @Nullable ProjectileSimulator.SimulationResult trajectory) {
-    }
-
-    private static record AimCommand(double pitchDeg, double controllerYawDeg) {
-    }
+    public static record SolverDebugReport(List<String> lines, @Nullable ProjectileSimulator.SimulationResult trajectory) { }
+    private static record AimCommand(double pitchDeg, double controllerYawDeg) { }
 
     static record AimCommandEvaluation(
             boolean valid,

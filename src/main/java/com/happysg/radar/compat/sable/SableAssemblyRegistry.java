@@ -54,8 +54,8 @@ public final class SableAssemblyRegistry extends SavedData {
             }
         }
 
-        // Prefer an established group over creating a new identity.
-        UUID owner = connected.stream()
+        UUID existingOwner = ownerByMember.get(memberId);
+        UUID owner = existingOwner != null ? existingOwner : connected.stream()
                 .filter(ownerByMember::containsKey)
                 .map(ownerByMember::get)
                 .min(UUID_ORDER)

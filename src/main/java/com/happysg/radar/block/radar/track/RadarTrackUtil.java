@@ -5,10 +5,8 @@ import com.happysg.radar.compat.sable.SableAssemblyRegistry;
 import com.happysg.radar.compat.vs2.SableUtils;
 import com.happysg.radar.compat.vs2.VS2ShipVelocityTracker;
 import com.happysg.radar.compat.Mods;
-import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
-import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -124,6 +122,16 @@ public class RadarTrackUtil {
         SableAssemblyRegistry registry = SableAssemblyRegistry.get(serverLevel);
         SubLevelContainer container = SubLevelContainer.getContainer(level);
 
+        for (RadarTrack track : tracks) {
+            if (track == null || track.trackCategory() != TrackCategory.SABLE || track.isSynthetic()) {
+                continue;
+            }
+
+            try {
+                registry.observe(serverLevel, UUID.fromString(track.id()));
+            } catch (IllegalArgumentException ignored) {}
+        }
+
         Map<String, RadarTrack> result = new LinkedHashMap<>();
         for (RadarTrack track : tracks) {
             if (track == null) {
@@ -144,7 +152,7 @@ public class RadarTrackUtil {
                 continue;
             }
 
-            UUID ownerId = registry.observe(serverLevel, memberId);
+            UUID ownerId = registry.groupOf(memberId);
             String key = ownerId.toString();
 
             SubLevelAccess owner = container == null ? null : container.getSubLevel(ownerId);

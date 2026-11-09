@@ -6,6 +6,7 @@ import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableAssemblyRegistry;
 import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
+import com.happysg.radar.compat.sable.SableSilhouetteStatus;
 import com.happysg.radar.compat.sable.SubLevelSilhouette;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -67,10 +68,12 @@ public record SableSilhouetteRequestPacket(BlockPos controllerPos, UUID sublevel
                 return;
             }
 
-            SubLevelSilhouette silhouette = SableSilhouetteServerCache.getSilhouette(level, packet.sublevelId());
-            int revision = SableSilhouetteServerCache.getRevision(level, packet.sublevelId());
-            byte status = SableSilhouetteServerCache.getStatus(level, packet.sublevelId());
-            if (silhouette == null || revision != packet.revision()) {
+            SableSilhouetteServerCache.Snapshot snapshot = SableSilhouetteServerCache.getSnapshot(level, packet.sublevelId());
+            SubLevelSilhouette silhouette = snapshot.silhouette();
+            int revision = snapshot.revision();
+            byte status = snapshot.status();
+
+            if (silhouette == null || !SableSilhouetteStatus.drawable(status)) {
                 return;
             }
 

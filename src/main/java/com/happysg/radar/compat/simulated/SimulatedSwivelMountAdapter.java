@@ -56,10 +56,7 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
     private BlockPos cachedCannonMountPos;
     private long nextCannonMountScanTick = Long.MIN_VALUE;
 
-    private SimulatedSwivelMountAdapter(KineticBlockEntity controller,
-                                        Direction.Axis rotationAxis,
-                                        Direction relativeDirection,
-                                        SwivelBearingBlockEntity bearing) {
+    private SimulatedSwivelMountAdapter(KineticBlockEntity controller, Direction.Axis rotationAxis, Direction relativeDirection, SwivelBearingBlockEntity bearing) {
         this.controller = controller;
         this.rotationAxis = rotationAxis;
         this.cannonAxis = rotationAxis == Direction.Axis.Y ? CannonAxis.YAW : CannonAxis.PITCH;
@@ -68,6 +65,9 @@ public final class SimulatedSwivelMountAdapter implements KineticMountAdapter {
         this.endpoint = bearing.getExtraKinetics();
     }
 
+    public static boolean isCannonImmuneSwivel(BlockState state) {
+        return state.getBlock() instanceof SwivelBearingBlock || state.getBlock() instanceof SwivelBearingPlateBlock;
+    }
 
     public static KineticMountAdapterResolution resolve(KineticBlockEntity controller, Direction.Axis rotationAxis) {
         Level level = controller.getLevel();
