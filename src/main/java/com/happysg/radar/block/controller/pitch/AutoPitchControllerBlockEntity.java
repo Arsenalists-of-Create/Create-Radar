@@ -188,6 +188,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         DataLinkBlockEntity pitchLink = findPitchDataLink();
         boolean networkPitch = isNetworkedPitchLink(pitchLink);
 
+        KineticMountAdapterResolution pitchActuator = networkPitch ? resolveKineticMount() : null;
+        boolean structuralPitchSelected = pitchActuator != null && pitchActuator.isStructuralSelection();
+        boolean structuralPitchConnected = structuralPitchSelected && hasNetworkedStructuralPitch();
+
         if (pitchLink != null && !networkPitch) {
             cbcShaftDrive.reset(this::commandGeneratedSpeed);
 
@@ -197,9 +201,17 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
+        if (networkPitch && structuralPitchSelected && !structuralPitchConnected && resolveControlledCbcMounts().stream().anyMatch(mount -> mount.isFixed() || mount.isCompact())) {
+            cbcShaftDrive.reset(this::commandGeneratedSpeed);
+            if (isRunning) {
+                failClosedRadarAim();
+            }
+            return;
+        }
+
         debugSwivelSweep.enforce(targetAngle, this::applyDebugSwivelCommand);
         tickDebugSwivelFollow();
-        boolean kineticSelected = !networkPitch && tickKineticActuator();
+        boolean kineticSelected = (!networkPitch || structuralPitchConnected) && tickKineticActuator();
         tickDebugSwivelSweep(kineticSelected);
         if (kineticSelected) {
             cbcShaftDrive.clear();
@@ -224,12 +236,18 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             }
 
             CannonMountContext mount = cbcMounts.getFirst();
-            if (!mount.isCurrent() || mount.isFixed() || mount.isCompact()) {
+            if (!mount.isCurrent() || mount.isFixed()) {
                 cbcShaftDrive.reset(this::commandGeneratedSpeed);
 
                 if (isRunning) {
                     failClosedRadarAim();
                 }
+                return;
+            }
+
+            if (mount.isCompact()) {
+                cbcShaftDrive.reset(this::commandGeneratedSpeed);
+                cannonHandler.tick(mount);
                 return;
             }
 
@@ -680,8 +698,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
-        KineticMountAdapterResolution kineticResolution = resolveKineticMount();
-        if (!isNetworkedPitchLink(findPitchDataLink()) && kineticResolution.isStructuralSelection() && shouldUseStructuralTargeting()) {
+        if (hasStructuralKineticSelection() && shouldUseStructuralTargeting()) {
             Vec3 origin = PhysicsHandler.getWorldVec(this);
             setStructuralAimDirection(targetPos.subtract(origin), false);
             return;
@@ -813,27 +830,25 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
      * T-Pitch firing uses this per mount so one side can fire while the other
      * side is still settling.
      */
-    public boolean isCbcMountAlignedForFiring(
-            @Nullable CannonMountContext mount,
-            boolean lag,
-            double minimumToleranceDegrees
-    ) {
+    public boolean isCbcMountAlignedForFiring(@Nullable CannonMountContext mount, boolean lag, double minimumToleranceDegrees) {
         return isCbcMountAlignedForFiring(
                 mount, lag, minimumToleranceDegrees,
                 Double.POSITIVE_INFINITY);
     }
 
-    public boolean isCbcMountAlignedForFiring(
-            @Nullable CannonMountContext mount,
-            boolean lag,
-            double minimumToleranceDegrees,
-            double maximumToleranceDegrees
-    ) {
-        if (level == null || mount == null || targetLimitConstrained
-                || debugSwivelSweep.isActive()
-                || debugSwivelFollow.isActive()) {
+    public boolean isCbcMountAlignedForFiring(@Nullable CannonMountContext mount, boolean lag, double minimumToleranceDegrees, double maximumToleranceDegrees) {
+        if (level == null || mount == null || targetLimitConstrained || debugSwivelSweep.isActive() || debugSwivelFollow.isActive()) {
             return false;
         }
+
+        if (hasNetworkedStructuralPitch()) {
+            DataLinkBlockEntity link = findPitchDataLink();
+
+            if (link != null && mount.sameMount(CannonMountContext.resolveEndpoint(level, link.getTargetPosition()))) {
+                return isAlignedForFiring(lag, minimumToleranceDegrees, maximumToleranceDegrees);
+            }
+        }
+
         for (CannonMountContext controlled : resolveControlledCbcMounts()) {
             if (controlled.sameMount(mount)) {
                 return cannonHandler.atTargetPitch(controlled, lag, minimumToleranceDegrees, maximumToleranceDegrees);
@@ -1443,8 +1458,33 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         return consumed;
     }
 
+    private boolean hasNetworkedStructuralPitch() {
+        if (!(level instanceof ServerLevel serverLevel)
+                || !Mods.SIMULATED.isLoaded()) {
+            return false;
+        }
+
+        DataLinkBlockEntity link = findPitchDataLink();
+        if (link == null || !isNetworkedPitchLink(link)) {
+            return false;
+        }
+
+        BlockPos mountPos = link.getTargetPosition();
+        CannonMountContext mount =
+                CannonMountContext.resolveEndpoint(serverLevel, mountPos);
+
+        if (mount == null || !mount.isCurrent() || (!mount.isFixed() && !mount.isCompact())) {
+            return false;
+        }
+
+        return SimulatedSwivelMountAdapter.isMountOnControllerSwivel(
+                this,
+                getStructuralKineticAxis(),
+                mount.getBlockPos());
+    }
+
     private boolean hasStructuralKineticSelection() {
-        return !isNetworkedPitchLink(findPitchDataLink()) && resolveKineticMount().isStructuralSelection();
+        return (!isNetworkedPitchLink(findPitchDataLink()) || hasNetworkedStructuralPitch()) && resolveKineticMount().isStructuralSelection();
     }
 
     public boolean hasStructuralKineticSelectionForTargeting() {

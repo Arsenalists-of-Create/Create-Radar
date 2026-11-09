@@ -17,6 +17,7 @@ import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
+import com.happysg.radar.compat.simulated.SimulatedSwivelMountAdapter;
 import com.happysg.radar.registry.AllDataBehaviors;
 import com.happysg.radar.registry.ModBlocks;
 import com.happysg.radar.api.mount.RadarMountAdapter;
@@ -85,6 +86,8 @@ public class DataLinkBlockItem extends BlockItem {
     private static final String YAW_LINK_ORDER = CreateRadar.MODID + ".data_link.yaw_link_order";
     private static final String DATA_LINK_ONLY_AIM_ALLOWED = CreateRadar.MODID + ".data_link.only_aim_allowed";
     private static final String PITCH_MOUNT_UNSUPPORTED = CreateRadar.MODID + ".data_link.pitch_mount_unsupported";
+    private static final String PITCH_SWIVEL_UNAVAILABLE = CreateRadar.MODID + ".data_link.pitch_swivel_unavailable";
+    private static final String PITCH_SWIVEL_MOUNT_MISMATCH = CreateRadar.MODID + ".data_link.pitch_swivel_mount_mismatch";
 
     public DataLinkBlockItem(Block pBlock, Properties pProperties) {
         super(pBlock, pProperties);
@@ -351,9 +354,24 @@ public class DataLinkBlockItem extends BlockItem {
                 return invalidSelection(use);
             }
 
-            if (controllerType == ControllerType.PITCH && (selectedCbc == null || !selectedCbc.isCurrent() || selectedCbc.isFixed() || selectedCbc.isCompact())) {
-                sendError(use.player(), PITCH_MOUNT_UNSUPPORTED);
-                return InteractionResult.FAIL;
+            if (controllerType == ControllerType.PITCH) {
+                boolean fixedMount = selectedCbc != null && selectedCbc.isFixed();
+                boolean structuralSwivelPitch = false;
+
+                if (fixedMount && Mods.SIMULATED.isLoaded() && use.be() instanceof AutoPitchControllerBlockEntity pitch && pitch.getBlockState().hasProperty(HorizontalDirectionalBlock.FACING)) {
+                    Direction.Axis pitchAxis = pitch.getBlockState().getValue(HorizontalDirectionalBlock.FACING).getAxis();
+                    structuralSwivelPitch = SimulatedSwivelMountAdapter.isMountOnControllerSwivel(pitch, pitchAxis, selectedCbc.getBlockPos());
+                }
+
+                if (fixedMount && !structuralSwivelPitch) {
+                    if (!(use.be() instanceof AutoPitchControllerBlockEntity) || !Mods.SIMULATED.isLoaded()) {
+                        sendError(use.player(), PITCH_SWIVEL_UNAVAILABLE);
+                    } else {
+                        sendError(use.player(), PITCH_SWIVEL_MOUNT_MISMATCH);
+                    }
+
+                    return InteractionResult.FAIL;
+                }
             }
 
             networkData = NetworkData.get(serverLevel);
