@@ -61,6 +61,15 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     }
 
     @Override
+    public void initialize() {
+        super.initialize();
+
+        if (level != null && !level.isClientSide) {
+            assembleNextTick = true;
+        }
+    }
+
+    @Override
     public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
         super.addBehaviours(behaviours);
         movementMode.setValue(MovementMode.MOVE_NEVER_PLACE.ordinal());
