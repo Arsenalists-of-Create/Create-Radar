@@ -6129,12 +6129,18 @@ public class WeaponFiringControl {
             unavailableReason = "source_frame_unavailable";
         }
 
-        PitchConstraint pitchConstraint = frameKind == MountFrameKind.UNAVAILABLE
-                ? new PitchConstraint(1.0, -1.0,
-                rightAxis, upAxis, forwardAxis)
-                : mountPitchConstraint(
-                structuralPitch, controllerMin, controllerMax, cannonMin, cannonMax,
-                rightAxis, upAxis, forwardAxis);
+        PitchConstraint pitchConstraint = frameKind == MountFrameKind.UNAVAILABLE ? new PitchConstraint(1.0, -1.0, rightAxis, upAxis, forwardAxis) : mountPitchConstraint(structuralPitch, controllerMin, controllerMax, cannonMin, cannonMax, rightAxis, upAxis, forwardAxis);
+
+        if (frameKind != MountFrameKind.UNAVAILABLE && this.pitchController == null
+                && yawController != null
+                && cannonContraption != null) {
+            Double physicalPitch = currentPitchDeg(cannonContraption);
+            if (physicalPitch != null && Double.isFinite(physicalPitch)) {
+                double tolerance = 0.05;
+
+                pitchConstraint = PitchConstraint.intersect(physicalPitch - tolerance, physicalPitch + tolerance, cannonMin, cannonMax, rightAxis, upAxis, forwardAxis);
+            }
+        }
         ControllerMovementLimits yawLimits = yawController == null
                 ? ControllerMovementLimits.defaults(CannonAxis.YAW)
                 : yawController.getMovementLimits();
