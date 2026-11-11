@@ -4,9 +4,8 @@ import com.happysg.radar.CreateRadar;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableIdRecordAccess;
-import dev.ryanhcode.sable.api.SubLevelHelper;
-import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
-import dev.ryanhcode.sable.sublevel.SubLevel;
+import com.happysg.radar.compat.vs2.SableUtils;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -19,8 +18,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
 
-public record IDRecordPacket(String shipId, String shipSlug, String secretID, String newSlug) implements CustomPacketPayload {
-
+public record IDRecordPacket(String shipId, String shipSlug, String secretID, String newSlug, long transponderPos) implements CustomPacketPayload {
     public IDRecordPacket {
         shipSlug = shipSlug == null ? "" : shipSlug;
         secretID = secretID == null ? "" : secretID;
@@ -38,6 +36,8 @@ public record IDRecordPacket(String shipId, String shipSlug, String secretID, St
             IDRecordPacket::secretID,
             ByteBufCodecs.STRING_UTF8,
             IDRecordPacket::newSlug,
+            ByteBufCodecs.VAR_LONG,
+            IDRecordPacket::transponderPos,
             IDRecordPacket::new
     );
 
@@ -52,7 +52,33 @@ public record IDRecordPacket(String shipId, String shipSlug, String secretID, St
                 return;
             }
 
-            UUID sourceId = UUID.fromString(packet.shipId());
+            UUID sourceId;
+            try {
+                sourceId = UUID.fromString(packet.shipId());
+            } catch (IllegalArgumentException exception) {
+                return;
+            }
+
+            BlockPos pos = BlockPos.of(packet.transponderPos());
+            var level = sender.serverLevel();
+            if (!level.hasChunkAt(pos)) {
+                return;
+            }
+
+            if (!(level.getBlockState(pos).getBlock() instanceof com.happysg.radar.block.controller.id.IdentificationTransponder)) {
+                return;
+            }
+
+            var containing = SableUtils.getShipManagingPos(level, pos);
+            if (containing == null || !sourceId.equals(containing.getUniqueId())) {
+                return;
+            }
+
+            if (sender.distanceToSqr(SableUtils.getWorldVec(level, pos)) > 64.0 * 64.0) {
+                return;
+            }
+
+            IDManager.registerTransponder(sourceId, pos, packet.newSlug(), packet.secretID());
             IDManager.addIDRecord(sourceId, packet.secretID(), packet.newSlug());
 
             if (Mods.SABLE.isLoaded()) {
@@ -67,7 +93,7 @@ public record IDRecordPacket(String shipId, String shipSlug, String secretID, St
         });
     }
 
-    public static void send(UUID shipId, String shipSlug, String secretID, String newSlug) {
-        PacketDistributor.sendToServer(new IDRecordPacket(shipId.toString(), shipSlug, secretID, newSlug));
+    public static void send(UUID shipId, String shipSlug, String secretID, String newSlug, BlockPos transponderPos) {
+        PacketDistributor.sendToServer(new IDRecordPacket(shipId.toString(), shipSlug, secretID, newSlug, transponderPos.asLong()));
     }
 }

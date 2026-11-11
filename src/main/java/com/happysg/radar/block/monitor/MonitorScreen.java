@@ -1454,9 +1454,8 @@ public class MonitorScreen extends Screen {
         if (mon.getLevel() == null) return null;
 
         if ("Sable:ship".equals(track.entityType())) {
-            IDManager.IDRecord rec = IDManager.getIDRecordByShipId(UUID.fromString(track.id()));
-            if (rec != null && rec.name() != null && !rec.name().isBlank())
-                return rec.name();
+            String name = track.getDisplayName();
+            return name.isBlank() ? null : name;
         }
 
         if (track.trackCategory() == TrackCategory.PLAYER) {

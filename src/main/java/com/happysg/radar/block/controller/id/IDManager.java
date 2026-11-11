@@ -1,6 +1,7 @@
 package com.happysg.radar.block.controller.id;
 
 import dev.ryanhcode.sable.companion.SubLevelAccess;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.*;
 import net.minecraft.server.MinecraftServer;
@@ -18,6 +19,31 @@ public class IDManager extends SavedData {
 
     // i key records by ship ID (long)
     public static final Map<UUID, IDRecord> ID_RECORDS = new HashMap<>();
+    private static final Map<UUID, Map<BlockPos, IDRecord>> TRANSPONDER_SOURCES = new HashMap<>();
+
+    public static void registerTransponder(UUID shipId, BlockPos pos, String name, String secretID) {
+        TRANSPONDER_SOURCES.computeIfAbsent(shipId, ignored -> new HashMap<>()).put(pos.immutable(), new IDRecord(name, secretID));
+        INSTANCE.setDirty();
+    }
+
+    public static void unregisterTransponder(UUID shipId, BlockPos pos) {
+        Map<BlockPos, IDRecord> sources = TRANSPONDER_SOURCES.get(shipId);
+        if (sources == null) {
+            return;
+        }
+
+        if (sources.remove(pos) != null) {
+            if (sources.isEmpty()) {
+                TRANSPONDER_SOURCES.remove(shipId);
+            }
+            INSTANCE.setDirty();
+        }
+    }
+
+    public static Map<BlockPos, IDRecord> getTransponderSources(UUID shipId) {
+        Map<BlockPos, IDRecord> sources = TRANSPONDER_SOURCES.get(shipId);
+        return sources == null ? Map.of() : Map.copyOf(sources);
+    }
 
     public record IDRecord(String name, String secretID) {}
 
@@ -45,7 +71,8 @@ public class IDManager extends SavedData {
     }
 
     public static IDManager load(CompoundTag tag, HolderLookup.Provider registries) {
-        if (!tag.contains("idRecords")) return INSTANCE;
+        ID_RECORDS.clear();
+        TRANSPONDER_SOURCES.clear();
 
         ListTag list = tag.getList("idRecords", Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
@@ -54,6 +81,19 @@ public class IDManager extends SavedData {
             String name = c.getString("name");       // now slug
             String secretID = c.getString("secretID");
             ID_RECORDS.put(shipId, new IDRecord(name, secretID));
+        }
+
+        ListTag sources = tag.getList("transponderSources", Tag.TAG_COMPOUND);
+        for (int i = 0; i < sources.size(); i++) {
+            CompoundTag source = sources.getCompound(i);
+            if (!source.hasUUID("shipId") || !source.contains("pos", Tag.TAG_LONG)) {
+                continue;
+            }
+
+            UUID shipId = source.getUUID("shipId");
+            BlockPos pos = BlockPos.of(source.getLong("pos"));
+
+            TRANSPONDER_SOURCES.computeIfAbsent(shipId, ignored -> new HashMap<>()).put(pos, new IDRecord(source.getString("name"), source.getString("secretID")));
         }
 
         return INSTANCE;
@@ -72,6 +112,21 @@ public class IDManager extends SavedData {
         }
 
         tag.put("idRecords", list);
+        ListTag sources = new ListTag();
+
+        for (Map.Entry<UUID, Map<BlockPos, IDRecord>> shipEntry : TRANSPONDER_SOURCES.entrySet()) {
+            for (Map.Entry<BlockPos, IDRecord> entry : shipEntry.getValue().entrySet()) {
+                CompoundTag source = new CompoundTag();
+                source.putUUID("shipId", shipEntry.getKey());
+                source.putLong("pos", entry.getKey().asLong());
+                source.putString("name", entry.getValue().name());
+                source.putString("secretID", entry.getValue().secretID());
+
+                sources.add(source);
+            }
+        }
+
+        tag.put("transponderSources", sources);
         return tag;
     }
 

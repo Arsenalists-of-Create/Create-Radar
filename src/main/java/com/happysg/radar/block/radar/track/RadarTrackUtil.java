@@ -168,6 +168,7 @@ public class RadarTrackUtil {
             ) : RadarTrackUtil.getRadarTrack(owner, level);
 
             grouped.setFriendly(track.isFriendly());
+            grouped.setDisplayName(track.getDisplayName());
             grouped.setJammingData(track.getJammingData());
             grouped.setScannedTime(track.scannedTime());
 
@@ -176,6 +177,10 @@ public class RadarTrackUtil {
                 result.put(key, grouped);
             } else {
                 existing.setFriendly(existing.isFriendly() || track.isFriendly());
+                if (existing.getDisplayName().isBlank() && !grouped.getDisplayName().isBlank()) {
+                    existing.setDisplayName(grouped.getDisplayName());
+                }
+
                 if (track.scannedTime() > existing.scannedTime()) {
                     existing.setScannedTime(track.scannedTime());
                     existing.setJammingData(track.getJammingData());

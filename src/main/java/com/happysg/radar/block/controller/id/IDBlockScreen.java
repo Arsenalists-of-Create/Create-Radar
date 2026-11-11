@@ -11,6 +11,7 @@ import com.simibubi.create.foundation.gui.AllIcons;
 import com.simibubi.create.foundation.gui.widget.IconButton;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
@@ -22,13 +23,15 @@ public class IDBlockScreen extends AbstractSimiScreen {
     private static final ModGuiTextures BACKGROUND = ModGuiTextures.ID_SCREEN;
 
     SubLevelAccess ship;
+    private final BlockPos transponderPos;
     String id = "";
     String name = "";
     private EditBox nameField;
     private EditBox idField;
 
-    public IDBlockScreen(SubLevelAccess ship) {
+    public IDBlockScreen(SubLevelAccess ship, BlockPos transponderPos) {
         this.ship = ship;
+        this.transponderPos = transponderPos.immutable();
     }
 
     @Override
@@ -75,7 +78,7 @@ public class IDBlockScreen extends AbstractSimiScreen {
     public void onClose() {
         IDManager.addIDRecord(ship.getUniqueId(), id, name);
         super.onClose();
-        IDRecordPacket.send(ship.getUniqueId(), ship.getUniqueId().toString(), id,name);
+        IDRecordPacket.send(ship.getUniqueId(), ship.getUniqueId().toString(), id, name, transponderPos);
     }
 
     private void loadFromClientCache() {

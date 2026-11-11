@@ -213,14 +213,19 @@ public final class AutoTargetingHelper {
 
         // VS2 -> transponder / name via IDManager
         if (track.trackCategory() == TrackCategory.SABLE) {
+            if (sl == null) {
+                return false;
+            }
+
             try {
-                var rec = com.happysg.radar.block.controller.id.IDManager.getIDRecordByShipId(UUID.fromString(track.getId()));
-                if (rec == null) return false;
+                UUID shipId = UUID.fromString(track.getId());
+                var record = com.happysg.radar.compat.sable.SableIdRecordAccess.resolveEffectiveIdentification(sl, shipId);
 
-                String key = (rec.secretID() != null && !rec.secretID().isBlank())
-                        ? rec.secretID()
-                        : rec.name();
+                if (record == null) {
+                    return false;
+                }
 
+                String key = record.secretID();
                 return key != null && !key.isBlank() && ignoreList.contains(key.toLowerCase(Locale.ROOT));
             } catch (IllegalArgumentException ignored) {
                 return false;

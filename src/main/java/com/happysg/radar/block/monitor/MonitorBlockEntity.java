@@ -28,6 +28,7 @@ import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.block.radar.track.TrackCategory;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.sable.SableAssemblyRegistry;
+import com.happysg.radar.compat.sable.SableIdRecordAccess;
 import com.happysg.radar.compat.sable.SableSilhouetteServerCache;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
@@ -37,7 +38,6 @@ import com.mojang.logging.LogUtils;
 import com.simibubi.create.api.equipment.goggles.IHaveHoveringInformation;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SubLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -1035,7 +1035,17 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             if (serverLevel != null) {
                 if (track.trackCategory() == TrackCategory.SABLE) {
                     if (!track.isSynthetic()) {
-                        track.setFriendly(isFriendlySublevel(track, networkSecret));
+                        track.setFriendly(isFriendlySublevel(serverLevel, track, networkSecret));
+
+                        try {
+                            UUID shipId = UUID.fromString(track.getId());
+                            IDManager.IDRecord identification = SableIdRecordAccess.resolveEffectiveIdentification(serverLevel, shipId);
+
+                            track.setDisplayName(identification != null ? identification.name() : "");
+                        } catch (IllegalArgumentException ignored) {
+                            track.setDisplayName("");
+                        }
+
                         SableSilhouetteServerCache.attachMetadata(serverLevel, track);
                     }
                 } else {
@@ -1353,14 +1363,21 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         return normalizeSecret(IdentificationConfig.fromTag(group.identificationTag).label());
     }
 
-    private static boolean isFriendlySublevel(RadarTrack track, String networkSecret) {
-        if (networkSecret.isBlank() || !"Sable:ship".equals(track.entityType())) {
+    private static boolean isFriendlySublevel(ServerLevel level, RadarTrack track, String networkSecret) {
+        if (networkSecret == null || networkSecret.isBlank() || track.trackCategory() != TrackCategory.SABLE) {
             return false;
         }
 
         try {
-            IDManager.IDRecord record = IDManager.getIDRecordByShipId(UUID.fromString(track.id()));
-            return record != null && networkSecret.equals(normalizeSecret(record.secretID()));
+            UUID shipId = UUID.fromString(track.getId());
+            IDManager.IDRecord record = SableIdRecordAccess.resolveEffectiveIdentification(level, shipId);
+
+            if (record == null) {
+                return false;
+            }
+
+            String secret = normalizeSecret(record.secretID());
+            return !secret.isBlank() && networkSecret.equals(secret);
         } catch (IllegalArgumentException ignored) {
             return false;
         }
@@ -1389,8 +1406,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (level.isClientSide) {
             if (radarPos == null) return Optional.empty();
 
-            if (radar instanceof BlockEntity be
-                    && be.getBlockPos().equals(radarPos)) {
+            if (radar instanceof BlockEntity be && be.getBlockPos().equals(radarPos)) {
                 return Optional.of(radar);
             }
 
@@ -1405,8 +1421,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             return Optional.empty();
         }
 
-        if (radar instanceof BlockEntity be
-                && be.getBlockPos().equals(radarPos)) {
+        if (radar instanceof BlockEntity be && be.getBlockPos().equals(radarPos)) {
             return Optional.of(radar);
         }
 

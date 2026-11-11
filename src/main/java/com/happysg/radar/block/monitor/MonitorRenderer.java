@@ -1430,12 +1430,8 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         if (mon.getLevel() == null) return null;
 
         if ("Sable:ship".equals(track.entityType())) {
-            IDManager.IDRecord rec = IDManager.getIDRecordByShipId(UUID.fromString(track.id()));
-            if (rec != null) {
-                String storedName = rec.name();
-                if (storedName != null && !storedName.isBlank())
-                    return storedName;
-            }
+            String name = track.getDisplayName();
+            return name.isBlank() ? null : name;
         }
 
         // Players: null-safe

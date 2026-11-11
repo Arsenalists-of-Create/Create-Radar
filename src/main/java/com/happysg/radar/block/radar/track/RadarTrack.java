@@ -29,6 +29,7 @@ public class RadarTrack implements RadarContact {
     private int silhouetteRevision = -1;
     private byte silhouetteStatus = 0;
     private boolean friendly;
+    private String displayName = "";
     private boolean synthetic;
     private JammingData jammingData;
 
@@ -95,6 +96,7 @@ public class RadarTrack implements RadarContact {
         copy.silhouetteRevision = silhouetteRevision;
         copy.silhouetteStatus = silhouetteStatus;
         copy.friendly = friendly;
+        copy.displayName = displayName;
         copy.synthetic = synthetic;
         copy.jammingData = jammingData;
         copy.vector = vector;
@@ -113,6 +115,7 @@ public class RadarTrack implements RadarContact {
         silhouetteRevision = source.silhouetteRevision;
         silhouetteStatus = source.silhouetteStatus;
         friendly = source.friendly;
+        displayName = source.displayName;
         synthetic = source.synthetic;
         jammingData = source.jammingData;
         vector = source.vector;
@@ -183,6 +186,7 @@ public class RadarTrack implements RadarContact {
         RadarTrack track = new RadarTrack(tag.getString("id"), position, velocity, tag.getLong("scannedTime"), category, tag.getString("entityType"), tag.getFloat("eh"));
 
         track.friendly = tag.getBoolean("Friendly");
+        track.displayName = tag.getString("DisplayName");
         track.synthetic = tag.getBoolean("Synthetic");
 
         if (tag.contains("Jamming", Tag.TAG_COMPOUND)) {
@@ -251,6 +255,10 @@ public class RadarTrack implements RadarContact {
 
         tag.putString("entityType", entityType);
         tag.putFloat("eh", entityheight);
+
+        if (!displayName.isBlank()) {
+            tag.putString("DisplayName", displayName);
+        }
 
         if (!compactMotion || friendly) {
             tag.putBoolean("Friendly", friendly);
@@ -356,6 +364,14 @@ public class RadarTrack implements RadarContact {
 
     public void setFriendly(boolean friendly) {
         this.friendly = friendly;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName == null ? "" : displayName;
     }
 
     public boolean isSynthetic() {
