@@ -1,8 +1,6 @@
 package com.happysg.radar.block.controller.kinetic;
 
 import com.happysg.radar.compat.cbc.CannonMountContext;
-import com.happysg.radar.block.controller.kinetic.ControllerMotionProfile;
-import com.happysg.radar.debug.MotionTraceRecorder;
 import com.simibubi.create.content.kinetics.RotationPropagator;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
@@ -46,9 +44,6 @@ public final class CbcShaftDrive {
     private long pendingFineReverseTick = Long.MIN_VALUE;
     private boolean hadDrive;
     private List<ConfirmedDriveNode> confirmedDrivePath = List.of();
-    private Level traceLevel;
-    private BlockPos traceControllerPos;
-    private BlockPos traceMountPos;
 
     public CbcShaftDrive(CannonAxis axis) {
         this.axis = axis;
@@ -78,20 +73,6 @@ public final class CbcShaftDrive {
     }
 
     public void reset(DoubleConsumer command) {
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_shaft.reset",
-                    traceLevel,
-                    traceControllerPos,
-                    "mount", traceMountPos,
-                    "axis", axis,
-                    "previousRpm", lastCommandedRpm,
-                    "previousRatio", speedRatio,
-                    "reverseHoldTicks", reverseHoldTicks,
-                    "hadDrive", hadDrive
-            );
-        }
-
         command.accept(0.0);
         clear();
     }
@@ -106,46 +87,7 @@ public final class CbcShaftDrive {
             ControllerAngleDelta yawPath,
             DoubleConsumer command
     ) {
-
-        traceLevel = controller.getLevel();
-        traceControllerPos = controller.getBlockPos();
-        traceMountPos = mount == null ? null : mount.getBlockPos();
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_shaft.tick",
-                    traceLevel,
-                    traceControllerPos,
-                    "mount", traceMountPos,
-                    "axis", axis,
-                    "running", running,
-                    "requestedAngle", requestedAngle,
-                    "inputRpm", inputRpm,
-                    "outputSide", outputSide,
-                    "yawPath", yawPath,
-                    "lastCommandedRpm", lastCommandedRpm,
-                    "speedRatio", speedRatio,
-                    "reverseHoldTicks", reverseHoldTicks,
-                    "probeTicks", probeTicks,
-                    "hadDrive", hadDrive,
-                    "endpointPresent", endpoint != null
-            );
-        }
-
         if (controller.getLevel() == null || !(mount.blockEntity() instanceof CannonMountBlockEntity cbc) || !mount.isCurrent()) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_shaft.rejected",
-                        traceLevel,
-                        traceControllerPos,
-                        "mount", traceMountPos,
-                        "axis", axis,
-                        "reason", "INVALID_MOUNT_OR_LEVEL",
-                        "levelPresent", controller.getLevel() != null,
-                        "mountCurrent", mount.isCurrent()
-                );
-            }
-
             reset(command);
             return;
         }
@@ -167,25 +109,6 @@ public final class CbcShaftDrive {
                 || contraption.isStalled()
                 || !(contraption.getContraption()
                 instanceof AbstractMountedCannonContraption cannon)) {
-
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_shaft.inactive",
-                        traceLevel,
-                        traceControllerPos,
-                        "mount", traceMountPos,
-                        "axis", axis,
-                        "running", running,
-                        "requestedAngle", requestedAngle,
-                        "inputRpm", inputRpm,
-                        "cannonAssembled", mount.hasAssembledCannon(),
-                        "contraptionPresent", contraption != null,
-                        "contraptionStalled",
-                        contraption != null && contraption.isStalled(),
-                        "lastCommandedRpm", lastCommandedRpm
-                );
-            }
-
             motionProfile.reset();
             filteredActualRate = 0.0;
             filteredDesiredRate = 0.0;
@@ -250,43 +173,8 @@ public final class CbcShaftDrive {
         double actualRate = clamp(filteredActualRate, -5.0, 5.0);
         double desiredRate = clamp(filteredDesiredRate, -5.0, 5.0);
 
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_shaft.feedback",
-                    level,
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "axis", axis,
-                    "actualAngle", actual,
-                    "desiredAngle", desired,
-                    "angleError", error,
-                    "consecutiveSample", consecutive,
-                    "measuredActualRate", measuredActualRate,
-                    "measuredDesiredRate", measuredDesiredRate,
-                    "filteredActualRate", filteredActualRate,
-                    "filteredDesiredRate", filteredDesiredRate,
-                    "actualRate", actualRate,
-                    "desiredRate", desiredRate,
-                    "lastSampleTick", lastSampleTick,
-                    "inputRpm", inputRpm
-            );
-        }
-
         if (Math.abs(error) < 0.06 && Math.abs(desiredRate) < 0.03 && Math.abs(actualRate) < 0.06) {
             clearFineReversal();
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_shaft.settled",
-                        level,
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "axis", axis,
-                        "error", error,
-                        "actualRate", actualRate,
-                        "desiredRate", desiredRate,
-                        "previousRpm", lastCommandedRpm
-                );
-            }
 
             motionProfile.recordAppliedStep(0.0);
             reverseHoldTicks = 0;
@@ -305,136 +193,10 @@ public final class CbcShaftDrive {
         boolean retainedStoppedDrive = !physicallyDriven && hasConfirmedStoppedDrivePath(selected, controller, outputSide);
         boolean driven = physicallyDriven || retainedStoppedDrive;
 
-        if (!physicallyDriven
-                && !retainedStoppedDrive
-                && confirmedDrivePath.size() >= 2
-                && Math.abs(lastCommandedRpm) <= EPSILON
-                && MotionTraceRecorder.isEnabled()) {
-
-            boolean nodesPresent = true;
-            boolean statesMatch = true;
-            boolean connectionsIntact = true;
-            boolean nodesStopped = true;
-            boolean foreignNodeSource = false;
-
-            for (int i = 0; i < confirmedDrivePath.size(); i++) {
-                ConfirmedDriveNode recorded = confirmedDrivePath.get(i);
-                KineticBlockEntity node = recorded.entity();
-
-                boolean present = isCurrentDriveNode(level, node);
-                nodesPresent &= present;
-
-                if (!present) {
-                    continue;
-                }
-
-                statesMatch &= recorded.state().getBlock() == node.getBlockState().getBlock();
-                nodesStopped &= Math.abs(node.getSpeed()) <= EPSILON && Math.abs(node.getTheoreticalSpeed()) <= EPSILON && !node.isOverStressed();
-
-                if (node != controller) {
-                    foreignNodeSource |= node.isSource();
-                }
-
-                if (i + 1 < confirmedDrivePath.size()) {
-                    KineticBlockEntity upstream = confirmedDrivePath.get(i + 1).entity();
-                    connectionsIntact &= RotationPropagator.isConnected(upstream, node);
-                    foreignNodeSource |= node.hasSource() && (node.source == null || !node.source.equals(upstream.getBlockPos()));
-                }
-            }
-
-            MotionTraceRecorder.record("cbc_shaft.retention_diagnostic", level, controller.getBlockPos(), "mount", mount.getBlockPos(), "axis", axis, "nodesPresent", nodesPresent, "statesMatch", statesMatch, "connectionsIntact", connectionsIntact, "nodesStopped", nodesStopped, "foreignNodeSource", foreignNodeSource, "foreignOutputSource", hasForeignOutputSource(controller, outputSide), "controllerHasSource", controller.hasSource(), "controllerTheoreticalSpeed", controller.getTheoreticalSpeed(), "endpointIsSource", selected != null && selected.isSource(), "firstNodeMatches", confirmedDrivePath.getFirst().entity() == selected, "lastNodeMatches", confirmedDrivePath.getLast().entity() == controller, "lastCommandedRpm", lastCommandedRpm, "speedRatio", speedRatio);
-        }
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_shaft.connection",
-                    level,
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "axis", axis,
-                    "driven", driven,
-                    "physicallyDriven", physicallyDriven,
-                    "retainedStoppedDrive", retainedStoppedDrive,
-                    "confirmedPathLength", confirmedDrivePath.size(),
-                    "endpointPresent", selected != null,
-                    "endpointPosition",
-                    selected == null ? null : selected.getBlockPos(),
-                    "controllerSpeed", controller.getSpeed(),
-                    "endpointSpeed",
-                    selected == null ? null : selected.getSpeed(),
-                    "controllerOverstressed", controller.isOverStressed(),
-                    "endpointOverstressed",
-                    selected != null && selected.isOverStressed(),
-                    "speedRatio", speedRatio,
-                    "maximumRpm", maximumRpm,
-                    "hadDrive", hadDrive
-            );
-        }
-
         if (!driven) {
             clearFineReversal();
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_shaft.drive_loss_detail",
-                        level,
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "axis", axis,
-                        "commandedRpm", lastCommandedRpm,
-                        "generatedRpm", controller.getGeneratedSpeed(),
-                        "controllerSpeed", controller.getSpeed(),
-                        "controllerTheoreticalSpeed",
-                        controller.getTheoreticalSpeed(),
-                        "endpointSpeed",
-                        selected == null ? null : selected.getSpeed(),
-                        "endpointTheoreticalSpeed",
-                        selected == null ? null : selected.getTheoreticalSpeed(),
-                        "controllerHasSource", controller.hasSource(),
-                        "endpointHasSource",
-                        selected != null && selected.hasSource(),
-                        "controllerHasNetwork", controller.hasNetwork(),
-                        "endpointHasNetwork",
-                        selected != null && selected.hasNetwork(),
-                        "directConnectionIntact",
-                        selected != null && RotationPropagator.isConnected(controller, selected),
-                        "controllerRegistered",
-                        level.getBlockEntity(controller.getBlockPos()) == controller,
-                        "endpointOwnedByMount",
-                        selected != null
-                                && level.getBlockEntity(selected.getBlockPos()) instanceof CannonMountBlockEntity parent
-                                && (parent.getYawInterface() == selected || parent.getPitchInterface() == selected),
-                        "cachedPathLength", confirmedDrivePath.size(),
-                        "hadDrive", hadDrive,
-                        "reverseHoldTicks", reverseHoldTicks,
-                        "probeTicks", probeTicks,
-                        "speedRatio", speedRatio,
-                        "controllerOverstressed", controller.isOverStressed(),
-                        "endpointOverstressed",
-                        selected != null && selected.isOverStressed(),
-                        "foreignOutputSource",
-                        hasForeignOutputSource(controller, outputSide),
-                        "endpointRemoved",
-                        selected != null && selected.isRemoved(),
-                        "endpointLevelMatches",
-                        selected != null && selected.getLevel() == level,
-                        "endpointCurrent",
-                        isCurrentDriveNode(level, selected),
-                        "controllerCurrent",
-                        isCurrentDriveNode(level, controller),
-                        "lastCommandedRpm", lastCommandedRpm
-                );
-            }
-
             confirmedDrivePath = List.of();
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record("cbc_shaft.drive_missing", level, controller.getBlockPos(), "mount", mount.getBlockPos(), "axis", axis, "error", error, "endpointPresent", selected != null, "endpointHasSource", selected != null && selected.hasSource(), "endpointIsSource", selected != null && selected.isSource(), "probeTicks", probeTicks, "nextProbeTick", nextProbeTick, "previouslyDriven", hadDrive);
-            }
-
             if (reverseHoldTicks > 0) {
-                if (MotionTraceRecorder.isEnabled()) {
-                    MotionTraceRecorder.record("cbc_shaft.reversal_hold", level, controller.getBlockPos(), "mount", mount.getBlockPos(), "axis", axis, "remainingHoldTicks", reverseHoldTicks, "error", error, "reason", "TEMPORARY_DRIVE_LOSS");
-                }
-
                 reverseHoldTicks--;
                 motionProfile.recordAppliedStep(0.0);
                 send(command, 0.0);
@@ -495,22 +257,6 @@ public final class CbcShaftDrive {
         if (Math.abs(motorRpm) > EPSILON && Math.abs(endRpm) > EPSILON) {
             double observedRatio = endRpm / motorRpm;
 
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_shaft.gearing",
-                        level,
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "axis", axis,
-                        "motorRpm", motorRpm,
-                        "endpointRpm", endRpm,
-                        "observedRatio", observedRatio,
-                        "previousRatio", speedRatio,
-                        "ratioAccepted",
-                        Double.isFinite(observedRatio) && Math.abs(observedRatio) >= 0.015625 && Math.abs(observedRatio) <= 64.0
-                );
-            }
-
             if (Double.isFinite(observedRatio) && Math.abs(observedRatio) >= 0.015625 && Math.abs(observedRatio) <= 64.0) {
                 speedRatio = observedRatio;
             }
@@ -556,36 +302,6 @@ public final class CbcShaftDrive {
             }
         }
 
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_shaft.smoothing",
-                    level,
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "axis", axis,
-                    "actualAngle", actual,
-                    "desiredAngle", desired,
-                    "error", error,
-                    "actualRate", actualRate,
-                    "targetRate", desiredRate,
-                    "closingVelocity", closingVelocity,
-                    "profileRpm", profileRpm,
-                    "maximumPhysicalStep", maximumPhysicalStep,
-                    "unbrakedStep", unbrakedStep,
-                    "finalPlannedStep", plannedStep,
-                    "brakingLimited",
-                    Math.abs(plannedStep) < Math.abs(unbrakedStep),
-                    "physicalDegreesPerMotorRpm", physicalDegreesPerMotorRpm,
-                    "speedRatio", speedRatio,
-                    "maximumRpm", maximumRpm,
-                    "reverseHoldTicks", reverseHoldTicks,
-                    "profileVelocity",
-                    motionProfile.traceVelocityDegPerTick(),
-                    "profileTargetRate",
-                    motionProfile.traceTargetRateDegPerTick()
-            );
-        }
-
         double rpm = clamp(plannedStep / physicalDegreesPerMotorRpm, -maximumRpm, maximumRpm);
         if (Math.abs(rpm) < 0.5) {
             rpm = 0.0;
@@ -595,20 +311,6 @@ public final class CbcShaftDrive {
 
         if (pendingFineReverseSign != 0) {
             boolean confirmed = pendingFineReverseTick == tick - 1 && Math.abs(rpm) > EPSILON && (int) Math.signum(rpm) == pendingFineReverseSign;
-
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        confirmed ? "cbc_shaft.fine_reverse_confirmed" : "cbc_shaft.fine_reverse_cancelled",
-                        level,
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "axis", axis,
-                        "requestedRpm", rpm,
-                        "angleError", error,
-                        "desiredRate", desiredRate
-                );
-            }
-
             clearFineReversal();
 
             if (confirmed) {
@@ -625,24 +327,6 @@ public final class CbcShaftDrive {
             boolean movingTarget = Math.abs(desiredRate) >= 0.10;
             boolean physicallySlowed = Math.abs(actualRate) <= ControllerMotionProfile.REVERSAL_RELEASE_SPEED_DEG_PER_TICK;
 
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_shaft.reversal",
-                        level,
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "axis", axis,
-                        "completedHoldTicks", completedHoldTicks,
-                        "remainingHoldTicks", reverseHoldTicks,
-                        "movingTarget", movingTarget,
-                        "physicallySlowed", physicallySlowed,
-                        "actualRate", actualRate,
-                        "desiredRate", desiredRate,
-                        "requestedRpm", rpm,
-                        "previousRpm", lastCommandedRpm
-                );
-            }
-
             if (movingTarget && completedHoldTicks >= 1 && physicallySlowed) {
                 reverseHoldTicks = 0;
             } else {
@@ -657,41 +341,9 @@ public final class CbcShaftDrive {
             if (Math.abs(error) <= 0.5 && Math.abs(desiredRate) < 0.15) {
                 pendingFineReverseSign = (int) Math.signum(rpm);
                 pendingFineReverseTick = tick;
-
-                if (MotionTraceRecorder.isEnabled()) {
-                    MotionTraceRecorder.record(
-                            "cbc_shaft.fine_reverse_deferred",
-                            level,
-                            controller.getBlockPos(),
-                            "mount", mount.getBlockPos(),
-                            "axis", axis,
-                            "previousRpm", lastCommandedRpm,
-                            "requestedRpm", rpm,
-                            "angleError", error,
-                            "actualRate", actualRate,
-                            "desiredRate", desiredRate
-                    );
-                }
-
                 motionProfile.recordAppliedStep(0.0);
                 send(command, 0.0);
                 return;
-            }
-
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_shaft.reversal_start",
-                        level,
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "axis", axis,
-                        "previousRpm", lastCommandedRpm,
-                        "requestedRpm", rpm,
-                        "actualRate", actualRate,
-                        "desiredRate", desiredRate,
-                        "angleError", error,
-                        "holdTicks", ControllerMotionProfile.REVERSAL_HOLD_TICKS
-                );
             }
 
             reverseHoldTicks = Math.max(0, ControllerMotionProfile.REVERSAL_HOLD_TICKS - 1);
@@ -704,27 +356,6 @@ public final class CbcShaftDrive {
         double rpmBeforeRampLimit = rpm;
         rpm = clamp(rpm, lastCommandedRpm - maxChange, lastCommandedRpm + maxChange);
         rpm = Math.rint(rpm * 2.0) / 2.0;
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_shaft.final_command",
-                    level,
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "axis", axis,
-                    "actualAngle", actual,
-                    "desiredAngle", desired,
-                    "angleError", error,
-                    "plannedStep", plannedStep,
-                    "rpmBeforeRampLimit", rpmBeforeRampLimit,
-                    "maxRpmChange", maxChange,
-                    "previousRpm", lastCommandedRpm,
-                    "commandedRpm", rpm,
-                    "maximumRpm", maximumRpm,
-                    "speedRatio", speedRatio
-            );
-        }
-
         send(command, rpm);
     }
 
@@ -735,21 +366,6 @@ public final class CbcShaftDrive {
     private void send(DoubleConsumer command, double rpm) {
         lastCommandedRpm = Double.isFinite(rpm) ? rpm : 0.0;
         command.accept(lastCommandedRpm);
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_shaft.output",
-                    traceLevel,
-                    traceControllerPos,
-                    "mount", traceMountPos,
-                    "axis", axis,
-                    "commandedRpm", lastCommandedRpm,
-                    "speedRatio", speedRatio,
-                    "reverseHoldTicks", reverseHoldTicks,
-                    "probeTicks", probeTicks,
-                    "hadDrive", hadDrive
-            );
-        }
     }
 
 

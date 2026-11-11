@@ -55,7 +55,6 @@ public final class ConflictTraceSessionManager {
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
-        MotionTraceRecorder.stop();
         disable(event.getServer());
         EarlyDiagnosticJournal.gracefulShutdown("server");
     }

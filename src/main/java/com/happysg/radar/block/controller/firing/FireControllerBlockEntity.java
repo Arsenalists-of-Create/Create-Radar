@@ -5,7 +5,6 @@ import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.WeaponContactUnlinkState;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
-import com.happysg.radar.debug.MotionTraceRecorder;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
@@ -216,19 +215,6 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
 
         boolean fieldChanged = this.powered != powered;
         this.powered = powered;
-
-        if (fieldChanged && MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "firing.controller_output_edge",
-                    this.level,
-                    this.worldPosition,
-                    "powered", powered,
-                    "pulseTrain", pulsing,
-                    "lastCommandTick", lastCommandTick,
-                    "nextPulseTick", nextPulseTick,
-                    "pulseOffTick", pulseOffTick
-            );
-        }
 
         if (state.getValue(FireControllerBlock.POWERED) == powered) {
             if (fieldChanged) {

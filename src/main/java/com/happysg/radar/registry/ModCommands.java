@@ -199,21 +199,6 @@ public class  ModCommands {
         );
         dispatcher.register(
                 Commands.literal("radar")
-                        .then(Commands.literal("debug")
-                                .requires(src -> src.hasPermission(2))
-                                .then(Commands.literal("motion_trace")
-                                        .executes(ctx -> motionTraceStatus(ctx.getSource()))
-                                        .then(Commands.literal("on")
-                                                .executes(ctx -> setMotionTrace(ctx.getSource(), true)))
-                                        .then(Commands.literal("off")
-                                                .executes(ctx -> setMotionTrace(ctx.getSource(), false)))
-                                        .then(Commands.literal("status")
-                                                .executes(ctx -> motionTraceStatus(ctx.getSource())))
-                                )
-                        )
-        );
-        dispatcher.register(
-                Commands.literal("radar")
                         .then(Commands.literal("controller_angle")
                                 .then(Commands.argument("min", FloatArgumentType.floatArg(-180,360))
                                         .then(Commands.argument("max", FloatArgumentType.floatArg(-180,360))
@@ -233,34 +218,6 @@ public class  ModCommands {
 
     }
 
-    private static int setMotionTrace(CommandSourceStack source, boolean enable) {
-        if (enable) {
-            if (!MotionTraceRecorder.start()) {
-                source.sendFailure(Component.literal("Motion trace failed to start: " + MotionTraceRecorder.lastError()));
-                return 0;
-            }
-        } else {
-            MotionTraceRecorder.stop();
-        }
-
-        return motionTraceStatus(source);
-    }
-
-    private static int motionTraceStatus(CommandSourceStack source) {
-        boolean enabled = MotionTraceRecorder.isEnabled();
-
-        String file = MotionTraceRecorder.path() == null ? "none" : MotionTraceRecorder.path().toAbsolutePath().toString();
-        String message = "Motion trace: " + (enabled ? "ON" : "OFF") + " | entries=" + MotionTraceRecorder.entries() + " | file=" + file;
-
-        if (MotionTraceRecorder.lastError() != null) {
-            message += " | error=" + MotionTraceRecorder.lastError();
-        }
-
-        String result = message;
-        source.sendSuccess(() -> Component.literal(result), false);
-
-        return 1;
-    }
 
     private static int toggleInspector(CommandSourceStack source,
                                        @Nullable Boolean requestedState) {

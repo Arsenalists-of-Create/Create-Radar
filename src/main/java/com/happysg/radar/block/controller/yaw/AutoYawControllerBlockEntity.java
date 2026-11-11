@@ -19,7 +19,6 @@ import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.api.mount.RadarMountAdapter;
 import com.happysg.radar.api.mount.RadarMountRegistry;
 import com.happysg.radar.api.controller.RadarYawController;
-import com.happysg.radar.debug.MotionTraceRecorder;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
@@ -954,22 +953,6 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     private void commandGeneratedSpeed(double rpm) {
         sequenceContext = null;
-        if (MotionTraceRecorder.isEnabled() && level != null && !level.isClientSide()) {
-            StackTraceElement[] stack = Thread.currentThread().getStackTrace();
-            MotionTraceRecorder.record(
-                    "cbc_generator.command",
-                    level,
-                    worldPosition,
-                    "axis", "YAW",
-                    "requestedRpm", rpm,
-                    "previousGeneratedRpm", generatedSpeed,
-                    "actualRpm", getSpeed(),
-                    "theoreticalRpm", getTheoreticalSpeed(),
-                    "hasSource", hasSource(),
-                    "caller", stack.length > 2 ? stack[2].getMethodName() : "unknown"
-            );
-        }
-
         if (hasSource()) {
             generatedSpeed = 0.0f;
             detachKinetics();
@@ -988,21 +971,6 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
         }
         generatedSpeed = next;
         updateGeneratedRotation();
-
-        if (MotionTraceRecorder.isEnabled() && level != null && !level.isClientSide()) {
-            MotionTraceRecorder.record(
-                    "cbc_generator.after_update",
-                    level,
-                    worldPosition,
-                    "axis", "YAW",
-                    "requestedRpm", rpm,
-                    "generatedRpm", generatedSpeed,
-                    "actualRpm", getSpeed(),
-                    "theoreticalRpm", getTheoreticalSpeed(),
-                    "hasSource", hasSource()
-            );
-        }
-
         setChanged();
     }
 

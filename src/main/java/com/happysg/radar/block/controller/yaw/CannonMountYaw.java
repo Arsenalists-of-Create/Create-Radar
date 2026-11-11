@@ -5,7 +5,6 @@ import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.block.controller.kinetic.ControllerMotionProfile;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.config.RadarConfig;
-import com.happysg.radar.debug.MotionTraceRecorder;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 import rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity;
@@ -37,19 +36,6 @@ public class CannonMountYaw {
                 return;
             }
 
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.yaw_target",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "source", "SABLE",
-                        "targetPosition", targetPos,
-                        "calculatedYaw", angles.get(0).get(1),
-                        "previousTargetYaw", controller.getTargetAngle()
-                );
-            }
-
             controller.setInternalTargetAngle(angles.get(0).get(1));
             controller.setRunning(true);
             controller.notifyUpdate();
@@ -63,20 +49,6 @@ public class CannonMountYaw {
 
         double angle = controller.computeYawToTargetDeg(cannonCenter, targetPos);
         double newAngle = AutoYawControllerBlockEntity.wrap360(angle) + 180.0;
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_direct.yaw_target",
-                    controller.getLevel(),
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "source", "WORLD",
-                    "targetPosition", targetPos,
-                    "cannonCenter", cannonCenter,
-                    "calculatedYaw", newAngle,
-                    "previousTargetYaw", controller.getTargetAngle()
-            );
-        }
 
         controller.setInternalTargetAngle(newAngle);
         controller.setRunning(true);
@@ -114,24 +86,6 @@ public class CannonMountYaw {
 
         double yawError = AutoYawControllerBlockEntity.shortestDelta(current, desired);
         boolean aligned = Math.abs(yawError) < effectiveTolerance;
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_direct.yaw_alignment",
-                    controller.getLevel(),
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "currentYaw", current,
-                    "desiredYaw", desired,
-                    "yawError", yawError,
-                    "effectiveTolerance", effectiveTolerance,
-                    "minimumTolerance", minimumToleranceDegrees,
-                    "maximumTolerance", maximumToleranceDegrees,
-                    "lag", lag,
-                    "alignedForFiring", aligned
-            );
-        }
-
         return aligned;
     }
 
@@ -146,44 +100,17 @@ public class CannonMountYaw {
 
     private void rotateCBC(CannonMountContext mount) {
         if (!controller.isRunningController()) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.yaw_inactive",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "reason", "CONTROLLER_NOT_RUNNING"
-                );
-            }
             motionState.reset();
             return;
         }
 
         if (!mount.supportsDirectYawControl()) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.yaw_inactive",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "reason", "DIRECT_YAW_NOT_SUPPORTED"
-                );
-            }
             motionState.reset();
             return;
         }
 
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.yaw_inactive",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "reason", "CONTRAPTION_MISSING"
-                );
-            }
             motionState.reset();
             return;
         }
@@ -195,67 +122,17 @@ public class CannonMountYaw {
         double rpm = Math.abs(controller.getAvailableInputSpeed());
 
         if (rpm <= 0.0) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.yaw_inactive",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "reason", "NO_INPUT_RPM",
-                        "currentYaw", currentYaw,
-                        "desiredYaw", desiredYaw,
-                        "yawError", yawDiff,
-                        "rpm", rpm
-                );
-            }
-
             motionState.reset();
             return;
         }
 
         double move = controller.getLevel() != null ? motionState.nextTrackingStep(yawDiff, rpm, desiredYaw, controller.getLevel().getGameTime(), true) : motionState.nextStep(yawDiff, rpm);
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_direct.yaw_smoothing",
-                    controller.getLevel(),
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "currentYaw", currentYaw,
-                    "desiredYaw", desiredYaw,
-                    "yawError", yawDiff,
-                    "inputRpm", rpm,
-                    "plannedMove", move,
-                    "nextYaw",
-                    AutoYawControllerBlockEntity.wrap360(currentYaw + move),
-                    "profileVelocity", motionState.traceVelocityDegPerTick(),
-                    "profileTargetRate", motionState.traceTargetRateDegPerTick(),
-                    "profileTargetTick", motionState.traceTargetTick()
-            );
-        }
-
         if (Math.abs(move) <= 1.0E-9) {
             return;
         }
 
         double nextYaw = AutoYawControllerBlockEntity.wrap360(currentYaw + move);
         boolean accepted = mount.trySetYaw((float) nextYaw);
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_direct.yaw_write",
-                    controller.getLevel(),
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "previousYaw", currentYaw,
-                    "requestedYaw", nextYaw,
-                    "accepted", accepted,
-                    "observedYawAfterWrite",
-                    AutoYawControllerBlockEntity.wrap360(contraption.yaw),
-                    "plannedMove", move,
-                    "inputRpm", rpm
-            );
-        }
 
         if (!accepted) {
             motionState.reset();

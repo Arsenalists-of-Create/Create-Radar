@@ -2,7 +2,6 @@ package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.TrackCategory;
-import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonMountContext;
 import com.happysg.radar.compat.cbc.CannonTargeting;
 import com.happysg.radar.compat.cbc.CannonUtil;
@@ -10,8 +9,6 @@ import com.happysg.radar.block.controller.kinetic.ControllerMotionProfile;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.config.RadarConfig;
-import com.happysg.radar.config.server.RadarServerConfig;
-import com.happysg.radar.debug.MotionTraceRecorder;
 import com.mojang.logging.LogUtils;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -81,26 +78,6 @@ public class CannonMountPitch {
         double desiredPitch = controller.getTargetAngle();
         double pitchError = desiredPitch - currentPitch;
         boolean aligned = Math.abs(pitchError) < tol;
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_direct.pitch_alignment",
-                    controller.getLevel(),
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "rawContraptionPitch", contraption.pitch,
-                    "currentPitch", currentPitch,
-                    "desiredPitch", desiredPitch,
-                    "pitchError", pitchError,
-                    "effectiveTolerance", tol,
-                    "minimumTolerance", minimumToleranceDegrees,
-                    "maximumTolerance", maximumToleranceDegrees,
-                    "orientationInversion", invert,
-                    "lag", lag,
-                    "alignedForFiring", aligned
-            );
-        }
-
         return aligned;
     }
 
@@ -196,64 +173,23 @@ public class CannonMountPitch {
 
     private void rotateCBC(CannonMountContext mount) {
         if (mount.isFixed()) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.pitch_inactive",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "reason", "FIXED_MOUNT"
-                );
-            }
             return;
         }
 
         ControllerMotionProfile.State motionState = motionStates.computeIfAbsent(mount.blockEntity(), ignored -> new ControllerMotionProfile.State());
 
         if (!controller.isRunningController()) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.pitch_inactive",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "reason", "CONTROLLER_NOT_RUNNING",
-                        "targetPitch", controller.getTargetAngle(),
-                        "availableRpm", controller.getAvailableInputSpeed()
-                );
-            }
-
             motionState.reset();
             return;
         }
 
         PitchOrientedContraptionEntity contraption = mount.getContraption();
         if (contraption == null) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.pitch_inactive",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "reason", "CONTRAPTION_MISSING"
-                );
-            }
-
             motionState.reset();
             return;
         }
 
         if (!(contraption.getContraption() instanceof AbstractMountedCannonContraption cannonContraption)) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.pitch_inactive",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "reason", "INVALID_CANNON_CONTRAPTION"
-                );
-            }
-
             motionState.reset();
             return;
         }
@@ -264,66 +200,16 @@ public class CannonMountPitch {
 
         double diff = controller.getTargetAngle() - currentPitch;
 
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_direct.pitch_feedback",
-                    controller.getLevel(),
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "rawContraptionPitch", contraption.pitch,
-                    "controllerSpacePitch", currentPitch,
-                    "desiredPitch", controller.getTargetAngle(),
-                    "pitchError", diff,
-                    "initialOrientation", cannonContraption.initialOrientation(),
-                    "orientationInversion", invert,
-                    "inputRpm", controller.getAvailableInputSpeed(),
-                    "running", controller.isRunningController()
-            );
-        }
-
         //LOGGER.debug("PITCH.rotateCBC current={} target={} diff={} speed={}", currentPitch, controller.getTargetAngle(), diff, controller.getAvailableInputSpeed());
 
         double rpm = Math.abs(controller.getAvailableInputSpeed());
 
         if (rpm <= 0.0) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.pitch_inactive",
-                        controller.getLevel(),
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "reason", "NO_INPUT_RPM",
-                        "currentPitch", currentPitch,
-                        "desiredPitch", controller.getTargetAngle(),
-                        "pitchError", diff,
-                        "inputRpm", rpm
-                );
-            }
-
             motionState.reset();
             return;
         }
 
         double move = controller.getLevel() != null ? motionState.nextTrackingStep(diff, rpm, controller.getTargetAngle(), controller.getLevel().getGameTime(), false) : motionState.nextStep(diff, rpm);
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_direct.pitch_smoothing",
-                    controller.getLevel(),
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "currentPitch", currentPitch,
-                    "desiredPitch", controller.getTargetAngle(),
-                    "pitchError", diff,
-                    "inputRpm", rpm,
-                    "plannedMove", move,
-                    "nextPitch", currentPitch + move,
-                    "orientationInversion", invert,
-                    "profileVelocity", motionState.traceVelocityDegPerTick(),
-                    "profileTargetRate", motionState.traceTargetRateDegPerTick(),
-                    "profileTargetTick", motionState.traceTargetTick()
-            );
-        }
-
         //LOGGER.debug("RADAR_PITCH_MOVE diff={} rpm={} move={}", diff, rpm, move);
 
         if (Math.abs(move) <= 1.0E-9) {
@@ -333,23 +219,6 @@ public class CannonMountPitch {
         double nextCtl = currentPitch + move;
         double rawPitchBeforeWrite = contraption.pitch;
         mount.setPitch((float) nextCtl);
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_direct.pitch_write",
-                    controller.getLevel(),
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "previousControllerPitch", currentPitch,
-                    "requestedControllerPitch", nextCtl,
-                    "plannedMove", move,
-                    "rawPitchBeforeWrite", rawPitchBeforeWrite,
-                    "rawPitchAfterWrite", contraption.pitch,
-                    "orientationInversion", invert,
-                    "inputRpm", rpm
-            );
-        }
-
         mount.notifyUpdate();
     }
 
@@ -361,32 +230,7 @@ public class CannonMountPitch {
         if (PhysicsHandler.isBlockInPlotyard(controller.getLevel(), controller.getBlockPos())) {
             List<List<Double>> angles = VS2CannonTargeting.calculatePitchAndYawVS2(mount, targetPos, serverLevel);
             if (angles == null || angles.isEmpty() || angles.get(0).isEmpty()) {
-                if (MotionTraceRecorder.isEnabled()) {
-                    MotionTraceRecorder.record(
-                            "cbc_direct.pitch_solver_failed",
-                            serverLevel,
-                            controller.getBlockPos(),
-                            "mount", mount.getBlockPos(),
-                            "source", "SABLE",
-                            "targetPosition", targetPos,
-                            "reason", "NO_VALID_SABLE_PITCH_SOLUTION"
-                    );
-                }
                 return;
-            }
-
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.pitch_target",
-                        serverLevel,
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "source", "SABLE",
-                        "targetPosition", targetPos,
-                        "calculatedPitch", angles.get(0).get(0),
-                        "previousPitch", controller.getTargetAngle(),
-                        "solutionCount", angles.size()
-                );
             }
 
             controller.setInternalTargetAngle(angles.get(0).get(0));
@@ -403,20 +247,6 @@ public class CannonMountPitch {
         controller.setLastTargetPos(targetPos);
 
         if (angles == null || angles.isEmpty()) {
-            if (MotionTraceRecorder.isEnabled()) {
-                MotionTraceRecorder.record(
-                        "cbc_direct.pitch_solver_failed",
-                        serverLevel,
-                        controller.getBlockPos(),
-                        "mount", mount.getBlockPos(),
-                        "source", "WORLD",
-                        "origin", origin,
-                        "targetPosition", targetPos,
-                        "reason", "NO_VALID_PITCH_ROOTS",
-                        "artilleryMode", controller.isArtillery()
-                );
-            }
-
             controller.setRunning(false);
             return;
         }
@@ -425,24 +255,6 @@ public class CannonMountPitch {
             controller.setInternalTargetAngle(angles.get(1));
         } else if (!angles.isEmpty()) {
             controller.setInternalTargetAngle(angles.get(0));
-        }
-
-        if (MotionTraceRecorder.isEnabled()) {
-            MotionTraceRecorder.record(
-                    "cbc_direct.pitch_target",
-                    serverLevel,
-                    controller.getBlockPos(),
-                    "mount", mount.getBlockPos(),
-                    "source", "WORLD",
-                    "origin", origin,
-                    "targetPosition", targetPos,
-                    "pitchRoots", angles,
-                    "solutionCount", angles.size(),
-                    "artilleryMode", controller.isArtillery(),
-                    "selectedRootIndex",
-                    controller.isArtillery() && angles.size() == 2 ? 1 : 0,
-                    "selectedPitch", controller.getTargetAngle()
-            );
         }
 
         //LOGGER.debug("PITCH.solve targetAngle={}", controller.getTargetAngle());
