@@ -492,6 +492,17 @@ public final class KineticControllerState {
             }
         }
 
+        boolean physicalCatchupStalled = continuousTracking && physicalVelocitySampleValid && leadLimited && Math.abs(remainingDegrees) >= 10.0 && Math.abs(physicalAngularVelocityDegPerTick) < 0.1 && Math.abs(physicalSetpointLead) >= MAX_PHYSICAL_SETPOINT_LEAD_DEGREES - 0.5;
+        if (physicalCatchupStalled) {
+            if (MotionTraceRecorder.isEnabled()) {
+                MotionTraceRecorder.record("swivel.physical_catchup_stalled", motionTraceLevel, controllerPos, "axis", axis, "remainingDegrees", remainingDegrees, "bearingTarget", bearingTarget, "physicalAngle", physicalAngle, "physicalRate", physicalAngularVelocityDegPerTick, "setpointLead", physicalSetpointLead, "plannedStep", plannedStep);
+            }
+
+            if (!adapter.wakePhysicalAssembly()) {
+                failClosed(commandGenerator, true, "physical_assembly_could_not_wake");
+                return true;
+            }
+        }
 
         double rawRpm = clamp(plannedStep / maximumStep * maximumRpm, -maximumRpm, maximumRpm) * driveSign;
 

@@ -1456,7 +1456,7 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     @Override
     public float calculateAddedStressCapacity() {
-        return 256.0f;
+        return 2048.0f;
     }
 
     public void setInternalTargetAngle(double targetAngle) {

@@ -1854,7 +1854,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
     @Override
     public float calculateAddedStressCapacity() {
-        return 256.0f;
+        return 2048.0f;
     }
 
     public static Entity getEntityByUUID(ServerLevel level, UUID uuid) {
