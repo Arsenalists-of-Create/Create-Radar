@@ -827,6 +827,10 @@ public final class WeaponNetworkRuntime {
         }
 
         for (BlockPos endpoint : invalidEndpoints) {
+            if (!level.hasChunkAt(endpoint)) {
+                continue;
+            }
+
             BlockEntity blockEntity = level.getBlockEntity(endpoint);
             if (blockEntity instanceof AutoPitchControllerBlockEntity pitch) {
                 pitch.onWeaponTopologyChanged();
@@ -835,6 +839,10 @@ public final class WeaponNetworkRuntime {
             }
         }
         for (BlockPos firing : invalidFiring) {
+            if (!level.hasChunkAt(firing)) {
+                continue;
+            }
+
             if (level.getBlockEntity(firing) instanceof FireControllerBlockEntity fire) {
                 fire.setPowered(false);
             }
@@ -851,7 +859,7 @@ public final class WeaponNetworkRuntime {
         Set<BlockPos> filterers = new HashSet<>();
         NetworkData networkData = NetworkData.get(level);
         for (BlockPos endpoint : endpoints) {
-            BlockEntity blockEntity = level.getBlockEntity(endpoint);
+            BlockEntity blockEntity = level.hasChunkAt(endpoint) ? level.getBlockEntity(endpoint) : null;
             if (blockEntity instanceof AutoPitchControllerBlockEntity pitch) {
                 pitch.markMountDirtyExternal();
                 pitch.onWeaponTopologyChanged();
@@ -870,6 +878,10 @@ public final class WeaponNetworkRuntime {
         }
 
         for (BlockPos filtererPos : filterers) {
+            if (!level.hasChunkAt(filtererPos)) {
+                continue;
+            }
+
             if (level.getBlockEntity(filtererPos) instanceof NetworkFiltererBlockEntity filterer) {
                 filterer.onWeaponTopologyChanged();
             }

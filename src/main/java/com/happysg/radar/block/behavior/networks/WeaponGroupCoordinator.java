@@ -66,7 +66,7 @@ public final class WeaponGroupCoordinator {
             }
 
             if (g.pitchPos() == null) {
-                if (g.yawPos() != null && sl.getBlockEntity(g.yawPos()) instanceof AutoYawControllerBlockEntity yaw) {
+                if (g.yawPos() != null && sl.hasChunkAt(g.yawPos()) && sl.getBlockEntity(g.yawPos()) instanceof AutoYawControllerBlockEntity yaw) {
                     WeaponFiringControl control = yaw.getYawOnlyAimControl();
                     if (control != null) {
                         try {
@@ -86,6 +86,9 @@ public final class WeaponGroupCoordinator {
                 continue;
             }
             if (!processedPitchEndpoints.add(g.pitchPos())) continue;
+            if (!sl.hasChunkAt(g.pitchPos())) {
+                continue;
+            }
 
             BlockEntity be = sl.getBlockEntity(g.pitchPos());
             if (!(be instanceof AutoPitchControllerBlockEntity pitch)) continue;

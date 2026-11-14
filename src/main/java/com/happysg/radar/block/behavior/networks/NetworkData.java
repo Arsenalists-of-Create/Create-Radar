@@ -898,13 +898,26 @@ public class NetworkData extends SavedData {
             return false;
         }
 
+        if (!level.hasChunkAt(group.key.filtererPos())) {
+            return false;
+        }
+
+        for (BlockPos endpoint : allEndpoints(group)) {
+            if (!level.hasChunkAt(endpoint)) {
+                return false;
+            }
+        }
+
+        Set<BlockPos> reachable = findReachableContactEndpoints(level, group);
+        if (reachable == null) {
+            return false;
+        }
+
         boolean changed = repairOrphanedPitchFilterLinks(level, group);
         if (!groupsByFilterer.containsKey(key(group.key.dim(), group.key.filtererPos()))) {
             if (changed) setDirty();
             return changed;
         }
-
-        Set<BlockPos> reachable = findReachableContactEndpoints(level, group);
 
         for (BlockPos endpoint : snapshotContactEndpoints(group)) {
             if (!reachable.contains(endpoint)) {
@@ -1052,6 +1065,7 @@ public class NetworkData extends SavedData {
         return changed;
     }
 
+    @Nullable
     private Set<BlockPos> findReachableContactEndpoints(ServerLevel level, Group group) {
         Set<BlockPos> reachable = new HashSet<>();
         Set<BlockPos> visited = new HashSet<>();
@@ -1087,8 +1101,11 @@ public class NetworkData extends SavedData {
                 }
 
                 BlockPos next = current.relative(dir);
+                if (!level.hasChunkAt(next)) {
+                    return null;
+                }
 
-                if (fromMonitor && level.hasChunkAt(next) && level.getBlockEntity(next) instanceof MonitorBlockEntity neighbor && !current.equals(neighbor.getControllerPos())) {
+                if (fromMonitor && level.getBlockEntity(next) instanceof MonitorBlockEntity neighbor && !current.equals(neighbor.getControllerPos())) {
                     continue;
                 }
 

@@ -1073,6 +1073,7 @@ public class WeaponFiringControl {
 
             this.fireController = this.topologyValid
                     && this.view.firingPos() != null
+                    && serverLevel.hasChunkAt(this.view.firingPos())
                     && serverLevel.getBlockEntity(this.view.firingPos()) instanceof FireControllerBlockEntity fire ? fire : null;
 
             if (previousFire != null && previousFire != this.fireController) {
@@ -1106,7 +1107,9 @@ public class WeaponFiringControl {
             return;
         }
 
-        if (this.level.getBlockEntity(this.controlView.pitchPos())
+        if (this.controlView.pitchPos() != null
+                && serverLevel.hasChunkAt(this.controlView.pitchPos())
+                && serverLevel.getBlockEntity(this.controlView.pitchPos())
                 instanceof AutoPitchControllerBlockEntity autopitch) {
             this.pitchController = autopitch;
         } else {
@@ -1120,8 +1123,8 @@ public class WeaponFiringControl {
             return;
         }
 
-        this.yawController = channel.yawPos() != null && this.level.getBlockEntity(channel.yawPos()) instanceof AutoYawControllerBlockEntity yaw ? yaw : null;
-        this.fireController = channel.firingPos() != null && this.level.getBlockEntity(channel.firingPos()) instanceof FireControllerBlockEntity fire ? fire : null;
+        this.yawController = channel.yawPos() != null && serverLevel.hasChunkAt(channel.yawPos()) && serverLevel.getBlockEntity(channel.yawPos()) instanceof AutoYawControllerBlockEntity yaw ? yaw : null;
+        this.fireController = channel.firingPos() != null && serverLevel.hasChunkAt(channel.firingPos()) && serverLevel.getBlockEntity(channel.firingPos()) instanceof FireControllerBlockEntity fire ? fire : null;
         this.topologyValid = this.controlView.validTopology();
 
         Set<FireControllerBlockEntity> activeFires = currentFireControllers();
@@ -1161,7 +1164,7 @@ public class WeaponFiringControl {
 
         if (this.level instanceof ServerLevel serverLevel && mountPos != null) {
             for (BlockPos firePos : WeaponNetworkRuntime.get(serverLevel).getFiringControllersForMount(mountPos)) {
-                if (serverLevel.getBlockEntity(firePos) instanceof FireControllerBlockEntity fire) {
+                if (serverLevel.hasChunkAt(firePos) && serverLevel.getBlockEntity(firePos) instanceof FireControllerBlockEntity fire) {
                     controllers.add(fire);
                 }
             }
@@ -1776,10 +1779,18 @@ public class WeaponFiringControl {
                                         Vec3 cannonOrigin = this.getCannonRayStart();
                                         double best = (double)0.0F;
 
-                                        for(BlockPos dlPos : grp.dataLinks()) {
+                                        for (BlockPos dlPos : grp.dataLinks()) {
+                                            if (!serverLevel.hasChunkAt(dlPos)) {
+                                                continue;
+                                            }
+
                                             BlockEntity be = serverLevel.getBlockEntity(dlPos);
                                             if (be instanceof DataLinkBlockEntity dl) {
                                                 BlockPos srcPos = dl.getSourcePosition();
+                                                if (srcPos == null || !serverLevel.hasChunkAt(srcPos)) {
+                                                    continue;
+                                                }
+
                                                 BlockEntity srcBe = serverLevel.getBlockEntity(srcPos);
                                                 if (srcBe instanceof IRadar radar) {
                                                     Vec3 radarWorldPos = PhysicsHandler.getWorldVec(srcBe);
@@ -6003,7 +6014,7 @@ public class WeaponFiringControl {
         List<BlockPos> firePositions = runtime.getFiringControllersForMount(mountPos);
 
         for (BlockPos firePos : firePositions) {
-            if (!(serverLevel.getBlockEntity(firePos) instanceof FireControllerBlockEntity fire)) {
+            if (!serverLevel.hasChunkAt(firePos) || !(serverLevel.getBlockEntity(firePos) instanceof FireControllerBlockEntity fire)) {
                 continue;
             }
 
