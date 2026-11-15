@@ -224,7 +224,7 @@ public final class SableDataLinkRelocation {
         moves = validMoves;
         disconnectStationaryLinksForMovedEndpoints(level, moves);
 
-        PENDING_MOUNT_MOVES.remove(level);
+        List<PendingMountMove> mountMoves = PENDING_MOUNT_MOVES.remove(level);
 
         // Controller links establish the canonical mount relocation before a
         // radar-style link migrates its saved endpoint and DataLink position.
@@ -246,6 +246,22 @@ public final class SableDataLinkRelocation {
         }
         for (PendingMove move : otherMoves) {
             processMoveGroup(level, List.of(move), false);
+        }
+
+        if (mountMoves != null) {
+            Set<BlockPos> relocatedMounts = new HashSet<>();
+
+            for (PendingMove move : moves) {
+                if (isWeaponControllerMove(move)) {
+                    relocatedMounts.add(move.oldTarget());
+                }
+            }
+
+            for (PendingMountMove mountMove : mountMoves) {
+                if (!relocatedMounts.contains(mountMove.oldMount())) {
+                    processMountOnly(level, mountMove);
+                }
+            }
         }
 
         relocateConfirmedRadars(level, moves);

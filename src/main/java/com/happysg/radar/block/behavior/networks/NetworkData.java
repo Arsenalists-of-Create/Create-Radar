@@ -908,21 +908,21 @@ public class NetworkData extends SavedData {
             }
         }
 
-        Set<BlockPos> reachable = findReachableContactEndpoints(level, group);
-        if (reachable == null) {
-            return false;
-        }
+        boolean[] incomplete = {false};
+        Set<BlockPos> reachable = findReachableContactEndpoints(level, group, incomplete);
 
-        boolean changed = repairOrphanedPitchFilterLinks(level, group);
+        boolean changed = !incomplete[0] && repairOrphanedPitchFilterLinks(level, group);
         if (!groupsByFilterer.containsKey(key(group.key.dim(), group.key.filtererPos()))) {
             if (changed) setDirty();
             return changed;
         }
 
-        for (BlockPos endpoint : snapshotContactEndpoints(group)) {
-            if (!reachable.contains(endpoint)) {
-                removeEndpointFromGroup(level, group, endpoint, true, RadarNetworkLifecycleEvent.Action.RECONCILED);
-                changed = true;
+        if (!incomplete[0]) {
+            for (BlockPos endpoint : snapshotContactEndpoints(group)) {
+                if (!reachable.contains(endpoint)) {
+                    removeEndpointFromGroup(level, group, endpoint, true, RadarNetworkLifecycleEvent.Action.RECONCILED);
+                    changed = true;
+                }
             }
         }
 
@@ -940,12 +940,14 @@ public class NetworkData extends SavedData {
             }
         }
 
-        if (reconcileLiveWeaponMountReferences(level, group)) {
-            changed = true;
-        }
+        if (!incomplete[0]) {
+            if (reconcileLiveWeaponMountReferences(level, group)) {
+                changed = true;
+            }
 
-        if (pruneUnreferencedWeaponMounts(group)) {
-            changed = true;
+            if (pruneUnreferencedWeaponMounts(group)) {
+                changed = true;
+            }
         }
 
         if (changed) {
@@ -1066,7 +1068,7 @@ public class NetworkData extends SavedData {
     }
 
     @Nullable
-    private Set<BlockPos> findReachableContactEndpoints(ServerLevel level, Group group) {
+    private Set<BlockPos> findReachableContactEndpoints(ServerLevel level, Group group, boolean[] incomplete) {
         Set<BlockPos> reachable = new HashSet<>();
         Set<BlockPos> visited = new HashSet<>();
         ArrayDeque<BlockPos> queue = new ArrayDeque<>();
@@ -1102,7 +1104,8 @@ public class NetworkData extends SavedData {
 
                 BlockPos next = current.relative(dir);
                 if (!level.hasChunkAt(next)) {
-                    return null;
+                    incomplete[0] = true;
+                    continue;
                 }
 
                 if (fromMonitor && level.getBlockEntity(next) instanceof MonitorBlockEntity neighbor && !current.equals(neighbor.getControllerPos())) {
@@ -1991,15 +1994,17 @@ public class NetworkData extends SavedData {
             group.dataLinks.remove(dataLinkPos);
         }
 
-        if (endpointKey != null && group != null && level != null && level.hasChunkAt(posFromKey(endpointKey)) && !hasOtherRadarLinkForEndpoint(level, group, posFromKey(endpointKey), dataLinkPos)) {
-            BlockPos endpointPos = posFromKey(endpointKey);
+        BlockPos endpointPos = endpointKey == null ? null : posFromKey(endpointKey);
+        boolean endpointLoaded = level != null && endpointPos != null && level.hasChunkAt(endpointPos);
+        boolean savedExplicitEndpoint = endpointKey != null && endpointOrigins.get(endpointKey) == LinkOrigin.DATALINK && group != null && (group.monitorEndpoints.contains(endpointPos) || group.radarEndpoints.contains(endpointPos) || group.weaponEndpoints.contains(endpointPos));
 
-            BlockEntity lifecycleBe = level.hasChunkAt(endpointPos) ? level.getBlockEntity(endpointPos) : null;
+        if (endpointPos != null && group != null && level != null && (endpointLoaded || savedExplicitEndpoint) && !hasOtherRadarLinkForEndpoint(level, group, endpointPos, dataLinkPos)) {
+            BlockEntity lifecycleBe = endpointLoaded ? level.getBlockEntity(endpointPos) : null;
             RadarDataLinkLifecycle lifecycle = lifecycleBe instanceof RadarDataLinkLifecycle callback ? callback : null;
             boolean lifecycleWasAttached = group.monitorEndpoints.contains(endpointPos) || group.radarEndpoints.contains(endpointPos) || group.weaponEndpoints.contains(endpointPos);
 
             BlockPos normalizedEndpoint = endpointPos;
-            BlockEntity endpointBe = level.getBlockEntity(endpointPos);
+            BlockEntity endpointBe = endpointLoaded ? level.getBlockEntity(endpointPos) : null;
             if (endpointBe instanceof MonitorBlockEntity endpointMonitor) {
                 normalizedEndpoint = endpointMonitor.getControllerPos();
             }
@@ -2009,7 +2014,7 @@ public class NetworkData extends SavedData {
             if (isMonitorEndpoint) {
                 BlockPos controllerPos = group.monitorEndpoints.contains(normalizedEndpoint) ? normalizedEndpoint : endpointPos;
 
-                BlockEntity controllerBe = level.getBlockEntity(controllerPos);
+                BlockEntity controllerBe = level.hasChunkAt(controllerPos) ? level.getBlockEntity(controllerPos) : null;
                 if (!(controllerBe instanceof MonitorBlockEntity) && endpointBe instanceof MonitorBlockEntity) {
                     controllerBe = endpointBe;
                 }
@@ -2030,7 +2035,9 @@ public class NetworkData extends SavedData {
                 reindexRadarEndpoint(dim, endpointPos);
                 postRadarLifecycleEvent(level, group, endpointPos, null, RadarNetworkLifecycleEvent.Action.DETACHED);
             } else if (group.weaponEndpoints.remove(endpointPos)) {
-                notifyNodeDisconnected(level, endpointPos);
+                if (endpointLoaded) {
+                    notifyNodeDisconnected(level, endpointPos);
+                }
                 endpointToFilterer.remove(endpointKey);
                 endpointOrigins.remove(endpointKey);
 
