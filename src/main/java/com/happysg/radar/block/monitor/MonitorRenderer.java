@@ -1073,7 +1073,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         Color color = new Color(RadarConfig.client().groundRadarColor.get());
 
         float screenAngle = MonitorSweepFrame.screenAngle(radar, projection, partialTicks);
-        float angleRad = (float) Math.toRadians(screenAngle);
+        float angleRad = (float) Math.toRadians(-screenAngle);
         float cos = (float) Math.cos(angleRad);
         float sin = (float) Math.sin(angleRad);
 

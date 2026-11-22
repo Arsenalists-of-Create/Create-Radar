@@ -640,7 +640,7 @@ public class MonitorScreen extends Screen {
         gg.pose().pushPose();
         gg.pose().translate(cx, cy, 0);
         // negative because GUI rotation direction is inverted relative to typical math
-        gg.pose().mulPose(Axis.ZP.rotationDegrees(-screenAngle));
+        gg.pose().mulPose(Axis.ZP.rotationDegrees(screenAngle));
         gg.pose().translate(-cx, -cy, 0);
 
         gg.blit(MonitorSprite.RADAR_SWEEP.getTexture(), sx, sy, 0, 0, drawSize, drawSize, drawSize, drawSize);
