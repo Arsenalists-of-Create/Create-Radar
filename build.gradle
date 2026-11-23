@@ -187,6 +187,10 @@ dependencies {
     //replace implementation instead of compileOnly after trackworks is compatible with 6.0
     compileOnly fg.deobf("curse.maven:trackwork-1057662:7760330")
 
+    //CBC Military Supplement
+    compileOnly fg.deobf("curse.maven:cbcms-1222164:8893370")
+    runtimeOnly fg.deobf("curse.maven:cbcms-1222164:8893370")
+
     //CC
     // Forge Gradle
     compileOnly("cc.tweaked:cc-tweaked-$minecraft_version-core-api:$cc_tweaked_version")
