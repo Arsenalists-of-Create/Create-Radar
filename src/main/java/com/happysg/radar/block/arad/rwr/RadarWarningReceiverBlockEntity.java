@@ -13,6 +13,7 @@ import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableIdRecordAccess;
 import com.happysg.radar.compat.sable.SableRwrReceiverAccess;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.networking.NetworkHandler;
@@ -362,7 +363,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         }
 
         Vec3 displayReceiverPos = receivers.get(0).position();
-        Set<String> receiverSecrets = receiverSecrets(receivers);
+        Set<String> receiverSecrets = receiverSecrets(level, receivers);
 
         Set<UUID> receiverShipIds = new HashSet<>();
         for (ReceiverTarget receiver : receivers) {
@@ -614,10 +615,10 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         return false;
     }
 
-    private static Set<String> receiverSecrets(List<ReceiverTarget> receivers) {
+    private static Set<String> receiverSecrets(ServerLevel level, List<ReceiverTarget> receivers) {
         Set<String> secrets = new HashSet<>();
         for (ReceiverTarget receiver : receivers) {
-            String secret = normalizeSecret(getReceiverSecret(receiver.shipId()));
+            String secret = normalizeSecret(getReceiverSecret(level, receiver.shipId()));
             if (!secret.isBlank()) {
                 secrets.add(secret);
             }
@@ -658,8 +659,8 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
         return !radarSecret.isBlank() && receiverSecrets.contains(radarSecret);
     }
 
-    private static String getReceiverSecret(UUID receiverShipId) {
-        IDManager.IDRecord record = IDManager.getIDRecordByShipId(receiverShipId);
+    private static String getReceiverSecret(ServerLevel level, UUID receiverShipId) {
+        IDManager.IDRecord record = SableIdRecordAccess.resolveEffectiveIdentification(level, receiverShipId);
         return record == null ? "" : record.secretID();
     }
 
