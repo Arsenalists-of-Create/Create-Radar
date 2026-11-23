@@ -185,7 +185,7 @@ dependencies {
 
     //trackworks
     //replace implementation instead of compileOnly after trackworks is compatible with 6.0
-    compileOnly fg.deobf("maven.modrinth:trackwork:${minecraft_version}-${trackwork_version}")
+    compileOnly fg.deobf("curse.maven:trackwork-1057662:7760330")
 
     //CC
     // Forge Gradle
