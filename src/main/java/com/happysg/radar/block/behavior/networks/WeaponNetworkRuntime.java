@@ -1,5 +1,6 @@
 package com.happysg.radar.block.behavior.networks;
 
+import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -42,15 +43,30 @@ public final class WeaponNetworkRuntime {
         }
     }
 
-    private static final Map<DimPos, LinkRef> linksByDataLink = new HashMap<>();
-    private static final Map<DimPos, DimPos> controllerToMount = new HashMap<>();
-    private static final Map<DimPos, Set<BlockPos>> mountToDataLinks = new HashMap<>();
+    private static final Map<ServerLevel, WeaponNetworkRuntime> BY_LEVEL = new WeakHashMap<>();
+
+    private final Map<DimPos, LinkRef> linksByDataLink = new HashMap<>();
+    private final Map<DimPos, DimPos> controllerToMount = new HashMap<>();
+    private final Map<DimPos, Set<BlockPos>> mountToDataLinks = new HashMap<>();
+
+    public static WeaponNetworkRuntime get(ServerLevel level) {
+        return BY_LEVEL.computeIfAbsent(level, ignored -> new WeaponNetworkRuntime());
+    }
+
+    @Nullable
+    public static WeaponNetworkRuntime peek(ServerLevel level) {
+        return BY_LEVEL.get(level);
+    }
+
+    public static void clear(ServerLevel level) {
+        BY_LEVEL.remove(level);
+    }
 
     public static void register(ServerLevel level, DataLinkBlockEntity link) {
         DataLinkBlockEntity.WeaponEndpointType type = link.getWeaponEndpointType();
         BlockPos dataLinkPos = link.getBlockPos();
 
-        if (type == DataLinkBlockEntity.WeaponEndpointType.NONE) {
+        if (type == DataLinkBlockEntity.WeaponEndpointType.NONE || !DataLinkBlock.isWeaponLink(link.getBlockState(), type)) {
             unregister(level, dataLinkPos);
             return;
         }
@@ -60,21 +76,21 @@ public final class WeaponNetworkRuntime {
         ResourceKey<Level> dim = level.dimension();
         DimPos dataLinkKey = new DimPos(dim, dataLinkPos);
 
-        LinkRef old = linksByDataLink.get(dataLinkKey);
+        LinkRef old = get(level).linksByDataLink.get(dataLinkKey);
         LinkRef next = new LinkRef(dim, dataLinkPos, endpointPos, mountPos, type);
         if (next.equals(old)) {
             return;
         }
 
         unregister(level, dataLinkPos);
-        linksByDataLink.put(dataLinkKey, next);
-        controllerToMount.put(new DimPos(dim, endpointPos), new DimPos(dim, mountPos));
-        mountToDataLinks.computeIfAbsent(new DimPos(dim, mountPos), $ -> new HashSet<>()).add(dataLinkPos);
+        get(level).linksByDataLink.put(dataLinkKey, next);
+        get(level).controllerToMount.put(new DimPos(dim, endpointPos), new DimPos(dim, mountPos));
+        get(level).mountToDataLinks.computeIfAbsent(new DimPos(dim, mountPos), $ -> new HashSet<>()).add(dataLinkPos);
     }
 
     public static void unregister(ServerLevel level, BlockPos dataLinkPos) {
         ResourceKey<Level> dim = level.dimension();
-        LinkRef old = linksByDataLink.remove(new DimPos(dim, dataLinkPos));
+        LinkRef old = 	get(level).linksByDataLink.remove(new DimPos(dim, dataLinkPos));
         if (old == null) {
             return;
         }
@@ -82,16 +98,16 @@ public final class WeaponNetworkRuntime {
         DimPos endpointKey = new DimPos(old.dim(), old.endpointPos());
         DimPos mountKey = new DimPos(old.dim(), old.mountPos());
 
-        DimPos indexedMount = controllerToMount.get(endpointKey);
+        DimPos indexedMount = get(level).controllerToMount.get(endpointKey);
         if (mountKey.equals(indexedMount)) {
-            controllerToMount.remove(endpointKey);
+            get(level).controllerToMount.remove(endpointKey);
         }
 
-        Set<BlockPos> links = mountToDataLinks.get(mountKey);
+        Set<BlockPos> links = get(level).mountToDataLinks.get(mountKey);
         if (links != null) {
             links.remove(old.dataLinkPos());
             if (links.isEmpty()) {
-                mountToDataLinks.remove(mountKey);
+                get(level).mountToDataLinks.remove(mountKey);
             }
         }
     }
@@ -122,20 +138,20 @@ public final class WeaponNetworkRuntime {
 
     @Nullable
     public static BlockPos getMountForController(ServerLevel level, BlockPos controllerPos) {
-        DimPos mount = controllerToMount.get(new DimPos(level.dimension(), controllerPos));
+        DimPos mount = get(level).controllerToMount.get(new DimPos(level.dimension(), controllerPos));
         return mount == null ? null : mount.pos();
     }
 
     @Nullable
     public static WeaponGroupView getWeaponGroupViewFromEndpoint(ServerLevel level, BlockPos endpointPos) {
-        DimPos mount = controllerToMount.get(new DimPos(level.dimension(), endpointPos));
+        DimPos mount = get(level).controllerToMount.get(new DimPos(level.dimension(), endpointPos));
         return mount == null ? null : getWeaponGroupViewFromMount(level, mount.pos());
     }
 
     @Nullable
     public static WeaponGroupView getWeaponGroupViewFromMount(ServerLevel level, BlockPos mountPos) {
         ResourceKey<Level> dim = level.dimension();
-        Set<BlockPos> dataLinks = mountToDataLinks.get(new DimPos(dim, mountPos));
+        Set<BlockPos> dataLinks = get(level).mountToDataLinks.get(new DimPos(dim, mountPos));
         if (dataLinks == null || dataLinks.isEmpty()) {
             return null;
         }
@@ -146,7 +162,7 @@ public final class WeaponNetworkRuntime {
         Set<BlockPos> liveLinks = new HashSet<>();
 
         for (BlockPos linkPos : dataLinks) {
-            LinkRef ref = linksByDataLink.get(new DimPos(dim, linkPos));
+            LinkRef ref = get(level).linksByDataLink.get(new DimPos(dim, linkPos));
             if (ref == null) {
                 continue;
             }
@@ -170,7 +186,7 @@ public final class WeaponNetworkRuntime {
     public static Collection<WeaponGroupView> getGroups(ServerLevel level) {
         ResourceKey<Level> dim = level.dimension();
         Set<BlockPos> mounts = new HashSet<>();
-        for (DimPos mountKey : mountToDataLinks.keySet()) {
+        for (DimPos mountKey : get(level).mountToDataLinks.keySet()) {
             if (mountKey.dim().equals(dim)) {
                 mounts.add(mountKey.pos());
             }

@@ -19,10 +19,13 @@ public enum Mods {
     COMPUTERCRAFT,
     TRACKWORK,
     CBCMODERNWARFARE,
+    CBCMORESHELLS,
     CBC_AT,
     CREATEBIGCANNONS,
     CREATEENERGYCANNONS,
     SHUPAPIUM,
+    SIMULATED,
+    VMOD,
     KABOOM;
     private final String id;
 

@@ -1,5 +1,6 @@
 package com.happysg.radar;
 
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.datalink.DataLinkBlockItem;
 import com.happysg.radar.block.monitor.MonitorInputHandler;
@@ -30,6 +31,7 @@ import net.createmod.catnip.lang.FontHelper;
 import net.createmod.ponder.foundation.PonderIndex;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.LevelAccessor;
 
@@ -99,6 +101,7 @@ public class CreateRadar {
 
         MinecraftForge.EVENT_BUS.addListener(CreateRadar::clientTick);
         MinecraftForge.EVENT_BUS.addListener(CreateRadar::onLoadWorld);
+        MinecraftForge.EVENT_BUS.addListener(CreateRadar::onUnloadWorld);
         ModSounds.register(modEventBus);
 
         // Compat modules
@@ -158,6 +161,13 @@ public class CreateRadar {
             IDManager.load(world.getServer());
         }
     }
+
+    public static void onUnloadWorld(LevelEvent.Unload event) {
+        if (event.getLevel() instanceof ServerLevel level) {
+            WeaponNetworkRuntime.clear(level);
+        }
+    }
+
     public static void init(final FMLCommonSetupEvent event) {
 
         event.enqueueWork(() -> {

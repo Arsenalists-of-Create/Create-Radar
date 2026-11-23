@@ -157,7 +157,8 @@ dependencies {
 
     //CBCAT
     //replace implementation instead of compileOnly after CBCAT is compatible with 6.0
-    compileOnly( fg.deobf("maven.modrinth:create-big-cannons-advanced-technologies:${cbc_at_version}-${minecraft_version}"))
+    //compileOnly fg.deobf("maven.modrinth:create-big-cannons-advanced-technologies:${cbc_at_version}-${minecraft_version}")
+    compileOnly fg.deobf(files("lib/cbc_at-com.dsvv.jar"))
 
     //CBCWPF
     compileOnly fg.deobf("maven.modrinth:cbc-warium-projectiles:${cbc_wpf_version}")

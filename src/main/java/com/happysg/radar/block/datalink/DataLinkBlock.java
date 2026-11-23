@@ -39,12 +39,22 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
         private final String name;
         LinkStyle(String name) { this.name = name; }
         @Override public String getSerializedName() { return name; }
-        }
+    }
 
 
-        public static final EnumProperty<LinkStyle> LINK_STYLE =
-                EnumProperty.create("link_style", LinkStyle.class);
+    public static final EnumProperty<LinkStyle> LINK_STYLE = EnumProperty.create("link_style", LinkStyle.class);
 
+    public static boolean isWeaponLink(LinkStyle style, DataLinkBlockEntity.WeaponEndpointType type) {
+        return type != DataLinkBlockEntity.WeaponEndpointType.NONE
+                && (style == LinkStyle.CONTROLLER || (style == LinkStyle.RADAR
+                && (type == DataLinkBlockEntity.WeaponEndpointType.PITCH || type == DataLinkBlockEntity.WeaponEndpointType.YAW)));
+    }
+
+    public static boolean isWeaponLink(BlockState state, DataLinkBlockEntity.WeaponEndpointType type) {
+        return state.getBlock() instanceof DataLinkBlock
+                && state.hasProperty(LINK_STYLE)
+                && isWeaponLink(state.getValue(LINK_STYLE), type);
+    }
 
     public DataLinkBlock(Properties props) {
         super(props);
@@ -94,21 +104,26 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
 
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        if (!level.isClientSide && level instanceof ServerLevel serverLevel) {
+        if (state.is(newState.getBlock())) {
+            super.onRemove(state, level, pos, newState, isMoving);
+            return;
+        }
+
+        if (level instanceof ServerLevel serverLevel) {
             WeaponNetworkRuntime.unregister(serverLevel, pos);
-            if(Mods.VALKYRIENSKIES.isLoaded() && VSAssemblySuppression.isSuppressed(serverLevel)) return;
-            ResourceKey<Level> dim = serverLevel.dimension();
-            Direction supportFace = state.getValue(FACING);
 
-            NetworkData.get(serverLevel).removeDataLinkAndCleanup(dim, pos, serverLevel);
+            if (!isMoving && !(Mods.VALKYRIENSKIES.isLoaded() && VSAssemblySuppression.isSuppressed(serverLevel))) {
+                ResourceKey<Level> dim = serverLevel.dimension();
+                Direction supportFace = state.getValue(FACING);
 
-            if (state.getValue(LINK_STYLE) == LinkStyle.RADAR) {
-                NetworkData.get(serverLevel).onEndpointRemoved(serverLevel, pos.relative(supportFace.getOpposite()));
+                NetworkData.get(serverLevel).removeDataLinkAndCleanup(dim, pos, serverLevel);
+
+                if (state.getValue(LINK_STYLE) == LinkStyle.RADAR) {
+                    NetworkData.get(serverLevel).onEndpointRemoved(serverLevel, pos.relative(supportFace.getOpposite()));
+                }
             }
         }
 
         super.onRemove(state, level, pos, newState, isMoving);
     }
-
-
 }
