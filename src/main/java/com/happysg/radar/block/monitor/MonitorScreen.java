@@ -936,7 +936,7 @@ public class MonitorScreen extends Screen {
 
         for (RadarTrack track : tracks) {
 
-            MonitorProjection.DisplayPoint point = projection.project(track.position());
+            MonitorProjection.DisplayPoint point = projection.project(SableMonitorRendererAccess.displayContactPosition(track));
             if (point.outside())
                 continue;
 
@@ -1210,6 +1210,11 @@ public class MonitorScreen extends Screen {
         float bestDist2 = pickRadius * pickRadius;
 
         List<MonitorContactSnapshot> contacts = new ArrayList<>(monitor.getMonitorContacts());
+        java.util.Map<String, Vec3> visualPositions = new java.util.HashMap<>();
+
+        for (RadarTrack track : monitor.getTracks()) {
+            visualPositions.put(track.id(), SableMonitorRendererAccess.displayContactPosition(track));
+        }
 
         if (monitor.getLevel() instanceof ClientLevel clientLevel) {
             contacts.addAll(MonitorContactContributorRegistry.collect(clientLevel, monitor.getBlockPos()));
@@ -1222,7 +1227,9 @@ public class MonitorScreen extends Screen {
                 continue;
             }
 
-            MonitorProjection.DisplayPoint point = projection.project(contact.position());
+            Vec3 position = "create_radar".equals(contact.sourceType()) ? visualPositions.getOrDefault(contact.id(), contact.position()) : contact.position();
+
+            MonitorProjection.DisplayPoint point = projection.project(position);
 
             if (point.outside()) {
                 continue;

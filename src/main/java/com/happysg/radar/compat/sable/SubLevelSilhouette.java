@@ -92,7 +92,66 @@ public final class SubLevelSilhouette {
         }
 
         final List<LineSegment> boundary = extractBoundary(grid, occupied, requestedSettings.maxOutputSegments());
-        return new ProjectedSilhouette(grid.cellSize, grid.originX, grid.originZ, grid.width, grid.height, boundary);
+        final Vec2 anchor = findSelectionAnchor(projectedBoxes);
+        return new ProjectedSilhouette(grid.cellSize, grid.originX, grid.originZ, grid.width, grid.height, boundary, anchor);
+    }
+
+    private static Vec2 findSelectionAnchor(List<Polygon> polygons) {
+        double weightedX = 0.0;
+        double weightedZ = 0.0;
+        double totalArea = 0.0;
+
+        for (Polygon polygon : polygons) {
+            double area = Math.sqrt(polygon.areaSquared());
+            double x = 0.0;
+            double z = 0.0;
+
+            for (Vec2 point : polygon.points) {
+                x += point.x();
+                z += point.z();
+            }
+
+            x /= polygon.points.size();
+            z /= polygon.points.size();
+
+            weightedX += x * area;
+            weightedZ += z * area;
+            totalArea += area;
+        }
+
+        if (totalArea <= 0.0) {
+            return null;
+        }
+
+        double centerX = weightedX / totalArea;
+        double centerZ = weightedZ / totalArea;
+
+        Vec2 best = null;
+        double bestDistance = Double.POSITIVE_INFINITY;
+
+        for (Polygon polygon : polygons) {
+            double x = 0.0;
+            double z = 0.0;
+
+            for (Vec2 point : polygon.points) {
+                x += point.x();
+                z += point.z();
+            }
+
+            x /= polygon.points.size();
+            z /= polygon.points.size();
+
+            double dx = x - centerX;
+            double dz = z - centerZ;
+            double distance = dx * dx + dz * dz;
+
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = new Vec2(x, z);
+            }
+        }
+
+        return best;
     }
 
     private static Polygon projectBox(final LocalBox box, final PointProjector projector, final MutableVec3 transformed) {
@@ -453,10 +512,13 @@ public final class SubLevelSilhouette {
      * World-space result. The monitor can draw every segment directly after converting world X/Z
      * into its own local screen coordinates.
      */
-    public record ProjectedSilhouette(double cellSize, double originX, double originZ, int gridWidth, int gridHeight,
-                                      List<LineSegment> boundarySegments) {
+    public record ProjectedSilhouette(double cellSize, double originX, double originZ, int gridWidth, int gridHeight, List<LineSegment> boundarySegments, Vec2 selectionAnchor) {
         public ProjectedSilhouette {
             boundarySegments = List.copyOf(boundarySegments);
+        }
+
+        public ProjectedSilhouette(double cellSize, double originX, double originZ, int gridWidth, int gridHeight, List<LineSegment> boundarySegments) {
+            this(cellSize, originX, originZ, gridWidth, gridHeight, boundarySegments, null);
         }
 
         private static ProjectedSilhouette empty(final double cellSize) {

@@ -8,19 +8,15 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 public final class SableAssemblyRegistry extends SavedData {
     private static final String DATA_NAME = "create_radar_sable_assemblies";
 
     private final Map<UUID, UUID> ownerByMember = new HashMap<>();
+    private long connectionGraphTick = Long.MIN_VALUE;
+    private final Map<UUID, Set<UUID>> connectionGraph = new HashMap<>();
+    private final Map<UUID, Set<UUID>> connectionComponents = new HashMap<>();
 
     private static final Comparator<UUID> UUID_ORDER = Comparator.comparing(UUID::toString);
 
@@ -45,18 +41,11 @@ public final class SableAssemblyRegistry extends SavedData {
             return groupOf(memberId);
         }
 
-        Set<UUID> connected = new HashSet<>();
-        connected.add(memberId);
-
-        for (SubLevel sublevel : SubLevelHelper.getConnectedChain(source)) {
-            if (sublevel != null && !sublevel.isRemoved()) {
-                connected.add(sublevel.getUniqueId());
-            }
-        }
+        Set<UUID> connected = connectedIds(level, memberId);
 
         UUID owner = connected.stream()
                 .map(ownerByMember::get)
-                .filter(connected::contains)
+                .filter(previous -> previous != null && connected.contains(previous))
                 .min(UUID_ORDER)
                 .orElseGet(() -> connected.stream().min(UUID_ORDER).orElse(memberId));
 
@@ -95,6 +84,86 @@ public final class SableAssemblyRegistry extends SavedData {
         return owner;
     }
 
+    public Set<UUID> connectedIds(ServerLevel level, UUID memberId) {
+        long now = level.getGameTime();
+
+        if (connectionGraphTick != now) {
+            connectionGraphTick = now;
+            connectionGraph.clear();
+            connectionComponents.clear();
+
+            SubLevelContainer container = SubLevelContainer.getContainer(level);
+
+            if (container != null) {
+                for (SubLevel sublevel : container.getAllSubLevels()) {
+                    if (sublevel != null && !sublevel.isRemoved()) {
+                        connectionGraph.put(sublevel.getUniqueId(), new HashSet<>());
+                    }
+                }
+
+                for (SubLevel sublevel : container.getAllSubLevels()) {
+                    if (sublevel == null || sublevel.isRemoved()) {
+                        continue;
+                    }
+
+                    UUID id = sublevel.getUniqueId();
+                    Set<UUID> neighbors = connectionGraph.get(id);
+
+                    for (var actor : sublevel.getPlot().getBlockEntityActors()) {
+                        Iterable<SubLevel> dependencies = actor.sable$getConnectionDependencies();
+
+                        if (dependencies == null) {
+                            continue;
+                        }
+
+                        for (SubLevel connected : dependencies) {
+                            if (connected == null || connected.isRemoved()) {
+                                continue;
+                            }
+
+                            UUID otherId = connected.getUniqueId();
+                            Set<UUID> reverse = connectionGraph.get(otherId);
+
+                            if (reverse != null) {
+                                neighbors.add(otherId);
+                                reverse.add(id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Set<UUID> cached = connectionComponents.get(memberId);
+        if (cached != null) {
+            return cached;
+        }
+
+        Set<UUID> connected = new HashSet<>();
+        Deque<UUID> pending = new ArrayDeque<>();
+
+        connected.add(memberId);
+        pending.add(memberId);
+
+        while (!pending.isEmpty()) {
+            UUID current = pending.removeFirst();
+
+            for (UUID neighbor : connectionGraph.getOrDefault(current, Set.of())) {
+                if (connected.add(neighbor)) {
+                    pending.addLast(neighbor);
+                }
+            }
+        }
+
+        Set<UUID> result = Set.copyOf(connected);
+
+        for (UUID id : result) {
+            connectionComponents.put(id, result);
+        }
+
+        return result;
+    }
+
     public List<SubLevel> loadedMembers(ServerLevel level, UUID anyMemberOrOwner) {
         SubLevelContainer container = SubLevelContainer.getContainer(level);
         if (container == null) {
@@ -113,13 +182,11 @@ public final class SableAssemblyRegistry extends SavedData {
         observe(level, source.getUniqueId());
 
         List<SubLevel> result = new ArrayList<>();
-        Set<UUID> seen = new HashSet<>();
 
-        seen.add(source.getUniqueId());
-        result.add(source);
+        for (UUID id : connectedIds(level, source.getUniqueId())) {
+            SubLevel member = container.getSubLevel(id);
 
-        for (SubLevel member : SubLevelHelper.getConnectedChain(source)) {
-            if (member != null && !member.isRemoved() && seen.add(member.getUniqueId())) {
+            if (member != null && !member.isRemoved()) {
                 result.add(member);
             }
         }

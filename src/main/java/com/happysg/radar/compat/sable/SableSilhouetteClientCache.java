@@ -27,16 +27,34 @@ public final class SableSilhouetteClientCache {
         }
     }
 
-    public static void setAssemblyMember(UUID memberId, UUID assemblyId) {
-        UUID previous = ASSEMBLY_BY_MEMBER.put(memberId, assemblyId);
+    public static void setAssemblyMembers(UUID assemblyId, List<UUID> memberIds) {
+        Set<UUID> received = new HashSet<>(memberIds);
 
-        if (!Objects.equals(previous, assemblyId)) {
-            if (previous != null) {
-                invalidateProjected(previous);
+        boolean unchanged = received.stream().allMatch(id -> assemblyId.equals(ASSEMBLY_BY_MEMBER.get(id))) && ASSEMBLY_BY_MEMBER.entrySet().stream().noneMatch(entry -> assemblyId.equals(entry.getValue()) && !received.contains(entry.getKey()));
+        if (unchanged) {
+            return;
+        }
+
+        Set<UUID> affected = new HashSet<>(received);
+        affected.add(assemblyId);
+
+        ASSEMBLY_BY_MEMBER.entrySet().removeIf(entry -> {
+            if (assemblyId.equals(entry.getValue()) && !received.contains(entry.getKey())) {
+                affected.add(entry.getKey());
+                return true;
             }
+            return false;
+        });
 
-            invalidateProjected(assemblyId);
-            invalidateProjected(memberId);
+        for (UUID memberId : received) {
+            UUID previous = ASSEMBLY_BY_MEMBER.put(memberId, assemblyId);
+            if (previous != null) {
+                affected.add(previous);
+            }
+        }
+
+        for (UUID id : affected) {
+            invalidateProjected(id);
         }
     }
 

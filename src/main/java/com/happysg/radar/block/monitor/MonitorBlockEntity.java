@@ -931,10 +931,6 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (g == null)
             return;
 
-        NetworkData data = NetworkData.get(sl);
-        data.setSelectedTargetId(g, track == null ? null : track.getId());
-        g.selectedWasAuto = false;
-
         if (track == null) {
             controllerBe.selectedEntity = null;
             controllerBe.activetrack = null;
@@ -950,11 +946,11 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         //LOGGER.debug("MONITOR forwarding to filterer: filterPos={}, groupKey={}", filterpos, g.key);
 
         if (level.getBlockEntity(filterpos) instanceof NetworkFiltererBlockEntity filtererBe) {
-            //LOGGER.debug("MONITOR found filterer BE: calling receiveSelectedTargetFromMonitor track={}", track == null ? "null" : track.getId());
-            //LOGGER.debug("Ping");
-            filtererBe.receiveSelectedTargetFromMonitor(track,safeZones);
+            filtererBe.receiveSelectedTargetFromMonitor(track, safeZones);
         } else {
-            //LOGGER.debug("MONITOR could NOT find NetworkFiltererBlockEntity at {}. Found={}", filterpos, level.getBlockEntity(filterpos) == null ? "null" : level.getBlockEntity(filterpos).getClass().getName());
+            NetworkData data = NetworkData.get(sl);
+            data.setSelectedTargetId(g, track == null ? null : track.getId());
+            g.selectedWasAuto = false;
         }
 
         controllerBe.sendData();

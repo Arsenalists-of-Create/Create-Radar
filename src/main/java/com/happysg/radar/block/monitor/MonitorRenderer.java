@@ -579,7 +579,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         float selectedAlpha = 1.0f;
 
         for (RadarTrack track : monitor.getTracks()) {
-            MonitorProjection.DisplayPoint point = projection.project(track.position());
+            MonitorProjection.DisplayPoint point = projection.project(SableMonitorRendererAccess.displayContactPosition(track, partialTicks));
             if (point.outside()) continue;
             MonitorProjection.Quad quad = MonitorProjection.fullSizeQuad(point, size);
             float depth = DEPTH_TRACK_BASE;
@@ -668,7 +668,7 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
         }
 
         for (RadarTrack track : monitor.getTracks()) {
-            MonitorProjection.DisplayPoint point = projection.project(track.position());
+            MonitorProjection.DisplayPoint point = projection.project(SableMonitorRendererAccess.displayContactPosition(track, partialTicks));
             if (point.outside()) continue;
             MonitorProjection.Quad quad = MonitorProjection.fullSizeQuad(point, size);
 
@@ -746,6 +746,10 @@ public class MonitorRenderer extends SmartBlockEntityRenderer<MonitorBlockEntity
 
 
         long gameTime = monitor.getLevel().getGameTime();
+
+        if (!syntheticSilhouette && SableSilhouetteClientCache.shouldRefreshAssembly(silhouetteId, gameTime)) {
+            SableSilhouetteRequestPacket.send(monitor.getControllerPos(), silhouetteId, revision);
+        }
 
         SubLevelSilhouette.ProjectionSettings projectionSettings = silhouetteProjectionSettings();
         SubLevelSilhouette.ProjectedSilhouette projected;

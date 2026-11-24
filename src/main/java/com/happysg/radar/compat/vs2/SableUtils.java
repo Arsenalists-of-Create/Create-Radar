@@ -1,6 +1,7 @@
 package com.happysg.radar.compat.vs2;
 
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableAssemblyRegistry;
 import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.SableCompanion;
@@ -9,6 +10,7 @@ import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
 import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
@@ -102,10 +104,17 @@ public class SableUtils {
         if (!Mods.SABLE.isLoaded()) {
             return Set.of();
         }
+
         SubLevelAccess access = getShipManagingPos(level, pos);
+        if (level instanceof ServerLevel serverLevel && access != null) {
+            return SableAssemblyRegistry.get(serverLevel)
+                    .connectedIds(serverLevel, access.getUniqueId());
+        }
+
         if (!(access instanceof SubLevel subLevel)) {
             return access == null ? Set.of() : Set.of(access.getUniqueId());
         }
+
         java.util.HashSet<UUID> ids = new java.util.HashSet<>();
         ids.add(subLevel.getUniqueId());
         for (SubLevel connected : SubLevelHelper.getConnectedChain(subLevel)) {

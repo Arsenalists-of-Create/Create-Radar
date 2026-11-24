@@ -4,6 +4,8 @@ package com.happysg.radar.compat.sable;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.radar.track.RadarTrackUtil;
+import com.happysg.radar.block.radar.track.TrackCategory;
+import com.happysg.radar.config.RadarConfig;
 import dev.ryanhcode.sable.api.SubLevelHelper;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.ClientSubLevelAccess;
@@ -22,6 +24,41 @@ import java.util.UUID;
 
 public final class SableMonitorRendererAccess {
     private SableMonitorRendererAccess() {}
+
+    public static Vec3 displayContactPosition(RadarTrack track) {
+        return displayContactPosition(
+                track,
+                Minecraft.getInstance().getTimer().getGameTimeDeltaPartialTick(true)
+        );
+    }
+
+    public static Vec3 displayContactPosition(RadarTrack track, float partialTicks) {
+        if (track.trackCategory() != TrackCategory.SABLE || track.isSynthetic() || track.getSilhouetteId() == null || Minecraft.getInstance().level == null) {
+            return track.position();
+        }
+
+        UUID silhouetteId = track.getSilhouetteId();
+        int revision = track.getSilhouetteRevision();
+
+        SubLevelSilhouette silhouette = SableSilhouetteClientCache.get(silhouetteId, revision);
+
+        if (silhouette == null || silhouette.isEmpty()) {
+            return track.position();
+        }
+
+        SubLevelSilhouette.ProjectionSettings settings = new SubLevelSilhouette.ProjectionSettings(RadarConfig.client().sableSilhouetteCellSize.getF(), 384, 120_000, RadarConfig.client().sableSilhouetteMaxRenderedSegments.get());
+        ProjectionResult result = projectClientShip(track, silhouetteId, revision, Minecraft.getInstance().level.getGameTime(), silhouette, settings, partialTicks);
+
+        if (result == null || result.projected() == null || result.projected().selectionAnchor() == null) {
+            return track.position();
+        }
+
+        SubLevelSilhouette.Vec2 anchor = result.projected().selectionAnchor();
+        Vec3 offset = result.reportedOffset();
+
+        return new Vec3(anchor.x() + offset.x, track.position().y, anchor.z() + offset.z);
+    }
+
     public record ProjectionResult(SubLevelSilhouette.ProjectedSilhouette projected, Vec3 reportedOffset) {}
 
     @Nullable
@@ -83,7 +120,16 @@ public final class SableMonitorRendererAccess {
                         () -> SubLevelSilhouette.projectCombined(parts, projectionSettings)
                 );
 
-        Vec3 reportedOffset = RadarTrackUtil.getReportedPositionOffset(track, subLevel);
+        SubLevelAccess anchor = subLevel;
+
+        try {
+            SubLevelAccess owner = container.getSubLevel(UUID.fromString(track.id()));
+            if (owner != null) {
+                anchor = owner;
+            }
+        } catch (IllegalArgumentException ignored) {}
+
+        Vec3 reportedOffset = RadarTrackUtil.getReportedPositionOffset(track, anchor);
         return new ProjectionResult(projected, reportedOffset);
     }
 

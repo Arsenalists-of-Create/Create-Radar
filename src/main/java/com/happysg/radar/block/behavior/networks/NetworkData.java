@@ -2076,7 +2076,7 @@ public class NetworkData extends SavedData {
             String recordedEndpoint = dataLinkToEndpoint.get(key(dim, linkPos));
 
             if (!level.hasChunkAt(linkPos) || SableDataLinkRelocation.isRelocating(level, linkPos)) {
-                if (recordedEndpoint == null || recordedEndpoint.equals(endpointKey)) {
+                if (endpointKey.equals(recordedEndpoint)) {
                     return true;
                 }
                 continue;
@@ -2114,7 +2114,11 @@ public class NetworkData extends SavedData {
                 continue;
             }
 
-            if (!level.hasChunkAt(linkPos) || SableDataLinkRelocation.isRelocating(level, linkPos)) {
+            if (!level.hasChunkAt(linkPos)) {
+                continue;
+            }
+
+            if (SableDataLinkRelocation.isRelocating(level, linkPos)) {
                 return true;
             }
 

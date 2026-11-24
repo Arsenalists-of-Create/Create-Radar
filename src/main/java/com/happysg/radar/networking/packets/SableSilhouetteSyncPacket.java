@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte status, List<SubLevelSilhouette.LocalBox> boxes, UUID assemblyId) implements CustomPacketPayload {
+public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte status, List<SubLevelSilhouette.LocalBox> boxes, UUID assemblyId, List<UUID> memberIds) implements CustomPacketPayload {
     private static final int MAX_PACKET_BOXES = 16_384;
 
     public static final Type<SableSilhouetteSyncPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(CreateRadar.MODID, "sable_silhouette_sync"));
@@ -26,8 +26,14 @@ public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte stat
 
     public SableSilhouetteSyncPacket {
         boxes = List.copyOf(boxes);
+        memberIds = List.copyOf(memberIds);
+
         if (boxes.size() > MAX_PACKET_BOXES) {
             throw new IllegalArgumentException("Too many silhouette boxes");
+        }
+
+        if (memberIds.isEmpty() || memberIds.size() > 33 || !memberIds.contains(sublevelId)) {
+            throw new IllegalArgumentException("Invalid silhouette membership");
         }
     }
 
@@ -44,6 +50,11 @@ public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte stat
             buf.writeDouble(box.maxX());
             buf.writeDouble(box.maxY());
             buf.writeDouble(box.maxZ());
+        }
+
+        buf.writeVarInt(memberIds.size());
+        for (UUID memberId : memberIds) {
+            buf.writeUUID(memberId);
         }
     }
 
@@ -71,7 +82,17 @@ public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte stat
             }
             boxes.add(new SubLevelSilhouette.LocalBox(minX, minY, minZ, maxX, maxY, maxZ));
         }
-        return new SableSilhouetteSyncPacket(id, revision, status, boxes, assemblyId);
+        int memberCount = buf.readVarInt();
+        if (memberCount < 1 || memberCount > 33) {
+            throw new IllegalArgumentException("Invalid silhouette member count");
+        }
+
+        List<UUID> members = new ArrayList<>(memberCount);
+        for (int i = 0; i < memberCount; i++) {
+            members.add(buf.readUUID());
+        }
+
+        return new SableSilhouetteSyncPacket(id, revision, status, boxes, assemblyId, members);
     }
 
     @Override
@@ -86,7 +107,7 @@ public record SableSilhouetteSyncPacket(UUID sublevelId, int revision, byte stat
     @OnlyIn(Dist.CLIENT)
     private static final class Client {
         private static void handle(SableSilhouetteSyncPacket packet) {
-            SableSilhouetteClientCache.setAssemblyMember(packet.sublevelId(), packet.assemblyId());
+            SableSilhouetteClientCache.setAssemblyMembers(packet.assemblyId(), packet.memberIds());
             if (SableSilhouetteStatus.drawable(packet.status())) {
                 SableSilhouetteClientCache.put(packet.sublevelId(), packet.revision(), SubLevelSilhouette.of(packet.boxes()));
             }

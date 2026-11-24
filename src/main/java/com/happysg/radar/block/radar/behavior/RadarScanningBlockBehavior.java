@@ -669,7 +669,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             return radarTracks.values();
         }
 
-        return RadarTrackUtil.groupConnectedSableTracks(blockEntity.getLevel(), RadarTrackUtil.withConnectedFriendlies(blockEntity.getLevel(), blockEntity.getBlockPos(), radarTracks.values()));
+        return RadarTrackUtil.groupConnectedSableTracks(blockEntity.getLevel(), radarTracks.values());
     }
 
     @Override

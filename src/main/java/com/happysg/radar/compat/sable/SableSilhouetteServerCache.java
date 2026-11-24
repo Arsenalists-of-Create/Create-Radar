@@ -36,20 +36,40 @@ public final class SableSilhouetteServerCache {
 
         SableAssemblyRegistry registry = SableAssemblyRegistry.get(level);
         List<SubLevel> members = registry.loadedMembers(level, id);
-        UUID silhouetteSourceId = id;
+
+        UUID silhouetteSourceId = null;
+        Entry entry = null;
 
         SubLevelContainer container = SubLevelContainer.getContainer(level);
         SubLevel direct = container == null ? null : container.getSubLevel(id);
 
-        if ((direct == null || direct.isRemoved()) && !members.isEmpty()) {
-            silhouetteSourceId = members.get(0).getUniqueId();
+        if (direct != null && !direct.isRemoved()) {
+            Entry candidate = getOrBuild(level, id, false);
+
+            if (candidate != null && candidate.silhouette != null && SableSilhouetteStatus.drawable(candidate.status)) {
+                silhouetteSourceId = id;
+                entry = candidate;
+            }
         }
 
-        Entry entry = getOrBuild(level, silhouetteSourceId, false);
-        if (entry == null || entry.status == SableSilhouetteStatus.NONE) {
+        if (entry == null) {
+            for (SubLevel member : members) {
+                UUID memberId = member.getUniqueId();
+                Entry candidate = getOrBuild(level, memberId, false);
+
+                if (candidate != null && candidate.silhouette != null && SableSilhouetteStatus.drawable(candidate.status)) {
+                    silhouetteSourceId = memberId;
+                    entry = candidate;
+                    break;
+                }
+            }
+        }
+
+        if (entry == null) {
             track.clearSilhouette();
             return;
         }
+
         track.setSilhouette(silhouetteSourceId, entry.revision, entry.status);
     }
 
@@ -206,10 +226,18 @@ public final class SableSilhouetteServerCache {
     }
 
     private static void store(Entry entry, SubLevelSilhouette silhouette, byte status, long now) {
+        boolean sameShape = entry.silhouette == silhouette || (entry.silhouette != null && silhouette != null && entry.silhouette.localBoxes().equals(silhouette.localBoxes()));
+
+        if (entry.status == status && sameShape) {
+            entry.lastBuildTick = now;
+            return;
+        }
+
         entry.silhouette = silhouette;
         entry.status = status;
         entry.revision++;
         entry.lastBuildTick = now;
+
         if (RadarConfig.server().sableSilhouetteDebugLogging.get()) {
             int boxes = silhouette == null ? 0 : silhouette.localBoxes().size();
             LOGGER.info("Sable silhouette revision={} status={} boxes={}", entry.revision, status, boxes);

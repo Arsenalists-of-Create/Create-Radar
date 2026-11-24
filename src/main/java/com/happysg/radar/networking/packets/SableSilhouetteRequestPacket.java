@@ -18,6 +18,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 public record SableSilhouetteRequestPacket(BlockPos controllerPos, UUID sublevelId, int revision) implements CustomPacketPayload {
@@ -77,25 +79,39 @@ public record SableSilhouetteRequestPacket(BlockPos controllerPos, UUID sublevel
                 return;
             }
 
-            PacketDistributor.sendToPlayer(player, new SableSilhouetteSyncPacket(packet.sublevelId(), revision, status, silhouette.localBoxes(), SableAssemblyRegistry.get(level).groupOf(packet.sublevelId())));
-
-            int sentMembers = 0;
-            int sentBoxes = silhouette.localBoxes().size();
+            List<SableSilhouetteServerCache.ConnectedSilhouetteMember> included = new ArrayList<>();
 
             for (var member : SableSilhouetteServerCache.getConnectedSilhouettes(level, packet.sublevelId())) {
                 if (member.sublevelId().equals(packet.sublevelId())) {
                     continue;
                 }
 
-                int boxCount = member.silhouette().localBoxes().size();
-                if (sentMembers >= 32 || sentBoxes + boxCount > 16384) {
+                if (included.size() >= 32) {
                     break;
                 }
 
-                PacketDistributor.sendToPlayer(player, new SableSilhouetteSyncPacket(member.sublevelId(), member.revision(), member.status(), member.silhouette().localBoxes(), SableAssemblyRegistry.get(level).groupOf(packet.sublevelId())));
+                included.add(member);
+            }
 
-                sentMembers++;
-                sentBoxes += boxCount;
+            SableAssemblyRegistry registry = SableAssemblyRegistry.get(level);
+            UUID assemblyId = registry.observe(level, packet.sublevelId());
+
+            List<UUID> memberIds = new ArrayList<>();
+            memberIds.add(packet.sublevelId());
+
+            for (var member : registry.loadedMembers(level, packet.sublevelId())) {
+                UUID id = member.getUniqueId();
+
+                if (!memberIds.contains(id) && memberIds.size() < 33) {
+                    memberIds.add(id);
+                }
+            }
+
+            List<UUID> membership = List.copyOf(memberIds);
+            PacketDistributor.sendToPlayer(player, new SableSilhouetteSyncPacket(packet.sublevelId(), revision, status, silhouette.localBoxes(), assemblyId, membership));
+
+            for (var member : included) {
+                PacketDistributor.sendToPlayer(player, new SableSilhouetteSyncPacket(member.sublevelId(), member.revision(), member.status(), member.silhouette().localBoxes(), assemblyId, membership));
             }
         });
     }

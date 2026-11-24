@@ -25,6 +25,7 @@ import com.happysg.radar.block.radar.track.RadarContactTrackAdapter;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.block.arad.rwr.RwrContactEvaluation;
 import com.happysg.radar.block.arad.rwr.RwrTargetReference;
+import com.happysg.radar.block.radar.track.RadarTrackUtil;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.compat.create.CreateSchematicLinkPersistence;
@@ -701,6 +702,23 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
     }
 
+    private Set<UUID> getOwnSableSublevels(ServerLevel sl, NetworkData.Group group) {
+        if (!Mods.SABLE.isLoaded()) {
+            return Set.of();
+        }
+
+        Set<UUID> own = new HashSet<>(PhysicsHandler.getConnectedSublevelIds(sl, worldPosition));
+        for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
+            own.addAll(PhysicsHandler.getConnectedSublevelIds(sl, endpoint.pos()));
+        }
+
+        for (BlockPos weaponPos : group.weaponEndpoints) {
+            own.addAll(PhysicsHandler.getConnectedSublevelIds(sl, weaponPos));
+        }
+
+        return own;
+    }
+
     private void refreshContactCache(ServerLevel sl, NetworkData.Group group, List<RadarSource> radars) {
         long gameTime = sl.getGameTime();
         if (lastContactRefreshTick == gameTime) {
@@ -714,6 +732,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return;
         }
 
+        Set<UUID> ownSublevels = getOwnSableSublevels(sl, group);
         LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
         for (RadarSource radar : radars) {
             Collection<? extends RadarContact> contacts = getContactsSafely(sl, radar);
@@ -730,18 +749,28 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 }
 
                 String id = track.getId();
-
                 if (id == null || id.isBlank()) {
                     continue;
+                }
+
+                if (track.trackCategory() == TrackCategory.SABLE && !track.isSynthetic()) {
+                    UUID shipId = parseUuid(id).orElse(null);
+
+                    if (shipId != null && ownSublevels.contains(shipId)) {
+                        continue;
+                    }
                 }
 
                 merged.merge(id, track, DirectionalJammingService::preferObservation);
             }
         }
 
+        Collection<RadarTrack> groupedTracks = RadarTrackUtil.groupConnectedSableTracks(sl, merged.values());
+
         IdentificationConfig identification = readIdentificationFromSlot();
         Set<String> friendlyIds = buildIgnoreList(identification == null ? IdentificationConfig.DEFAULT : identification);
-        for (RadarTrack track : merged.values()) {
+
+        for (RadarTrack track : groupedTracks) {
             if (track.isFriendly()) {
                 continue;
             }
@@ -751,7 +780,18 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             }
         }
 
-        cachedTracks = List.copyOf(merged.values());
+        if (group.selectedTargetId != null && Mods.SABLE.isLoaded()) {
+            try {
+                UUID selectedId = UUID.fromString(group.selectedTargetId);
+                String canonicalId = SableAssemblyRegistry.get(sl).groupOf(selectedId).toString();
+
+                if (!canonicalId.equals(group.selectedTargetId) && groupedTracks.stream().anyMatch(track -> canonicalId.equals(track.getId()))) {
+                    NetworkData.get(sl).setSelectedTargetId(group, canonicalId);
+                }
+            } catch (IllegalArgumentException ignored) {}
+        }
+
+        cachedTracks = List.copyOf(groupedTracks);
         lastContactRefreshTick = gameTime;
     }
 
@@ -997,8 +1037,16 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         }
     }
 
-    private void applySelectedTarget(ServerLevel sl, NetworkData data, NetworkData.Group group,
-                                     @Nullable RadarTrack track, boolean wasAuto) {
+    private void applySelectedTarget(ServerLevel sl, NetworkData data, NetworkData.Group group, @Nullable RadarTrack track, boolean wasAuto) {
+        if (track != null && track.trackCategory() == TrackCategory.SABLE && !track.isSynthetic()) {
+            UUID shipId = parseUuid(track.getId()).orElse(null);
+
+            if (shipId != null && getOwnSableSublevels(sl, group).contains(shipId)) {
+                track = null;
+                wasAuto = false;
+            }
+        }
+
         String prev = data.getSelectedTargetId(group);
         String next = track == null ? null : track.getId();
 
@@ -1338,9 +1386,20 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
                 }
 
                 RadarTrack track = toTrackSafely(serverLevel, contact, gameTime);
-
-                if (track == null || !selectedId.equals(track.getId())) {
+                if (track == null) {
                     continue;
+                }
+
+                if (!selectedId.equals(track.getId())) {
+                    if (!Mods.SABLE.isLoaded() || active.trackCategory() != TrackCategory.SABLE || track.trackCategory() != TrackCategory.SABLE || active.isSynthetic() || track.isSynthetic()) {
+                        continue;
+                    }
+
+                    UUID memberId = parseUuid(track.getId()).orElse(null);
+
+                    if (memberId == null || !selectedId.equals(SableAssemblyRegistry.get(serverLevel).observe(serverLevel, memberId).toString())) {
+                        continue;
+                    }
                 }
 
                 liveTrack = liveTrack == null ? track : DirectionalJammingService.preferObservation(liveTrack, track);
@@ -1349,8 +1408,8 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
 
         compassTrackValidationTick = gameTime;
         compassTrackValidationId = selectedId;
-        compassTrackValidationResult = liveTrack;
-        return liveTrack;
+        compassTrackValidationResult = liveTrack != null && active.trackCategory() == TrackCategory.SABLE && !active.isSynthetic() ? active : liveTrack;
+        return compassTrackValidationResult;
     }
 
     public boolean isChaffSuppressed(@Nullable String targetId) {
