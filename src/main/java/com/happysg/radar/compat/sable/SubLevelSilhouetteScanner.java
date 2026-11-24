@@ -22,9 +22,7 @@ import java.util.function.Predicate;
  * logicalPose() expects as input.</p>
  */
 public final class SubLevelSilhouetteScanner {
-
-    private SubLevelSilhouetteScanner() {
-    }
+    private SubLevelSilhouetteScanner() {}
 
     public static SubLevelSilhouette scan(final Level level,
                                           final BlockPos minInclusive,
@@ -113,15 +111,23 @@ public final class SubLevelSilhouetteScanner {
 
         for (final PlotChunkHolder holder : plot.getLoadedChunks()) {
             final ChunkPos chunkPos = holder.getPos();
-            final int minX = Math.max(bounds.minX(), chunkPos.getMinBlockX());
-            final int maxX = Math.min(bounds.maxX(), chunkPos.getMaxBlockX());
-            final int minZ = Math.max(bounds.minZ(), chunkPos.getMinBlockZ());
-            final int maxZ = Math.min(bounds.maxZ(), chunkPos.getMaxBlockZ());
-            if (minX > maxX || minZ > maxZ) {
+            final BoundingBox3ic chunkBounds = holder.getBoundingBox();
+            if (chunkBounds == null) {
                 continue;
             }
 
-            for (int y = bounds.minY(); y <= bounds.maxY(); y++) {
+            final int minX = Math.max(bounds.minX(), chunkPos.getMinBlockX() + chunkBounds.minX());
+            final int maxX = Math.min(bounds.maxX(), chunkPos.getMinBlockX() + chunkBounds.maxX());
+            final int minY = Math.max(bounds.minY(), chunkBounds.minY());
+            final int maxY = Math.min(bounds.maxY(), chunkBounds.maxY());
+            final int minZ = Math.max(bounds.minZ(), chunkPos.getMinBlockZ() + chunkBounds.minZ());
+            final int maxZ = Math.min(bounds.maxZ(), chunkPos.getMinBlockZ() + chunkBounds.maxZ());
+
+            if (minX > maxX || minY > maxY || minZ > maxZ) {
+                continue;
+            }
+
+            for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
                     for (int x = minX; x <= maxX; x++) {
                         if (++inspected > maxBlocksToInspect) {
