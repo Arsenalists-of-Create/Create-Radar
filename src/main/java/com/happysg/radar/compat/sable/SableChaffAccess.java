@@ -18,10 +18,13 @@ public final class SableChaffAccess {
 
     public static Set<String> getLoadedShipIds(ServerLevel level, AABB launchVolume) {
         Set<String> ids = new HashSet<>();
+        SableAssemblyRegistry assemblies = SableAssemblyRegistry.get(level);
 
         for (SubLevel subLevel : SableUtils.getLoadedShips(level, launchVolume)) {
             if (subLevel != null && subLevel.getUniqueId() != null) {
-                ids.add(subLevel.getUniqueId().toString());
+                UUID id = subLevel.getUniqueId();
+                ids.add(id.toString());
+                ids.add(assemblies.groupOf(id).toString());
             }
         }
 
@@ -29,24 +32,24 @@ public final class SableChaffAccess {
     }
 
     public static AABB getShipBounds(ServerLevel level, UUID shipId) {
-        SubLevelContainer container = SubLevelContainer.getContainer(level);
+        AABB result = null;
 
-        if (container == null) {
-            return null;
+        for (SubLevel member : SableAssemblyRegistry.get(level).loadedMembers(level, shipId)) {
+            BoundingBox3dc box = member.boundingBox();
+
+            if (box == null) {
+                continue;
+            }
+
+            AABB bounds = new AABB(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ());
+
+            result = result == null ? bounds : new AABB(Math.min(result.minX, bounds.minX), Math.min(result.minY, bounds.minY), Math.min(result.minZ, bounds.minZ), Math.max(result.maxX, bounds.maxX), Math.max(result.maxY, bounds.maxY), Math.max(result.maxZ, bounds.maxZ));
         }
 
-        SubLevelAccess subLevel = container.getSubLevel(shipId);
-
-        if (subLevel == null || subLevel.boundingBox() == null) {
-            return null;
-        }
-
-        BoundingBox3dc box = subLevel.boundingBox();
-        return new AABB(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ());
+        return result;
     }
 
     public static boolean isShipLoaded(ServerLevel level, UUID shipId) {
-        SubLevelContainer container = SubLevelContainer.getContainer(level);
-        return container != null && container.getSubLevel(shipId) != null;
+        return !SableAssemblyRegistry.get(level).loadedMembers(level, shipId).isEmpty();
     }
 }

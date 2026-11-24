@@ -54,10 +54,9 @@ public final class SableAssemblyRegistry extends SavedData {
             }
         }
 
-        UUID existingOwner = ownerByMember.get(memberId);
-        UUID owner = existingOwner != null ? existingOwner : connected.stream()
-                .filter(ownerByMember::containsKey)
+        UUID owner = connected.stream()
                 .map(ownerByMember::get)
+                .filter(connected::contains)
                 .min(UUID_ORDER)
                 .orElseGet(() -> connected.stream().min(UUID_ORDER).orElse(memberId));
 
@@ -72,10 +71,13 @@ public final class SableAssemblyRegistry extends SavedData {
         }
 
         boolean changed = false;
+        var iterator = ownerByMember.entrySet().iterator();
 
-        for (Map.Entry<UUID, UUID> entry : ownerByMember.entrySet()) {
-            if (mergedOwners.contains(entry.getValue()) && !owner.equals(entry.getValue())) {
-                entry.setValue(owner);
+        while (iterator.hasNext()) {
+            Map.Entry<UUID, UUID> entry = iterator.next();
+
+            if (!connected.contains(entry.getKey()) && mergedOwners.contains(entry.getValue()) && !entry.getKey().equals(entry.getValue())) {
+                iterator.remove();
                 changed = true;
             }
         }
@@ -94,28 +96,30 @@ public final class SableAssemblyRegistry extends SavedData {
     }
 
     public List<SubLevel> loadedMembers(ServerLevel level, UUID anyMemberOrOwner) {
-        UUID owner = groupOf(anyMemberOrOwner);
         SubLevelContainer container = SubLevelContainer.getContainer(level);
-
         if (container == null) {
             return List.of();
         }
 
-        List<SubLevel> result = new ArrayList<>();
-
-        Set<UUID> ids = new HashSet<>();
-        ids.add(owner);
-
-        for (Map.Entry<UUID, UUID> entry : ownerByMember.entrySet()) {
-            if (owner.equals(entry.getValue())) {
-                ids.add(entry.getKey());
-            }
+        SubLevel source = container.getSubLevel(anyMemberOrOwner);
+        if (source == null || source.isRemoved()) {
+            source = container.getSubLevel(groupOf(anyMemberOrOwner));
         }
 
-        for (UUID id : ids) {
-            SubLevel member = container.getSubLevel(id);
+        if (source == null || source.isRemoved()) {
+            return List.of();
+        }
 
-            if (member != null && !member.isRemoved()) {
+        observe(level, source.getUniqueId());
+
+        List<SubLevel> result = new ArrayList<>();
+        Set<UUID> seen = new HashSet<>();
+
+        seen.add(source.getUniqueId());
+        result.add(source);
+
+        for (SubLevel member : SubLevelHelper.getConnectedChain(source)) {
+            if (member != null && !member.isRemoved() && seen.add(member.getUniqueId())) {
                 result.add(member);
             }
         }

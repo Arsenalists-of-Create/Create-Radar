@@ -13,6 +13,7 @@ import com.happysg.radar.block.controller.id.IDManager;
 import com.happysg.radar.block.monitor.MonitorBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.sable.SableAssemblyRegistry;
 import com.happysg.radar.compat.sable.SableIdRecordAccess;
 import com.happysg.radar.compat.sable.SableRwrReceiverAccess;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
@@ -449,12 +450,16 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
                     float radarRange = emitter.getRwrRange();
 
                     boolean withinRadarRange = horizontalDistanceSqr(receiver.position(), radarWorldPos) <= radarRange * radarRange;
-                    boolean engaged = RadarContactRegistry.isSourceEngaged(level, receiver.shipId(), sourceId);
-                    boolean friendly = isFriendlyRadar(level, emitterPos, receiverSecrets, receiverShipIds);
+                    boolean ownRadar = RadarPhysics.connectedFrameIds(level, emitterPos).stream().anyMatch(receiverShipIds::contains);
 
-                    contactsBySource.computeIfAbsent(sourceId, ignored -> new ContactAccumulator(
-                            sourceId, emitter, displayReceiverPos, radarWorldPos
-                    )).accept(evaluation, withinRadarRange, engaged, friendly, receiver.position());
+                    boolean engaged = !ownRadar && RadarContactRegistry.isSourceEngaged(level, receiver.shipId(), sourceId);
+                    boolean friendly = ownRadar || isFriendlyRadar(level, emitterPos, receiverSecrets, receiverShipIds);
+
+                    if (ownRadar && evaluation.lockedOnExactTarget()) {
+                        evaluation = new RwrContactEvaluation(evaluation.emitting(), evaluation.detectableByReceiver(), evaluation.lockCapable(), false, evaluation.signalStrength());
+                    }
+
+                    contactsBySource.computeIfAbsent(sourceId, ignored -> new ContactAccumulator(sourceId, emitter, displayReceiverPos, radarWorldPos)).accept(evaluation, withinRadarRange, engaged, friendly, receiver.position());
                 } catch (RuntimeException exception) {
                     if (be instanceof IRadar) {
                         throw exception;
@@ -486,6 +491,10 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
 
         List<AggregatedRwrContact> contacts = new ArrayList<>();
         for (ContactAccumulator accumulator : contactsBySource.values()) {
+            if (RadarPhysics.connectedFrameIds(level, accumulator.radarPos).stream().anyMatch(receiverShipIds::contains)) {
+                continue;
+            }
+
             contacts.add(accumulator.toContact());
         }
         return List.copyOf(contacts);
@@ -510,8 +519,7 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
             liveSources.add(sourceId);
 
             boolean exactLocked = contact.contact().exactLocked();
-            boolean externalSource = level instanceof ServerLevel serverLevel
-                    && ExternalRwrEmitterRegistry.isActiveSource(serverLevel, sourceId);
+            boolean externalSource = level instanceof ServerLevel serverLevel && ExternalRwrEmitterRegistry.isActiveSource(serverLevel, sourceId);
             if (exactLocked) {
                 exactLockHoldTicks.put(sourceId, EXACT_LOCK_HOLD_TICKS);
             } else if (externalSource) {
@@ -598,8 +606,12 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
     }
 
     private static boolean isAnyLocked(ServerLevel level, List<ReceiverTarget> receivers) {
+        SableAssemblyRegistry assemblies = SableAssemblyRegistry.get(level);
+
         for (ReceiverTarget receiver : receivers) {
-            if (RadarContactRegistry.isLocked(level, receiver.shipId())) {
+            UUID shipId = receiver.shipId();
+
+            if (RadarContactRegistry.isLocked(level, shipId) || RadarContactRegistry.isLocked(level, assemblies.groupOf(shipId))) {
                 return true;
             }
         }
@@ -607,8 +619,12 @@ public class RadarWarningReceiverBlockEntity extends SmartBlockEntity {
     }
 
     private static boolean isAnyEngaged(ServerLevel level, List<ReceiverTarget> receivers) {
+        SableAssemblyRegistry assemblies = SableAssemblyRegistry.get(level);
+
         for (ReceiverTarget receiver : receivers) {
-            if (RadarContactRegistry.isEngaged(level, receiver.shipId())) {
+            UUID shipId = receiver.shipId();
+
+            if (RadarContactRegistry.isEngaged(level, shipId) || RadarContactRegistry.isEngaged(level, assemblies.groupOf(shipId))) {
                 return true;
             }
         }

@@ -28,6 +28,7 @@ import com.happysg.radar.block.arad.rwr.RwrTargetReference;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonUtil;
 import com.happysg.radar.compat.create.CreateSchematicLinkPersistence;
+import com.happysg.radar.compat.sable.SableAssemblyRegistry;
 import com.happysg.radar.compat.sable.SableDataLinkRelocation;
 import com.happysg.radar.compat.sable.SableLinkPersistence;
 import com.happysg.radar.compat.sable.SableNetworkFiltererAccess;
@@ -867,7 +868,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         float strongestSignal = Float.NEGATIVE_INFINITY;
 
         for (RadarRwrEmitter emitter : getRunningRwrEmitters(sl, group)) {
-
             if (!(emitter instanceof RadarSource source)) {
                 continue;
             }
@@ -927,17 +927,20 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
     }
 
     private void markExactLocksForSelectedShip(ServerLevel sl, NetworkData.Group group, UUID shipId) {
-        RwrTargetReference target = RwrTargetReference.sableShip(shipId);
-        RadarRwrEmitter strongestEmitter = findStrongestLockingRadar(sl, group, target);
+        for (var member : SableAssemblyRegistry.get(sl).loadedMembers(sl, shipId)) {
+            RwrTargetReference target = RwrTargetReference.sableShip(member.getUniqueId());
+            RadarRwrEmitter strongestEmitter = findStrongestLockingRadar(sl, group, target);
 
-        if (strongestEmitter != null) {
+            if (strongestEmitter == null) {
+                continue;
+            }
+
             try {
                 UUID emitterId = strongestEmitter.getRwrEmitterId();
 
                 if (emitterId != null) {
                     RadarContactRegistry.markExactLocked(sl, emitterId, target, 10);
                 }
-
             } catch (RuntimeException exception) {
                 if (strongestEmitter instanceof IRadar) {
                     throw exception;
@@ -954,8 +957,11 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
         float strongestSignal = Float.NEGATIVE_INFINITY;
 
         for (RadarRwrEmitter emitter : getRunningRwrEmitters(sl, group)) {
-            RadarRwrEvaluation evaluation = evaluateRwrEmitter(sl, emitter, target);
+            if (emitter instanceof IRadar radar && target.kind() == RwrTargetReference.Kind.SABLE_SHIP && target.uuid() != null && PhysicsHandler.getConnectedSublevelIds(sl, radar.getWorldPos()).contains(target.uuid())) {
+                continue;
+            }
 
+            RadarRwrEvaluation evaluation = evaluateRwrEmitter(sl, emitter, target);
             if (evaluation == null || !evaluation.emitting() || !evaluation.lockCapable() || !Float.isFinite(evaluation.signalStrength()) || evaluation.signalStrength() < 0.0F) {
                 continue;
             }
@@ -1441,12 +1447,15 @@ public class NetworkFiltererBlockEntity extends BlockEntity implements PartialSa
             return;
         }
 
-        RwrTargetReference target = RwrTargetReference.sableShip(shipId);
-        for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
-            BlockEntity be = sl.getBlockEntity(endpoint.pos());
+        for (var member : SableAssemblyRegistry.get(sl).loadedMembers(sl, shipId)) {
+            RwrTargetReference target = RwrTargetReference.sableShip(member.getUniqueId());
 
-            if (be instanceof RadarRwrEmitter emitter) {
-                RadarContactRegistry.clearExactLocked(sl, emitter.getRwrEmitterId(), target);
+            for (NetworkData.RadarEndpoint endpoint : group.getRadarEndpoints()) {
+                BlockEntity be = sl.getBlockEntity(endpoint.pos());
+
+                if (be instanceof RadarRwrEmitter emitter) {
+                    RadarContactRegistry.clearExactLocked(sl, emitter.getRwrEmitterId(), target);
+                }
             }
         }
     }

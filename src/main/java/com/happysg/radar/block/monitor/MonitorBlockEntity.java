@@ -1024,6 +1024,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         List<RadarTrack> displayTracks = new ArrayList<>(contacts.size());
         ServerLevel serverLevel = Mods.SABLE.isLoaded() && level instanceof ServerLevel sl ? sl : null;
         String networkSecret = serverLevel == null ? null : monitorNetworkSecret(serverLevel);
+        Set<UUID> labeledGroups = new HashSet<>();
 
         for (RadarContact contact : contacts) {
             RadarTrack track = RadarContactTrackAdapter.toTrack(contact, level.getGameTime());
@@ -1040,8 +1041,10 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                         try {
                             UUID shipId = UUID.fromString(track.getId());
                             IDManager.IDRecord identification = SableIdRecordAccess.resolveEffectiveIdentification(serverLevel, shipId);
+                            UUID groupId = SableAssemblyRegistry.get(serverLevel).groupOf(shipId);
 
-                            track.setDisplayName(identification != null ? identification.name() : "");
+                            String name = identification == null ? "" : identification.name();
+                            track.setDisplayName(name != null && !name.isBlank() && labeledGroups.add(groupId) ? name : "");
                         } catch (IllegalArgumentException ignored) {
                             track.setDisplayName("");
                         }

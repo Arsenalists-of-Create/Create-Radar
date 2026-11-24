@@ -82,7 +82,7 @@ public record IDRecordPacket(String shipId, String shipSlug, String secretID, St
             IDManager.addIDRecord(sourceId, packet.secretID(), packet.newSlug());
 
             if (Mods.SABLE.isLoaded()) {
-                int attachedCount = SableIdRecordAccess.applySecretIdToAttachedSublevels(sender, sourceId, packet.secretID());
+                int attachedCount = SableIdRecordAccess.applySecretIdToAttachedSublevels(sender, sourceId, packet.secretID(), packet.newSlug());
                 if (attachedCount > 0) {
                     sender.displayClientMessage(
                             Component.literal("Applied secret ID to " + attachedCount + " attached sublevel" + (attachedCount == 1 ? "." : "s.")),

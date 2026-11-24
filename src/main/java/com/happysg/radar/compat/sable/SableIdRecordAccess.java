@@ -19,7 +19,7 @@ import java.util.Set;
 public final class SableIdRecordAccess {
     private SableIdRecordAccess() {}
 
-    public static int applySecretIdToAttachedSublevels(ServerPlayer sender, UUID sourceId, String secretID) {
+    public static int applySecretIdToAttachedSublevels(ServerPlayer sender, UUID sourceId, String secretID, String name) {
         SubLevelContainer container = SubLevelContainer.getContainer(sender.serverLevel());
 
         if (container == null) {
@@ -39,13 +39,6 @@ public final class SableIdRecordAccess {
 
             if (sourceId.equals(attachedId)) {
                 continue;
-            }
-
-            IDManager.IDRecord existing = IDManager.getIDRecordByShipId(attachedId);
-            String name = existing != null ? existing.name() : attached.getName();
-
-            if (name == null || name.isBlank()) {
-                name = attachedId.toString();
             }
 
             IDManager.addIDRecord(attachedId, secretID, name);
