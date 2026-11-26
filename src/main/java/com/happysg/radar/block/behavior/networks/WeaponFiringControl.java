@@ -54,6 +54,8 @@ public class WeaponFiringControl {
 
 
     public final CannonMountBlockEntity cannonMount;
+    private final BlockPos ownerControllerPos;
+    private final boolean yawOnlyMode;
     public AutoPitchControllerBlockEntity pitchController;
     public AutoYawControllerBlockEntity yawController;
     public FireControllerBlockEntity fireController;
@@ -157,9 +159,20 @@ public class WeaponFiringControl {
         this.pitchController = controller;
         this.yawController = yawController;
         this.level = cannonMount.getLevel();
+        this.ownerControllerPos = controller.getBlockPos().immutable();
+        this.yawOnlyMode = false;
 
         LOGGER.debug("FiringControlBlockEntity.<init>() → controller={} mountPos={}", controller, cannonMount.getBlockPos());
     }
+    public WeaponFiringControl(AutoYawControllerBlockEntity yaw, CannonMountBlockEntity mount) {
+        this.cannonMount = mount;
+        this.pitchController = null;
+        this.yawController = yaw;
+        this.level = mount.getLevel();
+        this.ownerControllerPos = yaw.getBlockPos().immutable();
+        this.yawOnlyMode = true;
+    }
+
     private RayResult rayClear(Vec3 start, Vec3 end) {
 
         RayResult result = RayResult.CLEAR;
@@ -634,10 +647,13 @@ public class WeaponFiringControl {
     public void refreshControllers() {
 
         if (!(level instanceof ServerLevel serverLevel)) return;
-        this.view = WeaponNetworkRuntime.getWeaponGroupViewFromEndpoint(serverLevel, pitchController.getBlockPos());
-        if (view == null) {
-            this.yawController = null;
+        this.view = WeaponNetworkRuntime.getWeaponGroupViewFromEndpoint(serverLevel, ownerControllerPos);
+        if (view == null || !view.mountPos().equals(cannonMount.getBlockPos())
+                || (yawOnlyMode && (view.pitchPos() != null || !ownerControllerPos.equals(view.yawPos())))
+                || (!yawOnlyMode && !ownerControllerPos.equals(view.pitchPos()))) {
+            stopFireCannon();
             this.fireController = null;
+            if (!yawOnlyMode) this.yawController = null;
             return;
         }
         if (view.yawPos() != null && level.getBlockEntity(view.yawPos()) instanceof AutoYawControllerBlockEntity autoyaw) {
@@ -645,10 +661,12 @@ public class WeaponFiringControl {
         } else {
             this.yawController = null;
         }
-        if (view.pitchPos() != null && level.getBlockEntity(view.pitchPos()) instanceof AutoPitchControllerBlockEntity autopitch) {
-            this.pitchController = autopitch;
-        } else {
-            this.pitchController = null;
+        if (!yawOnlyMode) {
+            if (view.pitchPos() != null && level.getBlockEntity(view.pitchPos()) instanceof AutoPitchControllerBlockEntity autopitch) {
+                this.pitchController = autopitch;
+            } else {
+                this.pitchController = null;
+            }
         }
         if (view.firingPos() != null && level.getBlockEntity(view.firingPos()) instanceof FireControllerBlockEntity firecont) {
             this.fireController = firecont;
@@ -851,9 +869,8 @@ public class WeaponFiringControl {
                     maxSimDistanceBlocks);
         }
 
-        WeaponNetworkRuntime.WeaponGroupView grp = pitchController != null
-                ? WeaponNetworkRuntime.getWeaponGroupViewFromEndpoint(serverLevel, pitchController.getBlockPos())
-                : null;
+        WeaponNetworkRuntime.WeaponGroupView grp =
+                WeaponNetworkRuntime.getWeaponGroupViewFromEndpoint(serverLevel, ownerControllerPos);
 
         if (grp != null && !grp.dataLinks().isEmpty()) {
             Vec3 cannonOrigin = getCannonRayStart();
@@ -940,7 +957,7 @@ public class WeaponFiringControl {
 
         // Debug
         boolean auto = targetingConfig.autoFire();
-        boolean yawPitchOk = hasCorrectYawPitch(lag);
+        boolean yawPitchOk = hasCorrectYawPitch(lag, desiredPitch);
         boolean safeOk = !passesSafeZone();
         boolean cannonReady = CannonUtil.isCannonReadyToFire(cannonMount);
         boolean stableOk = (aimStableTicks >= AIM_STABLE_REQUIRED) || (!lag);
@@ -1075,31 +1092,45 @@ public class WeaponFiringControl {
         return false;
     }
 
-    private boolean hasCorrectYawPitch(boolean lag) {
-        if(yawController == null && pitchController == null)return false;
-        boolean yaw =true;
-        if(yawController !=null) {
-            yaw = yawController.atTargetYaw(lag);
-        }
-        boolean pitch = pitchController.atTargetPitch(lag);
+    private boolean hasCorrectYawPitch(boolean lag, @Nullable Double desiredPitch) {
+        if (yawController == null && pitchController == null) return false;
+        boolean yaw = yawController == null || yawController.atTargetYaw(lag);
+        if (!yaw) return false;
+        if (pitchController != null) return pitchController.atTargetPitch(lag);
+        if (!yawOnlyMode) return false;
 
-        return yaw && pitch;
+        PitchOrientedContraptionEntity entity = cannonMount.getContraption();
+        if (desiredPitch == null || !Double.isFinite(desiredPitch)
+                || entity == null || !(entity.getContraption() instanceof AbstractMountedCannonContraption cannon)) {
+            return false;
+        }
+        int invert = -cannon.initialOrientation().getStepX() + cannon.initialOrientation().getStepZ();
+        if (invert == 0) return false;
+        double physicalPitch = entity.pitch * -invert;
+        double tolerance = 0.15;
+        if (!lag) tolerance += Math.max(0.0, RadarConfig.server().targetLoosenAmount.get());
+        return Double.isFinite(physicalPitch) && Math.abs(physicalPitch - desiredPitch) <= tolerance;
     }
 
 
     private List<FireControllerBlockEntity> activeFireControllers() {
-        if (!(level instanceof ServerLevel serverLevel) || pitchController == null || cannonMount == null) {
+        if (!(level instanceof ServerLevel serverLevel) || cannonMount == null) {
             return List.of();
         }
 
-        WeaponNetworkRuntime.WeaponGroupView group = WeaponNetworkRuntime.getWeaponGroupViewFromEndpoint(serverLevel, pitchController.getBlockPos());
-        if (group == null || !group.mountPos().equals(cannonMount.getBlockPos())) {
+        WeaponNetworkRuntime.WeaponGroupView group =
+                WeaponNetworkRuntime.getWeaponGroupViewFromEndpoint(serverLevel, ownerControllerPos);
+        if (group == null || !group.mountPos().equals(cannonMount.getBlockPos())
+                || (yawOnlyMode && (group.pitchPos() != null || !ownerControllerPos.equals(group.yawPos())))
+                || (!yawOnlyMode && !ownerControllerPos.equals(group.pitchPos()))) {
             return List.of();
         }
 
         List<FireControllerBlockEntity> result = new ArrayList<>();
         for (BlockPos pos : WeaponNetworkRuntime.getFiringControllersForMount(serverLevel, group.mountPos())) {
-            if (serverLevel.hasChunkAt(pos) && serverLevel.getBlockEntity(pos) instanceof FireControllerBlockEntity fire && !fire.isRemoved()) {
+            if (serverLevel.hasChunkAt(pos)
+                    && serverLevel.getBlockEntity(pos) instanceof FireControllerBlockEntity fire
+                    && !fire.isRemoved()) {
                 result.add(fire);
             }
         }
