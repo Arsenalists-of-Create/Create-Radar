@@ -86,8 +86,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     private List<AABB> safeZones = new ArrayList<>();
     private BlockPos lastKnownPos = BlockPos.ZERO;
     private RadarTrack currenttrack;
-    private @Nullable BlockPos radarPosCache;
-    private @Nullable IRadar radarCache;
+    private int lastPushedRadarHash;
     private List<RadarTrack> cachedTracks = List.of();
     private DetectionConfig detectionCache = DetectionConfig.DEFAULT;
     public @Nullable RadarTrack activeTrackCache;
@@ -171,18 +170,24 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             setChanged();
         }
 
-        BlockPos netRadar = group.radarPos;
-        if (!Objects.equals(netRadar, radarPosCache)) {
-            radarPosCache = netRadar;
-            radarCache = null;
-            vsLoadedCacheUntilTick = -1;
-            lastPushedTrackId = null;
-        }
-
         detectionCache = DetectionConfig.fromTag(group.detectionTag);
 
-        IRadar radar = getRadar(sl);
-        if (radar == null || !radar.isRunning()) {
+        LinkedHashMap<String, RadarTrack> mergedTracks = new LinkedHashMap<>();
+        boolean hasRunningRadar = false;
+        for (BlockPos radarPos : group.radarEndpoints.keySet()) {
+            if (!sl.hasChunkAt(radarPos)) continue;
+            BlockEntity blockEntity = sl.getBlockEntity(radarPos);
+            if (!(blockEntity instanceof IRadar radar) || !radar.isRunning()) continue;
+            hasRunningRadar = true;
+            Collection<RadarTrack> tracks = radar.getTracks();
+            if (tracks == null) continue;
+            for (RadarTrack track : tracks) {
+                if (track == null || track.getId() == null || !detectionCache.test(track)) continue;
+                mergedTracks.putIfAbsent(track.getId(), track);
+            }
+        }
+
+        if (!hasRunningRadar) {
             cachedTracks = List.of();
             activeTrackCache = null;
             if (group.selectedTargetId != null) {
@@ -191,7 +196,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             return;
         }
 
-        cachedTracks = radar.getTracks().stream().filter(detectionCache::test).toList();
+        cachedTracks = List.copyOf(mergedTracks.values());
         RadarTrack selected = resolveSelectedTrack(group.selectedTargetId);
 
         if (group.selectedTargetId != null
@@ -334,13 +339,15 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         int configHash = cfgHash(targeting);
         long zonesHash = safeZonesHash(safeZones);
         int endpointHash = group.weaponEndpoints.hashCode();
+        int radarHash = group.radarEndpoints.keySet().hashCode();
         if (endpointHash != lastPushedEndpointHash) {
             endpointCacheUntilTick = -1;
         }
         boolean changed = !Objects.equals(lastPushedTrackId, id)
                 || lastPushedCfgHash != configHash
                 || lastPushedSafeZonesHash != zonesHash
-                || lastPushedEndpointHash != endpointHash;
+                || lastPushedEndpointHash != endpointHash
+                || lastPushedRadarHash != radarHash;
 
         activeTrackCache = selected;
         if (changed) {
@@ -348,6 +355,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             lastPushedCfgHash = configHash;
             lastPushedSafeZonesHash = zonesHash;
             lastPushedEndpointHash = endpointHash;
+            lastPushedRadarHash = radarHash;
             pushToEndpoints(selected);
         } else {
             for (AutoYawControllerBlockEntity yaw : getYawOnlyEndpoints(sl)) {
@@ -406,20 +414,6 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         autoUnloadedSinceTick = Long.MIN_VALUE;
         autoVisibleTargetId = null;
         autoVisibleSinceTick = Long.MIN_VALUE;
-    }
-
-    private @Nullable IRadar getRadar(ServerLevel sl) {
-        if (radarPosCache == null) return null;
-
-        if (radarCache instanceof BlockEntity be && be.getBlockPos().equals(radarPosCache)) {
-            return radarCache;
-        }
-
-        radarCache = null;
-        BlockEntity be = sl.getBlockEntity(radarPosCache);
-        if (be instanceof IRadar r) radarCache = r;
-
-        return radarCache;
     }
 
     private @Nullable RadarTrack resolveSelectedTrack(@Nullable String selectedId) {
@@ -958,16 +952,13 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
     }
 
     private void applyDetectionToRadar(ServerLevel sl, NetworkData.Group group, DetectionConfig detection) {
-        // group needs to know where the radar is
-        if (group.radarPos == null) return;
-
-        BlockEntity be = sl.getBlockEntity(group.radarPos);
-        if (!(be instanceof SmartBlockEntity sbe)) return;
-
-        RadarScanningBlockBehavior scan = BlockEntityBehaviour.get(sbe, RadarScanningBlockBehavior.TYPE);
-        if (scan == null) return;
-
-        scan.applyDetectionConfig(detection);
+        for (BlockPos radarPos : group.radarEndpoints.keySet()) {
+            if (!sl.hasChunkAt(radarPos)) continue;
+            BlockEntity be = sl.getBlockEntity(radarPos);
+            if (!(be instanceof SmartBlockEntity sbe)) continue;
+            RadarScanningBlockBehavior scan = BlockEntityBehaviour.get(sbe, RadarScanningBlockBehavior.TYPE);
+            if (scan != null) scan.applyDetectionConfig(detection);
+        }
     }
 
     private DetectionConfig readDetectionFromSlot() {

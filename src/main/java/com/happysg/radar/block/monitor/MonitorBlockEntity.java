@@ -59,6 +59,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     /** Client renders from this list (synced via packet). */
     protected Collection<RadarTrack> cachedTracks = new ArrayList<>();
+    private float networkRadarRange;
+
 
     /** Keep as field because renderer uses it (coloring). */
     protected DetectionConfig filter = DetectionConfig.DEFAULT;
@@ -139,6 +141,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         this.activetrack = null;
         this.radarPos = null;
         this.radar = null;
+        this.networkRadarRange = 0f;
         this.controller = null;
 
 
@@ -295,22 +298,42 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             return;
         }
 
-        // Server: rebuild and apply filter
-        Optional<IRadar> r = getRadar();
-        if (r.isEmpty()) {
-            cachedTracks = List.of();
-            activetrack = null;
-            selectedEntity = null;
+        ServerLevel serverLevel = (ServerLevel) level;
+        NetworkData.Group group = getNetworkGroup(serverLevel);
+        if (group == null) {
+            Optional<IRadar> existing = getRadar();
+            if (existing.isEmpty()) {
+                cachedTracks = List.of();
+                activetrack = null;
+                selectedEntity = null;
+                networkRadarRange = 0f;
+                return;
+            }
+            IRadar primary = existing.get();
+            Collection<RadarTrack> tracks = primary.getTracks();
+            cachedTracks = tracks == null ? List.of() : tracks.stream().filter(Objects::nonNull).filter(filter::test).toList();
+            networkRadarRange = primary.getRange();
+            activetrack = resolveActiveTrack();
             return;
         }
 
-        IRadar radar = r.get();
-        DetectionConfig det = this.filter; // already synced from network (or legacy)
-        cachedTracks = radar.getTracks().stream().filter(det::test).toList();
-
-        if (!level.isClientSide) {
-            activetrack = resolveActiveTrack();
+        LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
+        float maximumRange = 0f;
+        for (BlockPos radarPosition : group.radarEndpoints.keySet()) {
+            if (!serverLevel.hasChunkAt(radarPosition)) continue;
+            BlockEntity be = serverLevel.getBlockEntity(radarPosition);
+            if (!(be instanceof IRadar source) || !source.isRunning()) continue;
+            maximumRange = Math.max(maximumRange, source.getRange());
+            Collection<RadarTrack> tracks = source.getTracks();
+            if (tracks == null) continue;
+            for (RadarTrack track : tracks) {
+                if (track == null || track.getId() == null || !filter.test(track)) continue;
+                merged.putIfAbsent(track.getId(), track);
+            }
         }
+        cachedTracks = List.copyOf(merged.values());
+        networkRadarRange = maximumRange;
+        activetrack = resolveActiveTrack();
     }
     public boolean isLinked() {
         return getRadarCenterPos() != null;
@@ -412,7 +435,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     }
 
     public float getRange() {
-        return getRadar().map(IRadar::getRange).orElse(0f);
+        return networkRadarRange > 0f ? networkRadarRange : getRadar().map(IRadar::getRange).orElse(0f);
     }
 
     @Nullable
@@ -426,21 +449,13 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
 
     public Vec3 getTargetPos(TargetingConfig targetingConfig) {
-        AtomicReference<Vec3> targetPos = new AtomicReference<>();
-
-        getRadar().ifPresent(radar -> {
-            if (selectedEntity == null)
-                return;
-
-            targetPos.set(AutoTargetingHelper.resolveSelectedTargetPos(selectedEntity, getController().cachedTracks));
-        });
-
-        if (targetPos.get() == null)
+        Vec3 targetPos = selectedEntity == null ? null
+                : AutoTargetingHelper.resolveSelectedTargetPos(selectedEntity, getController().cachedTracks);
+        if (targetPos == null)
             selectedEntity = null;
-        else if (AutoTargetingHelper.isInSafeZone(targetPos.get(), safeZones))
+        else if (AutoTargetingHelper.isInSafeZone(targetPos, safeZones))
             return null;
-
-        return targetPos.get();
+        return targetPos;
     }
 
     // Safe zones
@@ -508,6 +523,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             filter = DetectionConfig.DEFAULT;
 
         radius = tag.contains("Size", Tag.TAG_INT) ? tag.getInt("Size") : 1;
+        if (clientPacket) networkRadarRange = tag.contains("NetworkRadarRange", Tag.TAG_FLOAT) ? tag.getFloat("NetworkRadarRange") : 0f;
 
         if (clientPacket && tag.contains("tracks", Tag.TAG_COMPOUND))
             cachedTracks = RadarTrackUtil.deserializeListNBT(tag.getCompound("tracks"));
@@ -553,6 +569,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 tag.put("radarPos", NbtUtils.writeBlockPos(radarPos));
 
             tag.put("Filter", filter.toTag());
+            tag.putFloat("NetworkRadarRange", networkRadarRange);
             tag.put("tracks", RadarTrackUtil.serializeNBTList(cachedTracks));
         } else {
             if (level instanceof ServerLevel slevel) {

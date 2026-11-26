@@ -13,6 +13,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,10 +37,20 @@ public final class RadarNetworkApi {
 
     public static Collection<? extends RadarContact> getContacts(ServerLevel level, BlockPos networkPos) {
         NetworkData.Group group = group(level, networkPos);
-        if (group == null || group.radarPos == null || !level.hasChunkAt(group.radarPos)) return List.of();
-        BlockEntity be = level.getBlockEntity(group.radarPos);
-        if (!(be instanceof IRadar radar) || !radar.isRunning()) return List.of();
-        return radar.getTracks().stream().map(RadarNetworkApi::contact).toList();
+        if (group == null) return List.of();
+        LinkedHashMap<String, RadarContact> contacts = new LinkedHashMap<>();
+        for (BlockPos radarPos : group.radarEndpoints.keySet()) {
+            if (!level.hasChunkAt(radarPos)) continue;
+            BlockEntity be = level.getBlockEntity(radarPos);
+            if (!(be instanceof IRadar radar) || !radar.isRunning()) continue;
+            Collection<RadarTrack> tracks = radar.getTracks();
+            if (tracks == null) continue;
+            for (RadarTrack track : tracks) {
+                if (track == null || track.getId() == null) continue;
+                contacts.putIfAbsent(track.getId(), contact(track));
+            }
+        }
+        return List.copyOf(contacts.values());
     }
 
     private static RadarContact contact(RadarTrack track) {
@@ -65,7 +76,7 @@ public final class RadarNetworkApi {
 
     public static Collection<BlockPos> getRadarPositions(ServerLevel level, BlockPos networkPos) {
         NetworkData.Group group = group(level, networkPos);
-        return group == null || group.radarPos == null ? List.of() : List.of(group.radarPos.immutable());
+        return group == null ? List.of() : List.copyOf(group.radarEndpoints.keySet());
     }
 
     public static boolean isLinked(ServerLevel level, BlockPos endpointPos) {
@@ -74,7 +85,7 @@ public final class RadarNetworkApi {
 
     public static boolean isRadarLinked(ServerLevel level, BlockPos radarPos) {
         NetworkData.Group group = group(level, radarPos);
-        return group != null && radarPos.equals(group.radarPos);
+        return group != null && group.radarEndpoints.containsKey(radarPos);
     }
 
     public static Optional<RadarNetworkView> getNetworkView(ServerLevel level, BlockPos networkPos) {
@@ -83,7 +94,7 @@ public final class RadarNetworkApi {
         if (filtererPos == null) return Optional.empty();
         NetworkData.Group group = NetworkData.get(level).getGroup(level.dimension(), filtererPos);
         if (group == null) return Optional.empty();
-        List<BlockPos> radars = group.radarPos == null ? List.of() : List.of(group.radarPos.immutable());
+        List<BlockPos> radars = group.radarEndpoints.keySet().stream().map(BlockPos::immutable).toList();
         List<BlockPos> monitors = group.monitorEndpoints.stream().map(BlockPos::immutable).toList();
         List<BlockPos> weapons = group.weaponEndpoints.stream().map(BlockPos::immutable).toList();
         BlockPos controller = filtererPos.immutable();

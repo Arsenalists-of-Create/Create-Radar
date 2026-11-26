@@ -285,29 +285,18 @@ public class DataLinkBlockItem extends BlockItem {
 
             switch (target.kind) {
                 case MONITOR -> canAttach = filterData.canAttachMonitor(fGroup, clickedPos);
-
                 case RADAR_BEARING -> canAttach = filterData.canAttachRadar(fGroup, clickedPos, NetworkData.RadarKind.BEARING);
-
                 case RADAR_STATIONARY -> canAttach = filterData.canAttachRadar(fGroup, clickedPos, NetworkData.RadarKind.STATIONARY);
-
                 case CONTROLLER -> {
-                    if (!(be instanceof AutoPitchControllerBlockEntity)) {
-                        player.displayClientMessage(
-                                Component.translatable(CreateRadar.MODID + ".data_link.only_pitch_allowed")
-                                        .withStyle(ChatFormatting.RED),
-                                true
-                        );
+                    if (!(be instanceof AutoPitchControllerBlockEntity) && !(be instanceof AutoYawControllerBlockEntity)) {
+                        player.displayClientMessage(Component.translatable(CreateRadar.MODID + ".data_link.invalid_filter_target").withStyle(ChatFormatting.RED), true);
                         stack.setTag(null);
                         return InteractionResult.FAIL;
                     }
 
                     weaponMountPos = WeaponNetworkRuntime.getMountForController(serverLevel, clickedPos);
                     if (weaponMountPos == null) {
-                        player.displayClientMessage(
-                                Component.translatable(CreateRadar.MODID + ".data_link.controller_no_weapon_group")
-                                        .withStyle(ChatFormatting.RED),
-                                true
-                        );
+                        player.displayClientMessage(Component.translatable(CreateRadar.MODID + ".data_link.controller_no_weapon_group").withStyle(ChatFormatting.RED), true);
                         stack.setTag(null);
                         return InteractionResult.FAIL;
                     }
@@ -320,11 +309,7 @@ public class DataLinkBlockItem extends BlockItem {
             }
 
             if (!canAttach) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID + ".data_link.filter_attach_denied")
-                                .withStyle(ChatFormatting.RED),
-                        true
-                );
+                player.displayClientMessage(Component.translatable(CreateRadar.MODID + ".data_link.filter_attach_denied").withStyle(ChatFormatting.RED), true);
                 stack.setTag(null);
                 return InteractionResult.FAIL;
             }
@@ -337,11 +322,7 @@ public class DataLinkBlockItem extends BlockItem {
             }
 
             if (!(level.getBlockState(placedPos).getBlock() instanceof DataLinkBlock)) {
-                player.displayClientMessage(
-                        Component.translatable(CreateRadar.MODID + ".data_link.place_failed")
-                                .withStyle(ChatFormatting.RED),
-                        true
-                );
+                player.displayClientMessage(Component.translatable(CreateRadar.MODID + ".data_link.place_failed").withStyle(ChatFormatting.RED), true);
                 stack.setTag(null);
                 return InteractionResult.FAIL;
             }
@@ -349,9 +330,7 @@ public class DataLinkBlockItem extends BlockItem {
             // Set texture/style for this link method
             BlockState dlState = level.getBlockState(placedPos);
             if (dlState.hasProperty(DataLinkBlock.LINK_STYLE)) {
-                level.setBlock(placedPos,
-                        dlState.setValue(DataLinkBlock.LINK_STYLE, DataLinkBlock.LinkStyle.RADAR),
-                        3);
+                level.setBlock(placedPos, dlState.setValue(DataLinkBlock.LINK_STYLE, DataLinkBlock.LinkStyle.RADAR), 3);
             }
 
             // Commit after placement
@@ -388,10 +367,7 @@ public class DataLinkBlockItem extends BlockItem {
 
             filterData.addDataLinkToGroup(fGroup, placedPos,clickedPos); // Might be issue later
 
-            player.displayClientMessage(
-                    Component.translatable("display_link.success").withStyle(ChatFormatting.GREEN),
-                    true
-            );
+            player.displayClientMessage(Component.translatable("display_link.success").withStyle(ChatFormatting.GREEN), true);
 
             stack.setTag(null);
             return InteractionResult.SUCCESS;
@@ -399,11 +375,7 @@ public class DataLinkBlockItem extends BlockItem {
 
 
         if (!level.isClientSide) {
-            player.displayClientMessage(
-                    Component.translatable(CreateRadar.MODID + ".data_link.select_mount_or_filterer_first")
-                            .withStyle(ChatFormatting.RED),
-                    true
-            );
+            player.displayClientMessage(Component.translatable(CreateRadar.MODID + ".data_link.select_mount_or_filterer_first").withStyle(ChatFormatting.RED), true);
         }
         return InteractionResult.FAIL;
     }
@@ -547,9 +519,7 @@ public class DataLinkBlockItem extends BlockItem {
 
         BlockState state = world.getBlockState(pos);
         VoxelShape shape = state.getShape(world, pos);
-        return shape.isEmpty() ? new AABB(BlockPos.ZERO)
-                : shape.bounds()
-                .move(pos);
+        return shape.isEmpty() ? new AABB(BlockPos.ZERO) : shape.bounds().move(pos);
     }
 
 
