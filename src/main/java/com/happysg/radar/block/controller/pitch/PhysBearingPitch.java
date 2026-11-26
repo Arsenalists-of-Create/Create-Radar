@@ -42,6 +42,11 @@ public class PhysBearingPitch {
     }
 
     public void setTarget(PhysBearingBlockEntity mount, Vec3 targetPos) {
+        if (mount.isRemoved() || !mount.isRunning()) {
+            controller.setRunning(false);
+            reset();
+            return;
+        }
         Ship ship = getShipIfPresent();
         Vec3 desired = ship != null ? toShipSpace(ship, targetPos) : targetPos;
 
@@ -58,6 +63,9 @@ public class PhysBearingPitch {
     }
 
     public boolean atTargetPitch(PhysBearingBlockEntity mount, boolean lag) {
+        if (mount.isRemoved() || !mount.isRunning()) {
+            return false;
+        }
         Double actualRad = mount.getActualAngle();
         if (actualRad == null) {
             return false;
@@ -89,6 +97,9 @@ public class PhysBearingPitch {
     }
 
     private void rotatePhysBearing(PhysBearingBlockEntity mount) {
+        if (mount.isRemoved() || !mount.isRunning()) {
+            return;
+        }
         ensureFollowAngleMode(mount);
 
         double rpmAbs = Math.abs(controller.getAvailableInputSpeed());

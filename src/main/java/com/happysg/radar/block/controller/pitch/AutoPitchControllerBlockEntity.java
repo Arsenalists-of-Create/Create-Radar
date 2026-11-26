@@ -155,6 +155,12 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
         cbcShaftDrive.reset(this::commandGeneratedSpeed);
         if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
+            if (mount.phys.isRemoved() || !mount.phys.isRunning()) {
+                if (isRunning) {
+                    failClosedRadarAim();
+                }
+                return;
+            }
             physHandler.tick(mount.phys);
         } else if (mount.kind == MountKind.API && mount.api != null) {
             apiHandler.tick(mount.api);
@@ -543,16 +549,26 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             }
         }
 
-        boolean mountChanged = !sameMount(cachedMount, newMount);
+        Mount oldMount = cachedMount;
+        boolean mountChanged = !sameMount(oldMount, newMount);
         cachedMount = newMount;
         cachedMountEndpointPos = mountPos == null ? null : mountPos.immutable();
         mountResolutionTick = level.getGameTime();
         mountDirty = false;
 
-        if (newMount == null) {
+        if (newMount == null || (oldMount != null && mountChanged)) {
             isRunning = false;
             lastTargetPos = null;
+            track = null;
             physHandler.reset();
+            if (firingControl != null) {
+                firingControl.resetTarget();
+                firingControl = null;
+            }
+            autoyaw = null;
+            cbcShaftDrive.reset(this::commandGeneratedSpeed);
+            kineticControllerState.endContinuousTracking();
+            kineticControllerState.onTargetChanged(false, targetAngle, 0.05);
         }
 
         if (mountChanged) {

@@ -122,6 +122,12 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity i
                         this::commandGeneratedSpeed
                 );
             } else if (mount.kind == MountKind.PHYS && Mods.VS_CLOCKWORK.isLoaded()) {
+                if (mount.phys.isRemoved() || !mount.phys.isRunning()) {
+                    if (isRunning) {
+                        failClosedRadarAim();
+                    }
+                    return;
+                }
                 if (level.getGameTime() % 20 == 5) {
                     physHandler.maybeUpdateYawZeroFromCannonInitialOrientation();
                 }
@@ -349,16 +355,20 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity i
             }
         }
 
-        boolean mountChanged = !sameMount(cachedMount, newMount);
+        Mount oldMount = cachedMount;
+        boolean mountChanged = !sameMount(oldMount, newMount);
         cachedMount = newMount;
         cachedMountEndpointPos = mountPos == null ? null : mountPos.immutable();
         mountResolutionTick = level.getGameTime();
         mountDirty = false;
 
-        if (newMount == null) {
+        if (newMount == null || (oldMount != null && mountChanged)) {
             isRunning = false;
             hasLastCbcYawWritten = false;
             physHandler.reset();
+            cbcShaftDrive.reset(this::commandGeneratedSpeed);
+            kineticControllerState.endContinuousTracking();
+            kineticControllerState.onTargetChanged(false, targetAngle, 0.05);
         }
 
         if (mountChanged) {

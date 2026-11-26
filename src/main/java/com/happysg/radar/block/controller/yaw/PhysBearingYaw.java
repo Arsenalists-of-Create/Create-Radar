@@ -34,6 +34,10 @@ public class PhysBearingYaw {
     }
 
     public void setTarget(PhysBearingBlockEntity mount, Vec3 targetPos) {
+        if (mount.isRemoved() || !mount.isRunning()) {
+            controller.setRunning(false);
+            return;
+        }
         Vec3 cannonCenter = controller.isUpsideDown()
                 ? controller.getBlockPos().below(3).getCenter()
                 : controller.getBlockPos().above(3).getCenter();
@@ -50,6 +54,9 @@ public class PhysBearingYaw {
     }
 
     public boolean atTargetYaw(PhysBearingBlockEntity mount, boolean lag) {
+        if (mount.isRemoved() || !mount.isRunning()) {
+            return false;
+        }
         Double actualRad = mount.getActualAngle();
         if (actualRad == null) {
             return false;
@@ -147,6 +154,9 @@ public class PhysBearingYaw {
     }
 
     private void rotatePhysBearing(PhysBearingBlockEntity mount) {
+        if (mount.isRemoved() || !mount.isRunning()) {
+            return;
+        }
         ensureFollowAngleMode(mount);
 
         if (!controller.isRunningController()) {
