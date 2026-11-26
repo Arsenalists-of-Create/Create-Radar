@@ -2,7 +2,7 @@ package com.happysg.radar.compat.vs2;
 
 import com.happysg.radar.compat.Mods;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Vec3i;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
@@ -11,19 +11,20 @@ import org.joml.Vector3d;
 import org.valkyrienskies.core.api.ships.LoadedShip;
 import org.valkyrienskies.core.api.ships.Ship;
 import org.valkyrienskies.mod.common.VSGameUtilsKt;
-import org.valkyrienskies.mod.common.util.VectorConversionsMCKt;
+import org.valkyrienskies.mod.common.ValkyrienSkiesMod;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 public class VS2Utils {
-
     public static BlockPos getWorldPos(Level level, BlockPos pos) {
         if (!Mods.VALKYRIENSKIES.isLoaded())
             return pos;
-        final LoadedShip loadedShip = VSGameUtilsKt.getShipObjectManagingPos(level, pos);
-        if (loadedShip != null) {
-            final Vector3d vec = loadedShip.getShipToWorld().transformPosition(new Vector3d(pos.getX(), pos.getY(), pos.getZ()));
-            VectorConversionsMCKt.toMinecraft(vec);
+        LoadedShip ship = getShipManagingPos(level, pos);
+        if (ship != null) {
+            Vector3d vec = ship.getShipToWorld().transformPosition(new Vector3d(pos.getX(), pos.getY(), pos.getZ()));
             return new BlockPos((int) vec.x(), (int) vec.y(), (int) vec.z());
         }
         return pos;
@@ -35,25 +36,11 @@ public class VS2Utils {
         return getShipVec(vec3, getShipManagingPos(be));
     }
 
-    public static Vec3 getShipVec(Vec3 vec3, Ship ship){
+    public static Vec3 getShipVec(Vec3 vec3, Ship ship) {
         if (!Mods.VALKYRIENSKIES.isLoaded())
             return vec3;
         if (ship != null) {
-            ship.getShipToWorld();
-            final Vector3d vec = ship.getWorldToShip().transformPosition(new Vector3d(vec3.x, vec3.y, vec3.z));
-            VectorConversionsMCKt.toMinecraft(vec);
-            return new Vec3(vec.x(), vec.y(), vec.z());
-        }
-        return vec3;
-    }
-
-    public static Vec3 getWorldVecDirectionTransform(Vec3 vec3, Ship ship) {
-        if (!Mods.VALKYRIENSKIES.isLoaded())
-            return vec3;
-        if (ship != null) {
-            ship.getShipToWorld();
-            final Vector3d vec = ship.getShipToWorld().transformDirection(new Vector3d(vec3.x, vec3.y, vec3.z));
-            VectorConversionsMCKt.toMinecraft(vec);
+            Vector3d vec = ship.getWorldToShip().transformPosition(new Vector3d(vec3.x, vec3.y, vec3.z));
             return new Vec3(vec.x(), vec.y(), vec.z());
         }
         return vec3;
@@ -63,6 +50,26 @@ public class VS2Utils {
         if (!Mods.VALKYRIENSKIES.isLoaded())
             return vec3;
         return getWorldVecDirectionTransform(vec3, getShipManagingPos(be));
+    }
+
+    public static Vec3 getWorldVecDirectionTransform(Vec3 vec3, Ship ship) {
+        if (!Mods.VALKYRIENSKIES.isLoaded())
+            return vec3;
+        if (ship != null) {
+            Vector3d vec = ship.getShipToWorld().transformDirection(new Vector3d(vec3.x, vec3.y, vec3.z));
+            return new Vec3(vec.x(), vec.y(), vec.z());
+        }
+        return vec3;
+    }
+
+    public static Vec3 getShipVecDirectionTransform(Vec3 vec3, Ship ship) {
+        if (!Mods.VALKYRIENSKIES.isLoaded())
+            return vec3;
+        if (ship != null) {
+            Vector3d vec = ship.getWorldToShip().transformDirection(new Vector3d(vec3.x, vec3.y, vec3.z));
+            return new Vec3(vec.x(), vec.y(), vec.z());
+        }
+        return vec3;
     }
 
     public static BlockPos getWorldPos(BlockEntity blockEntity) {
@@ -85,26 +92,49 @@ public class VS2Utils {
         return getShipManagingPos(blockEntity.getLevel(), blockEntity.getBlockPos());
     }
 
+    public static Set<UUID> getConnectedSublevelIds(Level level, BlockPos pos) {
+        if (!Mods.VALKYRIENSKIES.isLoaded())
+            return Set.of();
+
+        LoadedShip ship = getShipManagingPos(level, pos);
+        if (ship == null)
+            return Set.of();
+
+        long shipId = ship.getId();
+        if (!(level instanceof ServerLevel serverLevel))
+            return Set.of(new UUID(0L, shipId));
+
+        List<Long> connected = ValkyrienSkiesMod.getOrCreateGTPA(VSGameUtilsKt.getDimensionId(serverLevel)).getAllConnectedShips(shipId);
+        Set<UUID> ids = new HashSet<>();
+        ids.add(new UUID(0L, shipId));
+        for (long id : connected) ids.add(new UUID(0L, id));
+        return Set.copyOf(ids);
+    }
+
     public static Vec3 getWorldVec(Level level, BlockPos pos) {
         if (!Mods.VALKYRIENSKIES.isLoaded())
             return new Vec3(pos.getX(), pos.getY(), pos.getZ());
-        final LoadedShip loadedShip = VSGameUtilsKt.getShipObjectManagingPos(level, pos);
-        if (loadedShip != null) {
+        LoadedShip ship = getShipManagingPos(level, pos);
+        if (ship != null) {
             Vec3 center = pos.getCenter();
-            final Vector3d vec = loadedShip.getShipToWorld().transformPosition(new Vector3d(center.x, center.y, center.z));
-            VectorConversionsMCKt.toMinecraft(vec);
+            Vector3d vec = ship.getShipToWorld().transformPosition(new Vector3d(center.x, center.y, center.z));
             return new Vec3(vec.x(), vec.y(), vec.z());
         }
         return new Vec3(pos.getX(), pos.getY(), pos.getZ());
     }
-    public static Vec3 getWorldVec(Level level, Vec3 vec3){
+
+    public static Vec3 getWorldVec(Level level, Vec3 vec3) {
         if (!Mods.VALKYRIENSKIES.isLoaded())
             return vec3;
-        Vec3i vec3i = new Vec3i((int) vec3.x, (int) vec3.y, (int) vec3.z);
-        final LoadedShip loadedShip = VSGameUtilsKt.getShipObjectManagingPos(level, vec3i);
-        if (loadedShip != null) {
-            final Vector3d vec = loadedShip.getShipToWorld().transformPosition(new Vector3d(vec3.x, vec3.y, vec3.z));
-            VectorConversionsMCKt.toMinecraft(vec);
+        LoadedShip ship = VSGameUtilsKt.getShipObjectManagingPos(level, vec3.x, vec3.y, vec3.z);
+        return getWorldVec(vec3, ship);
+    }
+
+    public static Vec3 getWorldVec(Vec3 vec3, Ship ship) {
+        if (!Mods.VALKYRIENSKIES.isLoaded())
+            return vec3;
+        if (ship != null) {
+            Vector3d vec = ship.getShipToWorld().transformPosition(new Vector3d(vec3.x, vec3.y, vec3.z));
             return new Vec3(vec.x(), vec.y(), vec.z());
         }
         return vec3;
@@ -115,13 +145,16 @@ public class VS2Utils {
             return blockEntity.getBlockPos().getCenter();
         return getWorldVec(blockEntity.getLevel(), blockEntity.getBlockPos());
     }
+
     public static Vec3 getVec3FromVector(Vector3d vector) {
         return new Vec3(vector.x, vector.y, vector.z);
     }
+
     public static BlockPos getBlockPosFromVec3(Vec3 vec3) {
         return new BlockPos((int) vec3.x, (int) vec3.y, (int) vec3.z);
     }
-    public static Vector3d  getVector3dFromVec3(Vec3 vec) {
+
+    public static Vector3d getVector3dFromVec3(Vec3 vec) {
         return new Vector3d(vec.x, vec.y, vec.z);
     }
 
