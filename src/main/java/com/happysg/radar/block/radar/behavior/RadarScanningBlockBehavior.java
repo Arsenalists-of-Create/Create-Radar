@@ -133,7 +133,7 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
 
 
     private void updateRadarTracks() {
-        scanPos = PhysicsHandler.getWorldPos(bearingEntity).getCenter();
+        scanPos = PhysicsHandler.getWorldVec(bearingEntity);
         Level level = blockEntity.getLevel();
         boolean isServer = level instanceof net.minecraft.server.level.ServerLevel;
         net.minecraft.server.level.ServerLevel sl = isServer ? (net.minecraft.server.level.ServerLevel) level : null;
@@ -153,13 +153,22 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
             }
         }
 
+        Set<UUID> ownAndConnectedShips = PhysicsHandler.getConnectedSublevelIds(level, bearingEntity.getBlockPos());
+        for (UUID connectedShipId : ownAndConnectedShips) {
+            radarTracks.remove(Long.toString(connectedShipId.getLeastSignificantBits()));
+        }
         for (Ship ship : scannedShips) {
+            String shipTrackId = Long.toString(ship.getId());
+            if (ownAndConnectedShips.contains(new UUID(0L, ship.getId()))) {
+                radarTracks.remove(shipTrackId);
+                continue;
+            }
             Vec3 pos = RadarTrackUtil.getPosition(ship);
             if (isInFovAndRange(pos)) {
 
                 long key = ship.getId();
 
-                radarTracks.compute(ship.getSlug(), (id, track) -> {
+                radarTracks.compute(shipTrackId, (id, track) -> {
                     if (track == null) return RadarTrackUtil.getRadarTrack(ship, level);
                     track.updateRadarTrack(ship, level);
                     return track;
@@ -267,13 +276,14 @@ public class RadarScanningBlockBehavior extends BlockEntityBehaviour {
         splitAABB(getRadarAABB(), 256).forEach(aabb ->
                 VS2Utils.getLoadedShips(blockEntity.getLevel(), aabb).forEach(scannedShips::add));
 
-        scannedShips.remove(VS2Utils.getShipManagingPos(blockEntity));
+        Set<UUID> connected = PhysicsHandler.getConnectedSublevelIds(blockEntity.getLevel(), blockEntity.getBlockPos());
+        scannedShips.removeIf(ship -> connected.contains(new UUID(0L, ship.getId())));
     }
     private AABB getRadarAABB() {
-        BlockPos radarPos = PhysicsHandler.getWorldPos(blockEntity);
-        double x = radarPos.getX() + 0.5;
-        double y = radarPos.getY() + 0.5;
-        double z = radarPos.getZ() + 0.5;
+        Vec3 radarPos = PhysicsHandler.getWorldVec(blockEntity);
+        double x = radarPos.x;
+        double y = radarPos.y;
+        double z = radarPos.z;
 
         double yScan = RadarConfig.server().radarYScanRange.get();
         Level level = blockEntity.getLevel();
