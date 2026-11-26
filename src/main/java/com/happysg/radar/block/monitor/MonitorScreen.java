@@ -1228,7 +1228,6 @@ public class MonitorScreen extends Screen {
             }
 
             Vec3 position = "create_radar".equals(contact.sourceType()) ? visualPositions.getOrDefault(contact.id(), contact.position()) : contact.position();
-
             MonitorProjection.DisplayPoint point = projection.project(position);
 
             if (point.outside()) {

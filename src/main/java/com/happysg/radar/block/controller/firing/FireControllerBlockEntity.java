@@ -147,7 +147,7 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
     }
 
     public void setPowered(boolean powered) {
-        if (level == null || level.isClientSide)
+        if (level == null || level.isClientSide || isRemoved() || !level.hasChunkAt(worldPosition) || level.getBlockEntity(worldPosition) != this)
             return;
 
         if (powered) {
@@ -206,7 +206,7 @@ public class FireControllerBlockEntity extends SmartBlockEntity implements Radar
     }
 
     private void setPoweredInternal(boolean powered) {
-        if (level == null || level.isClientSide)
+        if (level == null || level.isClientSide || isRemoved() || !level.hasChunkAt(worldPosition) || level.getBlockEntity(worldPosition) != this)
             return;
 
         BlockState state = getBlockState();

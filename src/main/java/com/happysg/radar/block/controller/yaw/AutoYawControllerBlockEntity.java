@@ -1452,13 +1452,15 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity
 
     @Override
     public void onChunkUnloaded() {
-        clearYawOnlyAimControl();
+        yawOnlyAimControl = null;
         if (level != null && !level.isClientSide()) {
             if (level instanceof ServerLevel serverLevel) {
                 WeaponNetworkRuntime.get(serverLevel).unregisterContactController(worldPosition);
             }
-            stopDebugSwivelFollow("controller_chunk_unloaded", false);
-            releaseKineticActuator();
+            debugSwivelFollow.stop("controller_chunk_unloaded", (degrees, running) -> {});
+            kineticControllerState.release();
+            generatedSpeed = 0.0f;
+            isolatedGeneratorInitialized = false;
         }
         super.onChunkUnloaded();
     }
