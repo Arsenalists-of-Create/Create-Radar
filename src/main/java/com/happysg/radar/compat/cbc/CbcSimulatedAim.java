@@ -1,6 +1,7 @@
 package com.happysg.radar.compat.cbc;
 
 import com.happysg.radar.api.weapon.WeaponShotAdapterRegistry;
+import com.happysg.radar.compat.Mods;
 import com.happysg.radar.api.weapon.WeaponShotContext;
 import com.happysg.radar.api.weapon.WeaponShotProfile;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
@@ -38,7 +39,10 @@ public final class CbcSimulatedAim {
     private TargetingResult previousResult;
 
     public static boolean supports(AbstractMountedCannonContraption cannon) {
-        return cannon instanceof MountedBigCannonContraption || cannon instanceof MountedAutocannonContraption;
+        return cannon instanceof MountedBigCannonContraption
+                || cannon instanceof MountedAutocannonContraption
+                || Mods.CBC_AT.isLoaded() && com.happysg.radar.compat.cbc_at.CBCATCannonCompat.isCBCATCannon(cannon)
+                || Mods.CBCMODERNWARFARE.isLoaded() && com.happysg.radar.compat.cbcmw.CBCMWCannonCompat.isCBCMWCannon(cannon);
     }
 
     public void reset() {
@@ -83,6 +87,11 @@ public final class CbcSimulatedAim {
         previousResult = TargetingResult.noShot("unresolved ballistics");
 
         PitchOrientedContraptionEntity entity = mount.getContraption();
+        boolean addon = Mods.CBC_AT.isLoaded() && com.happysg.radar.compat.cbc_at.CBCATCannonCompat.isCBCATCannon(cannon)
+                || Mods.CBCMODERNWARFARE.isLoaded() && com.happysg.radar.compat.cbcmw.CBCMWCannonCompat.isCBCMWCannon(cannon);
+        if (addon && CBCMuzzleUtil.getMuzzleExitLocal(cannon) == null) {
+            return previousResult;
+        }
         Vec3 muzzle = CBCMuzzleUtil.getCBCSpawnAnchorWorld(entity);
         Vec3 pivot = entity.toGlobalVector(Vec3.atCenterOf(net.minecraft.core.BlockPos.ZERO), 0);
         Vec3 forward = CBCMuzzleUtil.getForwardWorld(entity);
@@ -93,11 +102,16 @@ public final class CbcSimulatedAim {
         double muzzleOffset = Math.max(0.0, muzzle.subtract(pivot).dot(forward));
         ProjectileModel model;
         int flightTicks;
-        WeaponShotProfile profile = cannon instanceof MountedBigCannonContraption
-                ? WeaponShotAdapterRegistry.resolve(new WeaponShotContext(level, mount.getBlockPos(), null, null))
+        WeaponShotProfile profile = addon || cannon instanceof MountedBigCannonContraption
+                ? WeaponShotAdapterRegistry.resolve(new WeaponShotContext(
+                        level, mount.getBlockPos(), null, null))
                 : null;
+        if (addon && profile == null) {
+            return previousResult;
+        }
         if (profile != null) {
-            if (profile.aimMode() != WeaponShotProfile.AimMode.BALLISTIC || profile.projectileModel() == null || profile.maxFlightTicks() <= 0) {
+            if (profile.aimMode() != WeaponShotProfile.AimMode.BALLISTIC
+                    || profile.projectileModel() == null || profile.maxFlightTicks() <= 0) {
                 return previousResult;
             }
             model = ProjectileModelBridge.toInternal(profile.projectileModel());
@@ -124,11 +138,15 @@ public final class CbcSimulatedAim {
                 flightTicks = Math.max(1, CannonUtil.getAutocannonLifetimeTicks(cannon));
             } else {
                 double distance = muzzle.distanceTo(target);
-                flightTicks = Math.max(160, Math.min(2400, (int) Math.ceil(distance / speed * 3.0 + 120.0)));
+                flightTicks = Math.max(160, Math.min(2400,
+                        (int) Math.ceil(distance / speed * 3.0 + 120.0)));
             }
-            model = ProjectileModel.cbc(speed, gravity, drag, dragDensity, ballistics.isQuadraticDrag());
+            model = ProjectileModel.cbc(speed, gravity, drag,
+                    dragDensity, ballistics.isQuadraticDrag());
         }
-        if (!Double.isFinite(model.muzzleSpeed()) || model.muzzleSpeed() <= 0.0 || !Double.isFinite(model.gravity()) || !Double.isFinite(model.drag()) || !Double.isFinite(model.dragDensity())) {
+        if (!Double.isFinite(model.muzzleSpeed()) || model.muzzleSpeed() <= 0.0
+                || !Double.isFinite(model.gravity()) || !Double.isFinite(model.drag())
+                || !Double.isFinite(model.dragDensity())) {
             return previousResult;
         }
 
@@ -174,6 +192,7 @@ public final class CbcSimulatedAim {
     }
 
     private static boolean finite(Vec3 vector) {
-        return vector != null && Double.isFinite(vector.x) && Double.isFinite(vector.y) && Double.isFinite(vector.z);
+        return vector != null && Double.isFinite(vector.x)
+                && Double.isFinite(vector.y) && Double.isFinite(vector.z);
     }
 }
