@@ -14,5 +14,37 @@
         "stream": false
       }
     ]
+  },
+  "rwr.sweep": {
+    "sounds": [
+      {
+        "name": "create_radar:sweep",
+        "stream": false
+      }
+    ]
+  },
+  "rwr.engaged": {
+    "sounds": [
+      {
+        "name": "create_radar:engaged",
+        "stream": false
+      }
+    ]
+  },
+  "sonar.hum": {
+    "sounds": [
+      {
+        "name": "create_radar:computer_humming",
+        "stream": false
+      }
+    ]
+  },
+  "sonar.ping": {
+    "sounds": [
+      {
+        "name": "create_radar:sonar_ping",
+        "stream": false
+      }
+    ]
   }
 }
