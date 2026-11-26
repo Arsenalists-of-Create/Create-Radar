@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.yaw;
 
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -14,7 +15,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.Level;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 
-public class AutoYawControllerBlock extends DirectionalKineticBlock implements IBE<AutoYawControllerBlockEntity> {
+public class AutoYawControllerBlock extends DirectionalKineticBlock implements IBE<AutoYawControllerBlockEntity>, PlacementShaftTarget {
 
     public AutoYawControllerBlock(Properties properties) {
         super(properties);
@@ -28,6 +29,11 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
     @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
         return face == state.getValue(FACING).getOpposite();
+    }
+
+    @Override
+    public boolean hasPlacementShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
+        return face.getAxis() == Direction.Axis.Y;
     }
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
@@ -53,9 +59,6 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!level.isClientSide && state.getBlock() != newState.getBlock() ) {
-            if (level.getBlockEntity(pos) instanceof AutoYawControllerBlockEntity controller) {
-                controller.releaseKineticActuator();
-            }
             breakAttachedDataLinks(level, pos);
         }
         super.onRemove(state, level, pos, newState, isMoving);
@@ -80,14 +83,6 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
             }
 
             level.destroyBlock(linkPos, true);
-        }
-    }
-
-    @Override
-    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
-        super.onPlace(state, level, pos, oldState, isMoving);
-        if (!level.isClientSide && level.getBlockEntity(pos) instanceof AutoYawControllerBlockEntity yaw) {
-            yaw.markMountDirtyExternal();
         }
     }
 

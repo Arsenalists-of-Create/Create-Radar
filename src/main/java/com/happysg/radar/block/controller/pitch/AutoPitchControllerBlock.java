@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.pitch;
 
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.happysg.radar.block.datalink.DataLinkBlock;
+import com.happysg.radar.block.controller.kinetic.PlacementShaftTarget;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
 import com.simibubi.create.foundation.block.IBE;
 import net.minecraft.core.BlockPos;
@@ -15,8 +16,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
 
-public class AutoPitchControllerBlock extends HorizontalKineticBlock implements IBE<AutoPitchControllerBlockEntity> {
-
+public class AutoPitchControllerBlock extends HorizontalKineticBlock implements IBE<AutoPitchControllerBlockEntity>, PlacementShaftTarget {
     public AutoPitchControllerBlock(Properties properties) {
         super(properties);
     }
@@ -29,6 +29,11 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
     @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
         return face == state.getValue(HORIZONTAL_FACING);
+    }
+
+    @Override
+    public boolean hasPlacementShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
+        return face.getAxis() == state.getValue(HORIZONTAL_FACING).getAxis();
     }
 
     @Override
@@ -51,9 +56,6 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!level.isClientSide && state.getBlock() != newState.getBlock() ) {
-            if (level.getBlockEntity(pos) instanceof AutoPitchControllerBlockEntity controller) {
-                controller.releaseKineticActuator();
-            }
             breakAttachedDataLinks(level, pos);
         }
         super.onRemove(state, level, pos, newState, isMoving);
