@@ -136,15 +136,7 @@ public class NetworkData extends SavedData {
         }
 
 
-        String controllerKey = posKey(dim, brokenPos);
-        String mountKey = controllerToWeaponMount.remove(controllerKey);
-        if (mountKey != null) {
-            String owningFiltererKey = weaponMountToFilterer.get(mountKey);
-            if (owningFiltererKey != null && groupsByFilterer.containsKey(owningFiltererKey)) {
-                dissolveGroup(level, owningFiltererKey);
-                setDirty();
-            }
-        }
+        onEndpointRemoved(level, brokenPos);
     }
     private void dissolveGroup(ServerLevel level, String filtererKey) {
         Group group = groupsByFilterer.remove(filtererKey);
@@ -194,6 +186,7 @@ public class NetworkData extends SavedData {
     private void notifyNodeDisconnected(ServerLevel level, @Nullable BlockPos pos) {
         if (pos == null) return;
 
+        if (!level.hasChunkAt(pos)) return;
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof INetworkNode node) {
             node.onNetworkDisconnected();
@@ -558,13 +551,20 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         String newK = key(dim, newEndpoint);
 
 
-        String filtererKey = endpointToFilterer.remove(oldK);
+        String filtererKey = endpointToFilterer.get(oldK);
         if (filtererKey == null) return;
-
-
-        endpointToFilterer.put(newK, filtererKey);
+        String existingOwner = endpointToFilterer.get(newK);
+        if (existingOwner != null) return;
 
         Group group = groupsByFilterer.get(filtererKey);
+        if (group == null || group.monitorEndpoints.contains(newEndpoint)
+                || group.radarEndpoints.containsKey(newEndpoint)
+                || group.weaponEndpoints.contains(newEndpoint)
+                || group.dataLinks.contains(newEndpoint)
+                || newEndpoint.equals(group.key.filtererPos())) return;
+
+        endpointToFilterer.remove(oldK);
+        endpointToFilterer.put(newK, filtererKey);
         if (group != null) {
             if (group.monitorEndpoints.remove(oldEndpoint)) {
                 group.monitorEndpoints.add(newEndpoint);
@@ -581,6 +581,8 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
             if (group.weaponEndpoints.remove(oldEndpoint)) {
                 group.weaponEndpoints.add(newEndpoint);
+                String mountKey = controllerToWeaponMount.remove(oldK);
+                if (mountKey != null) controllerToWeaponMount.put(newK, mountKey);
             }
         }
 
@@ -604,70 +606,75 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
 
     public void removeDataLinkAndCleanup(ResourceKey<Level> dim, BlockPos dataLinkPos, @Nullable ServerLevel level) {
-        String dlKey = key(dim, dataLinkPos);
+        String linkKey = key(dim, dataLinkPos);
+        String filtererKey = dataLinkToFilterer.remove(linkKey);
+        String endpointKey = dataLinkToEndpoint.remove(linkKey);
+        if (filtererKey == null) return;
 
-        String filtererKey = dataLinkToFilterer.remove(dlKey);
-        String endpointKey = dataLinkToEndpoint.remove(dlKey);
-
-        if (filtererKey == null) {
+        Group group = groupsByFilterer.get(filtererKey);
+        if (group == null) {
             setDirty();
             return;
         }
 
-        Group group = groupsByFilterer.get(filtererKey);
-        if (group != null) {
-            group.dataLinks.remove(dataLinkPos);
-        }
-
-        if (endpointKey != null && group != null && level != null) {
+        group.dataLinks.remove(dataLinkPos);
+        if (endpointKey != null) {
             BlockPos endpointPos = posFromKey(endpointKey);
-
-            BlockPos normalizedEndpoint = endpointPos;
-            BlockEntity endpointBe = level.getBlockEntity(endpointPos);
-            if (endpointBe instanceof MonitorBlockEntity endpointMonitor) {
-                normalizedEndpoint = endpointMonitor.getControllerPos();
+            BlockPos normalizedPos = endpointPos;
+            if (level != null && level.hasChunkAt(endpointPos)) {
+                BlockEntity endpoint = level.getBlockEntity(endpointPos);
+                if (endpoint instanceof MonitorBlockEntity monitor) {
+                    normalizedPos = monitor.getControllerPos();
+                }
             }
 
-            boolean isMonitorEndpoint = group.monitorEndpoints.contains(normalizedEndpoint) || group.monitorEndpoints.contains(endpointPos);
-
-            if (isMonitorEndpoint) {
-                BlockPos controllerPos = group.monitorEndpoints.contains(normalizedEndpoint) ? normalizedEndpoint : endpointPos;
-
-                BlockEntity controllerBe = level.getBlockEntity(controllerPos);
-                if (!(controllerBe instanceof MonitorBlockEntity) && endpointBe instanceof MonitorBlockEntity) {
-                    controllerBe = endpointBe;
+            String normalizedKey = key(dim, normalizedPos);
+            boolean hasOtherLink = false;
+            for (Map.Entry<String, String> link : dataLinkToEndpoint.entrySet()) {
+                if (!filtererKey.equals(dataLinkToFilterer.get(link.getKey()))) continue;
+                String otherEndpoint = link.getValue();
+                if (endpointKey.equals(otherEndpoint) || normalizedKey.equals(otherEndpoint)) {
+                    hasOtherLink = true;
+                    break;
                 }
-
-                if (controllerBe instanceof MonitorBlockEntity monitor) {
-                    monitor.onNetworkDisconnected();
+                if (level != null && group.monitorEndpoints.contains(normalizedPos)) {
+                    BlockPos otherPos = posFromKey(otherEndpoint);
+                    if (level.hasChunkAt(otherPos)
+                            && level.getBlockEntity(otherPos) instanceof MonitorBlockEntity monitor
+                            && normalizedPos.equals(monitor.getControllerPos())) {
+                        hasOtherLink = true;
+                        break;
+                    }
                 }
+            }
 
-                group.monitorEndpoints.remove(controllerPos);
-
-                // remove indices for both clicked endpoint and controller
-                endpointToFilterer.remove(endpointKey);
-                endpointToFilterer.remove(key(level.dimension(), controllerPos));
-            } else if (group.radarEndpoints.remove(endpointPos) != null) {
-                group.syncPrimaryRadar();
-                endpointToFilterer.remove(endpointKey);
-
-            } else if (group.weaponEndpoints.remove(endpointPos)) {
-                endpointToFilterer.remove(endpointKey);
-
-                // If you use controllerToWeaponMount, free it deterministically
-                String mountKey = controllerToWeaponMount.remove(endpointKey);
-                if (mountKey != null) {
-                    releaseWeaponMountIfUnused(group, mountKey);
+            if (!hasOtherLink) {
+                if (group.monitorEndpoints.remove(normalizedPos)) {
+                    endpointToFilterer.remove(normalizedKey, filtererKey);
+                    endpointToFilterer.remove(endpointKey, filtererKey);
+                    if (level != null && level.hasChunkAt(normalizedPos)) {
+                        notifyNodeDisconnected(level, normalizedPos);
+                    }
+                } else if (group.radarEndpoints.remove(endpointPos) != null) {
+                    group.syncPrimaryRadar();
+                    endpointToFilterer.remove(endpointKey, filtererKey);
+                    if (level != null && level.hasChunkAt(endpointPos)) {
+                        notifyNodeDisconnected(level, endpointPos);
+                    }
+                } else if (group.weaponEndpoints.remove(endpointPos)) {
+                    endpointToFilterer.remove(endpointKey, filtererKey);
+                    String mountKey = controllerToWeaponMount.remove(endpointKey);
+                    if (mountKey != null) releaseWeaponMountIfUnused(group, mountKey);
+                    if (level != null && level.hasChunkAt(endpointPos)) {
+                        notifyNodeDisconnected(level, endpointPos);
+                    }
                 }
             }
         }
 
-        // autodelete empty group
         cleanupIfEmpty(filtererKey);
-
         setDirty();
     }
-
 
     private void cleanupIfEmpty(String filtererKey) {
         Group group = groupsByFilterer.get(filtererKey);
@@ -698,71 +705,66 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
 
     public void onEndpointRemoved(ServerLevel level, BlockPos endpointPos) {
-        if (endpointPos == null || level == null) return;
-
+        if (level == null || endpointPos == null) return;
         ResourceKey<Level> dim = level.dimension();
-
-        BlockEntity be = level.getBlockEntity(endpointPos);
-        if (be instanceof MonitorBlockEntity m) {
-            BlockPos controllerPos = m.getControllerPos();
-            if (controllerPos != null) {
-                endpointPos = controllerPos;
-            }
+        String originalEndpointKey = key(dim, endpointPos);
+        BlockPos normalizedPos = endpointPos;
+        if (level.hasChunkAt(endpointPos)
+                && level.getBlockEntity(endpointPos) instanceof MonitorBlockEntity monitor) {
+            normalizedPos = monitor.getControllerPos();
         }
-
-        String endpointKey = key(dim, endpointPos);
+        String endpointKey = key(dim, normalizedPos);
         String filtererKey = endpointToFilterer.get(endpointKey);
+        if (filtererKey == null) filtererKey = endpointToFilterer.get(originalEndpointKey);
         if (filtererKey == null) return;
 
         Group group = groupsByFilterer.get(filtererKey);
         if (group == null) {
-            endpointToFilterer.remove(endpointKey);
+            endpointToFilterer.remove(endpointKey, filtererKey);
+            endpointToFilterer.remove(originalEndpointKey, filtererKey);
+            setDirty();
             return;
         }
 
-        if (group.monitorEndpoints.remove(endpointPos)) {
-            endpointToFilterer.remove(endpointKey);
-
+        boolean removed = false;
+        if (group.monitorEndpoints.remove(normalizedPos)) {
+            removed = true;
         } else if (group.radarEndpoints.remove(endpointPos) != null) {
             group.syncPrimaryRadar();
-            endpointToFilterer.remove(endpointKey);
-
+            removed = true;
         } else if (group.weaponEndpoints.remove(endpointPos)) {
-            endpointToFilterer.remove(endpointKey);
-
-            String mountKey = controllerToWeaponMount.remove(endpointKey);
-            if (mountKey != null) {
-                releaseWeaponMountIfUnused(group, mountKey);
-            }
-
-        } else {
-            endpointToFilterer.remove(endpointKey);
+            String mountKey = controllerToWeaponMount.remove(originalEndpointKey);
+            if (mountKey != null) releaseWeaponMountIfUnused(group, mountKey);
+            removed = true;
         }
 
-        // Remove any datalinks targeting this endpoint
-        List<String> dlKeysToRemove = new ArrayList<>();
-        for (Map.Entry<String, String> e : dataLinkToEndpoint.entrySet()) {
-            if (endpointKey.equals(e.getValue())) {
-                dlKeysToRemove.add(e.getKey());
-            }
+        if (removed) {
+            endpointToFilterer.remove(endpointKey, filtererKey);
+            endpointToFilterer.remove(originalEndpointKey, filtererKey);
         }
 
-        for (String dlKey : dlKeysToRemove) {
-            dataLinkToEndpoint.remove(dlKey);
-
-            String owner = dataLinkToFilterer.get(dlKey);
-            if (filtererKey.equals(owner)) {
-                dataLinkToFilterer.remove(dlKey);
-
-                BlockPos dlPos = posFromKey(dlKey);
-                group.dataLinks.remove(dlPos);
+        List<String> staleLinkKeys = new ArrayList<>();
+        for (Map.Entry<String, String> entry : dataLinkToEndpoint.entrySet()) {
+            if (!filtererKey.equals(dataLinkToFilterer.get(entry.getKey()))) continue;
+            if (endpointKey.equals(entry.getValue()) || originalEndpointKey.equals(entry.getValue())) {
+                staleLinkKeys.add(entry.getKey());
+                continue;
             }
+            BlockPos otherPos = posFromKey(entry.getValue());
+            if (group.monitorEndpoints.contains(normalizedPos)
+                    || !level.hasChunkAt(otherPos)
+                    || !(level.getBlockEntity(otherPos) instanceof MonitorBlockEntity other)) continue;
+            if (normalizedPos.equals(other.getControllerPos())) staleLinkKeys.add(entry.getKey());
+        }
+        for (String staleLink : staleLinkKeys) {
+            dataLinkToEndpoint.remove(staleLink);
+            dataLinkToFilterer.remove(staleLink, filtererKey);
+            group.dataLinks.remove(posFromKey(staleLink));
         }
 
         cleanupIfEmpty(filtererKey);
         setDirty();
     }
-
 
     public void setTargetingConfig(Group group, TargetingConfig cfg) {
         CompoundTag root = new CompoundTag();
@@ -939,6 +941,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
             }
 
             // datalinks
+            List<BlockPos> staleLinks = new ArrayList<>();
             if (!group.dataLinks.isEmpty()) {
                 Iterator<BlockPos> it = group.dataLinks.iterator();
                 while (it.hasNext()) {
@@ -947,10 +950,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
                     // if datalink block is definitely gone, drop it
                     if (isDefinitelyMissing(level, dlPos, onlyIfChunkLoaded, true)) {
-                        it.remove();
-                        dataLinkToFilterer.remove(dlKey);
-                        dataLinkToEndpoint.remove(dlKey);
-                        dataLinksRemoved++;
+                        staleLinks.add(dlPos);
                         continue;
                     }
 
@@ -964,6 +964,11 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                         }
                     }
                 }
+            }
+
+            for (BlockPos staleLink : staleLinks) {
+                removeDataLinkAndCleanup(levelDim, staleLink, level);
+                dataLinksRemoved++;
             }
 
             // delete group if it becomes empty after scrub
@@ -1274,7 +1279,11 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
         if (!g.radarEndpoints.containsKey(oldPos))
             return false;
-        if (g.radarEndpoints.containsKey(newPos))
+        if (g.radarEndpoints.containsKey(newPos)
+                || g.monitorEndpoints.contains(newPos)
+                || g.weaponEndpoints.contains(newPos)
+                || g.dataLinks.contains(newPos)
+                || newPos.equals(g.key.filtererPos()))
             return false;
 
         LinkedHashMap<BlockPos, RadarKind> moved = new LinkedHashMap<>();

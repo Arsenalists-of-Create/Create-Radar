@@ -1,6 +1,8 @@
 package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.vs2.VSAssemblySuppression;
 import com.happysg.radar.config.RadarConfig;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.mojang.logging.LogUtils;
@@ -28,7 +30,6 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fml.DistExecutor;
 import org.jetbrains.annotations.NotNull;
 
-
 public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<MonitorBlockEntity> {
     public MonitorBlock(Properties pProperties) {
         super(pProperties);
@@ -42,8 +43,7 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         return this.defaultBlockState()
-                .setValue(FACING, context.getHorizontalDirection()
-                        .getOpposite());
+                .setValue(FACING, context.getHorizontalDirection().getOpposite());
     }
 
     @Override
@@ -54,16 +54,17 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
 
     @Override
     public void onRemove(@NotNull BlockState pState, @NotNull Level pLevel, @NotNull BlockPos pPos, @NotNull BlockState pNewState, boolean pIsMoving) {
-        MonitorMultiBlockHelper.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
-        if (pLevel instanceof ServerLevel sl) {
+        if (!pState.is(pNewState.getBlock()) && !pIsMoving
+                && pLevel instanceof ServerLevel sl
+                && !(Mods.VALKYRIENSKIES.isLoaded() && VSAssemblySuppression.isSuppressed(sl))) {
             NetworkData.get(sl).onEndpointRemoved(sl, pPos);
+            MonitorMultiBlockHelper.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
         }
         super.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
     }
 
     @Override
     public void onNeighborChange(BlockState state, LevelReader level, BlockPos pos, BlockPos neighbor) {
-        //todo deal with this for contraption movements
         MonitorMultiBlockHelper.onNeighborChange(state, level, pos, neighbor);
         super.onNeighborChange(state, level, pos, neighbor);
     }
@@ -72,24 +73,17 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
     public @NotNull InteractionResult use(@NotNull BlockState pState, @NotNull Level pLevel, @NotNull BlockPos pPos, Player pPlayer, @NotNull InteractionHand pHand, @NotNull BlockHitResult pHit) {
         if (!pPlayer.getMainHandItem().isEmpty() || pHand == InteractionHand.OFF_HAND)
             return InteractionResult.PASS;
-        if(RadarConfig.client().useGuiByDefault.get()){
+        if (RadarConfig.client().useGuiByDefault.get()) {
             BlockEntity be = pLevel.getBlockEntity(pPos);
             if (be instanceof MonitorBlockEntity monitor) {
-                if (pLevel.isClientSide) {
-                    openMonitorScreenClient(monitor);
-                }
+                if (pLevel.isClientSide) openMonitorScreenClient(monitor);
                 return InteractionResult.sidedSuccess(pLevel.isClientSide);
             }
         }
         if (pPlayer.isShiftKeyDown()) {
             BlockEntity be = pLevel.getBlockEntity(pPos);
             if (be instanceof MonitorBlockEntity monitor && isGuiHotspot(monitor, pHit)) {
-
-                // i only open the GUI on the client
-                if (pLevel.isClientSide) {
-                    openMonitorScreenClient(monitor);
-                } else {
-                }
+                if (pLevel.isClientSide) openMonitorScreenClient(monitor);
                 return InteractionResult.sidedSuccess(pLevel.isClientSide);
             }
         }
@@ -121,6 +115,7 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
         builder.add(SHAPE);
         super.createBlockStateDefinition(builder);
     }
+
     private static boolean isGuiHotspot(MonitorBlockEntity anyPiece, BlockHitResult hit) {
         if (anyPiece == null || anyPiece.getLevel() == null) return false;
 
@@ -128,38 +123,24 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
         if (controller == null) return false;
 
         Direction screenFace = controller.getBlockState().getValue(FACING);
-
-        // i only accept clicks on the actual screen face
         if (hit.getDirection() != screenFace) return false;
 
         BlockPos controllerPos = controller.getControllerPos();
         if (controllerPos == null) controllerPos = controller.getBlockPos();
-
-        // i keep the hotspot on the controller tile (your LOWER_RIGHT)
         if (!hit.getBlockPos().equals(controllerPos)) return false;
 
         int size = controller.getSize();
         if (size <= 0) return false;
 
-        // i use your sizing rule: ~3 px on 1x1, ~6 px on 3x3 (and bigger screens still get 6)
         int stripPx = (size == 1) ? 3 : 6;
-        float epsY = stripPx / 16f; // fraction of a block face
-
-        // i compute local coords inside the clicked block (0..1)
+        float epsY = stripPx / 16f;
         Vec3 local = hit.getLocation().subtract(controllerPos.getX(), controllerPos.getY(), controllerPos.getZ());
-
-        // v: 0 top -> 1 bottom
         float v = 1f - (float) local.y;
-
-        // bottom strip: any u, just v near bottom
         return v >= 1f - epsY;
     }
 
-
     private static void openMonitorScreenClient(MonitorBlockEntity anyPiece) {
-        // i pass only the position across, not the block entity
         BlockPos pos = anyPiece.getBlockPos();
-
         DistExecutor.unsafeRunWhenOn(
                 net.minecraftforge.api.distmarker.Dist.CLIENT,
                 () -> () -> Client.openMonitorScreen(pos)
@@ -172,7 +153,6 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
             var mc = net.minecraft.client.Minecraft.getInstance();
             if (mc.level == null) return;
 
-            // i re-fetch the BE client-side so i never carry server/common objects through DistExecutor
             BlockEntity be = mc.level.getBlockEntity(clickedPos);
             if (!(be instanceof MonitorBlockEntity anyPiece)) return;
 
@@ -181,11 +161,7 @@ public class MonitorBlock extends HorizontalDirectionalBlock implements IBE<Moni
 
             BlockPos controllerPos = controller.getControllerPos();
             if (controllerPos == null) controllerPos = controller.getBlockPos();
-
             mc.setScreen(new MonitorScreen(controllerPos));
         }
     }
-
-
-
 }

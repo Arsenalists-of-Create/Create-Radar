@@ -41,7 +41,6 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
         @Override public String getSerializedName() { return name; }
     }
 
-
     public static final EnumProperty<LinkStyle> LINK_STYLE = EnumProperty.create("link_style", LinkStyle.class);
 
     public static boolean isWeaponLink(LinkStyle style, DataLinkBlockEntity.WeaponEndpointType type) {
@@ -63,13 +62,10 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
                 .setValue(LINK_STYLE, LinkStyle.RADAR));
     }
 
-
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
         builder.add(FACING, LINK_STYLE);
     }
-
-
 
     @Override
     public boolean isPathfindable(BlockState pState, BlockGetter pLevel, BlockPos pPos, PathComputationType pType) {
@@ -80,7 +76,6 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
     public VoxelShape getShape(BlockState pState, BlockGetter pLevel, BlockPos pPos, CollisionContext pContext) {
         return AllShapes.DATA_GATHERER.get(pState.getValue(FACING));
     }
-
 
     public BlockState getStateForPlacement(BlockPlaceContext context) {
         BlockState placed = super.getStateForPlacement(context);
@@ -114,13 +109,7 @@ public class DataLinkBlock extends WrenchableDirectionalBlock implements IBE<Dat
 
             if (!isMoving && !(Mods.VALKYRIENSKIES.isLoaded() && VSAssemblySuppression.isSuppressed(serverLevel))) {
                 ResourceKey<Level> dim = serverLevel.dimension();
-                Direction supportFace = state.getValue(FACING);
-
                 NetworkData.get(serverLevel).removeDataLinkAndCleanup(dim, pos, serverLevel);
-
-                if (state.getValue(LINK_STYLE) == LinkStyle.RADAR) {
-                    NetworkData.get(serverLevel).onEndpointRemoved(serverLevel, pos.relative(supportFace.getOpposite()));
-                }
             }
         }
 

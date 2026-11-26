@@ -1,22 +1,17 @@
 package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.networking.NetworkHandler;
-import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
 
-/**
- * Client -> Server: select a track on a given monitor controller.
- */
 public class MonitorSelectionPacket {
-
-
     private final BlockPos controllerPos;
     private final String selectedId;
 
@@ -29,32 +24,28 @@ public class MonitorSelectionPacket {
         buf.writeBlockPos(msg.controllerPos);
         buf.writeBoolean(msg.selectedId != null);
         if (msg.selectedId != null) {
-            buf.writeUtf(msg.selectedId);
+            buf.writeUtf(msg.selectedId, 256);
         }
     }
 
     public static MonitorSelectionPacket decode(FriendlyByteBuf buf) {
         BlockPos pos = buf.readBlockPos();
-        String id = buf.readBoolean() ? buf.readUtf() : null;
+        String id = buf.readBoolean() ? buf.readUtf(256) : null;
         return new MonitorSelectionPacket(pos, id);
     }
 
     public static void handle(MonitorSelectionPacket msg, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
+            ServerPlayer player = ctx.get().getSender();
+            if (player == null || msg.controllerPos == null || !player.serverLevel().hasChunkAt(msg.controllerPos)) return;
+            if (!(player.serverLevel().getBlockEntity(msg.controllerPos) instanceof MonitorBlockEntity monitor)) return;
 
-            if(ctx.get().getSender() == null) return;
+            MonitorBlockEntity controller = monitor.isController() ? monitor : monitor.getController();
+            if (controller == null || controller.isRemoved() || !controller.isController() || !controller.isLinked()) return;
 
-            ServerPlayer sp = ctx.get().getSender();
-            if(sp == null) return;
-            if (!(sp.level().getBlockEntity(msg.controllerPos) instanceof MonitorBlockEntity be)){
-
-                return;
-            }
-
-
-            MonitorBlockEntity controller = be.isController() ? be : be.getController();
-            if (controller == null || !controller.isLinked())
-                return;
+            Vec3 worldPos = PhysicsHandler.getWorldVec(controller);
+            if (worldPos == null || !Double.isFinite(worldPos.x) || !Double.isFinite(worldPos.y)
+                    || !Double.isFinite(worldPos.z) || player.distanceToSqr(worldPos) > 256.0) return;
 
             if (msg.selectedId == null) {
                 controller.activetrack = null;
@@ -64,21 +55,14 @@ public class MonitorSelectionPacket {
                 return;
             }
 
-
-            RadarTrack found = null;
-            for (RadarTrack t : controller.cachedTracks) {
-                if (msg.selectedId.equals(t.id())) {
-                    found = t;
-                    break;
+            if (msg.selectedId.isBlank() || msg.selectedId.length() > 256) return;
+            controller.updateCacheServerOrClient();
+            for (RadarTrack track : controller.getTracks()) {
+                if (track != null && msg.selectedId.equals(track.getId())) {
+                    controller.setSelectedTargetServer(track);
+                    controller.notifyUpdate();
+                    return;
                 }
-            }
-
-            if (found != null) {
-                controller.selectedEntity = found.id();
-                controller.setSelectedTargetServer(found);
-                controller.notifyUpdate();
-            }else{
-
             }
         });
         ctx.get().setPacketHandled(true);

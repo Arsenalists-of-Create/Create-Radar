@@ -48,7 +48,7 @@ public class PhysicsHandler {
 
     public static Vec3 getWorldVec(Level level, BlockPos pos) {
         if (!Mods.VALKYRIENSKIES.isLoaded())
-            return new Vec3(pos.getX(), pos.getY(), pos.getZ());
+            return pos.getCenter();
         return VS2Utils.getWorldVec(level, pos);
     }
 

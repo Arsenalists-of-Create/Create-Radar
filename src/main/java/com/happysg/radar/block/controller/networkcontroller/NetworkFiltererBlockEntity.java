@@ -2,6 +2,7 @@ package com.happysg.radar.block.controller.networkcontroller;
 
 import com.happysg.radar.block.arad.aradnetworks.RadarContactRegistry;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.behavior.networks.RadarNetworkTrackView;
 import com.happysg.radar.block.behavior.networks.WeaponFiringControl;
 import com.happysg.radar.block.behavior.networks.config.AutoTargetingHelper;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
@@ -173,6 +174,7 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
         detectionCache = DetectionConfig.fromTag(group.detectionTag);
 
         LinkedHashMap<String, RadarTrack> mergedTracks = new LinkedHashMap<>();
+        Set<Long> connectedShipIds = null;
         boolean hasRunningRadar = false;
         for (BlockPos radarPos : group.radarEndpoints.keySet()) {
             if (!sl.hasChunkAt(radarPos)) continue;
@@ -182,8 +184,12 @@ public class NetworkFiltererBlockEntity extends BlockEntity {
             Collection<RadarTrack> tracks = radar.getTracks();
             if (tracks == null) continue;
             for (RadarTrack track : tracks) {
-                if (track == null || track.getId() == null || !detectionCache.test(track)) continue;
-                mergedTracks.putIfAbsent(track.getId(), track);
+                if (track == null || !detectionCache.test(track)) continue;
+                if (track.trackCategory() == TrackCategory.VS2) {
+                    if (connectedShipIds == null) connectedShipIds = RadarNetworkTrackView.connectedShipIds(sl, group);
+                    if (RadarNetworkTrackView.isOwnVs2Contact(track, connectedShipIds)) continue;
+                }
+                RadarNetworkTrackView.mergeNewest(mergedTracks, track);
             }
         }
 

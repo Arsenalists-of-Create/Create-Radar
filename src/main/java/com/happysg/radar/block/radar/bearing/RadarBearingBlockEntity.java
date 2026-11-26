@@ -38,7 +38,7 @@ import java.util.List;
 import java.util.Optional;
 
 public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implements IRadar {
-    private BlockPos lastKnownPos = BlockPos.ZERO;
+    private BlockPos lastKnownPos;
     private int dishCount;
     private boolean creative;
     private Direction receiverFacing = Direction.NORTH;
@@ -49,6 +49,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     public RadarBearingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
+        lastKnownPos = pos.immutable();
     }
 
     @Override
@@ -90,15 +91,16 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
                 ResourceKey<Level> dim = serverLevel.dimension();
                 NetworkData data = NetworkData.get(serverLevel);
 
-                boolean updated = data.updateRadarPosition(
-                        dim,
-                        lastKnownPos,
-                        worldPosition
-                );
+                if (data.getFiltererForEndpoint(dim, lastKnownPos) == null
+                        || (serverLevel.hasChunkAt(lastKnownPos)
+                        && serverLevel.getBlockEntity(lastKnownPos) instanceof IRadar)) {
+                    lastKnownPos = worldPosition.immutable();
+                    setChanged();
+                    return;
+                }
 
-                // only commit the new position if the network accepted it
-                if (updated) {
-                    lastKnownPos = worldPosition;
+                if (data.updateRadarPosition(dim, lastKnownPos, worldPosition)) {
+                    lastKnownPos = worldPosition.immutable();
                     setChanged();
                 }
             }
@@ -108,8 +110,15 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
 
     public float getGlobalAngle() {
         Vec3 receiverVector = new Vec3(receiverFacing.getStepX(), receiverFacing.getStepY(), receiverFacing.getStepZ());
-        float receiverAngle = (float) Math.toDegrees(Math.atan2(receiverVector.x, receiverVector.z));
-        return ((receiverAngle + angle + 360)+180) % 360;
+        double receiverAngle = Math.atan2(receiverVector.x, receiverVector.z);
+        double localYaw = receiverAngle + Math.toRadians(angle);
+        Vec3 localForward = new Vec3(Math.sin(localYaw), 0.0, Math.cos(localYaw));
+        Vec3 worldForward = PhysicsHandler.getWorldVecDirectionTransform(localForward, this);
+        if (worldForward == null || !Double.isFinite(worldForward.x) || !Double.isFinite(worldForward.z)
+                || worldForward.horizontalDistanceSqr() < 1.0e-12) {
+            return (float) ((Math.toDegrees(localYaw) + 540.0) % 360.0);
+        }
+        return (float) ((Math.toDegrees(Math.atan2(worldForward.x, worldForward.z)) + 540.0) % 360.0);
     }
 
     public float getAngularSpeed() {
@@ -208,6 +217,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     protected void read(CompoundTag compound, boolean clientPacket) {
         super.read(compound, clientPacket);
+        lastKnownPos = compound.contains("LastKnownPos") ? BlockPos.of(compound.getLong("LastKnownPos")) : worldPosition.immutable();
         dishCount = compound.getInt("dishCount");
         creative = compound.getBoolean("creative");
         if (compound.contains("receiverFacing"))
@@ -217,6 +227,7 @@ public class RadarBearingBlockEntity extends MechanicalBearingBlockEntity implem
     @Override
     public void write(CompoundTag compound, boolean clientPacket) {
         super.write(compound, clientPacket);
+        compound.putLong("LastKnownPos", lastKnownPos.asLong());
         compound.putInt("dishCount", dishCount);
         compound.putBoolean("creative", creative);
         if (receiverFacing != null)

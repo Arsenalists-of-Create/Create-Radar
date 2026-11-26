@@ -2,6 +2,7 @@ package com.happysg.radar.block.monitor;
 
 import com.happysg.radar.block.behavior.networks.INetworkNode;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.behavior.networks.RadarNetworkTrackView;
 import com.happysg.radar.block.behavior.networks.config.DetectionConfig;
 import com.happysg.radar.block.behavior.networks.config.TargetingConfig;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
@@ -64,11 +65,12 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
 
     /** Keep as field because renderer uses it (coloring). */
     protected DetectionConfig filter = DetectionConfig.DEFAULT;
-    private BlockPos lastKnownPos = BlockPos.ZERO;
+    private BlockPos lastKnownPos;
     public final List<AABB> safeZones = new ArrayList<>();
 
     public MonitorBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
+        lastKnownPos = pos.immutable();
     }
 
     @Override
@@ -91,6 +93,22 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         if (level == null)
             return;
 
+        if (!level.isClientSide && level.getGameTime() % 40 == 0
+                && level instanceof ServerLevel serverLevel && !lastKnownPos.equals(worldPosition)) {
+            NetworkData data = NetworkData.get(serverLevel);
+            BlockPos previousFilterer = data.getFiltererForEndpoint(serverLevel.dimension(), lastKnownPos);
+            NetworkData.Group previousGroup = previousFilterer == null ? null
+                    : data.getGroup(serverLevel.dimension(), previousFilterer);
+            boolean previousMonitorStillExists = serverLevel.hasChunkAt(lastKnownPos)
+                    && serverLevel.getBlockEntity(lastKnownPos) instanceof MonitorBlockEntity;
+            if (!previousMonitorStillExists && (previousGroup == null
+                    || !previousGroup.monitorEndpoints.contains(lastKnownPos)
+                    || data.updateMonitorPosition(serverLevel.dimension(), lastKnownPos, worldPosition))) {
+                lastKnownPos = worldPosition.immutable();
+                setChanged();
+            }
+        }
+
 //        if(activetrack != null){
 //            setSelectedTargetServer(activetrack);
 //        }
@@ -109,29 +127,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
                 sendData();
             }
         }
-        if (!level.isClientSide && level.getGameTime() % 40 == 0) {
-            if (level instanceof ServerLevel serverLevel) {
 
-                // nothing to do if we didnt move
-                if (lastKnownPos.equals(worldPosition))
-                    return;
-
-                ResourceKey<Level> dim = serverLevel.dimension();
-                NetworkData data = NetworkData.get(serverLevel);
-
-                boolean updated = data.updateMonitorPosition(
-                        dim,
-                        lastKnownPos,
-                        worldPosition
-                );
-
-                // only commit the new position if the network accepted it
-                if (updated) {
-                    lastKnownPos = worldPosition;
-                    setChanged();
-                }
-            }
-        }
 
 
     }
@@ -139,6 +135,9 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     public void onDataLinkRemoved() {
         // clear any cached network state
         this.activetrack = null;
+        this.selectedEntity = null;
+        this.hoveredEntity = null;
+        this.cachedTracks = List.of();
         this.radarPos = null;
         this.radar = null;
         this.networkRadarRange = 0f;
@@ -161,11 +160,26 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     private void syncFromNetwork(ServerLevel sl) {
         NetworkData.Group g = getNetworkGroup(sl);
         if (g == null) {
+            if (radarPos != null || selectedEntity != null || !cachedTracks.isEmpty()) {
+                radarPos = null;
+                radar = null;
+                activetrack = null;
+                selectedEntity = null;
+                cachedTracks = List.of();
+                networkRadarRange = 0f;
+                setChanged();
+            }
             return;
         }
 
-
         BlockPos netRadar = g.radarPos;
+        for (BlockPos candidate : g.radarEndpoints.keySet()) {
+            if (!sl.hasChunkAt(candidate)) continue;
+            if (sl.getBlockEntity(candidate) instanceof IRadar source && source.isRunning()) {
+                netRadar = candidate;
+                break;
+            }
+        }
         if (!Objects.equals(netRadar, radarPos)) {
             radarPos = netRadar;
             radar = null;
@@ -318,6 +332,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
 
         LinkedHashMap<String, RadarTrack> merged = new LinkedHashMap<>();
+        Set<Long> connectedShipIds = null;
         float maximumRange = 0f;
         for (BlockPos radarPosition : group.radarEndpoints.keySet()) {
             if (!serverLevel.hasChunkAt(radarPosition)) continue;
@@ -327,8 +342,12 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
             Collection<RadarTrack> tracks = source.getTracks();
             if (tracks == null) continue;
             for (RadarTrack track : tracks) {
-                if (track == null || track.getId() == null || !filter.test(track)) continue;
-                merged.putIfAbsent(track.getId(), track);
+                if (track == null || !filter.test(track)) continue;
+                if (track.trackCategory() == TrackCategory.VS2) {
+                    if (connectedShipIds == null) connectedShipIds = RadarNetworkTrackView.connectedShipIds(serverLevel, group);
+                    if (RadarNetworkTrackView.isOwnVs2Contact(track, connectedShipIds)) continue;
+                }
+                RadarNetworkTrackView.mergeNewest(merged, track);
             }
         }
         cachedTracks = List.copyOf(merged.values());
@@ -369,7 +388,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
         }
 
         // Server: radarPos will be set from network (or legacy) already
-        if (radarPos == null) {
+        if (radarPos == null || !level.hasChunkAt(radarPos)) {
             radar = null;
             return Optional.empty();
         }
@@ -502,6 +521,8 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     @Override
     protected void read(CompoundTag tag, boolean clientPacket) {
         super.read(tag, clientPacket);
+        lastKnownPos = tag.contains("LastKnownPos", Tag.TAG_LONG)
+                ? BlockPos.of(tag.getLong("LastKnownPos")) : worldPosition.immutable();
 
         if (tag.contains("Controller", Tag.TAG_COMPOUND))
             controller = NbtUtils.readBlockPos(tag.getCompound("Controller"));
@@ -553,6 +574,7 @@ public class MonitorBlockEntity extends SmartBlockEntity implements IHaveHoverin
     @Override
     protected void write(CompoundTag tag, boolean clientPacket) {
         super.write(tag, clientPacket);
+        tag.putLong("LastKnownPos", lastKnownPos.asLong());
 
         if (controller != null)
             tag.put("Controller", NbtUtils.writeBlockPos(controller));

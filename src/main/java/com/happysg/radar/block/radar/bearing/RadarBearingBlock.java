@@ -1,6 +1,8 @@
 package com.happysg.radar.block.radar.bearing;
 
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.compat.Mods;
+import com.happysg.radar.compat.vs2.VSAssemblySuppression;
 import com.happysg.radar.registry.ModBlockEntityTypes;
 import com.simibubi.create.content.contraptions.bearing.BearingBlock;
 import com.simibubi.create.foundation.block.IBE;
@@ -74,6 +76,7 @@ public class RadarBearingBlock extends BearingBlock implements IBE<RadarBearingB
         }
         return InteractionResult.SUCCESS;
     }
+
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (state.is(newState.getBlock())) {
@@ -81,12 +84,10 @@ public class RadarBearingBlock extends BearingBlock implements IBE<RadarBearingB
             return;
         }
 
-        if (!level.isClientSide && level instanceof ServerLevel sl) {
+        if (level instanceof ServerLevel sl && !isMoving && !(Mods.VALKYRIENSKIES.isLoaded() && VSAssemblySuppression.isSuppressed(sl))) {
             NetworkData.get(sl).onEndpointRemoved(sl, pos);
         }
 
         super.onRemove(state, level, pos, newState, isMoving);
     }
-
-
 }

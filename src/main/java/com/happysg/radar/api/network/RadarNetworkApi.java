@@ -4,10 +4,12 @@ import com.happysg.radar.api.tracking.BasicRadarContact;
 import com.happysg.radar.api.tracking.RadarContact;
 import com.happysg.radar.api.tracking.RadarContactCategory;
 import com.happysg.radar.block.behavior.networks.NetworkData;
+import com.happysg.radar.block.behavior.networks.RadarNetworkTrackView;
 import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlockEntity;
 import com.happysg.radar.block.radar.behavior.IRadar;
 import com.happysg.radar.block.radar.track.RadarTrack;
+import com.happysg.radar.block.radar.track.TrackCategory;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -16,13 +18,16 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public final class RadarNetworkApi {
     private RadarNetworkApi() {}
 
     public static Optional<BlockPos> getNetworkController(ServerLevel level, BlockPos networkPos) {
-        if (level == null || networkPos == null || !level.hasChunkAt(networkPos)) return Optional.empty();
-        if (level.getBlockEntity(networkPos) instanceof NetworkFiltererBlockEntity) return Optional.of(networkPos.immutable());
+        if (level == null || networkPos == null) return Optional.empty();
+        if (level.hasChunkAt(networkPos) && level.getBlockEntity(networkPos) instanceof NetworkFiltererBlockEntity) {
+            return Optional.of(networkPos.immutable());
+        }
         return Optional.ofNullable(NetworkData.get(level).getFiltererForEndpoint(level.dimension(), networkPos));
     }
 
@@ -38,7 +43,8 @@ public final class RadarNetworkApi {
     public static Collection<? extends RadarContact> getContacts(ServerLevel level, BlockPos networkPos) {
         NetworkData.Group group = group(level, networkPos);
         if (group == null) return List.of();
-        LinkedHashMap<String, RadarContact> contacts = new LinkedHashMap<>();
+        LinkedHashMap<String, RadarTrack> tracksById = new LinkedHashMap<>();
+        Set<Long> connectedShipIds = null;
         for (BlockPos radarPos : group.radarEndpoints.keySet()) {
             if (!level.hasChunkAt(radarPos)) continue;
             BlockEntity be = level.getBlockEntity(radarPos);
@@ -46,11 +52,15 @@ public final class RadarNetworkApi {
             Collection<RadarTrack> tracks = radar.getTracks();
             if (tracks == null) continue;
             for (RadarTrack track : tracks) {
-                if (track == null || track.getId() == null) continue;
-                contacts.putIfAbsent(track.getId(), contact(track));
+                if (track == null) continue;
+                if (track.trackCategory() == TrackCategory.VS2) {
+                    if (connectedShipIds == null) connectedShipIds = RadarNetworkTrackView.connectedShipIds(level, group);
+                    if (RadarNetworkTrackView.isOwnVs2Contact(track, connectedShipIds)) continue;
+                }
+                RadarNetworkTrackView.mergeNewest(tracksById, track);
             }
         }
-        return List.copyOf(contacts.values());
+        return tracksById.values().stream().map(RadarNetworkApi::contact).toList();
     }
 
     private static RadarContact contact(RadarTrack track) {
