@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "key": {
+    "A": { "item": "create:iron_sheet" },
+    "B": { "item": "minecraft:amethyst_shard" },
+    "C": { "item": "create:transmitter" }
+  },
+  "pattern": [
+    "A",
+    "B",
+    "C"
+  ],
+  "result": {
+    "id": "create_radar:sonar_sensor"
+  },
+  "show_notification": true
+}

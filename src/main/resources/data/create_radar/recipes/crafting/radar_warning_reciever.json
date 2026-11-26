@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "key": {
+    "A": { "item": "minecraft:note_block" },
+    "B": { "tag": "c:plates/iron" },
+    "C": { "tag": "c:plates/copper" },
+    "E": { "item": "create:electron_tube" }
+  },
+  "pattern": [
+    "BEB",
+    "CCC",
+    "BAB"
+  ],
+  "result": { "id": "create_radar:radar_warning_receiver" },
+  "show_notification": true
+}

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "key": {
+    "A": { "item": "create:mechanical_bearing" },
+    "B": { "tag": "c:plates/iron" },
+    "C": { "item": "create:andesite_alloy" },
+    "E": { "item": "create:electron_tube" }
+  },
+  "pattern": [
+    " E ",
+    "BAB",
+    " C "
+  ],
+  "result": { "id": "create_radar:sonar_bearing" },
+  "show_notification": true
+}
