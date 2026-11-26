@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.pitch;
 
+import com.happysg.radar.block.controller.kinetic.ControllerMotionProfile;
 import com.happysg.radar.block.radar.track.RadarTrack;
 import com.happysg.radar.compat.Mods;
 import com.happysg.radar.compat.cbc.CannonTargeting;
@@ -22,6 +23,9 @@ public class CannonMountPitch {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private final AutoPitchControllerBlockEntity controller;
+    private final ControllerMotionProfile.State motionState = new ControllerMotionProfile.State();
+    private CannonMountBlockEntity lastMount;
+    private PitchOrientedContraptionEntity lastContraption;
 
     public CannonMountPitch(AutoPitchControllerBlockEntity controller) {
         this.controller = controller;
@@ -119,17 +123,20 @@ public class CannonMountPitch {
     }
 
     private void rotateCBC(CannonMountBlockEntity mount) {
-        if (!controller.isRunningController()) {
-            LOGGER.debug("PITCH.rotateCBC aborted: isRunning=false");
-            return;
+        PitchOrientedContraptionEntity contraption = mount.getContraption();
+        if (lastMount != mount || lastContraption != contraption) {
+            motionState.reset();
+            lastMount = mount;
+            lastContraption = contraption;
         }
 
-        PitchOrientedContraptionEntity contraption = mount.getContraption();
-        if (contraption == null) {
+        if (!controller.isRunningController() || contraption == null) {
+            motionState.reset();
             return;
         }
 
         if (!(contraption.getContraption() instanceof AbstractMountedCannonContraption cannonContraption)) {
+            motionState.reset();
             return;
         }
 
@@ -138,45 +145,22 @@ public class CannonMountPitch {
         currentPitch = currentPitch * -invert;
 
         double diff = controller.getTargetAngle() - currentPitch;
-
-        double nearDeadbandDeg = AutoPitchControllerBlockEntity.getCbcTolerance();
-        if (controller.firingControl != null) {
-            Vec3 muzzle = controller.firingControl.getCannonRayStart();
-            Vec3 target = controller.getLastTargetPos();
-            if (target != null) {
-                double dist = muzzle.distanceTo(target);
-                if (dist <= 10.0) {
-                    nearDeadbandDeg = 6.0;
-                }
-            }
-        }
-
-        LOGGER.debug(
-                "PITCH.rotateCBC current={} target={} diff={} speed={} deadband={}",
-                currentPitch,
-                controller.getTargetAngle(),
-                diff,
-                controller.getSpeed(),
-                nearDeadbandDeg
-        );
-
-        if (Math.abs(diff) <= nearDeadbandDeg) {
-            mount.setPitch((float) controller.getTargetAngle());
-            mount.notifyUpdate();
-            return;
-        }
-
         double rpm = Math.abs(controller.getSpeed());
+
         if (rpm <= 0.0) {
+            motionState.reset();
             return;
         }
 
+        double move = controller.getLevel() != null
+                ? motionState.nextTrackingStep(diff, rpm, controller.getTargetAngle(), controller.getLevel().getGameTime(), false)
+                : motionState.nextStep(diff, rpm);
 
+        if (Math.abs(move) <= 1.0E-9) {
+            return;
+        }
 
-        double stepDeg = rpm / 24.0;
-        double move = Math.signum(diff) * Math.min(Math.abs(diff), stepDeg);
         double nextCtl = currentPitch + move;
-
         mount.setPitch((float) nextCtl);
         mount.notifyUpdate();
     }

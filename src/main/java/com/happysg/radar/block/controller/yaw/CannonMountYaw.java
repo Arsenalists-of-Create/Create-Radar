@@ -1,5 +1,6 @@
 package com.happysg.radar.block.controller.yaw;
 
+import com.happysg.radar.block.controller.kinetic.ControllerMotionProfile;
 import com.happysg.radar.compat.vs2.PhysicsHandler;
 import com.happysg.radar.compat.cbc.VS2CannonTargeting;
 import net.minecraft.server.level.ServerLevel;
@@ -12,6 +13,9 @@ import java.util.List;
 public class CannonMountYaw {
 
     private final AutoYawControllerBlockEntity controller;
+    private final ControllerMotionProfile.State motionState = new ControllerMotionProfile.State();
+    private CannonMountBlockEntity lastMount;
+    private PitchOrientedContraptionEntity lastContraption;
 
     public CannonMountYaw(AutoYawControllerBlockEntity controller) {
         this.controller = controller;
@@ -72,37 +76,35 @@ public class CannonMountYaw {
     }
 
     private void rotateCBC(CannonMountBlockEntity mount) {
-        if (!controller.isRunningController()) {
-            return;
+        PitchOrientedContraptionEntity contraption = mount.getContraption();
+        if (lastMount != mount || lastContraption != contraption) {
+            motionState.reset();
+            lastMount = mount;
+            lastContraption = contraption;
         }
 
-        PitchOrientedContraptionEntity contraption = mount.getContraption();
-        if (contraption == null) {
+        if (!controller.isRunningController() || contraption == null) {
+            motionState.reset();
             return;
         }
 
         double currentYaw = AutoYawControllerBlockEntity.wrap360(contraption.yaw);
         double desiredYaw = AutoYawControllerBlockEntity.wrap360(controller.getTargetAngle());
-
         double yawDiff = AutoYawControllerBlockEntity.shortestDelta(currentYaw, desiredYaw);
-        if (Math.abs(yawDiff) <= AutoYawControllerBlockEntity.getToleranceDeg()) {
-            mount.setYaw((float) desiredYaw);
-            controller.recordCbcYawWritten(desiredYaw);
-            mount.notifyUpdate();
-            return;
-        }
-
         double rpm = Math.abs(controller.getSpeed());
+
         if (rpm <= 0.0) {
+            motionState.reset();
             return;
         }
 
+        double move = controller.getLevel() != null ? motionState.nextTrackingStep(yawDiff, rpm, desiredYaw, controller.getLevel().getGameTime(), true) : motionState.nextStep(yawDiff, rpm);
 
+        if (Math.abs(move) <= 1.0E-9) {
+            return;
+        }
 
-        double stepDeg = rpm / 24.0;
-        double move = Math.signum(yawDiff) * Math.min(Math.abs(yawDiff), stepDeg);
         double nextYaw = AutoYawControllerBlockEntity.wrap360(currentYaw + move);
-
         mount.setYaw((float) nextYaw);
         controller.recordCbcYawWritten(nextYaw);
         mount.notifyUpdate();
