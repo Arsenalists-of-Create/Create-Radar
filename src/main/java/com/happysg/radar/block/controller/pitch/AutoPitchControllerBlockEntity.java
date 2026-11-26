@@ -108,6 +108,10 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
             return;
         }
 
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel).advertiseContactController(this);
+        }
+
         KineticMountAdapterResolution structural = resolveKineticMount();
         if (structural.isStructuralSelection()) {
             cbcShaftDrive.clear();
@@ -985,12 +989,29 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
 
 
     @Override
+    public void remove() {
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.peek(serverLevel);
+            if (runtime != null) {
+                runtime.unregisterContactController(worldPosition);
+            }
+        }
+        super.remove();
+    }
+
+    @Override
     public void onChunkUnloaded() {
         if (level != null && !level.isClientSide()) {
             cbcShaftDrive.clear();
             kineticControllerState.release();
             generatedSpeed = 0.0f;
             isolatedGeneratorInitialized = false;
+        }
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.peek(serverLevel);
+            if (runtime != null) {
+                runtime.unregisterContactController(worldPosition);
+            }
         }
         super.onChunkUnloaded();
     }
@@ -1075,9 +1096,7 @@ public class AutoPitchControllerBlockEntity extends GeneratingKineticBlockEntity
         final RadarMountAdapter api;
         final BlockPos apiPos;
 
-        private Mount(MountKind kind, @Nullable CannonMountBlockEntity cbc,
-                      @Nullable PhysBearingBlockEntity phys, @Nullable RadarMountAdapter api,
-                      @Nullable BlockPos apiPos) {
+        private Mount(MountKind kind, @Nullable CannonMountBlockEntity cbc, @Nullable PhysBearingBlockEntity phys, @Nullable RadarMountAdapter api, @Nullable BlockPos apiPos) {
             this.kind = kind;
             this.cbc = cbc;
             this.phys = phys;

@@ -91,6 +91,10 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity i
             return;
         }
 
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel).advertiseContactController(this);
+        }
+
         refreshLimitNeutral();
         KineticMountAdapterResolution structural = resolveKineticMount();
         if (structural.isStructuralSelection()) {
@@ -814,12 +818,29 @@ public class AutoYawControllerBlockEntity extends GeneratingKineticBlockEntity i
 
 
     @Override
+    public void remove() {
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.peek(serverLevel);
+            if (runtime != null) {
+                runtime.unregisterContactController(worldPosition);
+            }
+        }
+        super.remove();
+    }
+
+    @Override
     public void onChunkUnloaded() {
         if (level != null && !level.isClientSide()) {
             cbcShaftDrive.clear();
             kineticControllerState.release();
             generatedSpeed = 0.0f;
             isolatedGeneratorInitialized = false;
+        }
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.peek(serverLevel);
+            if (runtime != null) {
+                runtime.unregisterContactController(worldPosition);
+            }
         }
         super.onChunkUnloaded();
     }

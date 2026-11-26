@@ -1,11 +1,13 @@
 package com.happysg.radar.block.controller.firing;
 
+import com.happysg.radar.block.behavior.networks.WeaponNetworkRuntime;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RepeaterBlock;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -16,11 +18,9 @@ import java.util.List;
 public class FireControllerBlockEntity extends SmartBlockEntity {
     boolean powered = false;
 
-    // server-time when we last got a target update
     private long lastCommandTick = -1;
     private static final long FAILSAFE_TICKS = 10;
 
-    // i use these to run a pulse train when a repeater is on top
     private boolean pulsing = false;
     private long nextPulseTick = -1;
     private long pulseOffTick = -1;
@@ -38,23 +38,23 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
         super.tick();
         if (level == null || level.isClientSide) return;
 
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime.get(serverLevel).advertiseContactController(this);
+        }
+
         long now = level.getGameTime();
 
-        // i hard fail-safe: if nobody has told me to keep firing recently, i turn off
         if ((isPowered() || pulsing) && lastCommandTick >= 0 && (now - lastCommandTick) > FAILSAFE_TICKS) {
             setPowered(false);
             return;
         }
 
-        // i run pulse train timing
         if (pulsing) {
-            // i turn off after a 1-tick "on" window
             if (pulseOffTick >= 0 && now >= pulseOffTick) {
                 pulseOffTick = -1;
                 setPoweredInternal(false);
             }
 
-            // i start the next pulse when scheduled
             if (nextPulseTick >= 0 && now >= nextPulseTick) {
                 startPulseNow(now);
             }
@@ -70,23 +70,19 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
         if (level == null || level.isClientSide)
             return;
 
-        // i treat every call as a command input, and remember when it happened
         lastCommandTick = level.getGameTime();
 
         if (powered && hasRepeaterAbove()) {
-            // i enter pulsing mode; pulses keep coming as long as i'm being commanded (failsafe handles dropout)
             pulsing = true;
 
             long now = level.getGameTime();
             if (nextPulseTick < 0 || now >= nextPulseTick) {
-                // i fire an immediate pulse when first commanded (or if we got desynced)
                 startPulseNow(now);
             }
 
             return;
         }
 
-        // i stop pulsing if i'm being set normally/off
         pulsing = false;
         nextPulseTick = -1;
         pulseOffTick = -1;
@@ -95,7 +91,6 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
     }
 
     private void startPulseNow(long now) {
-        // i generate a 1-tick pulse
         setPoweredInternal(true);
         pulseOffTick = now + 1;
 
@@ -116,8 +111,7 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
             return 2;
         }
 
-        // i map repeater DELAY (1..4) to game ticks (2..8)
-        int delaySteps = above.getValue(RepeaterBlock.DELAY); // 1..4
+        int delaySteps = above.getValue(RepeaterBlock.DELAY);
         return Math.max(1, delaySteps) * 2;
     }
 
@@ -185,5 +179,27 @@ public class FireControllerBlockEntity extends SmartBlockEntity {
         if (level != null && !level.isClientSide) {
             setPoweredInternal(false);
         }
+    }
+
+    @Override
+    public void onChunkUnloaded() {
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.peek(serverLevel);
+            if (runtime != null) {
+                runtime.unregisterContactController(worldPosition);
+            }
+        }
+        super.onChunkUnloaded();
+    }
+
+    @Override
+    public void remove() {
+        if (level instanceof ServerLevel serverLevel) {
+            WeaponNetworkRuntime runtime = WeaponNetworkRuntime.peek(serverLevel);
+            if (runtime != null) {
+                runtime.unregisterContactController(worldPosition);
+            }
+        }
+        super.remove();
     }
 }

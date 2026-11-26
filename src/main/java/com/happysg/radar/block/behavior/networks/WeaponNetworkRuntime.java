@@ -3,7 +3,15 @@ package com.happysg.radar.block.behavior.networks;
 import com.happysg.radar.block.controller.firing.FireControllerBlockEntity;
 import com.happysg.radar.block.controller.pitch.AutoPitchControllerBlockEntity;
 import com.happysg.radar.block.controller.yaw.AutoYawControllerBlockEntity;
+import com.happysg.radar.api.mount.RadarMountAdapter;
 import com.happysg.radar.api.mount.RadarMountRegistry;
+import com.happysg.radar.compat.Mods;
+import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.HorizontalDirectionalBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import org.valkyrienskies.clockwork.content.contraptions.phys.bearing.PhysBearingBlockEntity;
+import rbasamoyai.createbigcannons.cannon_control.cannon_mount.CannonMountBlockEntity;
 import com.happysg.radar.block.datalink.DataLinkBlock;
 import com.happysg.radar.block.datalink.DataLinkBlockEntity;
 import net.minecraft.core.BlockPos;
@@ -28,13 +36,18 @@ public final class WeaponNetworkRuntime {
 
     private static final Comparator<BlockPos> STABLE_POSITION =
             Comparator.comparingInt((BlockPos pos) -> pos.getX())
-                    .thenComparingInt(pos -> pos.getY())
-                    .thenComparingInt(pos -> pos.getZ());
+                    .thenComparingInt(BlockPos::getY)
+                    .thenComparingInt(BlockPos::getZ);
 
     private static final Map<ServerLevel, WeaponNetworkRuntime> BY_LEVEL = new WeakHashMap<>();
 
     private record LinkRef(BlockPos dataLinkPos, BlockPos endpointPos, BlockPos mountPos,
                            DataLinkBlockEntity.WeaponEndpointType type) { }
+
+    private record ContactRef(BlockPos endpointPos, BlockPos mountPos,
+                              DataLinkBlockEntity.WeaponEndpointType type) { }
+
+    private record Slot(BlockPos mountPos, DataLinkBlockEntity.WeaponEndpointType type) { }
 
     public record WeaponGroupView(BlockPos mountPos,
                                   @Nullable BlockPos yawPos,
@@ -70,6 +83,7 @@ public final class WeaponNetworkRuntime {
 
     private final WeakReference<ServerLevel> levelReference;
     private final Map<BlockPos, LinkRef> linksByDataLink = new HashMap<>();
+    private final Map<BlockPos, DataLinkBlockEntity.WeaponEndpointType> contactControllers = new HashMap<>();
     private RuntimeSnapshot snapshot = RuntimeSnapshot.empty();
     private boolean dirty = true;
     private long snapshotTick = Long.MIN_VALUE;
@@ -89,6 +103,31 @@ public final class WeaponNetworkRuntime {
 
     public static void clear(ServerLevel level) {
         BY_LEVEL.remove(level);
+    }
+
+    public void advertiseContactController(BlockEntity controller) {
+        ServerLevel level = levelReference.get();
+        if (controller == null || level == null || controller.getLevel() != level || controller.isRemoved()) {
+            return;
+        }
+        DataLinkBlockEntity.WeaponEndpointType type = endpointType(controller);
+        if (type == DataLinkBlockEntity.WeaponEndpointType.NONE) {
+            return;
+        }
+        BlockPos pos = controller.getBlockPos().immutable();
+        if (contactControllers.put(pos, type) != type) {
+            dirty = true;
+        }
+    }
+
+    public void unregisterContactController(BlockPos controllerPos) {
+        if (controllerPos != null && contactControllers.remove(controllerPos) != null) {
+            dirty = true;
+        }
+    }
+
+    public void markContactTopologyDirty() {
+        dirty = true;
     }
 
     public static void register(ServerLevel level, DataLinkBlockEntity link) {
@@ -235,11 +274,16 @@ public final class WeaponNetworkRuntime {
     }
 
     private boolean isAvailable(ServerLevel level, LinkRef ref) {
-        if (!level.hasChunkAt(ref.dataLinkPos()) || !level.hasChunkAt(ref.endpointPos()) || !level.hasChunkAt(ref.mountPos())) {
+        if (!level.hasChunkAt(ref.dataLinkPos())
+                || !level.hasChunkAt(ref.endpointPos())
+                || !level.hasChunkAt(ref.mountPos())) {
             return false;
         }
         BlockEntity link = level.getBlockEntity(ref.dataLinkPos());
-        if (!(link instanceof DataLinkBlockEntity dataLink) || dataLink.isRemoved() || dataLink.getWeaponEndpointType() != ref.type() || !DataLinkBlock.isWeaponLink(dataLink.getBlockState(), ref.type())) {
+        if (!(link instanceof DataLinkBlockEntity dataLink)
+                || dataLink.isRemoved()
+                || dataLink.getWeaponEndpointType() != ref.type()
+                || !DataLinkBlock.isWeaponLink(dataLink.getBlockState(), ref.type())) {
             return false;
         }
         BlockEntity endpoint = level.getBlockEntity(ref.endpointPos());
@@ -255,7 +299,90 @@ public final class WeaponNetworkRuntime {
             return false;
         }
         BlockEntity mount = level.getBlockEntity(ref.mountPos());
-        return mount != null && !mount.isRemoved() || RadarMountRegistry.find(level, ref.mountPos()) != null;
+        return mount != null && !mount.isRemoved()
+                || RadarMountRegistry.find(level, ref.mountPos()) != null;
+    }
+
+    private static DataLinkBlockEntity.WeaponEndpointType endpointType(BlockEntity endpoint) {
+        if (endpoint instanceof AutoYawControllerBlockEntity) {
+            return DataLinkBlockEntity.WeaponEndpointType.YAW;
+        }
+        if (endpoint instanceof AutoPitchControllerBlockEntity) {
+            return DataLinkBlockEntity.WeaponEndpointType.PITCH;
+        }
+        if (endpoint instanceof FireControllerBlockEntity) {
+            return DataLinkBlockEntity.WeaponEndpointType.FIRING;
+        }
+        return DataLinkBlockEntity.WeaponEndpointType.NONE;
+    }
+
+    private boolean isContactMount(ServerLevel level, BlockPos mountPos,
+                                   DataLinkBlockEntity.WeaponEndpointType type) {
+        if (!level.hasChunkAt(mountPos)) {
+            return false;
+        }
+        BlockEntity mount = level.getBlockEntity(mountPos);
+        if (mount instanceof CannonMountBlockEntity && !mount.isRemoved()) {
+            return true;
+        }
+        if (Mods.VS_CLOCKWORK.isLoaded() && mount instanceof PhysBearingBlockEntity && !mount.isRemoved()) {
+            return true;
+        }
+        RadarMountAdapter api = RadarMountRegistry.find(level, mountPos);
+        if (api == null || !api.isValid() || !mountPos.equals(api.getMountPos())) {
+            return false;
+        }
+        return switch (type) {
+            case YAW -> api.supportsYaw();
+            case PITCH -> api.supportsPitch();
+            case FIRING -> true;
+            case NONE -> false;
+        };
+    }
+
+    private List<BlockPos> discoverContactMounts(ServerLevel level, BlockPos endpointPos,
+                                                   DataLinkBlockEntity.WeaponEndpointType type) {
+        if (!level.hasChunkAt(endpointPos)) {
+            return List.of();
+        }
+        BlockEntity entity = level.getBlockEntity(endpointPos);
+        if (entity == null || entity.isRemoved() || endpointType(entity) != type) {
+            return List.of();
+        }
+        Set<BlockPos> candidates = new HashSet<>();
+        BlockState state = entity.getBlockState();
+        switch (type) {
+            case PITCH -> {
+                if (state.hasProperty(HorizontalDirectionalBlock.FACING)) {
+                    Direction direction = state.getValue(HorizontalDirectionalBlock.FACING);
+                    BlockPos candidate = endpointPos.relative(direction);
+                    if (isContactMount(level, candidate, type)) {
+                        candidates.add(candidate.immutable());
+                    }
+                }
+            }
+            case YAW -> {
+                if (state.hasProperty(DirectionalKineticBlock.FACING)) {
+                    Direction direction = state.getValue(DirectionalKineticBlock.FACING).getOpposite();
+                    if (direction.getAxis() == Direction.Axis.Y) {
+                        BlockPos candidate = endpointPos.relative(direction);
+                        if (isContactMount(level, candidate, type)) {
+                            candidates.add(candidate.immutable());
+                        }
+                    }
+                }
+            }
+            case FIRING -> {
+                for (Direction direction : Direction.values()) {
+                    BlockPos candidate = endpointPos.relative(direction);
+                    if (isContactMount(level, candidate, type)) {
+                        candidates.add(candidate.immutable());
+                    }
+                }
+            }
+            case NONE -> { }
+        }
+        return candidates.stream().sorted(STABLE_POSITION).toList();
     }
 
     private RuntimeSnapshot buildSnapshot() {
@@ -263,68 +390,96 @@ public final class WeaponNetworkRuntime {
         if (level == null) {
             return RuntimeSnapshot.empty();
         }
-        Map<BlockPos, BlockPos> endpointToMount = new HashMap<>();
-        Map<BlockPos, List<LinkRef>> grouped = new HashMap<>();
-
+        Map<BlockPos, List<LinkRef>> explicitByMount = new HashMap<>();
+        Set<BlockPos> endpointsWithExplicitLinks = new HashSet<>();
+        Set<Slot> reservedSlots = new HashSet<>();
         for (LinkRef ref : linksByDataLink.values()) {
-            if (!isAvailable(level, ref)) {
-                continue;
+            endpointsWithExplicitLinks.add(ref.endpointPos());
+            if (ref.type() != DataLinkBlockEntity.WeaponEndpointType.FIRING) {
+                reservedSlots.add(new Slot(ref.mountPos(), ref.type()));
             }
-            endpointToMount.put(ref.endpointPos(), ref.mountPos());
-            grouped.computeIfAbsent(ref.mountPos(), ignored -> new ArrayList<>()).add(ref);
+            if (isAvailable(level, ref)) {
+                explicitByMount.computeIfAbsent(ref.mountPos(), ignored -> new ArrayList<>()).add(ref);
+            }
         }
 
-        Map<BlockPos, WeaponGroupView> groups = new HashMap<>();
-        Map<BlockPos, List<BlockPos>> firingControllers = new HashMap<>();
+        Map<BlockPos, List<ContactRef>> contactsByMount = new HashMap<>();
+        Set<BlockPos> ambiguousMounts = new HashSet<>();
+        for (Map.Entry<BlockPos, DataLinkBlockEntity.WeaponEndpointType> entry : contactControllers.entrySet()) {
+            BlockPos endpointPos = entry.getKey();
+            DataLinkBlockEntity.WeaponEndpointType type = entry.getValue();
+            if (endpointsWithExplicitLinks.contains(endpointPos)) {
+                continue;
+            }
+            List<BlockPos> discovered = discoverContactMounts(level, endpointPos, type);
+            if (discovered.size() > 1) {
+                ambiguousMounts.addAll(discovered);
+                continue;
+            }
+            if (discovered.size() != 1) {
+                continue;
+            }
+            BlockPos mountPos = discovered.get(0);
+            if (type != DataLinkBlockEntity.WeaponEndpointType.FIRING
+                    && reservedSlots.contains(new Slot(mountPos, type))) {
+                continue;
+            }
+            contactsByMount.computeIfAbsent(mountPos, ignored -> new ArrayList<>())
+                    .add(new ContactRef(endpointPos, mountPos, type));
+        }
 
-        for (Map.Entry<BlockPos, List<LinkRef>> entry : grouped.entrySet()) {
-            List<LinkRef> refs = entry.getValue();
-            refs.sort(Comparator.comparing(LinkRef::dataLinkPos, STABLE_POSITION));
-            BlockPos yaw = null;
-            BlockPos pitch = null;
-            Set<BlockPos> firing = new LinkedHashSet<>();
+        Set<BlockPos> allMounts = new HashSet<>(explicitByMount.keySet());
+        allMounts.addAll(contactsByMount.keySet());
+        allMounts.addAll(ambiguousMounts);
+        List<BlockPos> sortedMounts = allMounts.stream().sorted(STABLE_POSITION).toList();
+
+        Map<BlockPos, BlockPos> endpointToMount = new HashMap<>();
+        Map<BlockPos, WeaponGroupView> groups = new java.util.LinkedHashMap<>();
+        Map<BlockPos, List<BlockPos>> firingByMount = new HashMap<>();
+
+        for (BlockPos mountPos : sortedMounts) {
+            List<LinkRef> explicit = explicitByMount.getOrDefault(mountPos, List.of());
+            List<ContactRef> contacts = contactsByMount.getOrDefault(mountPos, List.of());
+            Map<DataLinkBlockEntity.WeaponEndpointType, Set<BlockPos>> explicitClaims = new java.util.EnumMap<>(DataLinkBlockEntity.WeaponEndpointType.class);
+            Map<DataLinkBlockEntity.WeaponEndpointType, Set<BlockPos>> contactClaims = new java.util.EnumMap<>(DataLinkBlockEntity.WeaponEndpointType.class);
             Set<BlockPos> dataLinks = new LinkedHashSet<>();
-            boolean ambiguous = false;
-
-            for (LinkRef ref : refs) {
+            for (LinkRef ref : explicit) {
                 dataLinks.add(ref.dataLinkPos());
-                switch (ref.type()) {
-                    case YAW -> {
-                        if (yaw != null && !yaw.equals(ref.endpointPos())) ambiguous = true;
-                        else yaw = ref.endpointPos();
-                    }
-                    case PITCH -> {
-                        if (pitch != null && !pitch.equals(ref.endpointPos())) ambiguous = true;
-                        else pitch = ref.endpointPos();
-                    }
-                    case FIRING -> firing.add(ref.endpointPos());
-                    case NONE -> { }
-                }
+                explicitClaims.computeIfAbsent(ref.type(), ignored -> new HashSet<>()).add(ref.endpointPos());
+            }
+            for (ContactRef ref : contacts) {
+                contactClaims.computeIfAbsent(ref.type(), ignored -> new HashSet<>()).add(ref.endpointPos());
             }
 
-            if (ambiguous) {
-                for (LinkRef ref : refs) {
-                    endpointToMount.remove(ref.endpointPos());
-                }
+            Set<BlockPos> yaw = explicitClaims.getOrDefault(DataLinkBlockEntity.WeaponEndpointType.YAW, Set.of());
+            Set<BlockPos> pitch = explicitClaims.getOrDefault(DataLinkBlockEntity.WeaponEndpointType.PITCH, Set.of());
+            if (yaw.isEmpty()) {
+                yaw = contactClaims.getOrDefault(DataLinkBlockEntity.WeaponEndpointType.YAW, Set.of());
+            }
+            if (pitch.isEmpty()) {
+                pitch = contactClaims.getOrDefault(DataLinkBlockEntity.WeaponEndpointType.PITCH, Set.of());
+            }
+            if (ambiguousMounts.contains(mountPos) || yaw.size() > 1 || pitch.size() > 1) {
                 continue;
             }
 
-            List<BlockPos> allFiring = firing.stream().sorted(STABLE_POSITION).toList();
-            List<BlockPos> activeFiring = allFiring.stream()
-                    .filter(pos -> level.getBlockEntity(pos) instanceof FireControllerBlockEntity)
-                    .toList();
-            firingControllers.put(entry.getKey(), List.copyOf(activeFiring));
-            BlockPos primary = allFiring.isEmpty() ? null : allFiring.get(0);
-            groups.put(entry.getKey(), new WeaponGroupView(entry.getKey(), yaw, pitch, primary, dataLinks));
+            Set<BlockPos> firing = new HashSet<>(explicitClaims.getOrDefault(DataLinkBlockEntity.WeaponEndpointType.FIRING, Set.of()));
+            firing.addAll(contactClaims.getOrDefault(DataLinkBlockEntity.WeaponEndpointType.FIRING, Set.of()));
+            List<BlockPos> orderedFiring = firing.stream().sorted(STABLE_POSITION).toList();
+            BlockPos yawPos = yaw.isEmpty() ? null : yaw.iterator().next();
+            BlockPos pitchPos = pitch.isEmpty() ? null : pitch.iterator().next();
+            BlockPos firingPos = orderedFiring.isEmpty() ? null : orderedFiring.get(0);
+            if (yawPos == null && pitchPos == null && firingPos == null) {
+                continue;
+            }
+            if (yawPos != null) endpointToMount.put(yawPos, mountPos);
+            if (pitchPos != null) endpointToMount.put(pitchPos, mountPos);
+            for (BlockPos pos : orderedFiring) endpointToMount.put(pos, mountPos);
+            firingByMount.put(mountPos, List.copyOf(orderedFiring));
+            groups.put(mountPos, new WeaponGroupView(mountPos, yawPos, pitchPos, firingPos, dataLinks));
         }
 
-        List<BlockPos> sortedMounts = new ArrayList<>(groups.keySet());
-        sortedMounts.sort(STABLE_POSITION);
-        Map<BlockPos, WeaponGroupView> stableGroups = new java.util.LinkedHashMap<>();
-        for (BlockPos mount : sortedMounts) {
-            stableGroups.put(mount, groups.get(mount));
-        }
-
-        return new RuntimeSnapshot(Map.copyOf(endpointToMount), Collections.unmodifiableMap(stableGroups), Map.copyOf(firingControllers));
+        return new RuntimeSnapshot(Map.copyOf(endpointToMount),
+                Collections.unmodifiableMap(groups), Map.copyOf(firingByMount));
     }
 }
