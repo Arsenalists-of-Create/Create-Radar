@@ -558,7 +558,7 @@ public class AutoPitchControllerBlockEntity extends KineticBlockEntity {
         return isRunning;
     }
 
-    boolean isArtillery() {
+    public boolean isArtillery() {
         return artillery;
     }
 

@@ -41,6 +41,7 @@ import java.util.UUID;
 public class WeaponFiringControl {
 
     private static final Logger LOGGER = LogUtils.getLogger();
+    private final CbcSimulatedAim simulatedAim = new CbcSimulatedAim();
 
     public TargetingConfig targetingConfig = TargetingConfig.DEFAULT;
     private Vec3 target;
@@ -668,6 +669,7 @@ public class WeaponFiringControl {
 
     public void tick() {
         if (!isMountStateOk()) {
+            simulatedAim.reset();
             stopFireCannon();
             return;
         }
@@ -679,6 +681,7 @@ public class WeaponFiringControl {
         }
 
         if (!binoMode && activetrack == null) {
+            simulatedAim.reset();
             stopFireCannon();
             return;
         }
@@ -738,9 +741,6 @@ public class WeaponFiringControl {
         }else {
             target = binoTargetPos.getCenter();
         }
-
-
-
 
         AbstractMountedCannonContraption cannonContraption;
         if (cannonMount.getContraption() == null) return;
@@ -836,8 +836,11 @@ public class WeaponFiringControl {
         }else {
             lag = true;
         }
+        boolean simulatedCbc = CbcSimulatedAim.supports(cannonContraption)
+                && (!Mods.VALKYRIENSKIES.isLoaded()
+                || !PhysicsHandler.isBlockInShipyard(level, cannonMount.getBlockPos()));
         CannonLead.LeadSolution lead = null;
-        if (!CannonUtil.isLaserCannon(cannonContraption) && dist > noLeadDist) {
+        if (!simulatedCbc && !CannonUtil.isLaserCannon(cannonContraption) && dist > noLeadDist) {
             lead = CannonLead.solveLeadPerTickConstantVelocity(
                     cannonMount, cannonContraption, serverLevel,
                     shooterVel,
@@ -890,13 +893,19 @@ public class WeaponFiringControl {
 
         Double desiredPitch = null;
         Double desiredYaw = null;
+        com.happysg.radar.targeting.TargetingResult simulatedResult = null;
 
-        if (Mods.VALKYRIENSKIES.isLoaded() && PhysicsHandler.isBlockInShipyard(level, cannonMount.getBlockPos())) {
+        if (simulatedCbc) {
+            simulatedResult = simulatedAim.solve(serverLevel, cannonMount, cannonContraption,
+                    solvePos, targetVel, targetAccel, shooterVel,
+                    targetEntity != null ? targetEntity.getBoundingBox() : null, pitchController);
+            if (simulatedResult.hasShot()) {
+                desiredPitch = simulatedResult.desiredPitchDeg();
+                desiredYaw = com.happysg.radar.targeting.TargetingMath.wrap360(simulatedResult.desiredYawDeg() + 270.0);
+            }
+        } else if (Mods.VALKYRIENSKIES.isLoaded() && PhysicsHandler.isBlockInShipyard(level, cannonMount.getBlockPos())) {
             long now = level.getGameTime();
-            boolean needSolve = cachedVS2Angles == null
-                    || (now - cachedVS2SolveTick) >= VS2_SOLVE_INTERVAL
-                    || cachedVS2AimTarget == null
-                    || cachedVS2AimTarget.distanceToSqr(offsetAim) > VS2_AIM_CHANGE_THRESHOLD * VS2_AIM_CHANGE_THRESHOLD;
+            boolean needSolve = cachedVS2Angles == null || (now - cachedVS2SolveTick) >= VS2_SOLVE_INTERVAL || cachedVS2AimTarget == null || cachedVS2AimTarget.distanceToSqr(offsetAim) > VS2_AIM_CHANGE_THRESHOLD * VS2_AIM_CHANGE_THRESHOLD;
 
             if (needSolve) {
                 cachedVS2Angles = VS2CannonTargeting.calculatePitchAndYawVS2(cannonMount, offsetAim, serverLevel);
@@ -941,7 +950,9 @@ public class WeaponFiringControl {
                 LOGGER.warn("WFC AIMCHK: yawCtrl={} pitchCtrl={} atYaw={} atPitch={} targYaw={} targPitch={}", yawController != null ? yawController.getBlockPos() : null, pitchController != null ? pitchController.getBlockPos() : null, yawController != null && yawController.atTargetYaw(lag), pitchController != null && pitchController.atTargetPitch(lag), yawController != null ? yawController.getTargetAngle() : null, pitchController != null ? pitchController.getTargetAngle() : null);
             }
             if (!auto) LOGGER.warn("WFC BLOCK: autoFire disabled");
-            if (!hasLeadSolution && !canFireWithoutLead) LOGGER.warn("WFC BLOCK: no lead solution");
+            if (simulatedCbc ? simulatedResult == null || !simulatedResult.hasShot() : !hasLeadSolution && !canFireWithoutLead) {
+                LOGGER.warn("WFC BLOCK: no valid targeting solution");
+            }
             if (!safeOk) LOGGER.warn("WFC BLOCK: safe zone violation");
             if (!cannonReady) LOGGER.warn("WFC BLOCK: cannon not ready");
             if (!yawPitchOk) LOGGER.warn("WFC BLOCK: yaw/pitch not aligned");
@@ -950,11 +961,16 @@ public class WeaponFiringControl {
 
         boolean shouldFire =
                 targetingConfig.autoFire()
-                        && (hasLeadSolution || canFireWithoutLead)
+                        && (simulatedCbc ? simulatedResult != null && simulatedResult.hasShot() : hasLeadSolution || canFireWithoutLead)
                         && yawPitchOk
                         && safeOk
                         && cannonReady
                         && stableOk;
+
+        if (shouldFire) {
+            var profile = com.happysg.radar.api.weapon.WeaponShotAdapterRegistry.resolve(new com.happysg.radar.api.weapon.WeaponShotContext(serverLevel, cannonMount.getBlockPos(), null, null));
+            shouldFire = profile == null;
+        }
 
         if (fireController != null) {
             if (shouldFire) tryFireCannon();
@@ -963,6 +979,7 @@ public class WeaponFiringControl {
     }
 
     public void resetTarget(){
+        simulatedAim.reset();
         visCache.clear();
         this.target =null;
         this.activetrack =null;
@@ -981,9 +998,9 @@ public class WeaponFiringControl {
     }
 
     public void setTarget(Vec3 target, TargetingConfig config, RadarTrack track, WeaponNetworkRuntime.WeaponGroupView view){
-        LOGGER.warn("setTarget() → new target={} config={} atTick={}",
-                target, config, level != null ? level.getGameTime() : -1L);
+        LOGGER.warn("setTarget() → new target={} config={} atTick={}", target, config, level != null ? level.getGameTime() : -1L);
         if (target == null) {
+            simulatedAim.reset();
             this.target = null;
             this.activetrack = null;
             this.targetEntity = null;
@@ -996,6 +1013,9 @@ public class WeaponFiringControl {
 
             stopFireCannon();
             return;
+        }
+        if (this.activetrack == null || track == null || !this.activetrack.id().equals(track.id())) {
+            simulatedAim.reset();
         }
         this.binoMode =false;
 
@@ -1012,8 +1032,10 @@ public class WeaponFiringControl {
         this.targetShip = null;
     }
 
-    public void setBinoTarget(@Nullable BlockPos binoTarget, TargetingConfig config,
-                              WeaponNetworkRuntime.WeaponGroupView view, boolean reset) {
+    public void setBinoTarget(@Nullable BlockPos binoTarget, TargetingConfig config, WeaponNetworkRuntime.WeaponGroupView view, boolean reset) {
+        if (reset || binoTarget == null || !binoTarget.equals(this.binoTargetPos)) {
+            simulatedAim.reset();
+        }
 
         this.view = view;
         this.targetingConfig = config;
