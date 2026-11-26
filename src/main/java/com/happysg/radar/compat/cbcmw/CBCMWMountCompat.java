@@ -1,5 +1,6 @@
 package com.happysg.radar.compat.cbcmw;
 
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -11,12 +12,15 @@ import riftyboi.cbcmodernwarfare.cannon_control.compact_mount.CompactCannonMount
 import riftyboi.cbcmodernwarfare.cannon_control.compact_mount.CompactCannonMountBlockEntity;
 
 import javax.annotation.Nullable;
+import java.lang.reflect.Field;
 
 /**
  * Direct CBC Modern Warfare compact-mount access. Callers must guard entry
  * into this class with {@code Mods.CBCMODERNWARFARE.isLoaded()}.
  */
 public final class CBCMWMountCompat {
+    private static final Field PITCH_INTERFACE_FIELD = resolvePitchInterfaceField();
+
     private CBCMWMountCompat() {
     }
 
@@ -38,6 +42,28 @@ public final class CBCMWMountCompat {
     public static void setPitch(BlockEntity blockEntity, float pitch) {
         if (blockEntity instanceof CompactCannonMountBlockEntity compact) {
             compact.setPitch(pitch);
+        }
+    }
+
+    public static float getPitchSpeed(BlockEntity blockEntity) {
+        if (blockEntity instanceof CompactCannonMountBlockEntity compact && PITCH_INTERFACE_FIELD != null) {
+            try {
+                if (PITCH_INTERFACE_FIELD.get(compact) instanceof KineticBlockEntity kinetic) {
+                    return kinetic.getSpeed();
+                }
+            } catch (IllegalAccessException ignored) {
+            }
+        }
+        return 0.0f;
+    }
+
+    private static Field resolvePitchInterfaceField() {
+        try {
+            Field field = CompactCannonMountBlockEntity.class.getDeclaredField("pitchInterface");
+            field.setAccessible(true);
+            return field;
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+            return null;
         }
     }
 
