@@ -27,7 +27,7 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
 
     @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-        return face == state.getValue(FACING);
+        return face == state.getValue(FACING).getOpposite();
     }
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
@@ -53,6 +53,9 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!level.isClientSide && state.getBlock() != newState.getBlock() ) {
+            if (level.getBlockEntity(pos) instanceof AutoYawControllerBlockEntity controller) {
+                controller.releaseKineticActuator();
+            }
             breakAttachedDataLinks(level, pos);
         }
         super.onRemove(state, level, pos, newState, isMoving);
@@ -77,6 +80,14 @@ public class AutoYawControllerBlock extends DirectionalKineticBlock implements I
             }
 
             level.destroyBlock(linkPos, true);
+        }
+    }
+
+    @Override
+    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
+        super.onPlace(state, level, pos, oldState, isMoving);
+        if (!level.isClientSide && level.getBlockEntity(pos) instanceof AutoYawControllerBlockEntity yaw) {
+            yaw.markMountDirtyExternal();
         }
     }
 

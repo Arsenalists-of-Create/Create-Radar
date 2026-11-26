@@ -91,7 +91,7 @@ public class PhysBearingPitch {
     private void rotatePhysBearing(PhysBearingBlockEntity mount) {
         ensureFollowAngleMode(mount);
 
-        double rpmAbs = Math.abs(controller.getSpeed());
+        double rpmAbs = Math.abs(controller.getAvailableInputSpeed());
         if (rpmAbs <= 0.0) {
             return;
         }

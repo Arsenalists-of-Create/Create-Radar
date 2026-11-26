@@ -28,7 +28,7 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
 
     @Override
     public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-        return face == state.getValue(HORIZONTAL_FACING).getOpposite();
+        return face == state.getValue(HORIZONTAL_FACING);
     }
 
     @Override
@@ -51,6 +51,9 @@ public class AutoPitchControllerBlock extends HorizontalKineticBlock implements 
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!level.isClientSide && state.getBlock() != newState.getBlock() ) {
+            if (level.getBlockEntity(pos) instanceof AutoPitchControllerBlockEntity controller) {
+                controller.releaseKineticActuator();
+            }
             breakAttachedDataLinks(level, pos);
         }
         super.onRemove(state, level, pos, newState, isMoving);

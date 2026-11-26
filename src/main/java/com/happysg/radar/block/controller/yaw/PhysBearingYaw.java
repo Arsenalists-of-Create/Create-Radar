@@ -41,9 +41,7 @@ public class PhysBearingYaw {
         double angle = controller.computeYawToTargetDeg(cannonCenter, targetPos);
         double newAngle = AutoYawControllerBlockEntity.wrap360(angle) + 180.0;
 
-        if (hasYawZeroOffset) {
-            newAngle = AutoYawControllerBlockEntity.wrap360(newAngle - yawZeroOffsetDeg);
-        }
+        newAngle = toRelativeControllerAngle(newAngle);
 
         controller.setInternalTargetAngle(newAngle);
         controller.setRunning(true);
@@ -117,12 +115,17 @@ public class PhysBearingYaw {
         yawZeroOffsetDeg = AutoYawControllerBlockEntity.wrap360(newOffset);
         lastYawZeroOffsetDeg = yawZeroOffsetDeg;
 
-        controller.setInternalTargetAngle(AutoYawControllerBlockEntity.wrap360(controller.getTargetAngle() - delta));
-        controller.setInternalMinAngleDeg(AutoYawControllerBlockEntity.wrap360(controller.getMinAngleDeg() - delta));
-        controller.setInternalMaxAngleDeg(AutoYawControllerBlockEntity.wrap360(controller.getMaxAngleDeg() - delta));
+        controller.setInternalTargetAngle(AutoYawControllerBlockEntity.wrap360(
+                controller.getRequestedTargetAngle() - delta));
 
         controller.notifyUpdate();
         controller.setChanged();
+    }
+
+    double toRelativeControllerAngle(double absoluteControllerAngle) {
+        return hasYawZeroOffset
+                ? AutoYawControllerBlockEntity.wrap360(absoluteControllerAngle - yawZeroOffsetDeg)
+                : AutoYawControllerBlockEntity.wrap360(absoluteControllerAngle);
     }
 
     public void reset() {
@@ -150,7 +153,7 @@ public class PhysBearingYaw {
             return;
         }
 
-        double rpm = Math.abs(controller.getSpeed());
+        double rpm = Math.abs(controller.getAvailableInputSpeed());
         if (rpm <= 0.0) {
             return;
         }
@@ -205,7 +208,7 @@ public class PhysBearingYaw {
     }
 
     private double getStep(double range, double dist) {
-        double rpm = Math.abs(controller.getSpeed());
+        double rpm = Math.abs(controller.getAvailableInputSpeed());
         double r = Math.min(256.0, Math.max(0.0, rpm));
 
         double gamma = 1.6;
