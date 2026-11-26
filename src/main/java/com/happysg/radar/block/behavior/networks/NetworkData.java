@@ -431,7 +431,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         if (existingMountOwner != null && !existingMountOwner.equals(myKey)) return false;
 
         // in-group uniqueness
-        return !group.usedWeaponMounts.contains(weaponMountPos);
+        return true;
     }
 
     // ------------------------------------------------------------
@@ -483,6 +483,17 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
         controllerToWeaponMount.put(key(group.key.dim(), controllerPos), key(group.key.dim(), weaponMountPos));
 
         setDirty();
+    }
+
+    private boolean releaseWeaponMountIfUnused(Group group, String mountKey) {
+        if (group == null || mountKey == null || controllerToWeaponMount.containsValue(mountKey)) {
+            return false;
+        }
+        BlockPos mountPos = posFromKey(mountKey);
+        boolean removed = group.usedWeaponMounts.remove(mountPos);
+        String ownerKey = key(group.key.dim(), group.key.filtererPos());
+        weaponMountToFilterer.remove(mountKey, ownerKey);
+        return removed;
     }
 
     public void addDataLinkToGroup(Group group, BlockPos dataLinkPos, BlockPos endpointPos) {
@@ -592,9 +603,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                 // If you use controllerToWeaponMount, free it deterministically
                 String mountKey = controllerToWeaponMount.remove(endpointKey);
                 if (mountKey != null) {
-                    BlockPos mp = posFromKey(mountKey);
-                    group.usedWeaponMounts.remove(mp);
-                    weaponMountToFilterer.remove(mountKey);
+                    releaseWeaponMountIfUnused(group, mountKey);
                 }
             }
         }
@@ -670,9 +679,7 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
 
             String mountKey = controllerToWeaponMount.remove(endpointKey);
             if (mountKey != null) {
-                BlockPos mp = posFromKey(mountKey);
-                group.usedWeaponMounts.remove(mp);
-                weaponMountToFilterer.remove(mountKey);
+                releaseWeaponMountIfUnused(group, mountKey);
             }
 
         } else {
@@ -844,10 +851,9 @@ public static BlockPos getFiltererPosFromGroupKey(@Nullable String filtererKey) 
                     // free its mount if we have a mapping
                     String mountKey = controllerToWeaponMount.remove(posKey(levelDim, controllerPos));
                     if (mountKey != null) {
-                        weaponMountToFilterer.remove(mountKey);
-                        BlockPos mountPos = posFromKey(mountKey);
-                        group.usedWeaponMounts.remove(mountPos);
-                        mountsRemoved++;
+                        if (releaseWeaponMountIfUnused(group, mountKey)) {
+                            mountsRemoved++;
+                        }
                     }
                 }
             }
