@@ -57,6 +57,7 @@ public class WeaponFiringControl {
     public AutoPitchControllerBlockEntity pitchController;
     public AutoYawControllerBlockEntity yawController;
     public FireControllerBlockEntity fireController;
+    private final java.util.Set<BlockPos> lastPoweredFiringControllers = new java.util.HashSet<>();
     public WeaponNetworkRuntime.WeaponGroupView view;
     public final Level level;
     private RadarTrack activetrack;
@@ -945,7 +946,7 @@ public class WeaponFiringControl {
         boolean stableOk = (aimStableTicks >= AIM_STABLE_REQUIRED) || (!lag);
 
         if (level.getGameTime() % 20 == 0) {
-            LOGGER.warn("WFC FIREGATES: auto={} lead={} laserNoLead={} yawPitchOk={} safeOk={} cannonReady={} stableOk={} firingBE={} target={} aim={} offset={} stable={}/{}", auto, hasLeadSolution, canFireWithoutLead, yawPitchOk, safeOk, cannonReady, stableOk, fireController != null, target, offsetAim, offset, aimStableTicks, AIM_STABLE_REQUIRED);
+            LOGGER.warn("WFC FIREGATES: auto={} lead={} laserNoLead={} yawPitchOk={} safeOk={} cannonReady={} stableOk={} firingBE={} target={} aim={} offset={} stable={}/{}", auto, hasLeadSolution, canFireWithoutLead, yawPitchOk, safeOk, cannonReady, stableOk, !activeFireControllers().isEmpty(), target, offsetAim, offset, aimStableTicks, AIM_STABLE_REQUIRED);
             if (!yawPitchOk) {
                 LOGGER.warn("WFC AIMCHK: yawCtrl={} pitchCtrl={} atYaw={} atPitch={} targYaw={} targPitch={}", yawController != null ? yawController.getBlockPos() : null, pitchController != null ? pitchController.getBlockPos() : null, yawController != null && yawController.atTargetYaw(lag), pitchController != null && pitchController.atTargetPitch(lag), yawController != null ? yawController.getTargetAngle() : null, pitchController != null ? pitchController.getTargetAngle() : null);
             }
@@ -972,10 +973,8 @@ public class WeaponFiringControl {
             shouldFire = profile == null;
         }
 
-        if (fireController != null) {
-            if (shouldFire) tryFireCannon();
-            else stopFireCannon();
-        }
+        if (shouldFire) tryFireCannon();
+        else stopFireCannon();
     }
 
     public void resetTarget(){
@@ -1088,18 +1087,62 @@ public class WeaponFiringControl {
     }
 
 
+    private List<FireControllerBlockEntity> activeFireControllers() {
+        if (!(level instanceof ServerLevel serverLevel) || pitchController == null || cannonMount == null) {
+            return List.of();
+        }
+
+        WeaponNetworkRuntime.WeaponGroupView group = WeaponNetworkRuntime.getWeaponGroupViewFromEndpoint(serverLevel, pitchController.getBlockPos());
+        if (group == null || !group.mountPos().equals(cannonMount.getBlockPos())) {
+            return List.of();
+        }
+
+        List<FireControllerBlockEntity> result = new ArrayList<>();
+        for (BlockPos pos : WeaponNetworkRuntime.getFiringControllersForMount(serverLevel, group.mountPos())) {
+            if (serverLevel.hasChunkAt(pos) && serverLevel.getBlockEntity(pos) instanceof FireControllerBlockEntity fire && !fire.isRemoved()) {
+                result.add(fire);
+            }
+        }
+        return result;
+    }
+
+    private void commandFireControllers(boolean powered) {
+        List<FireControllerBlockEntity> active = activeFireControllers();
+        java.util.Set<BlockPos> activePositions = new java.util.HashSet<>();
+
+        for (FireControllerBlockEntity fire : active) {
+            activePositions.add(fire.getBlockPos());
+            fire.setPowered(powered);
+        }
+
+        if (level instanceof ServerLevel serverLevel) {
+            for (BlockPos pos : lastPoweredFiringControllers) {
+                if (activePositions.contains(pos) || !serverLevel.hasChunkAt(pos)) {
+                    continue;
+                }
+                BlockPos currentOwner = WeaponNetworkRuntime.getMountForController(serverLevel, pos);
+                if (currentOwner != null && (cannonMount == null || !currentOwner.equals(cannonMount.getBlockPos()))) {
+                    continue;
+                }
+                if (serverLevel.getBlockEntity(pos) instanceof FireControllerBlockEntity fire && !fire.isRemoved()) {
+                    fire.setPowered(false);
+                }
+            }
+        }
+
+        lastPoweredFiringControllers.clear();
+        if (powered) {
+            lastPoweredFiringControllers.addAll(activePositions);
+        }
+    }
+
     private void stopFireCannon() {
-        if(this.fireController == null) return;
-        fireController.setPowered(false);
+        commandFireControllers(false);
     }
 
     private void tryFireCannon() {
-        if(this.fireController == null) return;
-        fireController.setPowered(true);
-        LOGGER.debug("firing!");
-
+        commandFireControllers(true);
     }
-
 
     private boolean isMountStateOk() {
         if (level == null || cannonMount == null) return false;
