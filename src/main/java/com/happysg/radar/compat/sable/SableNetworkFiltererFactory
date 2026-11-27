@@ -1,0 +1,12 @@
+package com.happysg.radar.compat.sable;
+
+import com.happysg.radar.block.controller.networkcontroller.NetworkFiltererBlock;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+
+public final class SableNetworkFiltererFactory {
+    private SableNetworkFiltererFactory() {}
+
+    public static NetworkFiltererBlock create(BlockBehaviour.Properties properties) {
+        return new SableAwareNetworkFiltererBlock(properties);
+    }
+}
