@@ -24,7 +24,7 @@ import com.happysg.radar.block.radar.skyradar.SkyRadarBlock;
 import com.happysg.radar.block.radar.skyradar.SkyRadarSublevelConnectorBlock;
 
 import com.happysg.radar.compat.Mods;
-import com.happysg.radar.compat.sable.SableAwareNetworkFiltererBlock;
+import com.happysg.radar.compat.sable.SableNetworkFiltererFactory;
 import com.happysg.radar.compat.sable.SableMonitorFactory;
 import com.happysg.radar.compat.sable.SableDataLinkFactory;
 import com.simibubi.create.foundation.data.AssetLookup;
@@ -75,7 +75,7 @@ public class ModBlocks {
 
     private static NetworkFiltererBlock createNetworkFiltererBlock(BlockBehaviour.Properties properties) {
         if (Mods.SABLE.isLoaded()) {
-            return new SableAwareNetworkFiltererBlock(properties);
+            return SableNetworkFiltererFactory.create(properties);
         }
 
         return new NetworkFiltererBlock(properties);
