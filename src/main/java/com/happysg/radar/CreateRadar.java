@@ -173,6 +173,7 @@ public class CreateRadar {
             BlockStressValues.IMPACTS.register(ModBlocks.RADAR_DISH_BLOCK.get(), () -> 0d);
             BlockStressValues.IMPACTS.register(ModBlocks.RADAR_PLATE_BLOCK.get(), () -> 0d);
             BlockStressValues.IMPACTS.register(ModBlocks.CREATIVE_RADAR_PLATE_BLOCK.get(), () -> 0d);
+            BlockStressValues.IMPACTS.register(ModBlocks.SKY_RADAR.get(), () -> 4096d);
         });
 
         ModMessages.register();
